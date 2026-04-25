@@ -74,7 +74,7 @@ pi \
 - [ ] include skills
 - [ ] configurable default model
 - [ ] project-specific exploration prompt tweaks
-- [ ] better ui
+- [x] better ui
       mid-explore:
 
   ```
