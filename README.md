@@ -68,10 +68,30 @@ pi \
   "<task>"
 ```
 
-## Next ideas
+## TODO
 
-- better custom result rendering
-- optional `bash` support for richer exploration
-- a slash command that queues an explore run
-- configurable default model
-- project-specific exploration prompt tweaks
+- [ ] optional `bash` support for richer exploration
+- [ ] include skills
+- [ ] configurable default model
+- [ ] project-specific exploration prompt tweaks
+- [ ] better ui
+      mid-explore:
+
+  ```
+  Explore(Explore repo structure demo)
+  ⎿  Read(README.md)
+     Read(package.json)
+     Bash(ls -la /home/jt/projects/pi-explore/src/)
+     Running…
+     +3 more tool uses (ctrl+o to expand)
+  ```
+
+  shows the last 3 tool calls
+
+  when it finishes
+
+  ```
+  ● Explore(Explore repo structure demo)
+    ⎿  Done (6 tool uses · 29.1k tokens · 10s)
+    (ctrl+o to expand)
+  ```
