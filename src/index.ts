@@ -6,7 +6,9 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
-const DEFAULT_TOOLS = "read,grep,find,ls";
+const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
+const DEFAULT_TOOLS = "read,grep,find,ls,bash";
+const MAX_VISIBLE_TOOL_CALLS = 3;
 
 const EXPLORE_SYSTEM_PROMPT = `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
 
@@ -20,8 +22,9 @@ Do not:
 - create, edit, move, copy, or delete files
 - use commands or workflows that write temporary files
 - propose changes as if you already made them
+- read or search files outside the working directory you were given
 
-Your role is exclusively to search, read, and analyze existing code.
+Your role is exclusively to search, read, and analyze existing code within the provided working directory.
 
 How to work:
 - Start broad with find/grep/ls, then read the most relevant files.
@@ -55,7 +58,11 @@ Any caveats, uncertainty, or follow-up suggestions.
 `;
 
 const ExploreParams = Type.Object({
-  task: Type.String({ description: "What to explore in the codebase" }),
+  prompt: Type.String({ description: "What to explore in the codebase" }),
+  description: Type.String({
+    description:
+      "Short title for this explore task shown in the UI (e.g. 'Explore repo structure'). Keep it under 6 words, sentence case.",
+  }),
   cwd: Type.Optional(Type.String({ description: "Working directory for the explore subprocess" })),
   model: Type.Optional(
     Type.String({ description: "Optional model override for the explore subprocess" }),
@@ -79,9 +86,13 @@ type ExploreDetails = {
   timeline: string[];
   finalOutput: string;
   usage: Usage;
+  startTime: number;
+  durationMs?: number;
 };
 
 function formatToolCall(name: string, args: Record<string, unknown>): string {
+  const cap = name.charAt(0).toUpperCase() + name.slice(1);
+
   if (name === "read") {
     const filePath = String(args.path ?? "?");
     const offset = typeof args.offset === "number" ? args.offset : undefined;
@@ -89,25 +100,48 @@ function formatToolCall(name: string, args: Record<string, unknown>): string {
     if (offset !== undefined || limit !== undefined) {
       const start = offset ?? 1;
       const end = limit !== undefined ? start + limit - 1 : "?";
-      return `read ${filePath}:${start}-${end}`;
+      return `${cap}(${filePath}:${start}-${end})`;
     }
-    return `read ${filePath}`;
+    return `${cap}(${filePath})`;
   }
 
   if (name === "grep") {
-    return `grep /${String(args.pattern ?? "")}/ in ${String(args.path ?? ".")}`;
+    return `${cap}(/${String(args.pattern ?? "")}/ in ${String(args.path ?? ".")})` ;
   }
 
   if (name === "find") {
-    return `find ${String(args.pattern ?? "*")} in ${String(args.path ?? ".")}`;
+    return `${cap}(${String(args.pattern ?? "*")} in ${String(args.path ?? ".")})` ;
   }
 
   if (name === "ls") {
-    return `ls ${String(args.path ?? ".")}`;
+    return `${cap}(${String(args.path ?? ".")})`;
+  }
+
+  if (name === "bash") {
+    const cmd = String(args.command ?? "");
+    return `${cap}(${cmd.length > 60 ? `${cmd.slice(0, 60)}...` : cmd})`;
   }
 
   const raw = JSON.stringify(args);
-  return `${name} ${raw.length > 80 ? `${raw.slice(0, 80)}...` : raw}`;
+  return `${cap}(${raw.length > 60 ? `${raw.slice(0, 60)}...` : raw})`;
+}
+
+function buildDoneStats(toolUses: number, usage: Usage, durationMs?: number): string {
+  const parts: string[] = [];
+  parts.push(`${toolUses} tool use${toolUses !== 1 ? "s" : ""}`);
+
+  const totalTokens = usage.input + usage.output;
+  if (totalTokens > 0) {
+    const tokensDisplay =
+      totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : String(totalTokens);
+    parts.push(`${tokensDisplay} tokens`);
+  }
+
+  if (durationMs !== undefined && durationMs > 0) {
+    parts.push(`${(durationMs / 1000).toFixed(1)}s`);
+  }
+
+  return parts.join(" · ");
 }
 
 function summarizeText(text: string, maxLength = 180): string {
@@ -148,7 +182,10 @@ function buildProgressText(timeline: string[], finalOutput: string): string {
   if (timeline.length > 0) {
     lines.push("");
     lines.push("Recent activity:");
-    for (const item of timeline.slice(-8)) lines.push(`- ${item}`);
+    for (const item of timeline.slice(-8)) {
+      const display = item.startsWith("→ ") ? item.slice(2) : item;
+      lines.push(`- ${display}`);
+    }
   }
 
   if (finalOutput.trim()) {
@@ -172,20 +209,20 @@ export default function (pi: ExtensionAPI) {
     name: "explore",
     label: "Explore",
     description:
-      "Fast read-only codebase reconnaissance in an isolated pi subprocess. Use it to locate files, trace implementations, and answer repository questions without cluttering the main context.",
+      "Fast read-only codebase reconnaissance in an isolated pi subprocess. Use it to locate files, trace implementations, and answer repository questions without cluttering the main context.\n\nThe `description` parameter is a short UI title for the task. Rules: clear and concise, ideally no more than 6 words, sentence case (capitalize only the first word and proper nouns, not Title Case), avoid jargon unless necessary.",
     promptSnippet:
       "Use explore proactively for read-only codebase investigation: locating files, tracing behavior, answering implementation questions, and gathering context before edits.",
     promptGuidelines: [
       "Use explore for reconnaissance, code-path tracing, file discovery, API/feature investigation, and other read-only repository questions.",
-      "In the task, give the concrete question plus the desired thoroughness level when helpful, such as quick, medium, or thorough.",
+      "In the prompt, give the concrete question plus the desired thoroughness level when helpful, such as quick, medium, or thorough.",
       "Treat the result as findings to verify and synthesize in the parent agent before reporting conclusions or making changes.",
+      "Set description to a short, clear title for the task shown in the UI. Keep it under 6 words, sentence case (capitalize only first word and proper nouns).",
     ],
     parameters: ExploreParams,
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = params.cwd ?? ctx.cwd;
-      const activeModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-      const model = params.model ?? activeModel;
+      const model = params.model ?? DEFAULT_MODEL;
       const usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
       const timeline: string[] = [];
       let finalOutput = "";
@@ -193,6 +230,8 @@ export default function (pi: ExtensionAPI) {
       let stderr = "";
 
       const promptFile = await writeSystemPromptFile(EXPLORE_SYSTEM_PROMPT);
+
+      const startTime = Date.now();
 
       const emitUpdate = () => {
         onUpdate?.({
@@ -205,6 +244,7 @@ export default function (pi: ExtensionAPI) {
             timeline: [...timeline],
             finalOutput,
             usage: { ...usage },
+            startTime,
           } satisfies ExploreDetails,
         });
       };
@@ -229,7 +269,7 @@ export default function (pi: ExtensionAPI) {
           childArgs.push("--model", model);
         }
 
-        childArgs.push(params.task);
+        childArgs.push(params.prompt);
 
         const child = spawn("pi", childArgs, {
           cwd,
@@ -323,6 +363,8 @@ export default function (pi: ExtensionAPI) {
             timeline,
             finalOutput,
             usage,
+            startTime,
+            durationMs: Date.now() - startTime,
           } satisfies ExploreDetails,
         };
       } finally {
@@ -332,17 +374,68 @@ export default function (pi: ExtensionAPI) {
     },
 
     renderCall(args, theme) {
-      const preview = summarizeText(args.task ?? "", 100) || "(no task)";
-      const cwdText = args.cwd ? `\n${theme.fg("muted", `cwd: ${args.cwd}`)}` : "";
-      const modelText = args.model ? `\n${theme.fg("muted", `model: ${args.model}`)}` : "";
+      const preview = args.description || summarizeText(args.prompt ?? "", 80) || "no prompt";
+      const cwdSuffix = args.cwd ? theme.fg("dim", `: [${args.cwd}]`) : "";
       return new Text(
-        theme.fg("toolTitle", theme.bold("explore ")) +
-          theme.fg("dim", preview) +
-          cwdText +
-          modelText,
+        theme.fg("toolTitle", theme.bold("Explore")) +
+          theme.fg("dim", `(${preview})`) +
+          cwdSuffix,
         0,
         0,
       );
+    },
+
+    renderResult(result, options, theme) {
+      const details = result.details as ExploreDetails | undefined;
+      const timeline = details?.timeline ?? [];
+      const usage = details?.usage ?? {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0,
+        turns: 0,
+      };
+
+      // Only tool call entries are prefixed with "→ "
+      const toolCalls = timeline
+        .filter((item) => item.startsWith("→ "))
+        .map((item) => item.slice(2));
+
+      const lines: string[] = [];
+
+      if (options.expanded) {
+        for (const call of toolCalls) {
+          lines.push(theme.fg("dim", call));
+        }
+        if (options.isPartial) {
+          lines.push(theme.fg("muted", "Running\u2026"));
+        } else {
+          const stats = buildDoneStats(toolCalls.length, usage, details?.durationMs);
+          lines.push(theme.fg("success", "Done") + theme.fg("muted", ` (${stats})`));
+        }
+      } else if (options.isPartial) {
+        const hiddenCount = Math.max(0, toolCalls.length - MAX_VISIBLE_TOOL_CALLS);
+        const visibleCalls = toolCalls.slice(-MAX_VISIBLE_TOOL_CALLS);
+        for (const call of visibleCalls) {
+          lines.push(theme.fg("dim", call));
+        }
+        lines.push(theme.fg("muted", "Running\u2026"));
+        if (hiddenCount > 0) {
+          lines.push(theme.fg("muted", `+${hiddenCount} more tool uses (ctrl+o to expand)`));
+        }
+      } else {
+        const stats = buildDoneStats(toolCalls.length, usage, details?.durationMs);
+        lines.push(theme.fg("success", "Done") + theme.fg("muted", ` (${stats})`));
+        if (toolCalls.length > 0) {
+          lines.push(theme.fg("muted", "(ctrl+o to expand)"));
+        }
+      }
+
+      const prefix0 = theme.fg("dim", "⎿  ");
+      const indent = "   ";
+      const indented = lines.map((l, i) => (i === 0 ? prefix0 + l : indent + l)).join("\n");
+      return new Text(indented, 0, 0);
     },
   });
 }

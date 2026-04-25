@@ -70,7 +70,7 @@ pi \
 
 ## TODO
 
-- [ ] optional `bash` support for richer exploration
+- [x] optional `bash` support for richer exploration
 - [ ] include skills
 - [ ] configurable default model
 - [ ] project-specific exploration prompt tweaks
