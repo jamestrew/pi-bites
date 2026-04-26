@@ -2,15 +2,6 @@
 
 A minimal pi extension that adds one custom tool: `explore`.
 
-The tool runs a separate `pi` subprocess in read-only mode with isolated context:
-
-- `read`
-- `grep`
-- `find`
-- `ls`
-
-That makes it useful for reconnaissance and codebase exploration without cluttering the main agent context.
-
 ## Local development
 
 Run pi with the extension directly from this repo:
@@ -18,27 +9,6 @@ Run pi with the extension directly from this repo:
 ```bash
 pi -e ./src/index.ts
 ```
-
-## Install via symlink
-
-This keeps the source in this repo, but makes pi auto-discover it.
-
-```bash
-mkdir -p ~/.pi/agent/extensions
-ln -sfn "$PWD/src/index.ts" ~/.pi/agent/extensions/explore-subagent.ts
-```
-
-Then start pi normally and it should auto-load.
-
-## Reload during development
-
-If you use the symlinked install, edit `src/index.ts` here and then run:
-
-```text
-/reload
-```
-
-inside pi.
 
 ## What the tool does
 
@@ -60,18 +30,17 @@ pi \
   -p \
   --no-session \
   --no-extensions \
-  --no-skills \
   --no-prompt-templates \
   --no-themes \
   --tools read,grep,find,ls \
   --append-system-prompt <tempfile> \
-  "<task>"
+  "<prompt>"
 ```
 
 ## TODO
 
 - [x] optional `bash` support for richer exploration
-- [ ] include skills
+- [x] include skills
 - [ ] configurable default model
 - [ ] project-specific exploration prompt tweaks
 - [x] better ui
