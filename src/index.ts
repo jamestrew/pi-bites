@@ -1,12 +1,19 @@
 import { registerBashGate } from "./bash-gate.js";
-import { registerTokenUsageStatusline } from "./token_usage_statusline.js";
+import { registerStatusline } from "./statusline.js";
 import registerCustomRead from "./read.js";
 import registerExplore from "./explore.js";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { loadConfig, type SnacksConfig } from "./config.js";
 
 export default function (pi: ExtensionAPI) {
-  registerBashGate(pi);
-  registerTokenUsageStatusline(pi);
+  const configRef: { current: SnacksConfig } = { current: {} };
+
+  pi.on("session_start", async (_event, ctx) => {
+    configRef.current = loadConfig(ctx.cwd);
+  });
+
+  registerBashGate(pi, configRef);
+  registerStatusline(pi, configRef);
   registerCustomRead(pi);
-  registerExplore(pi);
+  registerExplore(pi, configRef);
 }

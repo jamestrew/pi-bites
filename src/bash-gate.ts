@@ -7,38 +7,41 @@
  *   - Allow for session → run all future commands matching the same pattern automatically
  *   - Deny             → block this command and tell the model why
  *
- * Edit GUARDED_PATTERNS below to control which commands need approval.
+ * Default patterns guard common test runners. Override via pi-snacks.json:
+ *
+ * ```json
+ * {
+ *   "bashGate": {
+ *     "patterns": ["\\brm\\s+-rf\\b", "\\bsudo\\b"]
+ *   }
+ * }
+ * ```
+ *
+ * Providing `patterns` replaces the built-in list entirely.
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { SnacksConfig } from "./config.js";
 
-/**
- * Each entry is a RegExp that is tested against the full bash command string.
- * The first matching pattern is the one used for "Allow for session" tracking.
- * Add/remove patterns to taste.
- */
-const GUARDED_PATTERNS: RegExp[] = [
-  /\bbun\s+test\b/,
-  /\bnpm\s+test\b/,
-  /\bpnpm\s+test\b/,
-  /\byarn\s+test\b/,
-  /\bvitest\b/,
-  /\bjest\b/,
-  /\bpytest\b/,
-  /\bgo\s+test\b/,
-  /\bcargo\s+test\b/,
-];
+function resolvePatterns(config: SnacksConfig): RegExp[] {
+  const raw = config.bashGate?.patterns;
+  if (!raw || raw.length === 0) return [];
+  return raw.map((p) => new RegExp(p));
+}
 
-export function registerBashGate(pi: ExtensionAPI) {
+export function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
   /** Patterns approved for the rest of the session (keyed by pattern source string). */
   const sessionAllowed = new Set<string>();
+  const patterns = resolvePatterns(configRef.current);
+
+  if (patterns.length === 0) return;
 
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
 
     const command = event.input.command as string;
 
-    const matchedPattern = GUARDED_PATTERNS.find((p) => p.test(command));
+    const matchedPattern = patterns.find((p) => p.test(command));
     if (!matchedPattern) return undefined;
 
     // Pattern was already approved for this session — run silently.

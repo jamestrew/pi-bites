@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
+import type { SnacksConfig } from "./config.js";
 
 const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
 const DEFAULT_TOOLS = "read,grep,find,ls,bash";
@@ -209,7 +210,7 @@ async function writeSystemPromptFile(prompt: string): Promise<{ dir: string; fil
   return { dir, file };
 }
 
-export default function(pi: ExtensionAPI) {
+export default function(pi: ExtensionAPI, configRef: { current: SnacksConfig } = { current: {} }) {
   pi.registerTool({
     name: "explore",
     label: "Explore",
@@ -227,7 +228,7 @@ export default function(pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = params.cwd ?? ctx.cwd;
-      const model = params.model ?? DEFAULT_MODEL;
+      const model = params.model ?? configRef.current.explore?.defaultModel ?? DEFAULT_MODEL;
       const usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
       const timeline: string[] = [];
       let finalOutput = "";
@@ -264,7 +265,7 @@ export default function(pi: ExtensionAPI) {
           "--no-prompt-templates",
           "--no-themes",
           "--tools",
-          DEFAULT_TOOLS,
+          configRef.current.explore?.defaultTools ?? DEFAULT_TOOLS,
           "--append-system-prompt",
           promptFile.file,
         ];
