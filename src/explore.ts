@@ -3,7 +3,7 @@ import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { SnacksConfig } from "./config.js";
 
@@ -124,12 +124,10 @@ function formatToolCall(name: string, args: Record<string, unknown>): string {
   }
 
   if (name === "bash") {
-    const cmd = String(args.command ?? "");
-    return `${cap}(${cmd.length > 60 ? `${cmd.slice(0, 60)}...` : cmd})`;
+    return `${cap}(${String(args.command ?? "")})`;
   }
 
-  const raw = JSON.stringify(args);
-  return `${cap}(${raw.length > 60 ? `${raw.slice(0, 60)}...` : raw})`;
+  return `${cap}(${JSON.stringify(args)})`;
 }
 
 function buildDoneStats(toolUses: number, usage: Usage, durationMs?: number): string {
@@ -405,40 +403,47 @@ export default function(pi: ExtensionAPI, configRef: { current: SnacksConfig } =
         .filter((item) => item.startsWith("→ "))
         .map((item) => item.slice(2));
 
-      const lines: string[] = [];
-
-      if (options.expanded) {
-        for (const call of toolCalls) {
-          lines.push(theme.fg("dim", call));
-        }
-        if (options.isPartial) {
-          lines.push(theme.fg("muted", "Running\u2026"));
-        } else {
-          const stats = buildDoneStats(toolCalls.length, usage, details?.durationMs);
-          lines.push(theme.fg("success", "Done") + theme.fg("muted", ` (${stats})`));
-        }
-      } else if (options.isPartial) {
-        const hiddenCount = Math.max(0, toolCalls.length - MAX_VISIBLE_TOOL_CALLS);
-        const visibleCalls = toolCalls.slice(-MAX_VISIBLE_TOOL_CALLS);
-        for (const call of visibleCalls) {
-          lines.push(theme.fg("dim", call));
-        }
-        lines.push(theme.fg("muted", "Running\u2026"));
-        if (hiddenCount > 0) {
-          lines.push(theme.fg("muted", `+${hiddenCount} more tool uses (ctrl+o to expand)`));
-        }
-      } else {
-        const stats = buildDoneStats(toolCalls.length, usage, details?.durationMs);
-        lines.push(theme.fg("success", "Done") + theme.fg("muted", ` (${stats})`));
-        if (toolCalls.length > 0) {
-          lines.push(theme.fg("muted", "(ctrl+o to expand)"));
-        }
-      }
-
       const prefix0 = theme.fg("dim", "⎿  ");
       const indent = "   ";
-      const indented = lines.map((l, i) => (i === 0 ? prefix0 + l : indent + l)).join("\n");
-      return new Text(indented, 0, 0);
+      const INDENT_WIDTH = 3; // visible columns used by prefix0 / indent
+
+      return {
+        render(width: number): string[] {
+          const callWidth = Math.max(1, width - INDENT_WIDTH);
+          const lines: string[] = [];
+
+          if (options.expanded) {
+            for (const call of toolCalls) {
+              lines.push(truncateToWidth(theme.fg("dim", call), callWidth, "\u2026"));
+            }
+            if (options.isPartial) {
+              lines.push(theme.fg("muted", "Running\u2026"));
+            } else {
+              const stats = buildDoneStats(toolCalls.length, usage, details?.durationMs);
+              lines.push(theme.fg("success", "Done") + theme.fg("muted", ` (${stats})`));
+            }
+          } else if (options.isPartial) {
+            const hiddenCount = Math.max(0, toolCalls.length - MAX_VISIBLE_TOOL_CALLS);
+            const visibleCalls = toolCalls.slice(-MAX_VISIBLE_TOOL_CALLS);
+            for (const call of visibleCalls) {
+              lines.push(truncateToWidth(theme.fg("dim", call), callWidth, "\u2026"));
+            }
+            lines.push(theme.fg("muted", "Running\u2026"));
+            if (hiddenCount > 0) {
+              lines.push(theme.fg("muted", `+${hiddenCount} more tool uses (ctrl+o to expand)`));
+            }
+          } else {
+            const stats = buildDoneStats(toolCalls.length, usage, details?.durationMs);
+            lines.push(theme.fg("success", "Done") + theme.fg("muted", ` (${stats})`));
+            if (toolCalls.length > 0) {
+              lines.push(theme.fg("muted", "(ctrl+o to expand)"));
+            }
+          }
+
+          return lines.map((l, i) => (i === 0 ? prefix0 + l : indent + l));
+        },
+        invalidate() {},
+      };
     },
   });
 }
