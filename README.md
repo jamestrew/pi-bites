@@ -13,3 +13,4 @@ collection of extensions to fit my needs
 - [ ] better todo tool (current using https://github.com/juicesharp/rpiv-todo)
   - [ ] don't want each tool call to be displayed, the main widget is enough
   - [ ] tweak tool description?
+  - [ ] once the full todo list is completed, subsequent agent starts should hide the todo list

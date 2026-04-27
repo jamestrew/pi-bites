@@ -3,7 +3,7 @@ import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text, truncateToWidth } from "@mariozechner/pi-tui";
+import { Text, truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import type { SnacksConfig } from "./config.js";
 
@@ -386,7 +386,7 @@ export default function(pi: ExtensionAPI, configRef: { current: SnacksConfig } =
       );
     },
 
-    renderResult(result, options, theme) {
+    renderResult(result, options, theme, context) {
       const details = result.details as ExploreDetails | undefined;
       const timeline = details?.timeline ?? [];
       const usage = details?.usage ?? {
@@ -413,9 +413,31 @@ export default function(pi: ExtensionAPI, configRef: { current: SnacksConfig } =
           const lines: string[] = [];
 
           if (options.expanded) {
+            // Prompt
+            const prompt = (context.args.prompt ?? "").trim();
+            if (prompt) {
+              lines.push(theme.fg("muted", "Prompt:"));
+              for (const l of wrapTextWithAnsi(prompt, callWidth)) {
+                lines.push(theme.fg("dim", l));
+              }
+              lines.push("");
+            }
+
+            // Tool calls
             for (const call of toolCalls) {
               lines.push(truncateToWidth(theme.fg("dim", call), callWidth, "\u2026"));
             }
+
+            // Final output
+            const output = details?.finalOutput?.trim() ?? "";
+            if (output) {
+              lines.push("");
+              for (const l of wrapTextWithAnsi(output, callWidth)) {
+                lines.push(l);
+              }
+            }
+
+            lines.push("");
             if (options.isPartial) {
               lines.push(theme.fg("muted", "Running\u2026"));
             } else {
