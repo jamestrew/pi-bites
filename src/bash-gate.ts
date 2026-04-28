@@ -18,6 +18,13 @@
  * ```
  *
  * Providing `patterns` replaces the built-in list entirely.
+ *
+ * Pass `--yolo` on the CLI to bypass all gates entirely — useful for
+ * non-interactive / scripted runs where no UI is available:
+ *
+ * ```bash
+ * pi --yolo -p "run the tests"
+ * ```
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -30,6 +37,12 @@ function resolvePatterns(config: SnacksConfig): RegExp[] {
 }
 
 export function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
+  pi.registerFlag("yolo", {
+    description: "Bypass all bash-gate confirmations (useful for non-interactive / scripted runs)",
+    type: "boolean",
+    default: false,
+  });
+
   /** Patterns approved for the rest of the session (keyed by pattern source string). */
   const sessionAllowed = new Set<string>();
   const patterns = resolvePatterns(configRef.current);
@@ -43,6 +56,9 @@ export function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksC
 
     const matchedPattern = patterns.find((p) => p.test(command));
     if (!matchedPattern) return undefined;
+
+    // --yolo flag: skip all gates.
+    if (pi.getFlag("yolo")) return undefined;
 
     // Pattern was already approved for this session — run silently.
     if (sessionAllowed.has(matchedPattern.source)) return undefined;

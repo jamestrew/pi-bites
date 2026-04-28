@@ -208,7 +208,7 @@ async function writeSystemPromptFile(prompt: string): Promise<{ dir: string; fil
   return { dir, file };
 }
 
-export default function(pi: ExtensionAPI, configRef: { current: SnacksConfig } = { current: {} }) {
+export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } = { current: {} }) {
   pi.registerTool({
     name: "explore",
     label: "Explore",
