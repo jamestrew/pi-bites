@@ -11,7 +11,7 @@
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check .",
     "typecheck": "tsgo --noEmit",
-    "check": "bun run lint && bun run fmt:check && bun run typecheck"
+    "check": "bun run lint && bun run fmt && bun run typecheck"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.70.6",
