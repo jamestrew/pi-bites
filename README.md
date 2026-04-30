@@ -8,7 +8,7 @@ collection of extensions to fit my needs
 
 ## TODO
 
-- [ ] configurable default model for explore
+- [x] configurable default model for explore
 - [ ] project-specific explore prompt tweaks
 - [ ] better todo tool (current using https://github.com/juicesharp/rpiv-todo)
   - [ ] don't want each tool call to be displayed, the main widget is enough
