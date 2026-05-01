@@ -1,10 +1,10 @@
 import * as path from "node:path";
-import {
-  type ExtensionAPI,
-  type ReadToolDetails,
-  createReadTool,
-} from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI, createReadTool } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
+
+const shortenPath = (p: string, cwd: string): string => {
+  return p.startsWith(cwd + path.sep) || p === cwd ? path.relative(cwd, p) : p;
+};
 
 export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
@@ -19,59 +19,35 @@ export default function (pi: ExtensionAPI) {
       return originalRead.execute(toolCallId, params, signal, onUpdate);
     },
 
-    renderCall(_args, theme, _context) {
-      return new Text(theme.fg("toolTitle", theme.bold("read")), 0, 0);
+    renderCall(args, theme, _context) {
+      const p = shortenPath(args.path || "", cwd);
+      let pathDisplay = p ? theme.fg("accent", p) : theme.fg("toolOutput", "...");
+
+      // Show line range if specified
+      if (args.offset !== undefined || args.limit !== undefined) {
+        const startLine = args.offset ?? 1;
+        const endLine = args.limit !== undefined ? startLine + args.limit - 1 : "";
+        pathDisplay += theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
+      }
+
+      return new Text(`${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`, 0, 0);
     },
 
-    renderResult(result, { expanded, isPartial }, theme, context) {
-      const args = context.args as { path: string; offset?: number; limit?: number };
-      const displayPath =
-        args.path.startsWith(cwd + path.sep) || args.path === cwd
-          ? path.relative(cwd, args.path)
-          : args.path;
-
-      const pathText = theme.fg("accent", displayPath);
-
-      const paramParts: string[] = [];
-      if (args.offset) paramParts.push(`offset=${args.offset}`);
-      if (args.limit) paramParts.push(`limit=${args.limit}`);
-      const paramText = paramParts.length > 0 ? theme.fg("dim", ` (${paramParts.join(", ")})`) : "";
-
-      if (isPartial) {
-        return new Text(`${pathText}${paramText}  ${theme.fg("warning", "Reading...")}`, 0, 0);
+    renderResult(result, { expanded }, theme, _context) {
+      // Minimal mode: show nothing in collapsed state
+      if (!expanded) {
+        return new Text("", 0, 0);
       }
 
-      const details = result.details as ReadToolDetails | undefined;
-      const content = result.content[0];
-
-      if (content?.type === "image") {
-        return new Text(`${pathText}  ${theme.fg("success", "image")}`, 0, 0);
+      // Expanded mode: show full output
+      const textContent = result.content.find((c) => c.type === "text");
+      if (!textContent || textContent.type !== "text") {
+        return new Text("", 0, 0);
       }
 
-      if (content?.type !== "text") {
-        return new Text(`${pathText}  ${theme.fg("error", "no content")}`, 0, 0);
-      }
-
-      const lineCount = content.text.split("\n").length;
-      let lineText = theme.fg("success", `${lineCount} lines`);
-
-      if (details?.truncation?.truncated) {
-        lineText += theme.fg("warning", ` (truncated from ${details.truncation.totalLines})`);
-      }
-
-      let text = `${pathText}${paramText}  ${lineText}`;
-
-      if (expanded) {
-        const lines = content.text.split("\n").slice(0, 15);
-        for (const line of lines) {
-          text += `\n${theme.fg("dim", line)}`;
-        }
-        if (lineCount > 15) {
-          text += `\n${theme.fg("muted", `... ${lineCount - 15} more lines`)}`;
-        }
-      }
-
-      return new Text(text, 0, 0);
+      const lines = textContent.text.split("\n");
+      const output = lines.map((line) => theme.fg("toolOutput", line)).join("\n");
+      return new Text(`\n${output}`, 0, 0);
     },
   });
 }
