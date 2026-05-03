@@ -213,11 +213,13 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
     name: "explore",
     label: "Explore",
     description:
-      "Fast read-only codebase reconnaissance in an isolated pi subprocess. Use it to locate files, trace implementations, and answer repository questions without cluttering the main context.\n\nThe `description` parameter is a short UI title for the task. Rules: clear and concise, ideally no more than 6 words, sentence case (capitalize only the first word and proper nouns, not Title Case), avoid jargon unless necessary.\n\nThe `cwd` parameter defaults to the current working directory — leave it null unless the user explicitly requests a different directory.",
+      "Fast read-only codebase reconnaissance in an isolated pi subprocess. Valuable for parallelizing independent queries or protecting the main context window from large search results, but should not be used when the main agent can answer the question directly with one or two tool calls.\n\nThe `description` parameter is a short UI title for the task. Rules: clear and concise, ideally no more than 6 words, sentence case (capitalize only the first word and proper nouns, not Title Case), avoid jargon unless necessary.\n\nThe `cwd` parameter defaults to the current working directory — leave it null unless the user explicitly requests a different directory.",
     promptSnippet:
-      "Use explore proactively for read-only codebase investigation: locating files, tracing behavior, answering implementation questions, and gathering context before edits.",
+      "Use explore for read-only codebase investigation when the task benefits from an isolated subprocess: broad searches across many files, tracing complex behavior, or gathering context before edits. Do not use it when you could answer the question with one or two tool calls — just make those calls directly.",
     promptGuidelines: [
-      "Use explore for reconnaissance, code-path tracing, file discovery, API/feature investigation, and other read-only repository questions.",
+      "Explore is valuable for parallelizing independent queries or shielding the main context from large results, but should not be used excessively. Avoid delegating work you could do yourself in one or two tool calls.",
+      "Good candidates: tracing a call chain across many files, understanding a feature end-to-end, finding all usages of a pattern across the codebase, or gathering broad context before a large refactor.",
+      'Bad candidates: "find where X is defined", "read this one file", "grep for this symbol" — just make those calls directly in the main agent.',
       "In the prompt, give the concrete question plus the desired thoroughness level when helpful, such as quick, medium, or thorough.",
       "Treat the result as findings to verify and synthesize in the parent agent before reporting conclusions or making changes.",
       "Set description to a short, clear title for the task shown in the UI. Keep it under 6 words, sentence case (capitalize only first word and proper nouns).",
