@@ -551,10 +551,10 @@ export function registerTodoTool(pi: ExtensionAPI): void {
     name: TOOL_NAME,
     label: TOOL_LABEL,
     description:
-      "Manage a task list for tracking multi-step progress. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus deleted tombstone. Use this to plan and track multi-step work like research, design, and implementation.",
+      "Manage a task list for tracking multi-step progress. Only use for complex work with 3+ distinct steps — skip for single or trivial tasks. Actions: create (new task), update (change status/fields/dependencies), list (all tasks, optionally filtered by status), get (single task details), delete (tombstone), clear (reset all). Status: pending → in_progress → completed, plus deleted tombstone.",
     promptSnippet: "Manage a Claude-Code-style task list to track multi-step progress",
     promptGuidelines: [
-      "Use `todo` for complex work with 3+ steps, when the user gives you a list of tasks, or immediately after receiving new instructions to capture requirements. Skip it for single trivial tasks and purely conversational requests.",
+      "Use `todo` for complex work with 3+ distinct steps, or when the user gives you a list of tasks. Do NOT use it if there is only one task — just do it directly. Do NOT use it for trivial or purely conversational requests. After receiving new instructions, only capture them as todos if they actually meet the 3+ step threshold.",
       "When starting any task, mark it in_progress BEFORE beginning work. Mark it completed IMMEDIATELY when done — never batch completions. Exactly one task should be in_progress at a time.",
       "Never mark a task completed if tests are failing, the implementation is partial, or you hit unresolved errors — keep it in_progress and create a new task for the blocker instead.",
       "Task status is a 4-state machine: pending → in_progress → completed, plus deleted as a tombstone. Pass activeForm (present-continuous label, e.g. 'researching existing tool') when marking in_progress.",
@@ -579,14 +579,30 @@ export function registerTodoTool(pi: ExtensionAPI): void {
       };
     },
 
-    renderCall(_args, _theme, _context) {
+    renderCall(_args, theme, context) {
+      if ((context.state as Record<string, unknown>).allDone) {
+        const visible = tasks.filter((t) => t.status !== "deleted");
+        const lines = [
+          `${theme.fg("success", "●")} ${theme.fg("muted", `All ${visible.length} task${visible.length === 1 ? "" : "s"} completed`)}`,
+          ...visible.map((t) => `  ${theme.fg("success", "✓")} ${theme.fg("dim", t.subject)}`),
+        ];
+        return new Text(lines.join("\n"), 0, 0);
+      }
       return new Container();
     },
 
-    renderResult(result, _opts, theme, _context) {
+    renderResult(result, { isPartial }, theme, context) {
       const err = (result.details as TaskDetails).error;
       if (err) {
         return new Text(theme.fg("error", `todo ✗: ${err}`), 0, 0);
+      }
+      if (!isPartial && !(context.state as Record<string, unknown>).allDone) {
+        const details = result.details as TaskDetails;
+        const visible = details.tasks.filter((t) => t.status !== "deleted");
+        if (visible.length > 0 && visible.every((t) => t.status === "completed")) {
+          (context.state as Record<string, unknown>).allDone = true;
+          context.invalidate();
+        }
       }
       return new Container();
     },
