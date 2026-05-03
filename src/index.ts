@@ -3,6 +3,7 @@ import { registerStatusline } from "./statusline.js";
 import registerCustomRead from "./read.js";
 import registerExplore from "./explore.js";
 import registerFzfFileSearch from "./fzf-file-search.js";
+import registerTodo from "./todo/index.js";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadConfig, type SnacksConfig } from "./config.js";
 
@@ -18,4 +19,5 @@ export default function (pi: ExtensionAPI) {
   registerCustomRead(pi);
   registerExplore(pi, configRef);
   registerFzfFileSearch(pi);
+  registerTodo(pi);
 }

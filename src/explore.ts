@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import type { SnacksConfig } from "./config.js";
 
 const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
