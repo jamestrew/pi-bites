@@ -43,14 +43,17 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     default: false,
   });
 
-  /** Patterns approved for the rest of the session (keyed by pattern source string). */
-  const sessionAllowed = new Set<string>();
-  const patterns = resolvePatterns(configRef.current);
+  let patterns: RegExp[] = [];
 
-  if (patterns.length === 0) return;
+  pi.on("session_start", (_event, _ctx) => {
+    patterns = resolvePatterns(configRef.current);
+  });
+
+  const sessionAllowed = new Set<string>();
 
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
+    if (patterns.length === 0) return undefined;
 
     const command = event.input.command as string;
 
@@ -82,7 +85,6 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       return undefined; // proceed just this once
     }
 
-    // "Deny" or dialog dismissed
     return { block: true, reason: "Bash gate: command was denied by the user." };
   });
 }
