@@ -398,6 +398,7 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
         cacheWrite: 0,
         cost: 0,
         turns: 0,
+        contextTokens: 0,
       };
 
       // Only tool call entries are prefixed with "→ "
