@@ -1,6 +1,6 @@
 import { registerBashGate } from "./bash-gate.js";
 import { registerStatusline } from "./statusline.js";
-import registerCustomRead from "./read.js";
+import registerCustomTools from "./tools.js";
 import registerExplore from "./explore.js";
 import registerFzfFileSearch from "./fzf-file-search.js";
 import registerTodo from "./todo/index.js";
@@ -17,7 +17,7 @@ export default function (pi: ExtensionAPI) {
 
   registerBashGate(pi, configRef);
   registerStatusline(pi, configRef);
-  registerCustomRead(pi);
+  registerCustomTools(pi);
   registerExplore(pi, configRef);
   registerFzfFileSearch(pi);
   registerTodo(pi);

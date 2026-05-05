@@ -1,5 +1,5 @@
 import * as path from "node:path";
-import { type ExtensionAPI, createReadTool } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI, createReadTool, createBashTool } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 
 const shortenPath = (p: string, cwd: string): string => {
@@ -9,10 +9,14 @@ const shortenPath = (p: string, cwd: string): string => {
 export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const originalRead = createReadTool(cwd);
+  const originalBash = createBashTool(cwd);
+
   pi.registerTool({
     name: "read",
     label: "read",
-    description: originalRead.description,
+    description:
+      originalRead.description +
+      " Call this tool in parallel when you know there are multiple files you want to read. Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.",
     parameters: originalRead.parameters,
 
     async execute(toolCallId, params, signal, onUpdate) {
@@ -49,5 +53,12 @@ export default function (pi: ExtensionAPI) {
       const output = lines.map((line) => theme.fg("toolOutput", line)).join("\n");
       return new Text(`\n${output}`, 0, 0);
     },
+  });
+
+  pi.registerTool({
+    ...originalBash,
+    description:
+      originalBash.description +
+      " Read files: use the read tool, NOT cat/head/tail.",
   });
 }
