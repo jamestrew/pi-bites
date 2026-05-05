@@ -57,8 +57,6 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     ...originalBash,
-    description:
-      originalBash.description +
-      " Read files: use the read tool, NOT cat/head/tail.",
+    description: originalBash.description + " Read files: use the read tool, NOT cat/head/tail.",
   });
 }

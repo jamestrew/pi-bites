@@ -15,4 +15,5 @@ pi install git:github.com/jamestrew/pi-bites
 ```
 
 ## TODO
+
 - [ ] project-specific explore prompt tweaks

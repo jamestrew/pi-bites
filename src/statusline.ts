@@ -42,7 +42,7 @@ async function updateStatus(
   }
 }
 
-export function registerStatusline(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
+export default function registerStatusline(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
   const run = (ctx: any) => {
     const command = configRef.current.statusline?.command;
     if (!command) return;

@@ -36,7 +36,7 @@ function resolvePatterns(config: SnacksConfig): RegExp[] {
   return raw.map((p) => new RegExp(p));
 }
 
-export function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
+export default function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
   pi.registerFlag("yolo", {
     description: "Bypass all bash-gate confirmations (useful for non-interactive / scripted runs)",
     type: "boolean",
