@@ -69,7 +69,7 @@ export default function (pi: ExtensionAPI) {
   const hasRg = isAvailable("rg");
 
   const bashExtra: string[] = [
-    "Read files: use the read tool, NOT cat/head/tail.",
+    "Read files: use the read tool, NOT cat/head/tail/sed.",
     "Avoid broad filesystem searches like `find /` or `find .` from the repo root — always scope file searches to a specific subdirectory.",
   ];
   if (hasFd) bashExtra.push("Prefer `fd` over `find` for file search.");
