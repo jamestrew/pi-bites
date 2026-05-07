@@ -1,16 +1,6 @@
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
 import { type ExtensionAPI, createReadTool, createBashTool } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
-
-function isAvailable(cmd: string): boolean {
-  try {
-    execFileSync("which", [cmd], { stdio: "ignore" });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 const shortenPath = (p: string, cwd: string): string => {
   return p.startsWith(cwd + path.sep) || p === cwd ? path.relative(cwd, p) : p;
@@ -65,18 +55,10 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  const hasFd = isAvailable("fd");
-  const hasRg = isAvailable("rg");
-
-  const bashExtra: string[] = [
-    "Read files: use the read tool, NOT cat/head/tail/sed.",
-    "Avoid broad filesystem searches like `find /` or `find .` from the repo root — always scope file searches to a specific subdirectory.",
-  ];
-  if (hasFd) bashExtra.push("Prefer `fd` over `find` for file search.");
-  if (hasRg) bashExtra.push("Prefer `rg` over `grep` for content search.");
-
   pi.registerTool({
     ...originalBash,
-    description: originalBash.description + " " + bashExtra.join(" "),
+    description:
+      originalBash.description +
+      " Read files: use the read tool, NOT cat/head/tail/sed. Avoid broad filesystem searches like `find /` or `find .` from the repo root — always scope file searches to a specific subdirectory.",
   });
 }

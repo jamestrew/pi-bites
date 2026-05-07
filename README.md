@@ -4,7 +4,7 @@ collection of pi coding agent extensions to fit my needs
 
 - explore subagent
 - less verbose read tool call
-- tweaked tool description for read & bash tool
+- tweaked tool descriptions for read & bash tools (use read tool instead of cat/head/tail/sed, scope file searches)
 - command gates for bash tool
 - better fzy finding for `@`
 - custom (additional) statusline via a script
