@@ -30,6 +30,22 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { SnacksConfig } from "./config.js";
 
+/**
+ * When a command is approved, add the time spent waiting in the gate to the
+ * timeout (if one was set by the model). This is necessary because the TUI
+ * elapsed timer starts at `tool_execution_start` — which fires *before* our
+ * gate handler runs — so the timer is already counting while the user reads
+ * the prompt. The actual process `setTimeout` inside `ops.exec()` only starts
+ * after `spawn()`, which is after this handler returns, so the spawned process
+ * always gets its full intended timeout. By compensating `event.input.timeout`
+ * here we keep the displayed elapsed time consistent with the timeout value.
+ */
+function compensateTimeout(input: Record<string, unknown>, gateStartMs: number): void {
+  if (typeof input.timeout !== "number") return;
+  const gateWaitSec = (Date.now() - gateStartMs) / 1000;
+  input.timeout = input.timeout + gateWaitSec;
+}
+
 function resolvePatterns(config: SnacksConfig): RegExp[] {
   const raw = config.bashGate?.patterns;
   if (!raw || raw.length === 0) return [];
@@ -71,17 +87,28 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       return { block: true, reason: "Bash gate: no UI available for confirmation." };
     }
 
-    const choice = await ctx.ui.select(
-      `🔒 Bash gate — command requires approval:\n\n  ${command}\n`,
-      ["Allow", "Allow for session", "Deny"],
-    );
+    // Snapshot the time before showing the prompt. The TUI's elapsed timer
+    // starts at `tool_execution_start` (before this handler runs), so any time
+    // the user spends in the gate is already ticking. We compensate by adding
+    // the gate wait duration to `event.input.timeout` so the spawned process
+    // still gets its full intended timeout.
+    const gateStartMs = Date.now();
 
-    if (choice === "Allow for session") {
+    const matchLabel = command.match(matchedPattern)?.[0] ?? matchedPattern.source;
+    const choice = await ctx.ui.select(`🔒 Bash gate — command requires approval`, [
+      "Allow",
+      `Allow for session ("${matchLabel}")`,
+      "Deny",
+    ]);
+
+    if (choice?.startsWith("Allow for session")) {
       sessionAllowed.add(matchedPattern.source);
+      compensateTimeout(event.input, gateStartMs);
       return undefined; // proceed
     }
 
     if (choice === "Allow") {
+      compensateTimeout(event.input, gateStartMs);
       return undefined; // proceed just this once
     }
 

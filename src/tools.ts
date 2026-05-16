@@ -1,5 +1,10 @@
 import * as path from "node:path";
-import { type ExtensionAPI, createReadTool, createBashTool } from "@mariozechner/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  createReadTool,
+  createBashTool,
+  createBashToolDefinition,
+} from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 
 const shortenPath = (p: string, cwd: string): string => {
@@ -10,6 +15,7 @@ export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const originalRead = createReadTool(cwd);
   const originalBash = createBashTool(cwd);
+  const originalBashDef = createBashToolDefinition(cwd);
 
   pi.registerTool({
     name: "read",
@@ -55,10 +61,35 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
+  // Track the moment execute() is actually called (i.e. after bash-gate approval).
+  // Keyed by toolCallId so concurrent calls don't collide.
+  const executeStartTimes = new Map<string, number>();
+
   pi.registerTool({
     ...originalBash,
     description:
       originalBash.description +
       " Read files: use the read tool, NOT cat/head/tail/sed. Avoid broad filesystem searches like `find /` or `find .` from the repo root — always scope file searches to a specific subdirectory.",
+
+    async execute(toolCallId, params, signal, onUpdate) {
+      // Record now — this runs after bash-gate resolves, so the elapsed timer
+      // will start from the moment the process is actually about to spawn.
+      executeStartTimes.set(toolCallId, Date.now());
+      try {
+        return await originalBash.execute(toolCallId, params, signal, onUpdate);
+      } finally {
+        executeStartTimes.delete(toolCallId);
+      }
+    },
+
+    renderCall(args, theme, context) {
+      // The TUI sets context.executionStarted at `tool_execution_start`, which
+      // fires before bash-gate runs. Override it so the elapsed timer only
+      // starts when execute() is actually called (post-gate).
+      return originalBashDef.renderCall!(args, theme, {
+        ...context,
+        executionStarted: executeStartTimes.has(context.toolCallId),
+      });
+    },
   });
 }
