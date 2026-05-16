@@ -1,11 +1,11 @@
 /**
- * Pi-snacks configuration loader.
+ * Pi-bites configuration loader.
  *
  * Config is read from two optional JSON files, merged with project-local taking precedence:
- *   ~/.pi/agent/pi-snacks.json   (global)
- *   <cwd>/.pi/pi-snacks.json     (project-local)
+ *   ~/.pi/agent/pi-bites.json   (global)
+ *   <cwd>/.pi/pi-bites.json     (project-local)
  *
- * Example pi-snacks.json:
+ * Example pi-bites.json:
  * ```json
  * {
  *   "explore": {
@@ -93,7 +93,7 @@ function tryReadJson(filePath: string, label: string): SnacksConfig {
   try {
     return JSON.parse(readFileSync(filePath, "utf-8")) as SnacksConfig;
   } catch (err) {
-    console.error(`pi-snacks: failed to parse ${label} config at ${filePath}: ${err}`);
+    console.error(`pi-bites: failed to parse ${label} config at ${filePath}: ${err}`);
     return {};
   }
 }
@@ -103,8 +103,8 @@ function tryReadJson(filePath: string, label: string): SnacksConfig {
  * Project-local values override global values within each section.
  */
 export function loadConfig(cwd: string): SnacksConfig {
-  const globalPath = join(getAgentDir(), "pi-snacks.json");
-  const projectPath = join(cwd, ".pi", "pi-snacks.json");
+  const globalPath = join(getAgentDir(), "pi-bites.json");
+  const projectPath = join(cwd, ".pi", "pi-bites.json");
 
   const global = tryReadJson(globalPath, "global");
   const project = tryReadJson(projectPath, "project-local");
@@ -139,12 +139,12 @@ export const EXTENSION_NAMES: ExtensionName[] = [
 
 /**
  * Resolve which config file to write to:
- * project-local (.pi/pi-snacks.json) if it already exists, otherwise global.
+ * project-local (.pi/pi-bites.json) if it already exists, otherwise global.
  */
 function resolveWritePath(cwd: string): string {
-  const projectPath = join(cwd, ".pi", "pi-snacks.json");
+  const projectPath = join(cwd, ".pi", "pi-bites.json");
   if (existsSync(projectPath)) return projectPath;
-  return join(getAgentDir(), "pi-snacks.json");
+  return join(getAgentDir(), "pi-bites.json");
 }
 
 function readConfigFile(filePath: string): SnacksConfig {
@@ -161,7 +161,7 @@ function writeConfigFile(filePath: string, config: SnacksConfig): void {
 // ---------------------------------------------------------------------------
 
 export function registerBitesCommands(pi: ExtensionAPI): void {
-  const globalPath = join(getAgentDir(), "pi-snacks.json");
+  const globalPath = join(getAgentDir(), "pi-bites.json");
 
   const completions = (prefix: string) =>
     EXTENSION_NAMES.filter((n) => n.startsWith(prefix)).map((n) => ({ value: n, label: n }));
@@ -192,7 +192,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
       const effective = loadConfig(ctx.cwd);
       if (effective.disable?.includes(name)) {
         const globalCfg = readConfigFile(globalPath);
-        const projectPath = join(ctx.cwd, ".pi", "pi-snacks.json");
+        const projectPath = join(ctx.cwd, ".pi", "pi-bites.json");
         const projectCfg = readConfigFile(projectPath);
         const inGlobal = globalCfg.disable?.includes(name);
         const inProject = projectCfg.disable?.includes(name);
@@ -229,7 +229,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
       }
 
       // Since disable arrays are unioned, remove from BOTH files to truly enable.
-      const projectPath = join(ctx.cwd, ".pi", "pi-snacks.json");
+      const projectPath = join(ctx.cwd, ".pi", "pi-bites.json");
       for (const filePath of [globalPath, projectPath]) {
         const config = readConfigFile(filePath);
         if (config.disable?.includes(name as ExtensionName)) {
@@ -247,7 +247,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
   pi.registerCommand("bites:list", {
     description: "List all extensions with their enabled/disabled status and config scope",
     handler: async (_args, ctx) => {
-      const projectPath = join(ctx.cwd, ".pi", "pi-snacks.json");
+      const projectPath = join(ctx.cwd, ".pi", "pi-bites.json");
       const globalCfg = readConfigFile(globalPath);
       const projectCfg = readConfigFile(projectPath);
       const globalDisabled = new Set(globalCfg.disable ?? []);

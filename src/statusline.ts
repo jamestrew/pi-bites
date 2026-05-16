@@ -5,7 +5,7 @@
  * status bar. Good for surfacing any live stats — token quotas, test counts,
  * build status, etc.
  *
- * Configure via pi-snacks.json:
+ * Configure via pi-bites.json:
  *
  * ```json
  * {

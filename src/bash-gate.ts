@@ -7,7 +7,7 @@
  *   - Allow for session → run all future commands matching the same pattern automatically
  *   - Deny             → block this command and tell the model why
  *
- * Default patterns guard common test runners. Override via pi-snacks.json:
+ * Default patterns guard common test runners. Override via pi-bites.json:
  *
  * ```json
  * {
