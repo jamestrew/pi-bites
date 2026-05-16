@@ -34,7 +34,7 @@ export default function registerTokenCount(pi: ExtensionAPI): void {
     updateTokenStatus(ctx);
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("turn_end", async (_event, ctx) => {
     updateTokenStatus(ctx);
   });
 }
