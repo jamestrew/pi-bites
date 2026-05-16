@@ -49,8 +49,20 @@ export default function registerStatusline(pi: ExtensionAPI, configRef: { curren
     return updateStatus(
       ctx.cwd,
       command,
-      (text) => ctx.ui.setStatus("statusline", text),
-      (color: string, text: string) => ctx.ui.theme.fg(color, text),
+      (text) => {
+        try {
+          ctx.ui.setStatus("statusline", text);
+        } catch {
+          /* stale ctx */
+        }
+      },
+      (color: string, text: string) => {
+        try {
+          return ctx.ui.theme.fg(color, text);
+        } catch {
+          return text;
+        }
+      },
     );
   };
 
