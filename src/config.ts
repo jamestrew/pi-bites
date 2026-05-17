@@ -56,6 +56,19 @@ export interface StatuslineConfig {
   command?: string;
 }
 
+export interface NotificationsConfig {
+  /**
+   * Shell command to run when the agent loop ends.
+   * Receives a JSON payload on stdin: { cwd, message }
+   * Compatible with Claude Code's Notification hook contract.
+   *
+   * Omit (or leave undefined) to use the built-in default:
+   *   notify-send on Linux, osascript on macOS.
+   * Set to "" to disable notifications entirely.
+   */
+  command?: string;
+}
+
 export interface BashGateConfig {
   /**
    * Array of regex pattern strings tested against the full bash command.
@@ -74,12 +87,14 @@ export type ExtensionName =
   | "explore"
   | "todo"
   | "fzf"
-  | "question";
+  | "question"
+  | "notifications";
 
 export interface SnacksConfig {
   explore?: ExploreConfig;
   statusline?: StatuslineConfig;
   bashGate?: BashGateConfig;
+  notifications?: NotificationsConfig;
   /**
    * List of extension names to disable entirely.
    * Global and project-local arrays are unioned.
@@ -117,6 +132,7 @@ export function loadConfig(cwd: string): SnacksConfig {
     explore: { ...global.explore, ...project.explore },
     statusline: { ...global.statusline, ...project.statusline },
     bashGate: { ...global.bashGate, ...project.bashGate },
+    notifications: { ...global.notifications, ...project.notifications },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
 }
@@ -135,6 +151,7 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "fzf",
   "todo",
   "question",
+  "notifications",
 ];
 
 /**

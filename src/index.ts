@@ -6,6 +6,7 @@ import registerExplore from "./explore.js";
 import registerFzfFileSearch from "./fzf-file-search.js";
 import registerTodo from "./todo/index.js";
 import registerQuestion from "./question/index.js";
+import registerNotifications from "./notifications.js";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 
@@ -31,5 +32,6 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("fzf")) registerFzfFileSearch(pi);
   if (!disabled.has("todo")) registerTodo(pi);
   if (!disabled.has("question")) registerQuestion(pi);
+  if (!disabled.has("notifications")) registerNotifications(pi, configRef);
   registerBitesCommands(pi);
 }

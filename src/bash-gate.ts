@@ -94,6 +94,8 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     // still gets its full intended timeout.
     const gateStartMs = Date.now();
 
+    pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
+
     const matchLabel = command.match(matchedPattern)?.[0] ?? matchedPattern.source;
     const choice = await ctx.ui.select(`🔒 Bash gate — command requires approval`, [
       "Allow",
