@@ -24,7 +24,7 @@ function updateTokenStatus(ctx: ExtensionContext): void {
 
   const tokenStr = usage.tokens !== null ? formatTokens(usage.tokens) : "?";
   const windowStr = formatTokens(usage.contextWindow);
-  const text = `ctx: ${tokenStr} / ${windowStr}`;
+  const text = `ctx: ${tokenStr}/${windowStr}`;
 
   ctx.ui.setStatus("token-count", ctx.ui.theme.fg("dim", text));
 }
