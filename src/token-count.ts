@@ -37,4 +37,8 @@ export default function registerTokenCount(pi: ExtensionAPI): void {
   pi.on("turn_end", async (_event, ctx) => {
     updateTokenStatus(ctx);
   });
+
+  pi.on("session_compact", async (_event, ctx) => {
+    updateTokenStatus(ctx);
+  });
 }
