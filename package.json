@@ -15,6 +15,9 @@
     "typecheck": "tsgo --noEmit",
     "check": "bun run lint && bun run fmt && bun run typecheck"
   },
+  "dependencies": {
+    "@ff-labs/fff-node": "/tmp/fff/packages/fff-node"
+  },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@typescript/native-preview": "^7.0.0-dev.20260429.1",
