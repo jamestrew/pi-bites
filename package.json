@@ -16,7 +16,7 @@
     "check": "bun run lint && bun run fmt && bun run typecheck"
   },
   "dependencies": {
-    "@ff-labs/fff-node": "/tmp/fff/packages/fff-node"
+    "@ff-labs/fff-node": "^0.8.1"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
