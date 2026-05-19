@@ -67,9 +67,6 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerTool({
     ...originalBash,
-    description:
-      originalBash.description +
-      " Read files: use the read tool, NOT cat/head/tail/sed. Avoid broad filesystem searches like `find /` or `find .` from the repo root — always scope file searches to a specific subdirectory.",
 
     async execute(toolCallId, params, signal, onUpdate) {
       // Record now — this runs after bash-gate resolves, so the elapsed timer
