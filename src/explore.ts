@@ -96,11 +96,25 @@ type ExploreDetails = {
   durationMs?: number;
 };
 
+function normalizeToolArg(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function summarizeToolArg(value: unknown, maxLength = 120): string {
+  const singleLine = normalizeToolArg(value).replace(/\s+/g, " ").trim();
+  if (singleLine.length <= maxLength) return singleLine;
+  return `${singleLine.slice(0, maxLength)}...`;
+}
+
+function wrapMultilineText(text: string, width: number): string[] {
+  return text.split("\n").flatMap((line) => wrapTextWithAnsi(line, width));
+}
+
 function formatToolCall(name: string, args: Record<string, unknown>): string {
   const cap = name.charAt(0).toUpperCase() + name.slice(1);
 
   if (name === "read") {
-    const filePath = String(args.path ?? "?");
+    const filePath = normalizeToolArg(args.path ?? "?");
     const offset = typeof args.offset === "number" ? args.offset : undefined;
     const limit = typeof args.limit === "number" ? args.limit : undefined;
     if (offset !== undefined || limit !== undefined) {
@@ -112,19 +126,19 @@ function formatToolCall(name: string, args: Record<string, unknown>): string {
   }
 
   if (name === "grep") {
-    return `${cap}(/${String(args.pattern ?? "")}/ in ${String(args.path ?? ".")})`;
+    return `${cap}(/${normalizeToolArg(args.pattern)}/ in ${normalizeToolArg(args.path ?? ".")})`;
   }
 
   if (name === "find") {
-    return `${cap}(${String(args.pattern ?? "*")} in ${String(args.path ?? ".")})`;
+    return `${cap}(${normalizeToolArg(args.pattern ?? "*")} in ${normalizeToolArg(args.path ?? ".")})`;
   }
 
   if (name === "ls") {
-    return `${cap}(${String(args.path ?? ".")})`;
+    return `${cap}(${normalizeToolArg(args.path ?? ".")})`;
   }
 
   if (name === "bash") {
-    return `${cap}(${String(args.command ?? "")})`;
+    return `${cap}(${normalizeToolArg(args.command)})`;
   }
 
   return `${cap}(${JSON.stringify(args)})`;
@@ -187,7 +201,7 @@ function buildProgressText(timeline: string[], finalOutput: string): string {
     lines.push("");
     lines.push("Recent activity:");
     for (const item of timeline.slice(-8)) {
-      const display = item.startsWith("→ ") ? item.slice(2) : item;
+      const display = item.startsWith("→ ") ? summarizeToolArg(item.slice(2)) : item;
       lines.push(`- ${display}`);
     }
   }
@@ -428,7 +442,9 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
 
             // Tool calls
             for (const call of toolCalls) {
-              lines.push(truncateToWidth(theme.fg("dim", call), callWidth, "\u2026"));
+              for (const line of wrapMultilineText(call, callWidth)) {
+                lines.push(theme.fg("dim", line));
+              }
             }
 
             // Final output
@@ -451,7 +467,9 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
             const hiddenCount = Math.max(0, toolCalls.length - MAX_VISIBLE_TOOL_CALLS);
             const visibleCalls = toolCalls.slice(-MAX_VISIBLE_TOOL_CALLS);
             for (const call of visibleCalls) {
-              lines.push(truncateToWidth(theme.fg("dim", call), callWidth, "\u2026"));
+              lines.push(
+                truncateToWidth(theme.fg("dim", summarizeToolArg(call)), callWidth, "\u2026"),
+              );
             }
             lines.push(theme.fg("muted", "Running\u2026"));
             if (hiddenCount > 0) {
