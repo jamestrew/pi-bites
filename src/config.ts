@@ -10,7 +10,7 @@
  * {
  *   "explore": {
  *     "defaultModel": "anthropic/claude-sonnet-4-5",
- *     "defaultTools": "read,grep,find,ls"
+ *     "defaultTools": "read,ls,bash"
  *   },
  *   "statusline": {
  *     "command": "python get_usage_limits.py"
@@ -26,7 +26,8 @@
  * ```
  *
  * Each top-level section is optional — omitted sections fall back to built-in defaults.
- * For bashGate.patterns, providing an array *replaces* the built-in pattern list entirely.
+ * For bashGate.patterns, providing an array adds extra gated patterns on top of the
+ * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
  *   "bashGate" | "statusline" | "tokenCount" | "tools" | "explore" | "todo" | "question"
@@ -43,7 +44,7 @@ import { getAgentDir } from "@mariozechner/pi-coding-agent";
 export interface ExploreConfig {
   /** Model to use when the LLM doesn't specify one. Default: "github-copilot/claude-haiku-4.5" */
   defaultModel?: string;
-  /** Comma-separated list of tools available to the subagent. Default: "read,grep,find,ls,bash" */
+  /** Comma-separated list of tools available to the subagent. Default: "read,ls,bash" */
   defaultTools?: string;
 }
 
@@ -72,7 +73,7 @@ export interface NotificationsConfig {
 export interface BashGateConfig {
   /**
    * Array of regex pattern strings tested against the full bash command.
-   * Replaces the built-in default pattern list entirely when provided.
+   * Adds extra gated patterns on top of the built-in destructive-command list.
    * Each string is passed to `new RegExp(pattern)`.
    */
   patterns?: string[];

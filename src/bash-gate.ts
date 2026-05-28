@@ -1,23 +1,22 @@
 /**
  * Bash Gate Extension
  *
- * Prompts for confirmation before running bash commands that match any of the
- * configured patterns. Presents three choices:
+ * Prompts for confirmation before running bash commands that match protected
+ * patterns. Presents three choices:
  *   - Allow            → run this command once
  *   - Allow for session → run all future commands matching the same pattern automatically
  *   - Deny             → block this command and tell the model why
  *
- * Default patterns guard common test runners. Override via pi-bites.json:
+ * Built-in patterns guard common destructive commands. Additional project
+ * patterns can be added via pi-bites.json:
  *
  * ```json
  * {
  *   "bashGate": {
- *     "patterns": ["\\brm\\s+-rf\\b", "\\bsudo\\b"]
+ *     "patterns": ["\\bbun\\s+check\\b", "\\bpytest\\b"]
  *   }
  * }
  * ```
- *
- * Providing `patterns` replaces the built-in list entirely.
  *
  * Pass `--yolo` on the CLI to bypass all gates entirely — useful for
  * non-interactive / scripted runs where no UI is available:
@@ -29,6 +28,96 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { SnacksConfig } from "./config.js";
+
+export const DESTRUCTIVE_PATTERNS = [
+  /\brm\b/i,
+  /\brmdir\b/i,
+  /\bmv\b/i,
+  /\bcp\b/i,
+  /\bmkdir\b/i,
+  /\btouch\b/i,
+  /\bchmod\b/i,
+  /\bchown\b/i,
+  /\bchgrp\b/i,
+  /\bln\b/i,
+  /\btee\b/i,
+  /\btruncate\b/i,
+  /\bdd\b/i,
+  /\bshred\b/i,
+  /(^|[^<])>(?!>)(?!\s*\/dev\/null\b)/,
+  />>(?!\s*\/dev\/null\b)/,
+  /\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
+  /\byarn\s+(add|remove|install|publish)/i,
+  /\bbun\s+(add|remove|install|publish)/i,
+  /\bpnpm\s+(add|remove|install|publish)/i,
+  /\bpip\s+(install|uninstall)/i,
+  /\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
+  /\bbrew\s+(install|uninstall|upgrade)/i,
+  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
+  /\bsudo\b/i,
+  /\bsu\b/i,
+  /\bkill\b/i,
+  /\bpkill\b/i,
+  /\bkillall\b/i,
+  /\breboot\b/i,
+  /\bshutdown\b/i,
+  /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
+  /\bservice\s+\S+\s+(start|stop|restart)/i,
+  /\b(vim?|nano|emacs|code|subl)\b/i,
+];
+
+export const SAFE_PATTERNS = [
+  /^\s*cat\b/,
+  /^\s*head\b/,
+  /^\s*tail\b/,
+  /^\s*less\b/,
+  /^\s*more\b/,
+  /^\s*grep\b/,
+  /^\s*find\b/,
+  /^\s*ls\b/,
+  /^\s*pwd\b/,
+  /^\s*echo\b/,
+  /^\s*printf\b/,
+  /^\s*wc\b/,
+  /^\s*sort\b/,
+  /^\s*uniq\b/,
+  /^\s*diff\b/,
+  /^\s*file\b/,
+  /^\s*stat\b/,
+  /^\s*du\b/,
+  /^\s*df\b/,
+  /^\s*tree\b/,
+  /^\s*which\b/,
+  /^\s*whereis\b/,
+  /^\s*type\b/,
+  /^\s*env\b/,
+  /^\s*printenv\b/,
+  /^\s*uname\b/,
+  /^\s*whoami\b/,
+  /^\s*id\b/,
+  /^\s*date\b/,
+  /^\s*cal\b/,
+  /^\s*uptime\b/,
+  /^\s*ps\b/,
+  /^\s*top\b/,
+  /^\s*htop\b/,
+  /^\s*free\b/,
+  /^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
+  /^\s*git\s+ls-/i,
+  /^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
+  /^\s*yarn\s+(list|info|why|audit)/i,
+  /^\s*node\s+--version/i,
+  /^\s*python\s+--version/i,
+  /^\s*curl\s/i,
+  /^\s*wget\s+-O\s*-/i,
+  /^\s*jq\b/,
+  /^\s*sed\s+-n/i,
+  /^\s*awk\b/,
+  /^\s*rg\b/,
+  /^\s*fd\b/,
+  /^\s*bat\b/,
+  /^\s*eza\b/,
+];
 
 /**
  * When a command is approved, add the time spent waiting in the gate to the
@@ -47,9 +136,8 @@ function compensateTimeout(input: Record<string, unknown>, gateStartMs: number):
 }
 
 function resolvePatterns(config: SnacksConfig): RegExp[] {
-  const raw = config.bashGate?.patterns;
-  if (!raw || raw.length === 0) return [];
-  return raw.map((p) => new RegExp(p));
+  const configured = (config.bashGate?.patterns ?? []).map((p) => new RegExp(p));
+  return [...DESTRUCTIVE_PATTERNS, ...configured];
 }
 
 export default function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
@@ -69,7 +157,6 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
-    if (patterns.length === 0) return undefined;
 
     const command = event.input.command as string;
 
@@ -84,7 +171,11 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     if (!ctx.hasUI) {
       // Non-interactive mode (e.g. `pi -p`) — block by default.
-      return { block: true, reason: "Bash gate: no UI available for confirmation." };
+      const reason =
+        process.env.PI_BITES_SUBAGENT === "explore"
+          ? "Bash gate: destructive command not allowed during exploration."
+          : "Bash gate: no UI available for confirmation.";
+      return { block: true, reason };
     }
 
     // Snapshot the time before showing the prompt. The TUI's elapsed timer

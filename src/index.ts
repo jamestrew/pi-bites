@@ -12,6 +12,7 @@ import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.j
 
 export default function (pi: ExtensionAPI) {
   const configRef: { current: SnacksConfig } = { current: {} };
+  const isExploreSubagent = process.env.PI_BITES_SUBAGENT === "explore";
 
   // Load config eagerly at startup to resolve the disable list.
   // Extensions are registered once at load time, so this must happen before
@@ -25,6 +26,9 @@ export default function (pi: ExtensionAPI) {
   });
 
   if (!disabled.has("bashGate")) registerBashGate(pi, configRef);
+
+  if (isExploreSubagent) return;
+
   if (!disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!disabled.has("tokenCount")) registerTokenCount(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);

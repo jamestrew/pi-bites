@@ -35,7 +35,7 @@ Example:
 {
   "explore": {
     "defaultModel": "anthropic/claude-sonnet-4-5",
-    "defaultTools": "read,grep,find,ls,bash"
+    "defaultTools": "read,ls,bash"
   },
   "statusline": {
     "command": "python get_usage_limits.py"
@@ -44,11 +44,7 @@ Example:
     "command": "notify-send 'pi'"
   },
   "bashGate": {
-    "patterns": [
-      "\\bbun\\s+check\\b",
-      "\\bbun\\s+test\\b",
-      "\\bpython\\s+scripts/check\\.py\\b"
-    ]
+    "patterns": ["\\bbun\\s+check\\b", "\\bbun\\s+test\\b", "\\bpython\\s+scripts/check\\.py\\b"]
   },
   "disable": ["tokenCount"]
 }
@@ -80,7 +76,7 @@ You can also edit config directly:
 
 ## Bash gate
 
-The bash gate prompts before running `bash` tool commands whose command string matches one of your configured regex patterns.
+The bash gate prompts before running `bash` tool commands whose command string matches one of the built-in destructive patterns or one of your configured regex patterns.
 
 ```json
 {
@@ -90,7 +86,7 @@ The bash gate prompts before running `bash` tool commands whose command string m
 }
 ```
 
-Each pattern is passed to JavaScript's `new RegExp(pattern)`. If no patterns are configured, no commands are gated.
+Each configured pattern is passed to JavaScript's `new RegExp(pattern)` and is added to the built-in destructive-command gate.
 
 For commands that include paths, remember both JSON and regex escaping apply, e.g. `"\\bpython\\s+scripts/check\\.py\\b"`.
 

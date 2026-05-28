@@ -2,13 +2,19 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import type { SnacksConfig } from "./config.js";
 
 const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
-const DEFAULT_TOOLS = "read,grep,find,ls,bash";
+const DEFAULT_TOOLS = "read,ls,bash";
+const RTK_OPTIMIZER_EXTENSION = "npm:pi-rtk-optimizer";
+const SELF_EXTENSION = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  `index${path.extname(fileURLToPath(import.meta.url))}`,
+);
 const MAX_VISIBLE_TOOL_CALLS = 3;
 
 const EXPLORE_SYSTEM_PROMPT = `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
@@ -215,6 +221,25 @@ function buildProgressText(timeline: string[], finalOutput: string): string {
   return lines.join("\n");
 }
 
+function extractTextContent(content: any): string {
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((part: any) => part?.type === "text" && typeof part.text === "string")
+    .map((part: any) => part.text)
+    .join("\n\n")
+    .trim();
+}
+
+function getBashGateReason(event: any): string | undefined {
+  if (event?.type !== "tool_execution_end" || event.toolName !== "bash" || !event.isError) {
+    return undefined;
+  }
+
+  const text = extractTextContent(event.result?.content);
+  if (!text.startsWith("Bash gate:")) return undefined;
+  return text;
+}
+
 async function writeSystemPromptFile(prompt: string): Promise<{ dir: string; file: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "pi-explore-"));
   const file = path.join(dir, "system-prompt.md");
@@ -275,7 +300,10 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
           "json",
           "-p",
           "--no-session",
-          "--no-extensions",
+          "-e",
+          SELF_EXTENSION,
+          "-e",
+          RTK_OPTIMIZER_EXTENSION,
           "--no-prompt-templates",
           "--no-themes",
           "--tools",
@@ -294,6 +322,7 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
           cwd,
           stdio: ["ignore", "pipe", "pipe"],
           shell: false,
+          env: { ...process.env, PI_BITES_SUBAGENT: "explore" },
         });
 
         let aborted = false;
@@ -319,6 +348,13 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
           try {
             event = JSON.parse(line);
           } catch {
+            return;
+          }
+
+          const gateReason = getBashGateReason(event);
+          if (gateReason) {
+            timeline.push(gateReason);
+            emitUpdate();
             return;
           }
 
