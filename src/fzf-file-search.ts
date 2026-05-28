@@ -39,12 +39,20 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
   let finderCwd: string | null = null;
   let finderPromise: Promise<FileFinder> | null = null;
 
-  pi.on("session_shutdown", async () => {
+  function resetFinder() {
     if (finder && !finder.isDestroyed) {
-      finder.destroy();
-      finder = null;
-      finderCwd = null;
+      try {
+        finder.destroy();
+      } catch (error) {
+        console.warn("FFF destroy failed", error);
+      }
     }
+    finder = null;
+    finderCwd = null;
+  }
+
+  pi.on("session_shutdown", async () => {
+    resetFinder();
   });
 
   function ensureFinder(cwd: string): Promise<FileFinder> {
@@ -52,11 +60,7 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
     if (finderPromise) return finderPromise;
 
     finderPromise = (async () => {
-      if (finder && !finder.isDestroyed) {
-        finder.destroy();
-        finder = null;
-        finderCwd = null;
-      }
+      resetFinder();
 
       const result = FileFinder.create({ basePath: cwd, aiMode: true });
       if (!result.ok) throw new Error(`FFF init failed: ${result.error}`);
@@ -65,9 +69,14 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
       finderCwd = cwd;
       await finder.waitForScan(15000);
       return finder;
-    })().finally(() => {
-      finderPromise = null;
-    });
+    })()
+      .catch((error) => {
+        resetFinder();
+        throw error;
+      })
+      .finally(() => {
+        finderPromise = null;
+      });
 
     return finderPromise;
   }
@@ -105,8 +114,20 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
 
         if (options.signal.aborted) return null;
 
-        const searchResult = f.mixedSearch(query, { pageSize: MENTION_MAX_RESULTS });
-        if (!searchResult.ok) return null;
+        let searchResult;
+        try {
+          searchResult = f.mixedSearch(query, { pageSize: MENTION_MAX_RESULTS });
+        } catch (error) {
+          console.warn("FFF search crashed; falling back to built-in provider", error);
+          resetFinder();
+          return current.getSuggestions(lines, cursorLine, cursorCol, options);
+        }
+
+        if (!searchResult.ok) {
+          console.warn("FFF search failed; falling back to built-in provider", searchResult.error);
+          resetFinder();
+          return current.getSuggestions(lines, cursorLine, cursorCol, options);
+        }
 
         const items: AutocompleteItem[] = searchResult.value.items
           .slice(0, MENTION_MAX_RESULTS)
