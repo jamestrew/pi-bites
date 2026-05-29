@@ -44,7 +44,7 @@ export const DESTRUCTIVE_PATTERNS = [
   /\btruncate\b/i,
   /\bdd\b/i,
   /\bshred\b/i,
-  /(^|[^<])>(?!>)(?!\s*\/dev\/null\b)/,
+  /(^|[^<])>(?!>)(?!&\d+\b)(?!\s*\/dev\/null\b)/,
   />>(?!\s*\/dev\/null\b)/,
   /\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
   /\byarn\s+(add|remove|install|publish)/i,
@@ -140,6 +140,16 @@ function resolvePatterns(config: SnacksConfig): RegExp[] {
   return [...DESTRUCTIVE_PATTERNS, ...configured];
 }
 
+export function findMatchedPattern(
+  command: string,
+  patternsOrConfig: RegExp[] | SnacksConfig = {},
+): RegExp | undefined {
+  const patterns = Array.isArray(patternsOrConfig)
+    ? patternsOrConfig
+    : resolvePatterns(patternsOrConfig);
+  return patterns.find((pattern) => pattern.test(command));
+}
+
 export default function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
   pi.registerFlag("yolo", {
     description: "Bypass all bash-gate confirmations (useful for non-interactive / scripted runs)",
@@ -160,7 +170,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     const command = event.input.command as string;
 
-    const matchedPattern = patterns.find((p) => p.test(command));
+    const matchedPattern = findMatchedPattern(command, patterns);
     if (!matchedPattern) return undefined;
 
     // --yolo flag: skip all gates.
