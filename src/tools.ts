@@ -42,7 +42,7 @@ const editPromptGuidelines = [
   "For repeated rename-style changes in one file, prefer one deliberate multi-edit strategy rather than many ad hoc replacements.",
 ];
 
-export default function(pi: ExtensionAPI) {
+export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const originalRead = createReadTool(cwd);
   const originalBash = createBashTool(cwd);

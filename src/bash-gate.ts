@@ -27,44 +27,131 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { extractBashFacts, type BashFacts } from "./bash-command-facts.js";
 import type { SnacksConfig } from "./config.js";
 
-export const DESTRUCTIVE_PATTERNS = [
-  /\brm\b/i,
-  /\brmdir\b/i,
-  /\bmv\b/i,
-  /\bcp\b/i,
-  /\bmkdir\b/i,
-  /\btouch\b/i,
-  /\bchmod\b/i,
-  /\bchown\b/i,
-  /\bchgrp\b/i,
-  /\bln\b/i,
-  /\btee\b/i,
-  /\btruncate\b/i,
-  /\bdd\b/i,
-  /\bshred\b/i,
-  /(^|[^<])>(?!>)(?!&\d+\b)(?!\s*\/dev\/null\b)/,
-  />>(?!\s*\/dev\/null\b)/,
-  /\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
-  /\byarn\s+(add|remove|install|publish)/i,
-  /\bbun\s+(add|remove|install|publish)/i,
-  /\bpnpm\s+(add|remove|install|publish)/i,
-  /\bpip\s+(install|uninstall)/i,
-  /\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
-  /\bbrew\s+(install|uninstall|upgrade)/i,
-  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
-  /\bsudo\b/i,
-  /\bsu\b/i,
-  /\bkill\b/i,
-  /\bpkill\b/i,
-  /\bkillall\b/i,
-  /\breboot\b/i,
-  /\bshutdown\b/i,
-  /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
-  /\bservice\s+\S+\s+(start|stop|restart)/i,
-  /\b(vim?|nano|emacs|code|subl)\b/i,
-];
+const DIRECT_COMMANDS = new Set([
+  "rm",
+  "rmdir",
+  "mv",
+  "cp",
+  "mkdir",
+  "touch",
+  "chmod",
+  "chown",
+  "chgrp",
+  "ln",
+  "tee",
+  "truncate",
+  "dd",
+  "shred",
+  "sudo",
+  "su",
+  "kill",
+  "pkill",
+  "killall",
+  "reboot",
+  "shutdown",
+  "vi",
+  "vim",
+  "nano",
+  "emacs",
+  "code",
+  "subl",
+]);
+
+const SUBCOMMAND_RULES = new Map<string, ReadonlySet<string>>([
+  ["npm", new Set(["install", "uninstall", "update", "ci", "link", "publish"])],
+  ["yarn", new Set(["add", "remove", "install", "publish"])],
+  ["bun", new Set(["add", "remove", "install", "publish"])],
+  ["pnpm", new Set(["add", "remove", "install", "publish"])],
+  ["pip", new Set(["install", "uninstall"])],
+  ["apt", new Set(["install", "remove", "purge", "update", "upgrade"])],
+  ["apt-get", new Set(["install", "remove", "purge", "update", "upgrade"])],
+  ["brew", new Set(["install", "uninstall", "upgrade"])],
+  [
+    "git",
+    new Set([
+      "add",
+      "commit",
+      "push",
+      "pull",
+      "merge",
+      "rebase",
+      "reset",
+      "checkout",
+      "stash",
+      "cherry-pick",
+      "revert",
+      "tag",
+      "init",
+      "clone",
+    ]),
+  ],
+  ["systemctl", new Set(["start", "stop", "restart", "enable", "disable"])],
+]);
+
+export const DESTRUCTIVE_MATCH_LABELS = [
+  ...DIRECT_COMMANDS,
+  "redirect:>",
+  "redirect:>>",
+  "npm install",
+  "npm uninstall",
+  "npm update",
+  "npm ci",
+  "npm link",
+  "npm publish",
+  "yarn add",
+  "yarn remove",
+  "yarn install",
+  "yarn publish",
+  "bun add",
+  "bun remove",
+  "bun install",
+  "bun publish",
+  "pnpm add",
+  "pnpm remove",
+  "pnpm install",
+  "pnpm publish",
+  "pip install",
+  "pip uninstall",
+  "apt install",
+  "apt remove",
+  "apt purge",
+  "apt update",
+  "apt upgrade",
+  "apt-get install",
+  "apt-get remove",
+  "apt-get purge",
+  "apt-get update",
+  "apt-get upgrade",
+  "brew install",
+  "brew uninstall",
+  "brew upgrade",
+  "git add",
+  "git commit",
+  "git push",
+  "git pull",
+  "git merge",
+  "git rebase",
+  "git reset",
+  "git checkout",
+  "git branch -d",
+  "git stash",
+  "git cherry-pick",
+  "git revert",
+  "git tag",
+  "git init",
+  "git clone",
+  "systemctl start",
+  "systemctl stop",
+  "systemctl restart",
+  "systemctl enable",
+  "systemctl disable",
+  "service start",
+  "service stop",
+  "service restart",
+] as const;
 
 export const SAFE_PATTERNS = [
   /^\s*cat\b/,
@@ -119,6 +206,12 @@ export const SAFE_PATTERNS = [
   /^\s*eza\b/,
 ];
 
+export interface BashGateMatch {
+  label: string;
+  source: "builtin" | "configured";
+  pattern?: RegExp;
+}
+
 /**
  * When a command is approved, add the time spent waiting in the gate to the
  * timeout (if one was set by the model). This is necessary because the TUI
@@ -135,19 +228,78 @@ function compensateTimeout(input: Record<string, unknown>, gateStartMs: number):
   input.timeout = input.timeout + gateWaitSec;
 }
 
-function resolvePatterns(config: SnacksConfig): RegExp[] {
-  const configured = (config.bashGate?.patterns ?? []).map((p) => new RegExp(p));
-  return [...DESTRUCTIVE_PATTERNS, ...configured];
+function resolveConfiguredPatterns(config: SnacksConfig): RegExp[] {
+  return (config.bashGate?.patterns ?? []).map((p) => new RegExp(p));
 }
 
-export function findMatchedPattern(
+function normalizeToken(value?: string): string | undefined {
+  return value?.toLowerCase();
+}
+
+function isDangerousRedirect(operator: string, target?: string): boolean {
+  if (!operator.includes(">")) return false;
+  if (operator.includes("<&") || operator.includes(">&")) return false;
+  return target?.trim() !== "/dev/null";
+}
+
+function findBuiltInMatch(facts: BashFacts): BashGateMatch | undefined {
+  for (const redirect of facts.redirects) {
+    if (!isDangerousRedirect(redirect.operator, redirect.target)) continue;
+    if (redirect.operator.includes(">>")) {
+      return { label: "redirect:>>", source: "builtin" };
+    }
+    return { label: "redirect:>", source: "builtin" };
+  }
+
+  for (const command of facts.commands) {
+    const name = normalizeToken(command.name);
+    const subcommand = normalizeToken(command.subcommand);
+    const thirdArg = normalizeToken(command.argv[2]);
+    if (!name) continue;
+
+    if (DIRECT_COMMANDS.has(name)) {
+      return { label: name, source: "builtin" };
+    }
+
+    const riskySubcommands = SUBCOMMAND_RULES.get(name);
+    if (riskySubcommands && subcommand && riskySubcommands.has(subcommand)) {
+      return { label: `${name} ${subcommand}`, source: "builtin" };
+    }
+
+    if (name === "git" && subcommand === "branch" && (thirdArg === "-d" || thirdArg === "-D")) {
+      return { label: "git branch -d", source: "builtin" };
+    }
+
+    if (name === "service") {
+      const action = normalizeToken(command.argv.at(-1));
+      if (action === "start" || action === "stop" || action === "restart") {
+        return { label: `service ${action}`, source: "builtin" };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+export async function findMatchedPattern(
   command: string,
   patternsOrConfig: RegExp[] | SnacksConfig = {},
-): RegExp | undefined {
+): Promise<BashGateMatch | undefined> {
+  const facts = await extractBashFacts(command);
+  const builtIn = findBuiltInMatch(facts);
+  if (builtIn) return builtIn;
+
   const patterns = Array.isArray(patternsOrConfig)
     ? patternsOrConfig
-    : resolvePatterns(patternsOrConfig);
-  return patterns.find((pattern) => pattern.test(command));
+    : resolveConfiguredPatterns(patternsOrConfig);
+  const pattern = patterns.find((candidate) => candidate.test(command));
+  if (!pattern) return undefined;
+
+  return {
+    label: pattern.source,
+    source: "configured",
+    pattern,
+  };
 }
 
 export default function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
@@ -160,7 +312,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
   let patterns: RegExp[] = [];
 
   pi.on("session_start", (_event, _ctx) => {
-    patterns = resolvePatterns(configRef.current);
+    patterns = resolveConfiguredPatterns(configRef.current);
   });
 
   const sessionAllowed = new Set<string>();
@@ -170,14 +322,14 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     const command = event.input.command as string;
 
-    const matchedPattern = findMatchedPattern(command, patterns);
+    const matchedPattern = await findMatchedPattern(command, patterns);
     if (!matchedPattern) return undefined;
 
     // --yolo flag: skip all gates.
     if (pi.getFlag("yolo")) return undefined;
 
     // Pattern was already approved for this session — run silently.
-    if (sessionAllowed.has(matchedPattern.source)) return undefined;
+    if (sessionAllowed.has(matchedPattern.label)) return undefined;
 
     if (!ctx.hasUI) {
       // Non-interactive mode (e.g. `pi -p`) — block by default.
@@ -197,15 +349,14 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
 
-    const matchLabel = command.match(matchedPattern)?.[0] ?? matchedPattern.source;
     const choice = await ctx.ui.select(`🔒 Bash gate — command requires approval`, [
       "Allow",
-      `Allow for session ("${matchLabel}")`,
+      `Allow for session ("${matchedPattern.label}")`,
       "Deny",
     ]);
 
     if (choice?.startsWith("Allow for session")) {
-      sessionAllowed.add(matchedPattern.source);
+      sessionAllowed.add(matchedPattern.label);
       compensateTimeout(event.input, gateStartMs);
       return undefined; // proceed
     }
