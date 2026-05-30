@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { extractBashFacts } from "./bash-command-facts.js";
-import { DESTRUCTIVE_MATCH_LABELS, findMatchedPattern } from "./bash-gate.js";
+import { findMatchedPattern } from "./bash-gate.js";
 
 describe("extractBashFacts", () => {
-  test("extracts commands, redirects, path-ish args, and pipe presence", async () => {
+  test("extracts commands, redirects, path-ish args, pipe presence, and flags", async () => {
     const facts = await extractBashFacts("git push origin main > out.txt | tee ./log.txt");
 
     expect(facts.hasPipe).toBe(true);
@@ -11,6 +11,7 @@ describe("extractBashFacts", () => {
       ["git", "push", "origin", "main"],
       ["tee", "./log.txt"],
     ]);
+    expect(facts.commands[0]?.flags).toEqual([]);
     expect(facts.redirects).toContainEqual({ operator: ">", target: "out.txt" });
     expect(facts.pathCandidates).toContain("./log.txt");
   });
@@ -45,15 +46,57 @@ describe("findMatchedPattern", () => {
 
     expect(matched).toBeDefined();
     expect(matched?.label).toBe(label);
-    expect(DESTRUCTIVE_MATCH_LABELS).toContain(label);
   });
 
-  test("supports configured extra patterns", async () => {
-    const matched = await findMatchedPattern("bun test", {
-      bashGate: { patterns: ["\\bbun\\s+test\\b"] },
+  test("supports configured command-only rules", async () => {
+    const matched = await findMatchedPattern("pytest -q", {
+      bashGate: { rules: [{ cmd: "pytest" }] },
     });
 
-    expect(matched?.label).toBe("\\bbun\\s+test\\b");
+    expect(matched?.label).toBe("pytest");
     expect(matched?.source).toBe("configured");
+  });
+
+  test("supports configured subcommand rules", async () => {
+    const matched = await findMatchedPattern("git push origin main", {
+      bashGate: {
+        rules: [{ cmd: "git", subcommands: ["push"], reason: "push mutates remote state" }],
+      },
+    });
+
+    expect(matched?.label).toBe("git push");
+    expect(matched?.reason).toBe("push mutates remote state");
+  });
+
+  test("supports configured flagAny rules", async () => {
+    const matched = await findMatchedPattern("sed -i 's/a/b/' file.txt", {
+      bashGate: { rules: [{ cmd: "sed", flagAny: ["-i"] }] },
+    });
+
+    expect(matched?.label).toBe("sed -i");
+    expect(matched?.source).toBe("configured");
+  });
+
+  test("supports configured redirect rules", async () => {
+    const matched = await findMatchedPattern("echo hi >> out.txt", {
+      bashGate: { rules: [{ redirects: "append" }] },
+    });
+
+    expect(matched?.label).toBe("redirect:>>");
+    expect(matched?.source).toBe("configured");
+  });
+
+  test("configured rules extend builtin defaults", async () => {
+    const builtinMatch = await findMatchedPattern("git push origin main", {
+      bashGate: { rules: [{ cmd: "sed", flagAny: ["-i"] }] },
+    });
+    const configuredMatch = await findMatchedPattern("sed -i 's/a/b/' file.txt", {
+      bashGate: { rules: [{ cmd: "sed", flagAny: ["-i"] }] },
+    });
+
+    expect(builtinMatch?.label).toBe("git push");
+    expect(builtinMatch?.source).toBe("builtin");
+    expect(configuredMatch?.label).toBe("sed -i");
+    expect(configuredMatch?.source).toBe("configured");
   });
 });

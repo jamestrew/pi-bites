@@ -5,6 +5,7 @@ export interface BashSimpleCommand {
   name?: string;
   subcommand?: string;
   argv: string[];
+  flags: string[];
 }
 
 export interface BashRedirect {
@@ -193,6 +194,7 @@ function walk(node: TSNode, facts: BashFacts): void {
       name: extractCommandName(argv),
       subcommand: argv[1],
       argv,
+      flags: argv.filter((arg, index) => index > 0 && arg.startsWith("-")),
     });
 
     for (const arg of argv.slice(1)) {

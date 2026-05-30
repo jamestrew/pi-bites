@@ -13,7 +13,7 @@
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check .",
     "typecheck": "tsgo --noEmit",
-    "test": "bun test",
+    "test": "bun test src",
     "check": "bun run lint && bun run fmt && bun run typecheck"
   },
   "dependencies": {

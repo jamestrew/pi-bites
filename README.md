@@ -44,7 +44,7 @@ Example:
     "command": "notify-send 'pi'"
   },
   "bashGate": {
-    "patterns": ["\\bbun\\s+check\\b", "\\bbun\\s+test\\b", "\\bpython\\s+scripts/check\\.py\\b"]
+    "rules": [{ "cmd": "bun", "subcommands": ["check", "test"] }, { "cmd": "pytest" }]
   },
   "disable": ["tokenCount"]
 }
@@ -76,19 +76,30 @@ You can also edit config directly:
 
 ## Bash gate
 
-The bash gate prompts before running `bash` tool commands whose command string matches one of the built-in destructive patterns or one of your configured regex patterns.
+The bash gate prompts before running `bash` tool commands that match one of the built-in destructive rules or one of your configured structured rules.
 
 ```json
 {
   "bashGate": {
-    "patterns": ["\\bbun\\s+check\\b", "\\brm\\s+-rf\\b", "\\bsudo\\b"]
+    "rules": [
+      { "cmd": "bun", "subcommands": ["check", "test"] },
+      { "cmd": "sed", "flagAny": ["-i"] },
+      { "cmd": "find", "flagAny": ["-delete"], "reason": "find -delete mutates files" },
+      { "redirects": "any-write" }
+    ]
   }
 }
 ```
 
-Each configured pattern is passed to JavaScript's `new RegExp(pattern)` and is added to the built-in destructive-command gate.
+Configured rules extend the built-in destructive-command gate; they do not replace it.
 
-For commands that include paths, remember both JSON and regex escaping apply, e.g. `"\\bpython\\s+scripts/check\\.py\\b"`.
+Supported rule fields:
+
+- `cmd`: match a command name like `git` or `rm`
+- `subcommands`: match a subcommand like `push` in `git push`
+- `flagAny`: match when any listed flag is present, like `-i` or `-delete`
+- `redirects`: one of `"any-write"`, `"append"`, or `"truncate"`
+- `reason`: optional explanation shown in the prompt
 
 When a command matches, pi asks whether to:
 

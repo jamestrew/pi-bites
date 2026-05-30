@@ -2,18 +2,21 @@
  * Bash Gate Extension
  *
  * Prompts for confirmation before running bash commands that match protected
- * patterns. Presents three choices:
- *   - Allow            → run this command once
- *   - Allow for session → run all future commands matching the same pattern automatically
- *   - Deny             → block this command and tell the model why
+ * structured rules. Presents three choices:
+ *   - Allow             → run this command once
+ *   - Allow for session → run all future commands matching the same rule automatically
+ *   - Deny              → block this command and tell the model why
  *
- * Built-in patterns guard common destructive commands. Additional project
- * patterns can be added via pi-bites.json:
+ * Built-in rules guard common destructive commands. Additional project rules
+ * can be added via pi-bites.json:
  *
  * ```json
  * {
  *   "bashGate": {
- *     "patterns": ["\\bbun\\s+check\\b", "\\bpytest\\b"]
+ *     "rules": [
+ *       { "cmd": "bun", "subcommands": ["test"] },
+ *       { "redirects": "any-write" }
+ *     ]
  *   }
  * }
  * ```
@@ -27,51 +30,22 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { extractBashFacts, type BashFacts } from "./bash-command-facts.js";
-import type { SnacksConfig } from "./config.js";
+import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
+import type {
+  BashGateConfig,
+  BashGateRedirectRule,
+  BashGateRule,
+  OneOrMany,
+  SnacksConfig,
+} from "./config.js";
 
-const DIRECT_COMMANDS = new Set([
-  "rm",
-  "rmdir",
-  "mv",
-  "cp",
-  "mkdir",
-  "touch",
-  "chmod",
-  "chown",
-  "chgrp",
-  "ln",
-  "tee",
-  "truncate",
-  "dd",
-  "shred",
-  "sudo",
-  "su",
-  "kill",
-  "pkill",
-  "killall",
-  "reboot",
-  "shutdown",
-  "vi",
-  "vim",
-  "nano",
-  "emacs",
-  "code",
-  "subl",
-]);
-
-const SUBCOMMAND_RULES = new Map<string, ReadonlySet<string>>([
-  ["npm", new Set(["install", "uninstall", "update", "ci", "link", "publish"])],
-  ["yarn", new Set(["add", "remove", "install", "publish"])],
-  ["bun", new Set(["add", "remove", "install", "publish"])],
-  ["pnpm", new Set(["add", "remove", "install", "publish"])],
-  ["pip", new Set(["install", "uninstall"])],
-  ["apt", new Set(["install", "remove", "purge", "update", "upgrade"])],
-  ["apt-get", new Set(["install", "remove", "purge", "update", "upgrade"])],
-  ["brew", new Set(["install", "uninstall", "upgrade"])],
-  [
-    "git",
-    new Set([
+export const DEFAULT_BASH_GATE_RULES: BashGateRule[] = [
+  { cmd: ["rm", "rmdir", "mv", "cp", "mkdir", "touch"] },
+  { cmd: ["chmod", "chown", "chgrp", "ln", "tee", "truncate", "dd", "shred"] },
+  { cmd: ["sudo", "su", "kill", "pkill", "killall", "reboot", "shutdown"] },
+  {
+    cmd: "git",
+    subcommands: [
       "add",
       "commit",
       "push",
@@ -86,72 +60,21 @@ const SUBCOMMAND_RULES = new Map<string, ReadonlySet<string>>([
       "tag",
       "init",
       "clone",
-    ]),
-  ],
-  ["systemctl", new Set(["start", "stop", "restart", "enable", "disable"])],
-]);
-
-export const DESTRUCTIVE_MATCH_LABELS = [
-  ...DIRECT_COMMANDS,
-  "redirect:>",
-  "redirect:>>",
-  "npm install",
-  "npm uninstall",
-  "npm update",
-  "npm ci",
-  "npm link",
-  "npm publish",
-  "yarn add",
-  "yarn remove",
-  "yarn install",
-  "yarn publish",
-  "bun add",
-  "bun remove",
-  "bun install",
-  "bun publish",
-  "pnpm add",
-  "pnpm remove",
-  "pnpm install",
-  "pnpm publish",
-  "pip install",
-  "pip uninstall",
-  "apt install",
-  "apt remove",
-  "apt purge",
-  "apt update",
-  "apt upgrade",
-  "apt-get install",
-  "apt-get remove",
-  "apt-get purge",
-  "apt-get update",
-  "apt-get upgrade",
-  "brew install",
-  "brew uninstall",
-  "brew upgrade",
-  "git add",
-  "git commit",
-  "git push",
-  "git pull",
-  "git merge",
-  "git rebase",
-  "git reset",
-  "git checkout",
-  "git branch -d",
-  "git stash",
-  "git cherry-pick",
-  "git revert",
-  "git tag",
-  "git init",
-  "git clone",
-  "systemctl start",
-  "systemctl stop",
-  "systemctl restart",
-  "systemctl enable",
-  "systemctl disable",
-  "service start",
-  "service stop",
-  "service restart",
-] as const;
+    ],
+  },
+  { cmd: "git", subcommands: "branch", flagAny: ["-d", "-D"] },
+  { cmd: "npm", subcommands: ["install", "uninstall", "update", "ci", "link", "publish"] },
+  { cmd: "yarn", subcommands: ["add", "remove", "install", "publish"] },
+  { cmd: "bun", subcommands: ["add", "remove", "install", "publish"] },
+  { cmd: "pnpm", subcommands: ["add", "remove", "install", "publish"] },
+  { cmd: "pip", subcommands: ["install", "uninstall"] },
+  { cmd: ["apt", "apt-get"], subcommands: ["install", "remove", "purge", "update", "upgrade"] },
+  { cmd: "brew", subcommands: ["install", "uninstall", "upgrade"] },
+  { cmd: "systemctl", subcommands: ["start", "stop", "restart", "enable", "disable"] },
+  { cmd: "service", subcommands: ["start", "stop", "restart"] },
+  { cmd: ["vim", "vi", "nano", "emacs", "code", "subl"] },
+  { redirects: "any-write" },
+];
 
 export const SAFE_PATTERNS = [
   /^\s*cat\b/,
@@ -209,7 +132,12 @@ export const SAFE_PATTERNS = [
 export interface BashGateMatch {
   label: string;
   source: "builtin" | "configured";
-  pattern?: RegExp;
+  rule: BashGateRule;
+  reason?: string;
+}
+
+interface BashRuleCommandMatch {
+  label: string;
 }
 
 /**
@@ -228,12 +156,25 @@ function compensateTimeout(input: Record<string, unknown>, gateStartMs: number):
   input.timeout = input.timeout + gateWaitSec;
 }
 
-function resolveConfiguredPatterns(config: SnacksConfig): RegExp[] {
-  return (config.bashGate?.patterns ?? []).map((p) => new RegExp(p));
-}
-
 function normalizeToken(value?: string): string | undefined {
   return value?.toLowerCase();
+}
+
+function asArray<T>(value?: OneOrMany<T>): T[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function resolveConfiguredRules(config: SnacksConfig): BashGateRule[] {
+  return config.bashGate?.rules ?? [];
+}
+
+function resolveEffectiveRules(config: BashGateConfig | SnacksConfig = {}): BashGateRule[] {
+  const configuredRules =
+    "bashGate" in config
+      ? resolveConfiguredRules(config)
+      : ((config as BashGateConfig).rules ?? []);
+  return [...DEFAULT_BASH_GATE_RULES, ...configuredRules];
 }
 
 function isDangerousRedirect(operator: string, target?: string): boolean {
@@ -242,40 +183,70 @@ function isDangerousRedirect(operator: string, target?: string): boolean {
   return target?.trim() !== "/dev/null";
 }
 
-function findBuiltInMatch(facts: BashFacts): BashGateMatch | undefined {
-  for (const redirect of facts.redirects) {
-    if (!isDangerousRedirect(redirect.operator, redirect.target)) continue;
-    if (redirect.operator.includes(">>")) {
-      return { label: "redirect:>>", source: "builtin" };
+function matchesRedirectRule(facts: BashFacts, redirectRule: BashGateRedirectRule): boolean {
+  return facts.redirects.some((redirect) => {
+    if (!isDangerousRedirect(redirect.operator, redirect.target)) return false;
+    if (redirectRule === "any-write") return true;
+    if (redirectRule === "append") return redirect.operator.includes(">>");
+    return redirect.operator.includes(">") && !redirect.operator.includes(">>");
+  });
+}
+
+function matchCommandRule(
+  command: BashSimpleCommand,
+  rule: BashGateRule,
+): BashRuleCommandMatch | undefined {
+  const name = normalizeToken(command.name);
+  const subcommand = normalizeToken(command.subcommand);
+  const cmdOptions = asArray(rule.cmd).map(normalizeToken).filter(Boolean);
+  const subcommandOptions = asArray(rule.subcommands).map(normalizeToken).filter(Boolean);
+  const flagOptions = asArray(rule.flagAny).map(normalizeToken).filter(Boolean);
+  const commandFlags = command.flags.map((flag) => normalizeToken(flag)).filter(Boolean);
+
+  if (cmdOptions.length > 0 && (!name || !cmdOptions.includes(name))) return undefined;
+
+  let matchedSubcommand: string | undefined;
+  if (subcommandOptions.length > 0) {
+    if (name === "service") {
+      const serviceAction = normalizeToken(command.argv.at(-1));
+      if (!serviceAction || !subcommandOptions.includes(serviceAction)) return undefined;
+      matchedSubcommand = serviceAction;
+    } else {
+      if (!subcommand || !subcommandOptions.includes(subcommand)) return undefined;
+      matchedSubcommand = subcommand;
     }
-    return { label: "redirect:>", source: "builtin" };
+  }
+
+  const matchedFlag =
+    flagOptions.length > 0 ? commandFlags.find((flag) => flagOptions.includes(flag)) : undefined;
+  if (flagOptions.length > 0 && !matchedFlag) return undefined;
+
+  if (name === "git" && matchedSubcommand === "branch" && matchedFlag) {
+    return { label: `git branch -d` };
+  }
+
+  if (matchedSubcommand) return { label: `${name} ${matchedSubcommand}` };
+  if (matchedFlag && name) return { label: `${name} ${matchedFlag}` };
+  if (name) return { label: name };
+  return undefined;
+}
+
+function matchRuleAgainstFacts(facts: BashFacts, rule: BashGateRule): string | undefined {
+  if (rule.redirects && !matchesRedirectRule(facts, rule.redirects)) return undefined;
+
+  const hasCommandConstraint =
+    rule.cmd !== undefined || rule.subcommands !== undefined || rule.flagAny !== undefined;
+  if (!hasCommandConstraint) {
+    if (!rule.redirects) return undefined;
+    const hasAppend = matchesRedirectRule(facts, "append");
+    if (rule.redirects === "append") return "redirect:>>";
+    if (rule.redirects === "truncate") return "redirect:>";
+    return hasAppend ? "redirect:>>" : "redirect:>";
   }
 
   for (const command of facts.commands) {
-    const name = normalizeToken(command.name);
-    const subcommand = normalizeToken(command.subcommand);
-    const thirdArg = normalizeToken(command.argv[2]);
-    if (!name) continue;
-
-    if (DIRECT_COMMANDS.has(name)) {
-      return { label: name, source: "builtin" };
-    }
-
-    const riskySubcommands = SUBCOMMAND_RULES.get(name);
-    if (riskySubcommands && subcommand && riskySubcommands.has(subcommand)) {
-      return { label: `${name} ${subcommand}`, source: "builtin" };
-    }
-
-    if (name === "git" && subcommand === "branch" && (thirdArg === "-d" || thirdArg === "-D")) {
-      return { label: "git branch -d", source: "builtin" };
-    }
-
-    if (name === "service") {
-      const action = normalizeToken(command.argv.at(-1));
-      if (action === "start" || action === "stop" || action === "restart") {
-        return { label: `service ${action}`, source: "builtin" };
-      }
-    }
+    const matched = matchCommandRule(command, rule);
+    if (matched) return matched.label;
   }
 
   return undefined;
@@ -283,23 +254,39 @@ function findBuiltInMatch(facts: BashFacts): BashGateMatch | undefined {
 
 export async function findMatchedPattern(
   command: string,
-  patternsOrConfig: RegExp[] | SnacksConfig = {},
+  rulesOrConfig: BashGateRule[] | BashGateConfig | SnacksConfig = {},
 ): Promise<BashGateMatch | undefined> {
   const facts = await extractBashFacts(command);
-  const builtIn = findBuiltInMatch(facts);
-  if (builtIn) return builtIn;
 
-  const patterns = Array.isArray(patternsOrConfig)
-    ? patternsOrConfig
-    : resolveConfiguredPatterns(patternsOrConfig);
-  const pattern = patterns.find((candidate) => candidate.test(command));
-  if (!pattern) return undefined;
+  const configuredRules = Array.isArray(rulesOrConfig)
+    ? rulesOrConfig
+    : "bashGate" in rulesOrConfig
+      ? resolveConfiguredRules(rulesOrConfig)
+      : ((rulesOrConfig as BashGateConfig).rules ?? []);
 
-  return {
-    label: pattern.source,
-    source: "configured",
-    pattern,
-  };
+  for (const rule of configuredRules) {
+    const label = matchRuleAgainstFacts(facts, rule);
+    if (!label) continue;
+    return {
+      label,
+      source: "configured",
+      rule,
+      reason: rule.reason,
+    };
+  }
+
+  for (const rule of DEFAULT_BASH_GATE_RULES) {
+    const label = matchRuleAgainstFacts(facts, rule);
+    if (!label) continue;
+    return {
+      label,
+      source: "builtin",
+      rule,
+      reason: rule.reason,
+    };
+  }
+
+  return undefined;
 }
 
 export default function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
@@ -309,10 +296,10 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     default: false,
   });
 
-  let patterns: RegExp[] = [];
+  let rules: BashGateRule[] = [];
 
   pi.on("session_start", (_event, _ctx) => {
-    patterns = resolveConfiguredPatterns(configRef.current);
+    rules = resolveEffectiveRules(configRef.current);
   });
 
   const sessionAllowed = new Set<string>();
@@ -322,7 +309,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     const command = event.input.command as string;
 
-    const matchedPattern = await findMatchedPattern(command, patterns);
+    const matchedPattern = await findMatchedPattern(command, rules);
     if (!matchedPattern) return undefined;
 
     // --yolo flag: skip all gates.
@@ -349,7 +336,10 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
 
-    const choice = await ctx.ui.select(`🔒 Bash gate — command requires approval`, [
+    const prompt = matchedPattern.reason
+      ? `🔒 Bash gate — ${matchedPattern.reason}`
+      : `🔒 Bash gate — command requires approval (${matchedPattern.label})`;
+    const choice = await ctx.ui.select(prompt, [
       "Allow",
       `Allow for session ("${matchedPattern.label}")`,
       "Deny",

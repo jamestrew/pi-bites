@@ -16,17 +16,17 @@
  *     "command": "python get_usage_limits.py"
  *   },
  *   "bashGate": {
- *     "patterns": [
- *       "\\bbun\\s+test\\b",
- *       "\\bnpm\\s+test\\b",
- *       "\\bpytest\\b"
+ *     "rules": [
+ *       { "cmd": "bun", "subcommands": ["test"] },
+ *       { "cmd": "npm", "subcommands": ["test"] },
+ *       { "cmd": "pytest" }
  *     ]
  *   }
  * }
  * ```
  *
  * Each top-level section is optional — omitted sections fall back to built-in defaults.
- * For bashGate.patterns, providing an array adds extra gated patterns on top of the
+ * For bashGate.rules, providing an array adds extra gated rules on top of the
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
@@ -70,13 +70,29 @@ export interface NotificationsConfig {
   command?: string;
 }
 
+export type OneOrMany<T> = T | T[];
+
+export type BashGateRedirectRule = "any-write" | "append" | "truncate";
+
+export interface BashGateRule {
+  /** Command name to match, e.g. "git" or ["rm", "mv"]. */
+  cmd?: OneOrMany<string>;
+  /** Subcommand to match, e.g. "push" for `git push`. */
+  subcommands?: OneOrMany<string>;
+  /** Match when any listed flag is present on the matched command. */
+  flagAny?: OneOrMany<string>;
+  /** Match write redirects anywhere in the parsed command. */
+  redirects?: BashGateRedirectRule;
+  /** Optional explanation surfaced in the UI when this rule matches. */
+  reason?: string;
+}
+
 export interface BashGateConfig {
   /**
-   * Array of regex pattern strings tested against the full bash command.
-   * Adds extra gated patterns on top of the built-in destructive-command list.
-   * Each string is passed to `new RegExp(pattern)`.
+   * Structured rules matched against parsed bash command facts.
+   * Adds extra gated rules on top of the built-in destructive-command list.
    */
-  patterns?: string[];
+  rules?: BashGateRule[];
 }
 
 /** Known extension names that can be disabled. */
