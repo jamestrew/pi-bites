@@ -35,6 +35,14 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
     pathIndex.clear();
   });
 
+  pi.on("agent_end", async (_event, ctx) => {
+    try {
+      await pathIndex.refresh(ctx.cwd);
+    } catch (error) {
+      console.warn("File path cache refresh failed", error);
+    }
+  });
+
   pi.on("session_start", async (_event, ctx) => {
     const cwd = ctx.cwd;
 
