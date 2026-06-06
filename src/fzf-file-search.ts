@@ -1,15 +1,9 @@
 /**
- * FFF-backed `@` file search
+ * fd-powered `@` file search
  *
- * Replaces the built-in `@` file autocomplete with FFF (Fast File Finder) —
- * a Rust-native, SIMD-accelerated file finder with frecency ranking.
- *
- * ## How it differs from the old fzf-based implementation
- *
- * The previous version ran `fd` per keystroke and scored results in JS.
- * This version uses FFF's native `mixedSearch`, which is pre-indexed,
- * frecency-ranked (files you access often rank higher), and git-aware —
- * no subprocess spawn per query.
+ * Replaces the built-in `@` file autocomplete with a lightweight per-session
+ * path cache. The cache is process-local and loaded on the first `@` request
+ * with `fd` instead of maintaining native or persistent finder state.
  *
  * ## Features preserved from the built-in
  *
@@ -20,13 +14,13 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
-import { FileFinder } from "@ff-labs/fff-node";
-import type { MixedItem } from "@ff-labs/fff-node";
+import { PathIndex } from "./file-search/path-index.js";
+import { searchPaths } from "./file-search/path-matcher.js";
 
 const MENTION_MAX_RESULTS = 20;
 
 function extractAtPrefix(textBeforeCursor: string): string | null {
-  const match = textBeforeCursor.match(/(?:^|[ \t])(@(?:"[^"]*|[^\s]*))$/);
+  const match = textBeforeCursor.match(/(?:^|[ \t])(@[^\s]*)$/);
   return match?.[1] ?? null;
 }
 
@@ -35,61 +29,14 @@ function buildAtCompletionValue(path: string): string {
 }
 
 export default function registerFzfFileSearch(pi: ExtensionAPI) {
-  let finder: FileFinder | null = null;
-  let finderCwd: string | null = null;
-  let finderPromise: Promise<FileFinder> | null = null;
-
-  function resetFinder() {
-    if (finder && !finder.isDestroyed) {
-      try {
-        finder.destroy();
-      } catch (error) {
-        console.warn("FFF destroy failed", error);
-      }
-    }
-    finder = null;
-    finderCwd = null;
-  }
+  const pathIndex = new PathIndex();
 
   pi.on("session_shutdown", async () => {
-    resetFinder();
+    pathIndex.clear();
   });
-
-  function ensureFinder(cwd: string): Promise<FileFinder> {
-    if (finder && !finder.isDestroyed && finderCwd === cwd) return Promise.resolve(finder);
-    if (finderPromise) return finderPromise;
-
-    finderPromise = (async () => {
-      resetFinder();
-
-      const result = FileFinder.create({ basePath: cwd, aiMode: true });
-      if (!result.ok) throw new Error(`FFF init failed: ${result.error}`);
-
-      finder = result.value;
-      finderCwd = cwd;
-      await finder.waitForScan(15000);
-      return finder;
-    })()
-      .catch((error) => {
-        resetFinder();
-        throw error;
-      })
-      .finally(() => {
-        finderPromise = null;
-      });
-
-    return finderPromise;
-  }
 
   pi.on("session_start", async (_event, ctx) => {
     const cwd = ctx.cwd;
-
-    // Warm up the finder eagerly so the first `@` keystroke is instant
-    try {
-      await ensureFinder(cwd);
-    } catch {
-      // Non-fatal — finder will be retried on first query
-    }
 
     ctx.ui.addAutocompleteProvider((current) => ({
       async getSuggestions(lines, cursorLine, cursorCol, options) {
@@ -97,54 +44,34 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
         const before = line.slice(0, cursorCol);
         const atPrefix = extractAtPrefix(before);
 
-        // Not an @ token — delegate to the built-in provider
+        // Not an @ token — delegate to the built-in provider.
         if (!atPrefix) return current.getSuggestions(lines, cursorLine, cursorCol, options);
 
         if (options.signal.aborted) return null;
 
-        const query = atPrefix.startsWith('@"') ? atPrefix.slice(2) : atPrefix.slice(1);
+        const query = atPrefix.slice(1);
 
-        let f: FileFinder;
+        let paths: string[];
         try {
-          f = await ensureFinder(cwd);
-        } catch {
-          // FFF unavailable — fall back to built-in
+          paths = await pathIndex.getPaths(cwd, options.signal);
+        } catch (error) {
+          if (options.signal.aborted) return null;
+          console.warn("File path cache load failed; falling back to built-in provider", error);
           return current.getSuggestions(lines, cursorLine, cursorCol, options);
         }
 
         if (options.signal.aborted) return null;
 
-        let searchResult;
-        try {
-          searchResult = f.mixedSearch(query, { pageSize: MENTION_MAX_RESULTS });
-        } catch (error) {
-          console.warn("FFF search crashed; falling back to built-in provider", error);
-          resetFinder();
-          return current.getSuggestions(lines, cursorLine, cursorCol, options);
-        }
-
-        if (!searchResult.ok) {
-          console.warn("FFF search failed; falling back to built-in provider", searchResult.error);
-          resetFinder();
-          return current.getSuggestions(lines, cursorLine, cursorCol, options);
-        }
-
-        const items: AutocompleteItem[] = searchResult.value.items
-          .slice(0, MENTION_MAX_RESULTS)
-          .map((mixed: MixedItem) => {
-            if (mixed.type === "directory") {
-              return {
-                value: buildAtCompletionValue(mixed.item.relativePath),
-                label: mixed.item.dirName,
-                description: mixed.item.relativePath,
-              };
-            }
-            return {
-              value: buildAtCompletionValue(mixed.item.relativePath),
-              label: mixed.item.fileName,
-              description: mixed.item.relativePath,
-            };
-          });
+        const items: AutocompleteItem[] = searchPaths(query, paths, {
+          limit: MENTION_MAX_RESULTS,
+        }).map((result) => {
+          const pathParts = result.path.split("/");
+          return {
+            value: buildAtCompletionValue(result.path),
+            label: pathParts.at(-1) ?? result.path,
+            description: result.path,
+          };
+        });
 
         if (items.length === 0) return null;
         return { prefix: atPrefix, items };

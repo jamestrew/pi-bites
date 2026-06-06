@@ -8,7 +8,7 @@ A small collection of personal extensions for the pi coding agent.
 - Less noisy `read` tool output
 - Tweaked `read` tool description/output to keep file reads less noisy
 - Configurable bash command gate
-- Better fuzzy finding for `@` file mentions powered by `@ff-labs/fff-node`
+- Better fuzzy finding for `@` file mentions powered by `fd` and Snacks/fzf-inspired scoring
 - Script-driven statusline
 - Token-count/status helpers
 - Custom todo and question tools
