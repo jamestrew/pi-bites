@@ -66,13 +66,19 @@ export async function listProjectPaths(cwd: string, signal?: AbortSignal): Promi
         return;
       }
 
-      const paths = Buffer.concat(stdoutChunks)
-        .toString("utf8")
-        .split("\n")
-        .map((path) => normalizeFdPath(path.trimEnd()))
-        .filter((path) => path.length > 0);
+      const pathSet = new Set<string>();
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      let lineStart = 0;
 
-      finish(() => resolve([...new Set(paths)].sort()));
+      for (let index = 0; index <= stdout.length; index++) {
+        if (index !== stdout.length && stdout[index] !== "\n") continue;
+
+        const path = normalizeFdPath(stdout.slice(lineStart, index).trimEnd());
+        if (path.length > 0) pathSet.add(path);
+        lineStart = index + 1;
+      }
+
+      finish(() => resolve([...pathSet].sort()));
     });
   });
 }

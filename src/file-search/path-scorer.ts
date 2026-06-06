@@ -121,15 +121,15 @@ class AlignmentScorer {
 function scoreAlignment(
   originalCandidate: string,
   searchableCandidate: string,
-  queryChars: string[],
+  query: string,
   start: number,
 ): ScoreResult | null {
   const scorer = new AlignmentScorer(originalCandidate);
   scorer.init(start);
 
   let last = start;
-  for (let i = 1; i < queryChars.length; i += 1) {
-    const next = searchableCandidate.indexOf(queryChars[i] ?? "", last + 1);
+  for (let i = 1; i < query.length; i += 1) {
+    const next = searchableCandidate.indexOf(query[i] ?? "", last + 1);
     if (next === -1) return null;
     scorer.update(next);
     last = next;
@@ -138,21 +138,24 @@ function scoreAlignment(
   return scorer.result;
 }
 
-export function scorePath(query: string, candidatePath: string): ScoreResult | null {
+export function scorePath(
+  query: string,
+  candidatePath: string,
+  lowerCandidatePath = candidatePath.toLowerCase(),
+): ScoreResult | null {
   if (query === "") return { score: 0, positions: [] };
 
   const ignoreCase = isCaseInsensitive(query);
-  const normalizedQuery = ignoreCase ? query.toLowerCase() : query;
-  const normalizedCandidate = ignoreCase ? candidatePath.toLowerCase() : candidatePath;
-  const queryChars = normalizedQuery.split("");
+  const searchableQuery = ignoreCase ? query.toLowerCase() : query;
+  const searchableCandidate = ignoreCase ? lowerCandidatePath : candidatePath;
   let best: ScoreResult | null = null;
 
   for (
-    let start = normalizedCandidate.indexOf(queryChars[0] ?? "");
+    let start = searchableCandidate.indexOf(searchableQuery[0] ?? "");
     start !== -1;
-    start = normalizedCandidate.indexOf(queryChars[0] ?? "", start + 1)
+    start = searchableCandidate.indexOf(searchableQuery[0] ?? "", start + 1)
   ) {
-    const result = scoreAlignment(candidatePath, normalizedCandidate, queryChars, start);
+    const result = scoreAlignment(candidatePath, searchableCandidate, searchableQuery, start);
     if (result && (!best || result.score > best.score)) best = result;
   }
 
