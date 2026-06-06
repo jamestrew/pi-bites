@@ -10,6 +10,11 @@ export interface PathSearchResult {
   score: number;
 }
 
+export interface PathSearchOptions {
+  limit?: number;
+  boost?: (path: string) => number;
+}
+
 const DEFAULT_LIMIT = 20;
 const EMPTY_QUERY_SCORE = 1000;
 
@@ -45,28 +50,32 @@ function insertTopResult(
 export function searchPaths(
   query: string,
   items: PathSearchItem[] | string[],
-  options: { limit?: number } = {},
+  options: PathSearchOptions = {},
 ): PathSearchResult[] {
   const limit = options.limit ?? DEFAULT_LIMIT;
   if (limit <= 0) return [];
 
   if (query === "") {
-    const results: PathSearchResult[] = [];
-    const resultCount = Math.min(limit, items.length);
+    const results: Array<PathSearchResult & { index: number }> = [];
 
-    for (let index = 0; index < resultCount; index++) {
+    for (let index = 0; index < items.length; index++) {
       const item = normalizeItem(items[index]);
-      results.push({ path: item.path, score: EMPTY_QUERY_SCORE });
+      insertTopResult(
+        results,
+        { path: item.path, score: EMPTY_QUERY_SCORE + (options.boost?.(item.path) ?? 0), index },
+        limit,
+      );
     }
 
-    return results;
+    return results.map(({ path, score }) => ({ path, score }));
   }
 
   const results: Array<PathSearchResult & { index: number }> = [];
 
   for (let index = 0; index < items.length; index++) {
     const item = normalizeItem(items[index]);
-    const score = scorePath(query, item.path, item.lowerPath)?.score ?? 0;
+    const matchScore = scorePath(query, item.path, item.lowerPath)?.score ?? 0;
+    const score = matchScore > 0 ? matchScore + (options.boost?.(item.path) ?? 0) : 0;
 
     if (score > 0) {
       insertTopResult(results, { path: item.path, score, index }, limit);

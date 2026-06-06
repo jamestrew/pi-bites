@@ -12,12 +12,15 @@
  * - Falls back to the built-in provider for non-`@` tokens.
  */
 
+import { isAbsolute, relative } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import { FileFrecency } from "./file-search/frecency.js";
 import { PathIndex } from "./file-search/path-index.js";
 import { searchPaths } from "./file-search/path-matcher.js";
 
 const MENTION_MAX_RESULTS = 20;
+const FRECENCY_BOOST = 100;
 
 function extractAtPrefix(textBeforeCursor: string): string | null {
   const match = textBeforeCursor.match(/(?:^|[ \t])(@[^\s]*)$/);
@@ -28,23 +31,56 @@ function buildAtCompletionValue(path: string): string {
   return path.includes(" ") ? `@"${path}"` : `@${path}`;
 }
 
+function toCwdRelativePath(cwd: string, path: string): string | null {
+  const relativePath = isAbsolute(path) ? relative(cwd, path) : path;
+  if (relativePath === "" || relativePath.startsWith("..") || isAbsolute(relativePath)) return null;
+  return relativePath;
+}
+
 export default function registerFzfFileSearch(pi: ExtensionAPI) {
   const pathIndex = new PathIndex();
+  const frecency = new FileFrecency();
 
   pi.on("session_shutdown", async () => {
     pathIndex.clear();
+    await frecency.save();
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
-    try {
-      await pathIndex.refresh(ctx.cwd);
-    } catch (error) {
-      console.warn("File path cache refresh failed", error);
-    }
+  pi.on("agent_end", (_event, ctx) => {
+    void (async () => {
+      try {
+        await frecency.load(ctx.cwd);
+        const paths = await pathIndex.refresh(ctx.cwd);
+        if (frecency.pruneMissing(paths) > 0) await frecency.save();
+      } catch (error) {
+        console.warn("File path cache refresh failed", error);
+      }
+    })();
+  });
+
+  pi.on("tool_result", (event, ctx) => {
+    if (event.isError || (event.toolName !== "write" && event.toolName !== "edit")) return;
+
+    const path = event.input.path;
+    if (typeof path !== "string") return;
+
+    const relativePath = toCwdRelativePath(ctx.cwd, path);
+    if (!relativePath) return;
+
+    void (async () => {
+      try {
+        await frecency.load(ctx.cwd);
+        frecency.visit(relativePath);
+        await frecency.save();
+      } catch (error) {
+        console.warn("File frecency visit failed", error);
+      }
+    })();
   });
 
   pi.on("session_start", async (_event, ctx) => {
     const cwd = ctx.cwd;
+    await frecency.load(cwd);
 
     ctx.ui.addAutocompleteProvider((current) => ({
       async getSuggestions(lines, cursorLine, cursorCol, options) {
@@ -72,6 +108,7 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
 
         const items: AutocompleteItem[] = searchPaths(query, paths, {
           limit: MENTION_MAX_RESULTS,
+          boost: (path) => Math.log1p(frecency.score(path)) * FRECENCY_BOOST,
         }).map((result) => {
           const pathParts = result.path.split("/");
           return {
@@ -86,6 +123,11 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
       },
 
       applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+        if (prefix.startsWith("@") && item.description) {
+          frecency.visit(item.description);
+          void frecency.save();
+        }
+
         return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
       },
 

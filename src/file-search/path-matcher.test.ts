@@ -9,6 +9,15 @@ describe("searchPaths", () => {
     ]);
   });
 
+  test("empty query can be ranked by boost", () => {
+    expect(
+      searchPaths("", ["b.ts", "a.ts", "c.ts"], {
+        limit: 2,
+        boost: (path) => (path === "c.ts" ? 10 : 0),
+      }).map((result) => result.path),
+    ).toEqual(["c.ts", "b.ts"]);
+  });
+
   test("default limit is 20", () => {
     const items = Array.from({ length: 25 }, (_, index) => `file-${index}.ts`);
 
@@ -29,6 +38,14 @@ describe("searchPaths", () => {
     const results = searchPaths("file", ["src/f-i-l-e.ts", "src/file.ts"]);
 
     expect(results.map((result) => result.path)).toEqual(["src/file.ts", "src/f-i-l-e.ts"]);
+  });
+
+  test("matching query can be ranked by boost", () => {
+    expect(
+      searchPaths("file", ["src/file.ts", "src/other-file.ts"], {
+        boost: (path) => (path === "src/other-file.ts" ? 1000 : 0),
+      }).map((result) => result.path),
+    ).toEqual(["src/other-file.ts", "src/file.ts"]);
   });
 
   test("filename match outranks directory-only match", () => {
