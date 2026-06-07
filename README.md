@@ -8,6 +8,7 @@ A small collection of personal extensions for the pi coding agent.
 - Less noisy `read` tool output
 - Tweaked `read` tool description/output to keep file reads less noisy
 - Configurable bash command gate
+- RTK command rewriting for assistant `bash` tool calls and user `!` shell commands
 - Better fuzzy finding for `@` file mentions powered by `fd` and Snacks/fzf-inspired scoring
 - Script-driven statusline
 - Token-count/status helpers
@@ -63,7 +64,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, statusline, tokenCount, tools, explore, fzf, todo, question, notifications
+bashGate, rtk, statusline, tokenCount, tools, explore, fzf, todo, question, notifications
 ```
 
 You can also edit config directly:

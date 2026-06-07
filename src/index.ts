@@ -1,4 +1,5 @@
 import registerBashGate from "./bash-gate.js";
+import registerRtk from "./rtk.js";
 import registerStatusline from "./statusline.js";
 import registerTokenCount from "./token-count.js";
 import registerCustomTools from "./tools.js";
@@ -26,6 +27,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   if (!disabled.has("bashGate")) registerBashGate(pi, configRef);
+  if (!disabled.has("rtk")) registerRtk(pi);
 
   if (isExploreSubagent) return;
 

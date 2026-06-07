@@ -10,7 +10,6 @@ import type { SnacksConfig } from "./config.js";
 
 const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
 const DEFAULT_TOOLS = "read,ls,bash";
-const RTK_OPTIMIZER_EXTENSION = "npm:pi-rtk-optimizer";
 const SELF_EXTENSION = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   `index${path.extname(fileURLToPath(import.meta.url))}`,
@@ -302,8 +301,6 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
           "--no-session",
           "-e",
           SELF_EXTENSION,
-          "-e",
-          RTK_OPTIMIZER_EXTENSION,
           "--no-prompt-templates",
           "--no-themes",
           "--tools",
