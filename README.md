@@ -14,6 +14,7 @@ A small collection of personal extensions for the pi coding agent.
 - Token-count/status helpers
 - Custom todo and question tools
 - Optional notifications
+- `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
 
 ## Installation
 
@@ -64,7 +65,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, tools, explore, fzf, todo, question, notifications
+bashGate, rtk, statusline, tokenCount, tools, explore, fzf, todo, question, notifications, spotme
 ```
 
 You can also edit config directly:
@@ -74,6 +75,23 @@ You can also edit config directly:
   "disable": ["bashGate", "notifications"]
 }
 ```
+
+## SpotMe
+
+SpotMe is a coding gym mode: every N code-writing actions, the agent scaffolds the next logical unit with a `SPOTME` marker, waits while you implement it, then reviews your work.
+
+```text
+/spotme:on [lite|medium|hard] [--every N]
+/spotme:status
+/spotme:rep
+/spotme:done
+/spotme:hint
+/spotme:solve
+/spotme:skip
+/spotme:off
+```
+
+Default difficulty is `medium`, every 2 code writes.
 
 ## Bash gate
 
