@@ -231,31 +231,49 @@ function matchCommandRule(
   return undefined;
 }
 
-function matchRuleAgainstFacts(facts: BashFacts, rule: BashGateRule): string | undefined {
-  if (rule.redirects && !matchesRedirectRule(facts, rule.redirects)) return undefined;
+function matchRuleAgainstFacts(facts: BashFacts, rule: BashGateRule): string[] {
+  if (rule.redirects && !matchesRedirectRule(facts, rule.redirects)) return [];
 
   const hasCommandConstraint =
     rule.cmd !== undefined || rule.subcommands !== undefined || rule.flagAny !== undefined;
   if (!hasCommandConstraint) {
-    if (!rule.redirects) return undefined;
+    if (!rule.redirects) return [];
     const hasAppend = matchesRedirectRule(facts, "append");
-    if (rule.redirects === "append") return "redirect:>>";
-    if (rule.redirects === "truncate") return "redirect:>";
-    return hasAppend ? "redirect:>>" : "redirect:>";
+    if (rule.redirects === "append") return ["redirect:>>"];
+    if (rule.redirects === "truncate") return ["redirect:>"];
+    return [hasAppend ? "redirect:>>" : "redirect:>"];
   }
 
+  const labels: string[] = [];
   for (const command of facts.commands) {
     const matched = matchCommandRule(command, rule);
-    if (matched) return matched.label;
+    if (matched) labels.push(matched.label);
   }
 
-  return undefined;
+  return [...new Set(labels)];
 }
 
-export async function findMatchedPattern(
+function pushMatches(
+  matches: BashGateMatch[],
+  labels: string[],
+  source: BashGateMatch["source"],
+  rule: BashGateRule,
+): void {
+  for (const label of labels) {
+    if (matches.some((match) => match.label === label && match.source === source)) continue;
+    matches.push({
+      label,
+      source,
+      rule,
+      reason: rule.reason,
+    });
+  }
+}
+
+export async function findMatchedPatterns(
   command: string,
   rulesOrConfig: BashGateRule[] | BashGateConfig | SnacksConfig = {},
-): Promise<BashGateMatch | undefined> {
+): Promise<BashGateMatch[]> {
   const facts = await extractBashFacts(command);
 
   const configuredRules = Array.isArray(rulesOrConfig)
@@ -263,30 +281,26 @@ export async function findMatchedPattern(
     : "bashGate" in rulesOrConfig
       ? resolveConfiguredRules(rulesOrConfig)
       : ((rulesOrConfig as BashGateConfig).rules ?? []);
+  const builtinRules = Array.isArray(rulesOrConfig) ? [] : DEFAULT_BASH_GATE_RULES;
+
+  const matches: BashGateMatch[] = [];
 
   for (const rule of configuredRules) {
-    const label = matchRuleAgainstFacts(facts, rule);
-    if (!label) continue;
-    return {
-      label,
-      source: "configured",
-      rule,
-      reason: rule.reason,
-    };
+    pushMatches(matches, matchRuleAgainstFacts(facts, rule), "configured", rule);
   }
 
-  for (const rule of DEFAULT_BASH_GATE_RULES) {
-    const label = matchRuleAgainstFacts(facts, rule);
-    if (!label) continue;
-    return {
-      label,
-      source: "builtin",
-      rule,
-      reason: rule.reason,
-    };
+  for (const rule of builtinRules) {
+    pushMatches(matches, matchRuleAgainstFacts(facts, rule), "builtin", rule);
   }
 
-  return undefined;
+  return matches;
+}
+
+export async function findMatchedPattern(
+  command: string,
+  rulesOrConfig: BashGateRule[] | BashGateConfig | SnacksConfig = {},
+): Promise<BashGateMatch | undefined> {
+  return (await findMatchedPatterns(command, rulesOrConfig))[0];
 }
 
 export default function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
@@ -309,14 +323,17 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     const command = event.input.command as string;
 
-    const matchedPattern = await findMatchedPattern(command, rules);
-    if (!matchedPattern) return undefined;
+    const matchedPatterns = await findMatchedPatterns(command, rules);
+    if (matchedPatterns.length === 0) return undefined;
+
+    const matchedPatternLabels = matchedPatterns.map((match) => match.label);
+    const sessionAllowKey = matchedPatternLabels.join(" && ");
 
     // --yolo flag: skip all gates.
     if (pi.getFlag("yolo")) return undefined;
 
     // Pattern was already approved for this session — run silently.
-    if (sessionAllowed.has(matchedPattern.label)) return undefined;
+    if (sessionAllowed.has(sessionAllowKey)) return undefined;
 
     if (!ctx.hasUI) {
       // Non-interactive mode (e.g. `pi -p`) — block by default.
@@ -336,17 +353,19 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
     pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
 
-    const prompt = matchedPattern.reason
-      ? `🔒 Bash gate — ${matchedPattern.reason}`
-      : `🔒 Bash gate — command requires approval (${matchedPattern.label})`;
+    const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
+    const prompt =
+      reasons.length > 0
+        ? `🔒 Bash gate — ${reasons.join("; ")} (${matchedPatternLabels.join(", ")})`
+        : `🔒 Bash gate — command requires approval (${matchedPatternLabels.join(", ")})`;
     const choice = await ctx.ui.select(prompt, [
       "Allow",
-      `Allow for session ("${matchedPattern.label}")`,
+      `Allow for session ("${sessionAllowKey}")`,
       "Deny",
     ]);
 
     if (choice?.startsWith("Allow for session")) {
-      sessionAllowed.add(matchedPattern.label);
+      sessionAllowed.add(sessionAllowKey);
       compensateTimeout(event.input, gateStartMs);
       return undefined; // proceed
     }

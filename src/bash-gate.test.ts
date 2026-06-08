@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { extractBashFacts } from "./bash-command-facts.js";
-import { findMatchedPattern } from "./bash-gate.js";
+import { findMatchedPattern, findMatchedPatterns } from "./bash-gate.js";
 
 describe("extractBashFacts", () => {
   test("extracts commands, redirects, path-ish args, pipe presence, and flags", async () => {
@@ -46,6 +46,18 @@ describe("findMatchedPattern", () => {
 
     expect(matched).toBeDefined();
     expect(matched?.label).toBe(label);
+  });
+
+  test("matches every gated command in a compound command", async () => {
+    const matches = await findMatchedPatterns("mkdir foo && rm bar");
+
+    expect(matches.map((match) => match.label)).toEqual(["mkdir", "rm"]);
+  });
+
+  test("matches every gated command separated by semicolons", async () => {
+    const matches = await findMatchedPatterns("touch a; rm b");
+
+    expect(matches.map((match) => match.label)).toEqual(["touch", "rm"]);
   });
 
   test("supports configured command-only rules", async () => {
