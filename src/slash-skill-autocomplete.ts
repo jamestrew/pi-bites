@@ -173,8 +173,37 @@ function patchSkillExpansion() {
   };
 }
 
-export default function registerSlashSkillAutocomplete(_pi: ExtensionAPI) {
+function hasExpandedSkillBlock(prompt: string): boolean {
+  return /<skill\s+[^>]*location="[^"]+SKILL\.md"[^>]*>[\s\S]*?<\/skill>/.test(prompt);
+}
+
+function patchLoadedSkillPrompt(systemPrompt: string): string {
+  const readInstruction =
+    "Use the read tool to load a skill's file when the task matches its description.";
+  const loadedInstruction =
+    "Use the read tool to load a skill's file when the task matches its description, unless the user prompt already includes that skill's full <skill> block. Treat included <skill> blocks as already loaded; only read referenced files when needed.";
+
+  if (systemPrompt.includes(loadedInstruction)) return systemPrompt;
+  if (systemPrompt.includes(readInstruction)) {
+    return systemPrompt.replace(readInstruction, loadedInstruction);
+  }
+
+  return `${systemPrompt}\n\nSkill invocation note: when the user prompt includes a full <skill> block, treat that skill as already loaded; do not read its SKILL.md again unless you need to inspect referenced files.`;
+}
+
+function registerLoadedSkillPromptPatch(pi: ExtensionAPI) {
+  pi.on("before_agent_start", async (event) => {
+    if (!hasExpandedSkillBlock(event.prompt)) return;
+
+    return {
+      systemPrompt: patchLoadedSkillPrompt(event.systemPrompt),
+    };
+  });
+}
+
+export default function registerSlashSkillAutocomplete(pi: ExtensionAPI) {
   patchEditor();
   patchAutocompleteProvider();
   patchSkillExpansion();
+  registerLoadedSkillPromptPatch(pi);
 }
