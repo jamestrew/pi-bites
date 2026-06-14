@@ -15,6 +15,7 @@ A small collection of personal extensions for the pi coding agent.
 - Custom todo and question tools
 - Optional notifications
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
+- Inline `/skill:` autocomplete with hidden skill-context injection
 
 ## Installation
 

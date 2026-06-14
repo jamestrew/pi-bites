@@ -37,7 +37,27 @@ type EditorLike = {
   forceFileAutocomplete(explicitTab?: boolean): void;
 };
 
-const PATCHED = Symbol.for("pi-bites.slash-skill-autocomplete.patched");
+// Why prototype patches instead of ctx.ui.addAutocompleteProvider?
+//
+// pi's public autocomplete hook can layer suggestions on top of the built-in provider,
+// but the editor decides when slash completion is active before/around that provider.
+// In current pi, slash completion is hardcoded to the first line and to text that
+// starts with `/`; inline text like `use /skill:handoff` is treated as normal text
+// or file completion. The editor methods that control this (`isSlashMenuAllowed`,
+// `isInSlashCommandContext`, `handleTabCompletion`, etc.) are private internals,
+// not extension hooks.
+//
+// Skill expansion is also private (`AgentSession._expandSkillCommand`). To hide
+// pi's normal visible `/skill:` expansion and inject hidden skill-context instead,
+// this extension has to patch that private method too.
+//
+// These patches are intentionally narrow and guarded with Symbol flags so reloads
+// do not stack wrappers, but they are still monkey patches over pi internals.
+const EDITOR_PATCHED = Symbol.for("pi-bites.slash-skill-autocomplete.editor-patched");
+const PROVIDER_PATCHED = Symbol.for("pi-bites.slash-skill-autocomplete.provider-patched");
+const SKILL_EXPANSION_PATCHED = Symbol.for(
+  "pi-bites.slash-skill-autocomplete.skill-expansion-hidden-v1",
+);
 
 function commandName(command: CommandLike): string {
   return command.name ?? command.value ?? "";
@@ -70,8 +90,8 @@ function skillSuggestions(commands: CommandLike[], slashPrefix: string): Suggest
 
 function patchEditor() {
   const proto = Editor.prototype as unknown as EditorLike & Record<PropertyKey, unknown>;
-  if (proto[PATCHED]) return;
-  proto[PATCHED] = true;
+  if (proto[EDITOR_PATCHED]) return;
+  proto[EDITOR_PATCHED] = true;
 
   proto.isSlashMenuAllowed = () => true;
   proto.isAtStartOfMessage = function () {
@@ -97,8 +117,8 @@ function patchEditor() {
 function patchAutocompleteProvider() {
   const proto = CombinedAutocompleteProvider.prototype as unknown as ProviderLike &
     Record<PropertyKey, unknown>;
-  if (proto[PATCHED]) return;
-  proto[PATCHED] = true;
+  if (proto[PROVIDER_PATCHED]) return;
+  proto[PROVIDER_PATCHED] = true;
 
   const originalGetSuggestions = proto.getSuggestions;
   proto.getSuggestions = async function (lines, cursorLine, cursorCol, options) {
@@ -134,68 +154,67 @@ function patchAutocompleteProvider() {
 
 function patchSkillExpansion() {
   const proto = AgentSession.prototype as unknown as Record<PropertyKey, unknown>;
-  if (proto[PATCHED]) return;
-  proto[PATCHED] = true;
+  if (proto[SKILL_EXPANSION_PATCHED]) return;
+  proto[SKILL_EXPANSION_PATCHED] = true;
 
-  const originalExpand = proto._expandSkillCommand as (this: AgentSession, text: string) => string;
-  proto._expandSkillCommand = function (this: AgentSession, text: string) {
-    if (text.startsWith("/skill:")) return originalExpand.call(this, text);
-    if (!/(^|\s)\/skill:[^\s]+/.test(text)) return text;
-
-    const session = this as unknown as {
-      resourceLoader: {
-        getSkills(): { skills: { name: string; filePath: string; baseDir: string }[] };
-      };
-      _extensionRunner: {
-        emitError(error: { extensionPath: string; event: string; error: string }): void;
-      };
-    };
-
-    return text.replace(/(^|\s)\/skill:([^\s]+)/g, (match, leading: string, skillName: string) => {
-      const skill = session.resourceLoader
-        .getSkills()
-        .skills.find((candidate) => candidate.name === skillName);
-      if (!skill) return match;
-
-      try {
-        const content = readFileSync(skill.filePath, "utf-8");
-        const body = stripFrontmatter(content).trim();
-        return `${leading}<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
-      } catch (error) {
-        session._extensionRunner.emitError({
-          extensionPath: skill.filePath,
-          event: "skill_expansion",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return match;
-      }
-    });
-  };
+  proto._expandSkillCommand = (text: string) => text;
 }
 
-function hasExpandedSkillBlock(prompt: string): boolean {
-  return /<skill\s+[^>]*location="[^"]+SKILL\.md"[^>]*>[\s\S]*?<\/skill>/.test(prompt);
+function skillNamesInPrompt(prompt: string): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  for (const match of prompt.matchAll(/(^|\s)\/skill:([^\s]+)/g)) {
+    const name = match[2];
+    if (seen.has(name)) continue;
+    seen.add(name);
+    names.push(name);
+  }
+
+  return names;
+}
+
+function formatSkillBlock(skill: { name: string; filePath: string; baseDir: string }): string {
+  const content = readFileSync(skill.filePath, "utf-8");
+  const body = stripFrontmatter(content).trim();
+  return `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
 }
 
 function patchLoadedSkillPrompt(systemPrompt: string): string {
   const readInstruction =
     "Use the read tool to load a skill's file when the task matches its description.";
   const loadedInstruction =
-    "Use the read tool to load a skill's file when the task matches its description, unless the user prompt already includes that skill's full <skill> block. Treat included <skill> blocks as already loaded; only read referenced files when needed.";
+    "Use the read tool to load a skill's file when the task matches its description, unless hidden skill-context has already provided that skill. Treat provided skill-context as already loaded; only read referenced files when needed.";
 
   if (systemPrompt.includes(loadedInstruction)) return systemPrompt;
   if (systemPrompt.includes(readInstruction)) {
     return systemPrompt.replace(readInstruction, loadedInstruction);
   }
 
-  return `${systemPrompt}\n\nSkill invocation note: when the user prompt includes a full <skill> block, treat that skill as already loaded; do not read its SKILL.md again unless you need to inspect referenced files.`;
+  return `${systemPrompt}\n\nSkill invocation note: when hidden skill-context is provided, treat that skill as already loaded; do not read its SKILL.md again unless you need to inspect referenced files.`;
 }
 
 function registerLoadedSkillPromptPatch(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event) => {
-    if (!hasExpandedSkillBlock(event.prompt)) return;
+    const names = skillNamesInPrompt(event.prompt);
+    if (names.length === 0) return;
+
+    const blocks = names
+      .map((name) => event.systemPromptOptions.skills?.find((skill) => skill.name === name))
+      .filter((skill) => skill !== undefined)
+      .map((skill) => formatSkillBlock(skill));
 
     return {
+      ...(blocks.length > 0
+        ? {
+            message: {
+              customType: "skill-context",
+              content: blocks.join("\n\n"),
+              display: false,
+              details: names.join(", "),
+            },
+          }
+        : {}),
       systemPrompt: patchLoadedSkillPrompt(event.systemPrompt),
     };
   });
