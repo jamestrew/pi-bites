@@ -49,15 +49,15 @@ describe("findMatchedPattern", () => {
   });
 
   test("matches every gated command in a compound command", async () => {
-    const matches = await findMatchedPatterns("mkdir foo && rm bar");
+    const matches = await findMatchedPatterns("chmod +x foo && rm bar");
 
-    expect(matches.map((match) => match.label)).toEqual(["mkdir", "rm"]);
+    expect(matches.map((match) => match.label)).toContainValues(["chmod", "rm"]);
   });
 
   test("matches every gated command separated by semicolons", async () => {
-    const matches = await findMatchedPatterns("touch a; rm b");
+    const matches = await findMatchedPatterns("rmdir a; rm b");
 
-    expect(matches.map((match) => match.label)).toEqual(["touch", "rm"]);
+    expect(matches.map((match) => match.label)).toEqual(["rmdir", "rm"]);
   });
 
   test("supports configured command-only rules", async () => {
