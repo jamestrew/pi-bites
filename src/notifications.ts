@@ -26,7 +26,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import type { AgentEndEvent, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { AgentEndEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { SnacksConfig } from "./config.js";
 
 export interface BitesNotifyPayload {

@@ -3,7 +3,7 @@ import registerRtk from "./rtk.js";
 import registerStatusline from "./statusline.js";
 import registerTokenCount from "./token-count.js";
 import registerCustomTools from "./tools.js";
-import registerExplore from "./explore.js";
+import registerExplore from "./explore/index.js";
 import registerFzfFileSearch from "./fzf-file-search.js";
 import registerAtMentionContext from "./at-mention-context.js";
 import registerTodo from "./todo/index.js";
@@ -11,7 +11,7 @@ import registerQuestion from "./question/index.js";
 import registerNotifications from "./notifications.js";
 import registerSpotme from "./spotme/index.js";
 import registerSlashSkillAutocomplete from "./slash-skill-autocomplete.js";
-import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 
 export default function (pi: ExtensionAPI) {

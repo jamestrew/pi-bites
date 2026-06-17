@@ -3,16 +3,17 @@ import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { type ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text, truncateToWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
+import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import type { SnacksConfig } from "./config.js";
+import { buildDoneStats, type Usage } from "./format.js";
+import type { SnacksConfig } from "../config.js";
 
 const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
 const DEFAULT_TOOLS = "read,ls,bash";
 const SELF_EXTENSION = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
-  `index${path.extname(fileURLToPath(import.meta.url))}`,
+  `../index${path.extname(fileURLToPath(import.meta.url))}`,
 );
 const MAX_VISIBLE_TOOL_CALLS = 3;
 
@@ -80,15 +81,6 @@ const ExploreParams = Type.Object({
   ),
 });
 
-type Usage = {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  cost: number;
-  turns: number;
-};
-
 type ExploreDetails = {
   status: "running" | "completed";
   cwd: string;
@@ -147,24 +139,6 @@ function formatToolCall(name: string, args: Record<string, unknown>): string {
   }
 
   return `${cap}(${JSON.stringify(args)})`;
-}
-
-function buildDoneStats(toolUses: number, usage: Usage, durationMs?: number): string {
-  const parts: string[] = [];
-  parts.push(`${toolUses} tool use${toolUses !== 1 ? "s" : ""}`);
-
-  const totalTokens = usage.input + usage.output;
-  if (totalTokens > 0) {
-    const tokensDisplay =
-      totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : String(totalTokens);
-    parts.push(`${tokensDisplay} tokens`);
-  }
-
-  if (durationMs !== undefined && durationMs > 0) {
-    parts.push(`${(durationMs / 1000).toFixed(1)}s`);
-  }
-
-  return parts.join(" · ");
 }
 
 function summarizeText(text: string, maxLength = 180): string {
@@ -299,6 +273,7 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
           "json",
           "-p",
           "--no-session",
+          "-ne",
           "-e",
           SELF_EXTENSION,
           "--no-prompt-templates",

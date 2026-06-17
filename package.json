@@ -7,7 +7,7 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
-    "dev": "pi -e ./src/index.ts",
+    "dev": "pi -ne -e ./src/index.ts",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "fmt": "oxfmt --write .",

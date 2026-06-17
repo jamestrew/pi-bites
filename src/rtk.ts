@@ -1,5 +1,5 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { createLocalBashOperations } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 
 const RTK_COMMAND = process.env.RTK_PATH || "rtk";
 const REWRITE_TIMEOUT_MS = 2_000;

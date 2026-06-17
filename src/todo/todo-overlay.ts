@@ -11,8 +11,8 @@
  * branch is stale at that point (message_end runs after the extension event).
  */
 
-import type { ExtensionUIContext, Theme } from "@mariozechner/pi-coding-agent";
-import { truncateToWidth, type TUI } from "@mariozechner/pi-tui";
+import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth, type TUI } from "@earendil-works/pi-tui";
 import { getTodos, type Task, type TaskStatus } from "./todo.js";
 
 // ---- Constants ----

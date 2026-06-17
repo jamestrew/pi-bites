@@ -4,7 +4,7 @@ import {
   createBashTool,
   createBashToolDefinition,
   createEditTool,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 const readDescriptionSuffix = [
   "Call this tool in parallel when you know there are multiple files you want to read.",

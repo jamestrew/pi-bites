@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createLsTool, createReadTool, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { createLsTool, createReadTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const MAX_MENTIONS = 8;
 

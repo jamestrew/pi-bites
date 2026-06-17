@@ -29,7 +29,7 @@
  * ```
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
 import type {
   BashGateConfig,

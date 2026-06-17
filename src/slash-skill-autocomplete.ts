@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import { AgentSession, stripFrontmatter, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { CombinedAutocompleteProvider, Editor, fuzzyFilter } from "@mariozechner/pi-tui";
+import { AgentSession, stripFrontmatter, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { CombinedAutocompleteProvider, Editor, fuzzyFilter } from "@earendil-works/pi-tui";
 
 type AutocompleteOptions = { signal: AbortSignal; force?: boolean };
 type AutocompleteItem = { value: string; label?: string; description?: string };

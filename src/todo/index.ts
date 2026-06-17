@@ -7,7 +7,7 @@
  * persistent widget.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { TOOL_NAME, registerTodoTool, registerTodosCommand, reconstructTodoState } from "./todo.js";
 import { TodoOverlay } from "./todo-overlay.js";
 

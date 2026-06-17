@@ -13,8 +13,8 @@
  */
 
 import { isAbsolute, relative } from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import type { AutocompleteItem } from "@mariozechner/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import { FileFrecency } from "./file-search/frecency.js";
 import { PathIndex } from "./file-search/path-index.js";
 import { searchPaths } from "./file-search/path-matcher.js";

@@ -1,8 +1,8 @@
 // ─── Pi adapter ─────────────────────────────────────────────────────────────
 // Thin wiring layer: connects SpotMeEngine to Pi"s extension API.
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { Type } from "typebox";
