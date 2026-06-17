@@ -4,9 +4,15 @@ import { createLsTool, createReadTool, type ExtensionAPI } from "@earendil-works
 
 const MAX_MENTIONS = 8;
 
+type LineRange = {
+  start: number;
+  end?: number;
+};
+
 type Mention = {
   raw: string;
   path: string;
+  lineRange?: LineRange;
 };
 
 type Expansion = {
@@ -15,11 +21,13 @@ type Expansion = {
   text: string;
 };
 
+type ParsedLineSuffix = { path: string; lineRange?: LineRange };
+
 function isMentionBoundary(char: string | undefined): boolean {
   return char === undefined || /\s/.test(char);
 }
 
-function parseAtMentions(text: string): Mention[] {
+export function parseAtMentions(text: string): Mention[] {
   const mentions: Mention[] = [];
 
   for (let i = 0; i < text.length; i++) {
@@ -53,10 +61,24 @@ function parseAtMentions(text: string): Mention[] {
 
   const seen = new Set<string>();
   return mentions.filter((mention) => {
-    if (seen.has(mention.path)) return false;
-    seen.add(mention.path);
+    const key = `${mention.path}:${mention.lineRange?.start ?? ""}-${mention.lineRange?.end ?? ""}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
+}
+
+function parseLineSuffix(path: string): ParsedLineSuffix | null {
+  const suffixMatch = path.match(/^(.*):(-?\d+)(?:-(-?\d+))?$/);
+  if (!suffixMatch) return null;
+
+  const suffixPath = suffixMatch[1]!;
+  const start = Number(suffixMatch[2]);
+  const end = suffixMatch[3] === undefined ? undefined : Number(suffixMatch[3]);
+
+  if (start < 1 || (end !== undefined && end < start)) return { path: suffixPath };
+
+  return { path: suffixPath, lineRange: { start, end } };
 }
 
 function textContentOnly(
@@ -69,43 +91,59 @@ function textContentOnly(
     .join("\n");
 }
 
-async function expandMention(
+export async function expandMention(
   cwd: string,
   mention: Mention,
   signal?: AbortSignal,
 ): Promise<Expansion | null> {
-  const absolutePath = resolve(cwd, mention.path);
+  let effectiveMention = mention;
+  let absolutePath = resolve(cwd, mention.path);
 
   let stats: Awaited<ReturnType<typeof stat>>;
   try {
     stats = await stat(absolutePath);
   } catch {
-    return null;
+    const suffix = parseLineSuffix(mention.path);
+    if (suffix === null) return null;
+
+    effectiveMention = { ...mention, path: suffix.path, lineRange: suffix.lineRange };
+    absolutePath = resolve(cwd, effectiveMention.path);
+    try {
+      stats = await stat(absolutePath);
+    } catch {
+      return null;
+    }
   }
 
   try {
     if (stats.isDirectory()) {
       const lsTool = createLsTool(cwd);
       const result = await lsTool.execute(
-        `at-mention-ls:${mention.path}`,
-        { path: mention.path },
+        `at-mention-ls:${effectiveMention.path}`,
+        { path: effectiveMention.path },
         signal,
       );
-      return { mention, absolutePath, text: textContentOnly(result.content) };
+      return { mention: effectiveMention, absolutePath, text: textContentOnly(result.content) };
     }
 
     if (stats.isFile()) {
       const readTool = createReadTool(cwd);
       const result = await readTool.execute(
-        `at-mention-read:${mention.path}`,
-        { path: mention.path },
+        `at-mention-read:${effectiveMention.path}`,
+        {
+          path: effectiveMention.path,
+          offset: effectiveMention.lineRange?.start,
+          limit:
+            effectiveMention.lineRange?.end === undefined
+              ? undefined
+              : effectiveMention.lineRange.end - effectiveMention.lineRange.start + 1,
+        },
         signal,
       );
-      return { mention, absolutePath, text: textContentOnly(result.content) };
+      return { mention: effectiveMention, absolutePath, text: textContentOnly(result.content) };
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { mention, absolutePath, text: `[Could not expand @ mention: ${message}]` };
+  } catch {
+    return null;
   }
 
   return null;
