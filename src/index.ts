@@ -9,6 +9,7 @@ import registerAtMentionContext from "./at-mention-context.js";
 import registerTodo from "./todo/index.js";
 import registerQuestion from "./question/index.js";
 import registerNotifications from "./notifications.js";
+import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
 import registerSlashSkillAutocomplete from "./slash-skill-autocomplete.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -39,6 +40,7 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("tools")) registerCustomTools(pi);
   if (!disabled.has("explore")) registerExplore(pi, configRef);
   if (!disabled.has("fzf")) registerFzfFileSearch(pi);
+  if (!disabled.has("promptNormalization")) registerPromptNormalization(pi);
   if (!disabled.has("atMentionContext")) registerAtMentionContext(pi);
   if (!disabled.has("todo")) registerTodo(pi);
   if (!disabled.has("question")) registerQuestion(pi);

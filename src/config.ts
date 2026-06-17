@@ -30,7 +30,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "statusline" | "tokenCount" | "tools" | "explore" | "todo" | "question" | "spotme" | "slashSkillAutocomplete" | "atMentionContext"
+ *   "bashGate" | "rtk" | "statusline" | "tokenCount" | "tools" | "explore" | "todo" | "question" | "spotme" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -109,6 +109,7 @@ export type ExtensionName =
   | "notifications"
   | "spotme"
   | "slashSkillAutocomplete"
+  | "promptNormalization"
   | "atMentionContext";
 
 export interface SnacksConfig {
@@ -176,6 +177,7 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "notifications",
   "spotme",
   "slashSkillAutocomplete",
+  "promptNormalization",
   "atMentionContext",
 ];
 
