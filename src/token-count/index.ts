@@ -15,12 +15,13 @@ const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_CACHE_TTL_MS = 5 * 60 * 1000;
 const CODEX_TIMEOUT_MS = 10_000;
 
-type CodexWindow = {
+export type CodexWindow = {
   usedPercent: number;
-  label: "5h" | "wk";
+  limitWindowSeconds: number;
+  resetAfterSeconds: number;
 };
 
-type CodexUsage = {
+export type CodexUsage = {
   capturedAt: number;
   windows: CodexWindow[];
 };
@@ -36,12 +37,30 @@ function formatTokens(count: number): string {
   return `${Math.round(count / 1_000_000)}M`;
 }
 
-function formatCodexUsage(usage: CodexUsage): string | undefined {
+export function formatCodexUsage(usage: CodexUsage): string | undefined {
   const parts = usage.windows.map((window) => {
-    const remaining = Math.max(0, Math.min(100, 100 - window.usedPercent));
-    return `${remaining.toFixed(0)}% ${window.label}`;
+    return `${formatCodexWindowLabel(window.limitWindowSeconds)}: ${window.usedPercent.toFixed(0)}% (${formatResetDuration(window.resetAfterSeconds)})`;
   });
   return parts.length > 0 ? `codex: ${parts.join(" ")}` : undefined;
+}
+
+function formatCodexWindowLabel(seconds: number): string {
+  const days = seconds / 86_400;
+  if (Number.isInteger(days) && days >= 1) return `${days}d`;
+
+  const hours = seconds / 3_600;
+  if (Number.isInteger(hours) && hours >= 1) return `${hours}h`;
+
+  return `${seconds}s`;
+}
+
+function formatResetDuration(seconds: number): string {
+  const safeSeconds = Math.max(0, seconds);
+  if (safeSeconds < 86_400) return `${(safeSeconds / 3_600).toFixed(1)}h`;
+
+  const days = Math.floor(safeSeconds / 86_400);
+  const remainingHours = (safeSeconds - days * 86_400) / 3_600;
+  return `${days}d${remainingHours.toFixed(1)}h`;
 }
 
 function tokenStatusText(ctx: ExtensionContext): string | undefined {
@@ -118,21 +137,30 @@ async function fetchWithTimeout(
   }
 }
 
-function normalizeCodexUsage(payload: any): CodexUsage {
+export function normalizeCodexUsage(payload: any): CodexUsage {
   const rateLimit = payload?.rate_limit;
   const primary = rateLimit?.primary_window;
   const secondary = rateLimit?.secondary_window;
-  const windows = [
-    normalizeCodexWindow(primary, "5h"),
-    normalizeCodexWindow(secondary, "wk"),
-  ].filter((window): window is CodexWindow => window !== undefined);
+  const windows = [normalizeCodexWindow(primary), normalizeCodexWindow(secondary)].filter(
+    (window): window is CodexWindow => window !== undefined,
+  );
 
   return { capturedAt: Date.now(), windows };
 }
 
-function normalizeCodexWindow(value: any, label: CodexWindow["label"]): CodexWindow | undefined {
+function normalizeCodexWindow(value: any): CodexWindow | undefined {
   const usedPercent = Number(value?.used_percent);
-  return Number.isFinite(usedPercent) ? { usedPercent, label } : undefined;
+  const limitWindowSeconds = Number(value?.limit_window_seconds);
+  const resetAfterSeconds = Number(value?.reset_after_seconds);
+  if (
+    !Number.isFinite(usedPercent) ||
+    !Number.isFinite(limitWindowSeconds) ||
+    !Number.isFinite(resetAfterSeconds)
+  ) {
+    return undefined;
+  }
+
+  return { usedPercent, limitWindowSeconds, resetAfterSeconds };
 }
 
 function hasHeader(headers: Record<string, string>, name: string): boolean {
