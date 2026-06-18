@@ -195,6 +195,13 @@ const CACHE_COLUMN: DataColumn = {
   getValue: (s) => formatTokens(s.tokens.cacheRead + s.tokens.cacheWrite),
 };
 
+const CACHE_HIT_COLUMN: DataColumn = {
+  label: "Hit%",
+  width: 7,
+  dimmed: true,
+  getValue: (s) => formatCacheHitPercent(s.tokens),
+};
+
 const FULL_DATA_COLUMNS: DataColumn[] = [
   SESSIONS_COLUMN,
   MSGS_COLUMN,
@@ -203,6 +210,7 @@ const FULL_DATA_COLUMNS: DataColumn[] = [
   INPUT_COLUMN,
   OUTPUT_COLUMN,
   CACHE_COLUMN,
+  CACHE_HIT_COLUMN,
 ];
 
 const TABLE_LAYOUTS: TableLayoutCandidate[] = [
@@ -836,6 +844,14 @@ function formatTokens(count: number): string {
 function formatNumber(n: number): string {
   if (n === 0) return "-";
   return n.toLocaleString();
+}
+
+function formatCacheHitPercent(tokens: TokenStats): string {
+  const promptTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite;
+  if (promptTokens === 0 || tokens.cacheRead === 0) return "-";
+  const percent = (tokens.cacheRead / promptTokens) * 100;
+  if (percent >= 10) return `${Math.round(percent)}%`;
+  return `${Math.round(percent * 10) / 10}%`;
 }
 
 function padLeft(s: string, len: number): string {
