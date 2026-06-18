@@ -37,7 +37,7 @@ import type {
   BashGateRule,
   OneOrMany,
   SnacksConfig,
-} from "./config.js";
+} from "../config.js";
 
 export const DEFAULT_BASH_GATE_RULES: BashGateRule[] = [
   { cmd: ["rm", "rmdir"] },

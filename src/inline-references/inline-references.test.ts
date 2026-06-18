@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseInlineReferences } from "./inline-references.js";
+import { parseInlineReferences } from "./index.js";
 
 describe("parseInlineReferences", () => {
   test("parses skill and prompt references", () => {

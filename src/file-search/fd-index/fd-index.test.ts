@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { listProjectPaths } from "./fd-index.js";
+import { listProjectPaths } from "./index.js";
 
 const fdAvailable = Bun.which("fd") !== null;
 const describeIfFd = fdAvailable ? describe : describe.skip;

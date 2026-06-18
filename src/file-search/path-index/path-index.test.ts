@@ -2,11 +2,11 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 
 const listProjectPathsMock = mock(async (cwd: string) => [`${cwd}/file.ts`]);
 
-mock.module("./fd-index.js", () => ({
+mock.module("../fd-index/index.js", () => ({
   listProjectPaths: listProjectPathsMock,
 }));
 
-const { PathIndex } = await import("./path-index.js");
+const { PathIndex } = await import("./index.js");
 
 afterEach(() => {
   listProjectPathsMock.mockClear();

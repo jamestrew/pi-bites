@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { searchPaths } from "./path-matcher.js";
+import { searchPaths } from "./index.js";
 
 describe("searchPaths", () => {
   test("empty query returns deterministic capped results", () => {

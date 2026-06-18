@@ -11,7 +11,7 @@ import {
   ExploreUsageReader,
   formatUsageStats,
   type UsageTotals,
-} from "./footer.js";
+} from "./index.js";
 
 const footerData = {
   getGitBranch: () => "main",

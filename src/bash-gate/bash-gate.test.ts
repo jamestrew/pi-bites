@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { extractBashFacts } from "./bash-command-facts.js";
-import { findMatchedPattern, findMatchedPatterns } from "./bash-gate.js";
+import { findMatchedPattern, findMatchedPatterns } from "./index.js";
 
 describe("extractBashFacts", () => {
   test("extracts commands, redirects, path-ish args, pipe presence, and flags", async () => {

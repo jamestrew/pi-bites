@@ -15,9 +15,9 @@
 import { isAbsolute, relative } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { FileFrecency } from "./file-search/frecency.js";
-import { PathIndex } from "./file-search/path-index.js";
-import { searchPaths } from "./file-search/path-matcher.js";
+import { FileFrecency } from "./frecency/index.js";
+import { PathIndex } from "./path-index/index.js";
+import { searchPaths } from "./path-matcher/index.js";
 
 const MENTION_MAX_RESULTS = 20;
 const FRECENCY_BOOST = 100;

@@ -1,19 +1,19 @@
-import registerBashGate from "./bash-gate.js";
+import registerBashGate from "./bash-gate/index.js";
 import registerRtk from "./rtk.js";
 import registerStatusline from "./statusline.js";
-import registerFooter from "./footer.js";
+import registerFooter from "./footer/index.js";
 import registerTokenCount from "./token-count/index.js";
 import registerUsageDashboard from "./usage-dashboard.js";
 import registerCustomTools from "./tools.js";
 import registerExplore from "./explore/index.js";
-import registerFzfFileSearch from "./fzf-file-search.js";
-import registerAtMentionContext from "./at-mention-context.js";
+import registerFzfFileSearch from "./file-search/index.js";
+import registerAtMentionContext from "./at-mention-context/index.js";
 import registerTodo from "./todo/index.js";
 import registerQuestion from "./question/index.js";
 import registerNotifications from "./notifications.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
-import registerInlineReferences from "./inline-references.js";
+import registerInlineReferences from "./inline-references/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 

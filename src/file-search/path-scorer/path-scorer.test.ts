@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { scorePath } from "./path-scorer.js";
+import { scorePath } from "./index.js";
 
 describe("scorePath", () => {
   test("returns null when query is not an ordered subsequence", () => {

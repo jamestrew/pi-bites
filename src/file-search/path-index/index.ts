@@ -1,4 +1,4 @@
-import { listProjectPaths } from "./fd-index.js";
+import { listProjectPaths } from "../fd-index/index.js";
 
 export class PathIndex {
   private cached = new Map<string, string[]>();

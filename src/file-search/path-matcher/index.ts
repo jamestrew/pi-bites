@@ -1,4 +1,4 @@
-import { scorePath } from "./path-scorer.js";
+import { scorePath } from "../path-scorer/index.js";
 
 export interface PathSearchItem {
   path: string;

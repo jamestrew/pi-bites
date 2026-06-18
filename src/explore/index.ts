@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { buildDoneStats, type Usage } from "./format.js";
+import { buildDoneStats, type Usage } from "./format/index.js";
 import type { SnacksConfig } from "../config.js";
 
 const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
