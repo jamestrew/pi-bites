@@ -30,7 +30,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "statusline" | "tokenCount" | "tools" | "explore" | "todo" | "question" | "spotme" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext"
+ *   "bashGate" | "rtk" | "statusline" | "tokenCount" | "usageDashboard" | "tools" | "explore" | "todo" | "question" | "spotme" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -101,6 +101,7 @@ export type ExtensionName =
   | "rtk"
   | "statusline"
   | "tokenCount"
+  | "usageDashboard"
   | "tools"
   | "explore"
   | "todo"
@@ -169,6 +170,7 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "rtk",
   "statusline",
   "tokenCount",
+  "usageDashboard",
   "tools",
   "explore",
   "fzf",

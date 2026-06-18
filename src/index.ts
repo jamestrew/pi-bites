@@ -2,6 +2,7 @@ import registerBashGate from "./bash-gate.js";
 import registerRtk from "./rtk.js";
 import registerStatusline from "./statusline.js";
 import registerTokenCount from "./token-count/index.js";
+import registerUsageDashboard from "./usage-dashboard.js";
 import registerCustomTools from "./tools.js";
 import registerExplore from "./explore/index.js";
 import registerFzfFileSearch from "./fzf-file-search.js";
@@ -37,6 +38,7 @@ export default function (pi: ExtensionAPI) {
 
   if (!disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!disabled.has("tokenCount")) registerTokenCount(pi);
+  if (!disabled.has("usageDashboard")) registerUsageDashboard(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);
   if (!disabled.has("explore")) registerExplore(pi, configRef);
   if (!disabled.has("fzf")) registerFzfFileSearch(pi);

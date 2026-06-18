@@ -12,6 +12,7 @@ A small collection of personal extensions for the pi coding agent.
 - Better fuzzy finding for `@` file mentions powered by `fd` and Snacks/fzf-inspired scoring
 - Script-driven statusline
 - Token-count/status helpers
+- `/usage` dashboard for session cost/token statistics
 - Custom todo and question tools
 - Optional notifications
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
@@ -66,7 +67,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, tools, explore, fzf, todo, question, notifications, spotme
+bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, spotme, slashSkillAutocomplete, promptNormalization, atMentionContext
 ```
 
 You can also edit config directly:
@@ -76,6 +77,12 @@ You can also edit config directly:
   "disable": ["bashGate", "notifications"]
 }
 ```
+
+## Usage dashboard
+
+Run `/usage` inside pi to open an interactive dashboard of local session usage. It reads session JSONL files from `~/.pi/agent/sessions` (or `PI_CODING_AGENT_DIR/sessions`) and summarizes cost, messages, sessions, and token counts by provider/model.
+
+Controls: `Tab`/arrow keys switch periods, `↑`/`↓` selects providers, `Enter` expands models, `v` toggles insights, and `q` closes.
 
 ## SpotMe
 
