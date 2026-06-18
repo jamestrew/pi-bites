@@ -12,7 +12,7 @@ import registerQuestion from "./question/index.js";
 import registerNotifications from "./notifications.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
-import registerSlashSkillAutocomplete from "./slash-skill-autocomplete.js";
+import registerInlineReferences from "./inline-references.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 
@@ -48,6 +48,7 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("question")) registerQuestion(pi);
   if (!disabled.has("notifications")) registerNotifications(pi, configRef);
   if (!disabled.has("spotme")) registerSpotme(pi);
-  if (!disabled.has("slashSkillAutocomplete")) registerSlashSkillAutocomplete(pi);
+  if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
+    registerInlineReferences(pi);
   registerBitesCommands(pi);
 }

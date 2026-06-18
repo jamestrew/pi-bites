@@ -16,7 +16,7 @@ A small collection of personal extensions for the pi coding agent.
 - Custom todo and question tools
 - Optional notifications
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
-- Inline `/skill:` autocomplete with hidden skill-context injection
+- Inline `$skill:name` / `$prompt:name` references with hidden context injection
 
 ## Installation
 
@@ -67,7 +67,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, spotme, slashSkillAutocomplete, promptNormalization, atMentionContext
+bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, spotme, inlineReferences, promptNormalization, atMentionContext
 ```
 
 You can also edit config directly:
@@ -83,6 +83,10 @@ You can also edit config directly:
 Run `/usage` inside pi to open an interactive dashboard of local session usage. It reads session JSONL files from `~/.pi/agent/sessions` (or `PI_CODING_AGENT_DIR/sessions`) and summarizes cost, messages, sessions, and token counts by provider/model.
 
 Controls: `Tab`/arrow keys switch periods, `↑`/`↓` selects providers, `Enter` expands models, `v` toggles insights, and `q` closes.
+
+## Inline references
+
+Use `$skill:name` or `$prompt:name` anywhere in a message to attach the referenced skill or prompt template as hidden context without expanding it into the visible user prompt. Typing `$` in the TUI offers completions for available skills and prompt templates.
 
 ## SpotMe
 
