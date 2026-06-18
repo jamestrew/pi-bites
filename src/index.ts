@@ -1,6 +1,7 @@
 import registerBashGate from "./bash-gate.js";
 import registerRtk from "./rtk.js";
 import registerStatusline from "./statusline.js";
+import registerFooter from "./footer.js";
 import registerTokenCount from "./token-count/index.js";
 import registerUsageDashboard from "./usage-dashboard.js";
 import registerCustomTools from "./tools.js";
@@ -36,6 +37,7 @@ export default function (pi: ExtensionAPI) {
 
   if (isExploreSubagent) return;
 
+  if (!disabled.has("footer")) registerFooter(pi);
   if (!disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!disabled.has("tokenCount")) registerTokenCount(pi);
   if (!disabled.has("usageDashboard")) registerUsageDashboard(pi);

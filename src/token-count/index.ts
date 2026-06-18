@@ -1,11 +1,7 @@
 /**
  * Token Count Statusline
  *
- * Shows the raw context token count as a status-bar entry after each agent
- * turn, complementing the built-in `0.0%/1.0M` percentage display.
- *
- * Example output in the footer extension line:
- *   ctx: 42k / 200k
+ * Shows OpenAI Codex usage/rate-limit information as a status-bar entry.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -28,14 +24,6 @@ export type CodexUsage = {
 
 let codexCache: CodexUsage | undefined;
 let codexRequestId = 0;
-
-function formatTokens(count: number): string {
-  if (count < 1_000) return count.toString();
-  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
-  if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  return `${Math.round(count / 1_000_000)}M`;
-}
 
 export function formatCodexUsage(usage: CodexUsage): string | undefined {
   const parts = usage.windows.map((window) => {
@@ -63,23 +51,9 @@ function formatResetDuration(seconds: number): string {
   return `${days}d${remainingHours.toFixed(1)}h`;
 }
 
-function tokenStatusText(ctx: ExtensionContext): string | undefined {
-  const usage = ctx.getContextUsage();
-  if (!usage) return undefined;
-
-  const tokenStr = usage.tokens !== null ? formatTokens(usage.tokens) : "?";
-  const windowStr = formatTokens(usage.contextWindow);
-  return `ctx: ${tokenStr}/${windowStr}`;
-}
-
 function setTokenStatus(ctx: ExtensionContext, codexUsage?: CodexUsage): void {
-  const parts = [
-    tokenStatusText(ctx),
-    codexUsage ? formatCodexUsage(codexUsage) : undefined,
-  ].filter(Boolean);
-  if (parts.length === 0) return;
-
-  ctx.ui.setStatus("token-count", ctx.ui.theme.fg("dim", parts.join(" | ")));
+  const text = codexUsage ? formatCodexUsage(codexUsage) : undefined;
+  ctx.ui.setStatus("token-count", text ? ctx.ui.theme.fg("dim", text) : undefined);
 }
 
 async function updateTokenStatus(ctx: ExtensionContext): Promise<void> {

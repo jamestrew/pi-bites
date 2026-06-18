@@ -30,7 +30,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "statusline" | "tokenCount" | "usageDashboard" | "tools" | "explore" | "todo" | "question" | "spotme" | "inlineReferences" | "promptNormalization" | "atMentionContext"
+ *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "tools" | "explore" | "todo" | "question" | "spotme" | "inlineReferences" | "promptNormalization" | "atMentionContext"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -99,6 +99,7 @@ export interface BashGateConfig {
 export type ExtensionName =
   | "bashGate"
   | "rtk"
+  | "footer"
   | "statusline"
   | "tokenCount"
   | "usageDashboard"
@@ -170,6 +171,7 @@ export function loadConfig(cwd: string): SnacksConfig {
 export const EXTENSION_NAMES: ExtensionName[] = [
   "bashGate",
   "rtk",
+  "footer",
   "statusline",
   "tokenCount",
   "usageDashboard",
