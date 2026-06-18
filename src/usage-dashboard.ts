@@ -221,10 +221,17 @@ const TABLE_LAYOUTS: TableLayoutCandidate[] = [
 // Data Collection
 // =============================================================================
 
-function getSessionsDir(): string {
+function getAgentDir(): string {
   // Replicate Pi's logic: respect PI_CODING_AGENT_DIR env var
-  const agentDir = process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
-  return join(agentDir, "sessions");
+  return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+}
+
+function getSessionsDir(): string {
+  return join(getAgentDir(), "sessions");
+}
+
+function getSubagentUsageDir(): string {
+  return join(getAgentDir(), "pi-bites", "usage");
 }
 
 async function collectSessionFilesRecursively(
@@ -255,6 +262,13 @@ async function getAllSessionFiles(signal?: AbortSignal): Promise<string[]> {
   return files;
 }
 
+async function getAllSubagentUsageFiles(signal?: AbortSignal): Promise<string[]> {
+  const files: string[] = [];
+  await collectSessionFilesRecursively(getSubagentUsageDir(), files, signal);
+  files.sort();
+  return files;
+}
+
 interface SessionMessage {
   provider: string;
   model: string;
@@ -264,6 +278,21 @@ interface SessionMessage {
   cacheRead: number;
   cacheWrite: number;
   timestamp: number;
+}
+
+interface SubagentUsageRecord {
+  type: "subagent_usage";
+  sessionId: string;
+  timestamp: number;
+  provider: string;
+  model: string;
+  usage: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheWrite?: number;
+    cost?: { total?: number };
+  };
 }
 
 interface ParsedSessionFile {
@@ -332,6 +361,61 @@ async function parseSessionFile(
     return sessionId ? { sessionId, messages } : null;
   } catch {
     return null;
+  }
+}
+
+async function parseSubagentUsageFile(
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<ParsedSessionFile[]> {
+  try {
+    const content = await readFile(filePath, "utf8");
+    if (signal?.aborted) return [];
+    const lines = content.trim().split("\n");
+    const bySession = new Map<string, SessionMessage[]>();
+
+    for (let i = 0; i < lines.length; i++) {
+      if (signal?.aborted) return [];
+      if (i % 500 === 0) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+      const line = lines[i]!;
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as SubagentUsageRecord;
+        if (
+          entry.type !== "subagent_usage" ||
+          !entry.sessionId ||
+          !entry.provider ||
+          !entry.model
+        ) {
+          continue;
+        }
+
+        const usage = entry.usage ?? {};
+        const messages = bySession.get(entry.sessionId) ?? [];
+        messages.push({
+          provider: entry.provider,
+          model: entry.model,
+          cost: usage.cost?.total || 0,
+          input: usage.input || 0,
+          output: usage.output || 0,
+          cacheRead: usage.cacheRead || 0,
+          cacheWrite: usage.cacheWrite || 0,
+          timestamp: entry.timestamp || 0,
+        });
+        bySession.set(entry.sessionId, messages);
+      } catch {
+        // Skip malformed lines
+      }
+    }
+
+    return Array.from(bySession.entries()).map(([sessionId, messages]) => ({
+      sessionId,
+      messages,
+    }));
+  } catch {
+    return [];
   }
 }
 
@@ -526,6 +610,29 @@ async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null>
       rawByPeriod,
       globalSessionSpans,
     );
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  const subagentUsageFiles = await getAllSubagentUsageFiles(signal);
+  if (signal?.aborted) return null;
+  for (const filePath of subagentUsageFiles) {
+    if (signal?.aborted) return null;
+    const parsedRuns = await parseSubagentUsageFile(filePath, signal);
+    if (signal?.aborted) return null;
+
+    for (const parsed of parsedRuns) {
+      addMessagesToUsageData(
+        data,
+        parsed.sessionId,
+        parsed.messages,
+        todayMs,
+        weekStartMs,
+        lastWeekStartMs,
+        rawByPeriod,
+        globalSessionSpans,
+      );
+    }
 
     await new Promise<void>((resolve) => setImmediate(resolve));
   }

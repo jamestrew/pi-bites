@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
@@ -16,6 +17,22 @@ const SELF_EXTENSION = path.join(
   `../index${path.extname(fileURLToPath(import.meta.url))}`,
 );
 const MAX_VISIBLE_TOOL_CALLS = 3;
+
+type SubagentUsageRecord = {
+  type: "subagent_usage";
+  subagent: "explore";
+  sessionId: string;
+  timestamp: number;
+  provider: string;
+  model: string;
+  usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: { total: number };
+  };
+};
 
 const EXPLORE_SYSTEM_PROMPT = `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
 
@@ -92,6 +109,28 @@ type ExploreDetails = {
   startTime: number;
   durationMs?: number;
 };
+
+function getAgentDir(): string {
+  return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+}
+
+function getSubagentUsageFile(): string {
+  return path.join(getAgentDir(), "pi-bites", "usage", "explore.jsonl");
+}
+
+function splitProviderModel(model: string): { provider: string; model: string } {
+  const slash = model.indexOf("/");
+  if (slash === -1) return { provider: "unknown", model };
+  return { provider: model.slice(0, slash), model: model.slice(slash + 1) };
+}
+
+async function appendSubagentUsageRecords(records: SubagentUsageRecord[]): Promise<void> {
+  if (records.length === 0) return;
+
+  const file = getSubagentUsageFile();
+  await mkdir(path.dirname(file), { recursive: true });
+  await appendFile(file, records.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
+}
 
 function normalizeToolArg(value: unknown): string {
   return String(value ?? "").trim();
@@ -242,6 +281,8 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
       const cwd = params.cwd ?? ctx.cwd;
       const model = params.model ?? configRef.current.explore?.defaultModel ?? DEFAULT_MODEL;
       const usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
+      const usageRecords: SubagentUsageRecord[] = [];
+      const exploreSessionId = `explore-${randomUUID()}`;
       const timeline: string[] = [];
       let finalOutput = "";
       let stopReason: string | undefined;
@@ -340,11 +381,37 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
 
             usage.turns += 1;
             if (event.message?.usage) {
-              usage.input += event.message.usage.input || 0;
-              usage.output += event.message.usage.output || 0;
-              usage.cacheRead += event.message.usage.cacheRead || 0;
-              usage.cacheWrite += event.message.usage.cacheWrite || 0;
-              usage.cost += event.message.usage.cost?.total || 0;
+              const input = event.message.usage.input || 0;
+              const output = event.message.usage.output || 0;
+              const cacheRead = event.message.usage.cacheRead || 0;
+              const cacheWrite = event.message.usage.cacheWrite || 0;
+              const cost = event.message.usage.cost?.total || 0;
+              const fallback = splitProviderModel(model);
+              const provider = event.message.provider || fallback.provider;
+              const messageModel = event.message.model || fallback.model;
+              const timestamp = event.message.timestamp || Date.now();
+
+              usage.input += input;
+              usage.output += output;
+              usage.cacheRead += cacheRead;
+              usage.cacheWrite += cacheWrite;
+              usage.cost += cost;
+
+              usageRecords.push({
+                type: "subagent_usage",
+                subagent: "explore",
+                sessionId: exploreSessionId,
+                timestamp,
+                provider,
+                model: messageModel,
+                usage: {
+                  input,
+                  output,
+                  cacheRead,
+                  cacheWrite,
+                  cost: { total: cost },
+                },
+              });
             }
 
             if (event.message?.stopReason) stopReason = event.message.stopReason;
@@ -378,6 +445,8 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
         if (exitCode !== 0 || stopReason === "error") {
           throw new Error(stderr.trim() || finalOutput.trim() || "Explore subagent failed");
         }
+
+        await appendSubagentUsageRecords(usageRecords);
 
         const content = finalOutput.trim() || buildProgressText(timeline, finalOutput);
         return {

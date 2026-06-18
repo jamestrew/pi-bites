@@ -262,33 +262,38 @@ async function dollarSuggestions(
 function registerDollarAutocomplete(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     const promptNames = new Set(loadDefaultPromptTemplates(ctx.cwd).map((prompt) => prompt.name));
-    ctx.ui.addAutocompleteProvider((current) => ({
-      ...current,
-      triggerCharacters: [...(current.triggerCharacters ?? []), "$"],
-      async getSuggestions(lines, cursorLine, cursorCol, options) {
-        const currentLine = lines[cursorLine] ?? "";
-        const beforeCursor = currentLine.slice(0, cursorCol);
-        const dollarPrefix = findDollarPrefix(beforeCursor);
-        if (dollarPrefix)
-          return dollarSuggestions(current, dollarPrefix, options.signal, promptNames);
-        return current.getSuggestions(lines, cursorLine, cursorCol, options);
-      },
-      applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-        if (prefix.startsWith("$")) {
+    ctx.ui.addAutocompleteProvider((current) => {
+      const currentWithTriggers = current as AutocompleteProvider & {
+        triggerCharacters?: string[];
+      };
+      return {
+        ...current,
+        triggerCharacters: [...(currentWithTriggers.triggerCharacters ?? []), "$"],
+        async getSuggestions(lines, cursorLine, cursorCol, options) {
           const currentLine = lines[cursorLine] ?? "";
-          const beforePrefix = currentLine.slice(0, cursorCol - prefix.length);
-          const afterCursor = currentLine.slice(cursorCol);
-          const newLines = [...lines];
-          newLines[cursorLine] = `${beforePrefix}${item.value} ${afterCursor}`;
-          return {
-            lines: newLines,
-            cursorLine,
-            cursorCol: beforePrefix.length + item.value.length + 1,
-          };
-        }
-        return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
-      },
-    }));
+          const beforeCursor = currentLine.slice(0, cursorCol);
+          const dollarPrefix = findDollarPrefix(beforeCursor);
+          if (dollarPrefix)
+            return dollarSuggestions(current, dollarPrefix, options.signal, promptNames);
+          return current.getSuggestions(lines, cursorLine, cursorCol, options);
+        },
+        applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+          if (prefix.startsWith("$")) {
+            const currentLine = lines[cursorLine] ?? "";
+            const beforePrefix = currentLine.slice(0, cursorCol - prefix.length);
+            const afterCursor = currentLine.slice(cursorCol);
+            const newLines = [...lines];
+            newLines[cursorLine] = `${beforePrefix}${item.value} ${afterCursor}`;
+            return {
+              lines: newLines,
+              cursorLine,
+              cursorCol: beforePrefix.length + item.value.length + 1,
+            };
+          }
+          return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+        },
+      };
+    });
   });
 }
 
