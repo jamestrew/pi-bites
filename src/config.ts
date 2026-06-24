@@ -57,6 +57,11 @@ export interface StatuslineConfig {
   command?: string;
 }
 
+export interface RollbackConfig {
+  /** Set to false to disable checkpoint tracking and /rollback. Default: true. */
+  enabled?: boolean;
+}
+
 export interface NotificationsConfig {
   /**
    * Shell command to run when the agent loop ends.
@@ -109,6 +114,7 @@ export type ExtensionName =
   | "fzf"
   | "question"
   | "notifications"
+  | "rollback"
   | "spotme"
   | "inlineReferences"
   /** @deprecated Use "inlineReferences". */
@@ -121,6 +127,7 @@ export interface SnacksConfig {
   statusline?: StatuslineConfig;
   bashGate?: BashGateConfig;
   notifications?: NotificationsConfig;
+  rollback?: RollbackConfig;
   /**
    * List of extension names to disable entirely.
    * Global and project-local arrays are unioned.
@@ -159,6 +166,7 @@ export function loadConfig(cwd: string): SnacksConfig {
     statusline: { ...global.statusline, ...project.statusline },
     bashGate: { ...global.bashGate, ...project.bashGate },
     notifications: { ...global.notifications, ...project.notifications },
+    rollback: { ...global.rollback, ...project.rollback },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
 }
@@ -181,6 +189,7 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "todo",
   "question",
   "notifications",
+  "rollback",
   "spotme",
   "inlineReferences",
   "promptNormalization",

@@ -11,6 +11,7 @@ import registerAtMentionContext from "./at-mention-context/index.js";
 import registerTodo from "./todo/index.js";
 import registerQuestion from "./question/index.js";
 import registerNotifications from "./notifications.js";
+import registerRollback from "./rollback.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
@@ -49,6 +50,7 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("todo")) registerTodo(pi);
   if (!disabled.has("question")) registerQuestion(pi);
   if (!disabled.has("notifications")) registerNotifications(pi, configRef);
+  if (!disabled.has("rollback")) registerRollback(pi, configRef);
   if (!disabled.has("spotme")) registerSpotme(pi);
   if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
     registerInlineReferences(pi);
