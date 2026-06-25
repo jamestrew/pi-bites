@@ -68,6 +68,17 @@ slugify() {
     cut -c1-48
 }
 
+ensure_jj_description() {
+  local number="$1"
+  local title="$2"
+  local description
+  description="$(jj log -r @ --no-graph --template 'description' 2>/dev/null | sed 's/[[:space:]]*$//' || true)"
+
+  if [[ -z "$description" ]]; then
+    jj describe -m "feat: ${title} (#${number})"
+  fi
+}
+
 section_after_blocked_by() {
   awk '
     /^##[[:space:]]+Blocked by[[:space:]]*$/ { in_section=1; next }
@@ -144,19 +155,24 @@ for number in "${issue_numbers[@]}"; do
     "Instructions:\n" +
     "- Treat this as an AFK ready-for-agent issue.\n" +
     "- Make the smallest complete change that satisfies the acceptance criteria.\n" +
-    "- Use jj, not git, for VCS operations.\n" +
+    "- Use jj, not git, for VCS operations. Do not run git diff/status/commit.\n" +
+    "- For diffs, compare against " + $base + "@origin with jj, for example `jj diff --from " + $base + "@origin`.\n" +
     "- Run relevant checks, including `bun check` before finishing.\n" +
     "- Describe the current jj change with a clear git conventional message mentioning #\(.number).\n" +
     "- Do not create a PR yet; a separate review/fix/PR pipeline will run next.\n" +
     "- If you cannot safely complete the issue, leave the worktree clean and explain why.\n"
   ' <<<"$issue_json" > "$prompt_file"
 
-  pi "${PI_ARGS[@]}" "$(cat "$prompt_file")"
+  pi "${PI_ARGS[@]}" --name "issue #$number implement" "$(cat "$prompt_file")"
+  ensure_jj_description "$number" "$title"
 
-  pi "${PI_ARGS[@]}" --skill "$REVIEW_SKILL" --skill "$HANDOFF_SKILL" "$(cat <<REVIEW_PROMPT
-Review the current branch/change for issue #$number using the thermo-nuclear-code-quality-review skill.
+  pi "${PI_ARGS[@]}" --name "issue #$number review" --skill "$REVIEW_SKILL" --skill "$HANDOFF_SKILL" "$(cat <<REVIEW_PROMPT
+Review the current jj change for issue #$number using the thermo-nuclear-code-quality-review skill.
 
 Original issue prompt is in: $prompt_file
+Base branch/change is: $BASE_BRANCH@origin
+
+Use jj commands only. Do not run git diff/status/commit. For the changed-code diff, use `jj diff --from $BASE_BRANCH@origin` or equivalent jj commands; do not assume the base branch is main.
 
 Write the review results as a handoff document to exactly this path:
 $review_handoff
@@ -165,22 +181,24 @@ The handoff must summarize high-conviction review findings, obvious/critical fix
 REVIEW_PROMPT
 )"
 
-  pi "${PI_ARGS[@]}" --skill "$HANDOFF_SKILL" "$(cat <<FIX_PROMPT
+  pi "${PI_ARGS[@]}" --name "issue #$number fix review" --skill "$HANDOFF_SKILL" "$(cat <<FIX_PROMPT
 Implement the obvious or critical fixes/refactors from this review handoff:
 $review_handoff
 
 Original issue prompt is in: $prompt_file
 
 Instructions:
-- Use jj, not git, for VCS operations. Squash any code changes into the original commit.
+- Use jj, not git, for VCS operations. Do not run git diff/status/commit. Squash any code changes into the original change.
+- For diffs, compare against $BASE_BRANCH@origin with jj, for example `jj diff --from $BASE_BRANCH@origin`; do not assume the base branch is main.
 - Preserve the behavior required by issue #$number.
 - Run relevant checks, including bun check when appropriate.
 - Update the review handoff in place, noting what was addressed and what was intentionally left unaddressed.
 - Do not create a PR; a separate session will do that next.
 FIX_PROMPT
 )"
+  ensure_jj_description "$number" "$title"
 
-  pi "${PI_ARGS[@]}" "$(cat <<PR_PROMPT
+  pi "${PI_ARGS[@]}" --name "issue #$number create PR" "$(cat <<PR_PROMPT
 Create the pull request for issue #$number.
 
 Original issue prompt is in: $prompt_file
@@ -191,7 +209,8 @@ Repo: $REPO
 
 Instructions:
 - Read the original issue prompt and review handoff.
-- Use jj, not git, for VCS operations.
+- Use jj, not git, for VCS operations. Do not run git diff/status/commit.
+- For diffs, compare against $BASE_BRANCH@origin with jj, for example `jj diff --from $BASE_BRANCH@origin`; do not assume the base branch is main.
 - Ensure the current jj change has a good description mentioning #$number.
 - Create or update a jj bookmark named $branch pointing at the current change.
 - Push it with jj to GitHub.
