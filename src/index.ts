@@ -15,6 +15,7 @@ import registerRollback from "./rollback.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
+import registerTauStatus from "./tau-status/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 
@@ -38,6 +39,8 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("rtk")) registerRtk(pi);
 
   if (isExploreSubagent) return;
+
+  if (!isNonInteractive && !disabled.has("tauStatus")) registerTauStatus(pi);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
