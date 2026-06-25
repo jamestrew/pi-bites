@@ -471,9 +471,15 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
 
     renderCall(args, theme) {
       const preview = args.description || summarizeText(args.prompt ?? "", 80) || "no prompt";
+      const selectedModel = args.model ?? configRef.current.explore?.defaultModel ?? DEFAULT_MODEL;
+      const { provider, model } = splitProviderModel(selectedModel);
+      const modelSuffix = theme.fg("dim", `: ${provider}/${model}`);
       const cwdSuffix = args.cwd ? theme.fg("dim", `: [${args.cwd}]`) : "";
       return new Text(
-        theme.fg("toolTitle", theme.bold("Explore")) + theme.fg("dim", `(${preview})`) + cwdSuffix,
+        theme.fg("toolTitle", theme.bold("Explore")) +
+          theme.fg("dim", `(${preview})`) +
+          modelSuffix +
+          cwdSuffix,
         0,
         0,
       );
