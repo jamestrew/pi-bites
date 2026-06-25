@@ -17,6 +17,7 @@
     "check": "bun run lint && bun run fmt && bun run typecheck && bun run test"
   },
   "dependencies": {
+    "@ff-labs/fff-node": "0.9.6",
     "tree-sitter-bash": "^0.25.1",
     "web-tree-sitter": "^0.26.8"
   },
