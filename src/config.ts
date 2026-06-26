@@ -30,7 +30,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "tools" | "explore" | "todo" | "question" | "spotme" | "inlineReferences" | "promptNormalization" | "atMentionContext" | "tauStatus"
+ *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "tools" | "explore" | "todo" | "question" | "spotme" | "inlineReferences" | "promptNormalization" | "atMentionContext" | "tau"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -121,7 +121,7 @@ export type ExtensionName =
   | "slashSkillAutocomplete"
   | "promptNormalization"
   | "atMentionContext"
-  | "tauStatus";
+  | "tau";
 
 export interface SnacksConfig {
   explore?: ExploreConfig;
@@ -195,7 +195,7 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "inlineReferences",
   "promptNormalization",
   "atMentionContext",
-  "tauStatus",
+  "tau",
 ];
 
 /**

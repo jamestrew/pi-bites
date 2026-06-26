@@ -130,8 +130,21 @@ export async function publishTauStatusForSession(
   }
 }
 
-export default function registerTauStatus(pi: ExtensionAPI): void {
+export default function registerTau(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     await publishTauStatusForSession(ctx);
+  });
+
+  // /agents -----------------------------------------------------------------
+  pi.registerCommand("agents", {
+    description:
+      "Return to Tau or another waiting parent by cooperatively shutting down this Pi session",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(
+        "Shutting down Pi. If this session was launched from Tau or another waiting parent, control will return there.",
+        "info",
+      );
+      ctx.shutdown();
+    },
   });
 }
