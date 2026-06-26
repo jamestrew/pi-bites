@@ -7,7 +7,23 @@ description: Break a plan, spec, or PRD into independently-grabbable issues on t
 
 Break a plan into independently-grabbable issues using vertical slices (tracer bullets).
 
-The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
+
+## Label concepts
+
+Two **category** roles:
+
+- `bug` — something is broken
+- `enhancement` — new feature or improvement
+
+Five **state** roles:
+
+- `needs-triage` — maintainer needs to evaluate
+- `needs-info` — waiting on reporter for more information
+- `ready-for-agent` — fully specified, ready for an AFK agent
+- `ready-for-human` — needs human implementation
+- `wontfix` — will not be actioned
+
+Every triaged issue should carry exactly one category role and one state role. Issues created by this skill are usually `enhancement` plus either `ready-for-agent` for AFK slices or `ready-for-human` for HITL slices, unless the maintainer specifies otherwise.
 
 ## Process
 
@@ -51,7 +67,18 @@ Iterate until the user approves the breakdown.
 
 ### 5. Publish the issues to the issue tracker
 
-For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. These issues are considered ready for AFK agents, so publish them with the correct triage label unless instructed otherwise.
+For each approved slice, publish a new issue to the issue tracker. Use the issue body template below.
+
+Labeling rules:
+
+- AFK slices must be labeled with the `enhancement` category role and the `ready-for-agent` state role unless the user explicitly says not to.
+- HITL slices must be labeled with the `enhancement` category role and the `ready-for-human` state role unless the user explicitly says not to.
+- Use the configured issue-tracker label strings for those canonical roles.
+- If the label for `ready-for-agent` is missing from the repository, create it before publishing or labeling AFK issues:
+
+```sh
+gh label create ready-for-agent --description "Fully specified, ready for an AFK agent" --color 0e8a16
+```
 
 Publish issues in dependency order (blockers first). After creating each dependent issue, add GitHub's native blocking relationship(s) with `gh issue edit`, for example:
 
