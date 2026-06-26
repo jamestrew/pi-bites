@@ -112,7 +112,7 @@ function renderReport(state: State, latestVersion: string, entries: Entry[]) {
     entries.length === 0
       ? "No upstream changelog entries are newer than the checkpoint.\n"
       : entries.map((entry) => `## ${entry.version}\n\n${entry.content}`).join("\n\n");
-  return `# Pi upstream watch — ${today}\n\nPackage: \`${packageName}\`\nCheckpoint: \`${state.lastCheckedVersion}\`\nLatest upstream: \`${latestVersion}\`\n\n## Agent review checklist\n\nClassify every entry below as \`adapt\`, \`leverage\`, \`watch\`, or \`irrelevant\`. Cross-reference local extension code before recommending action. Do not update \`${statePath}\` until the review is accepted.\n\nLocal surfaces to check first: \`src/index.ts\`, \`src/config.ts\`, \`src/tools.ts\`, \`src/explore/\`, \`src/statusline.ts\`, \`src/notifications.ts\`, \`src/file-search/\`, \`src/inline-references/\`, and docs under \`README.md\`.\n\n## Upstream entries\n\n${body}\n`;
+  return `# Pi upstream watch — ${today}\n\nPackage: \`${packageName}\`\nCheckpoint: \`${state.lastCheckedVersion}\`\nLatest upstream: \`${latestVersion}\`\n\n## Agent review checklist\n\nClassify every entry below as \`adapt\`, \`leverage\`, \`watch\`, or \`irrelevant\`. Cross-reference local extension code before recommending action. Do not update \`${statePath}\` until the review is accepted.\n\nLocal surfaces to check first: \`packages/ext/index.ts\`, \`packages/ext/config.ts\`, \`packages/ext/tools.ts\`, \`packages/ext/explore/\`, \`packages/ext/statusline.ts\`, \`packages/ext/notifications.ts\`, \`packages/ext/file-search/\`, \`packages/ext/inline-references/\`, \`packages/tau/\`, and docs under \`README.md\`.\n\n## Upstream entries\n\n${body}\n`;
 }
 
 await main();

@@ -7,7 +7,6 @@ description: Break a plan, spec, or PRD into independently-grabbable issues on t
 
 Break a plan into independently-grabbable issues using vertical slices (tracer bullets).
 
-
 ## Label concepts
 
 Two **category** roles:
