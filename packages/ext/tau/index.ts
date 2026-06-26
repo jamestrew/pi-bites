@@ -210,11 +210,19 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
   };
 }
 
-export default function registerTau(pi: ExtensionAPI): void {
-  const statusRuntime = createTauStatusRuntime();
+export function registerTauStatusHandlers(
+  pi: Pick<ExtensionAPI, "on">,
+  statusRuntime: TauStatusRuntime,
+): void {
+  let agentRunActive = false;
 
   pi.on("session_start", async (_event, ctx) => {
     await statusRuntime.start(ctx);
+  });
+
+  pi.on("agent_start", async () => {
+    agentRunActive = true;
+    await statusRuntime.recordEvent("working");
   });
 
   pi.on("tool_call", async () => {
@@ -222,16 +230,22 @@ export default function registerTau(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", async () => {
+    agentRunActive = false;
     await statusRuntime.recordEvent("idle");
   });
 
   pi.on("turn_end", async () => {
-    await statusRuntime.recordEvent("idle");
+    if (!agentRunActive) await statusRuntime.recordEvent("idle");
   });
 
   pi.on("session_shutdown", async () => {
     await statusRuntime.stop("stopped");
   });
+}
+
+export default function registerTau(pi: ExtensionAPI): void {
+  const statusRuntime = createTauStatusRuntime();
+  registerTauStatusHandlers(pi, statusRuntime);
 
   // /agents -----------------------------------------------------------------
   pi.registerCommand("agents", {
