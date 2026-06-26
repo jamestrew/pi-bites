@@ -7,11 +7,22 @@ import {
   TAU_STATUS_SCHEMA_VERSION,
   type TauStatusRecord as TauSessionStatus,
 } from "#tau/status.js";
-export {
-  TAU_STATUS_SCHEMA_VERSION,
-  type TauStatusRecord as TauSessionStatus,
-  type TauStatusValue as TauSessionStatusValue,
-} from "#tau/status.js";
+
+// Tau readers should treat heartbeatAt as the process-liveness signal, not
+// lastEventAt. Pi refreshes heartbeatAt every 20s; readers should consider a
+// session stale only after at least 60s without a heartbeat to allow scheduler
+// delays, suspend/resume jitter, and slow filesystems.
+export const TAU_HEARTBEAT_INTERVAL_MS = 20_000;
+export const TAU_READER_STALE_AFTER_MS = 60_000;
+
+export type TauSessionStatusValue =
+  | "idle"
+  | "working"
+  | "needs-input"
+  | "needs-permission"
+  | "stopped"
+  | "stale"
+  | "failed";
 
 export interface TauStatusPaths {
   directory: string;
@@ -44,6 +55,18 @@ export interface PublishTauStatusOptions {
   ppid?: number;
   writeSidecar?: (payload: TauSessionStatus) => Promise<void>;
   onError?: (error: unknown) => void;
+}
+
+export interface TauStatusRuntimeOptions extends PublishTauStatusOptions {
+  heartbeatIntervalMs?: number;
+  setInterval?: typeof setInterval;
+  clearInterval?: typeof clearInterval;
+}
+
+export interface TauStatusRuntime {
+  start(ctx: TauStatusContext): Promise<void>;
+  recordEvent(status?: TauSessionStatusValue): Promise<void>;
+  stop(status?: TauSessionStatusValue): Promise<void>;
 }
 
 export function getDefaultTauAgentsDir(agentDir = getAgentDir()): string {
@@ -92,6 +115,17 @@ function logTauStatusPublishError(error: unknown): void {
   console.error(`pi-bites: failed to write Tau status sidecar: ${error}`);
 }
 
+async function writeTauStatusSafely(
+  payload: TauSessionStatus,
+  options: PublishTauStatusOptions,
+): Promise<void> {
+  try {
+    await (options.writeSidecar ?? writeTauStatusSidecar)(payload);
+  } catch (error) {
+    (options.onError ?? logTauStatusPublishError)(error);
+  }
+}
+
 export async function publishTauStatusForSession(
   ctx: TauStatusContext,
   options: PublishTauStatusOptions = {},
@@ -109,16 +143,94 @@ export async function publishTauStatusForSession(
     now: options.now?.() ?? Date.now(),
   });
 
-  try {
-    await (options.writeSidecar ?? writeTauStatusSidecar)(payload);
-  } catch (error) {
-    (options.onError ?? logTauStatusPublishError)(error);
-  }
+  await writeTauStatusSafely(payload, options);
+}
+
+export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): TauStatusRuntime {
+  let current: TauSessionStatus | undefined;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let writeQueue = Promise.resolve();
+
+  const now = () => options.now?.() ?? Date.now();
+  const enqueueWrite = (payload: TauSessionStatus): Promise<void> => {
+    const write = writeQueue.then(() => writeTauStatusSafely(payload, options));
+    writeQueue = write.catch(() => {});
+    return write;
+  };
+  const writeCurrent = async () => {
+    if (current) await enqueueWrite({ ...current });
+  };
+  const clearHeartbeat = () => {
+    if (!heartbeatTimer) return;
+    (options.clearInterval ?? clearInterval)(heartbeatTimer);
+    heartbeatTimer = undefined;
+  };
+
+  return {
+    async start(ctx) {
+      clearHeartbeat();
+
+      const sessionId = ctx.sessionManager.getSessionId();
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      if (!sessionFile) return;
+
+      current = buildTauStatusPayload({
+        sessionId,
+        sessionFile,
+        cwd: ctx.cwd,
+        pid: options.pid ?? process.pid,
+        ppid: options.ppid ?? process.ppid,
+        now: now(),
+      });
+      await writeCurrent();
+
+      heartbeatTimer = (options.setInterval ?? setInterval)(() => {
+        if (!current) return;
+        current = { ...current, heartbeatAt: now() };
+        void writeCurrent();
+      }, options.heartbeatIntervalMs ?? TAU_HEARTBEAT_INTERVAL_MS);
+      heartbeatTimer.unref?.();
+    },
+
+    async recordEvent(status = current?.status ?? "idle") {
+      if (!current) return;
+      const eventAt = now();
+      current = { ...current, status, heartbeatAt: eventAt, lastEventAt: eventAt };
+      await writeCurrent();
+    },
+
+    async stop(status = "stopped") {
+      clearHeartbeat();
+      if (!current) return;
+      const stoppedAt = now();
+      current = { ...current, status, heartbeatAt: stoppedAt, lastEventAt: stoppedAt };
+      await writeCurrent();
+      current = undefined;
+    },
+  };
 }
 
 export default function registerTau(pi: ExtensionAPI): void {
+  const statusRuntime = createTauStatusRuntime();
+
   pi.on("session_start", async (_event, ctx) => {
-    await publishTauStatusForSession(ctx);
+    await statusRuntime.start(ctx);
+  });
+
+  pi.on("tool_call", async () => {
+    await statusRuntime.recordEvent("working");
+  });
+
+  pi.on("agent_end", async () => {
+    await statusRuntime.recordEvent("idle");
+  });
+
+  pi.on("turn_end", async () => {
+    await statusRuntime.recordEvent("idle");
+  });
+
+  pi.on("session_shutdown", async () => {
+    await statusRuntime.stop("stopped");
   });
 
   // /agents -----------------------------------------------------------------
