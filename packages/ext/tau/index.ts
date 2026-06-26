@@ -3,29 +3,15 @@ import { dirname, join } from "node:path";
 
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export const TAU_STATUS_SCHEMA_VERSION = 1;
-
-export type TauSessionStatusValue =
-  | "idle"
-  | "working"
-  | "needs-input"
-  | "needs-permission"
-  | "stopped"
-  | "stale"
-  | "failed";
-
-export interface TauSessionStatus {
-  schemaVersion: typeof TAU_STATUS_SCHEMA_VERSION;
-  sessionId: string;
-  sessionFile: string;
-  cwd: string;
-  pid: number;
-  ppid?: number;
-  startedAt: number;
-  heartbeatAt: number;
-  lastEventAt: number;
-  status: TauSessionStatusValue;
-}
+import {
+  TAU_STATUS_SCHEMA_VERSION,
+  type TauStatusRecord as TauSessionStatus,
+} from "#tau/status.js";
+export {
+  TAU_STATUS_SCHEMA_VERSION,
+  type TauStatusRecord as TauSessionStatus,
+  type TauStatusValue as TauSessionStatusValue,
+} from "#tau/status.js";
 
 export interface TauStatusPaths {
   directory: string;

@@ -5,6 +5,9 @@
     "pi-package"
   ],
   "type": "module",
+  "imports": {
+    "#tau/*.js": "./packages/tau/*.ts"
+  },
   "scripts": {
     "dev": "pi -ne -e ./packages/ext/index.ts",
     "lint": "oxlint .",
