@@ -15,8 +15,8 @@ usage() {
 Usage: $0 [--limit N] [--jobs N] [--repo OWNER/REPO] [--label LABEL] [--base BRANCH] [--review-skill PATH] [--handoff-skill PATH] [--pi-arg ARG ...]
 
 Find open ready-for-agent issues for this repo that are not blocked by any open
-native GitHub blocking relationship, then run a non-interactive pi
-implementation/review/fix/PR pipeline for each issue.
+native GitHub blocking relationship and do not already have an open linked PR,
+then run a non-interactive pi implementation/review/fix/PR pipeline for each issue.
 
 Options:
   -n, --limit N        Maximum number of issues to work on (default: no cap)
@@ -92,8 +92,15 @@ ensure_jj_description() {
 issue_is_unblocked() {
   local issue_json="$1"
   local open_blockers
-  open_blockers="$(jq '[.blockedBy.nodes[]? | select(.state != "CLOSED")] | length' <<<"$issue_json")"
+  open_blockers="$(jq '[((.blockedBy | if type == "object" then (.nodes // []) elif type == "array" then . else [] end)[]) | select(.state != "CLOSED")] | length' <<<"$issue_json")"
   [[ "$open_blockers" -eq 0 ]]
+}
+
+issue_has_open_pr() {
+  local issue_json="$1"
+  local open_prs
+  open_prs="$(jq '[((.closedByPullRequestsReferences | if type == "object" then (.nodes // []) elif type == "array" then . else [] end)[]) | select(.state == "OPEN")] | length' <<<"$issue_json")"
+  [[ "$open_prs" -gt 0 ]]
 }
 
 fetch_candidates() {
@@ -105,10 +112,16 @@ mapfile -t issue_numbers < <({ fetch_candidates "$LABEL"; fetch_candidates "read
 
 selected_issue_files=()
 for number in "${issue_numbers[@]}"; do
-  issue_json="$(gh issue view "$number" -R "$REPO" --json number,title,body,url,labels,author,comments,blockedBy)"
+  issue_json="$(gh issue view "$number" -R "$REPO" --json number,title,body,url,labels,author,comments,blockedBy,closedByPullRequestsReferences)"
   if ! issue_is_unblocked "$issue_json"; then
-    blockers="$(jq -r '[.blockedBy.nodes[]? | select(.state != "CLOSED") | "#\(.number)"] | join(", ")' <<<"$issue_json")"
+    blockers="$(jq -r '[((.blockedBy | if type == "object" then (.nodes // []) elif type == "array" then . else [] end)[]) | select(.state != "CLOSED") | "#\(.number)"] | join(", ")' <<<"$issue_json")"
     echo "Skipping #$number: blocked by ${blockers:-unknown open blocker}"
+    continue
+  fi
+
+  if issue_has_open_pr "$issue_json"; then
+    prs="$(jq -r '[((.closedByPullRequestsReferences | if type == "object" then (.nodes // []) elif type == "array" then . else [] end)[]) | select(.state == "OPEN") | "#\(.number)"] | join(", ")' <<<"$issue_json")"
+    echo "Skipping #$number: already has open PR ${prs:-unknown}"
     continue
   fi
 
