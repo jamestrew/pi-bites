@@ -13,8 +13,9 @@ usage() {
   cat <<USAGE
 Usage: $0 [--limit N] [--repo OWNER/REPO] [--label LABEL] [--base BRANCH] [--review-skill PATH] [--handoff-skill PATH] [--pi-arg ARG ...]
 
-Find open ready-for-agent issues for this repo that are not blocked, then run a
-non-interactive pi implementation/review/fix/PR pipeline for each issue.
+Find open ready-for-agent issues for this repo that are not blocked by any open
+native GitHub blocking relationship, then run a non-interactive pi
+implementation/review/fix/PR pipeline for each issue.
 
 Options:
   -n, --limit N        Maximum number of issues to work on (default: no cap)
@@ -79,44 +80,11 @@ ensure_jj_description() {
   fi
 }
 
-section_after_blocked_by() {
-  awk '
-    /^##[[:space:]]+Blocked by[[:space:]]*$/ { in_section=1; next }
-    /^##[[:space:]]+/ && in_section { exit }
-    in_section { print }
-  '
-}
-
 issue_is_unblocked() {
   local issue_json="$1"
-  local body blocked refs ref num state
-  body="$(jq -r '.body // ""' <<<"$issue_json")"
-  blocked="$(printf '%s\n' "$body" | section_after_blocked_by)"
-
-  if [[ -z "$(printf '%s' "$blocked" | tr -d '[:space:]')" ]]; then
-    return 0
-  fi
-
-  if grep -Eiq 'none|can start immediately|n/a|not blocked' <<<"$blocked"; then
-    return 0
-  fi
-
-  mapfile -t refs < <(grep -Eo '([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+' <<<"$blocked" | sort -u || true)
-  if [[ ${#refs[@]} -eq 0 ]]; then
-    return 1
-  fi
-
-  for ref in "${refs[@]}"; do
-    if [[ "$ref" == */*#* ]]; then
-      state="$(gh issue view "$ref" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
-    else
-      num="${ref#\#}"
-      state="$(gh issue view "$num" -R "$REPO" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
-    fi
-    [[ "$state" == "CLOSED" ]] || return 1
-  done
-
-  return 0
+  local open_blockers
+  open_blockers="$(jq '[.blockedBy.nodes[]? | select(.state != "CLOSED")] | length' <<<"$issue_json")"
+  [[ "$open_blockers" -eq 0 ]]
 }
 
 fetch_candidates() {
@@ -130,9 +98,10 @@ worked=0
 original_rev="$(jj log -r @ --no-graph --template 'change_id' 2>/dev/null || true)"
 
 for number in "${issue_numbers[@]}"; do
-  issue_json="$(gh issue view "$number" -R "$REPO" --json number,title,body,url,labels,author,comments)"
+  issue_json="$(gh issue view "$number" -R "$REPO" --json number,title,body,url,labels,author,comments,blockedBy)"
   if ! issue_is_unblocked "$issue_json"; then
-    echo "Skipping #$number: blocked"
+    blockers="$(jq -r '[.blockedBy.nodes[]? | select(.state != "CLOSED") | "#\(.number)"] | join(", ")' <<<"$issue_json")"
+    echo "Skipping #$number: blocked by ${blockers:-unknown open blocker}"
     continue
   fi
 

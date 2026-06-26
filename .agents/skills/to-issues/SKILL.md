@@ -53,7 +53,15 @@ Iterate until the user approves the breakdown.
 
 For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. These issues are considered ready for AFK agents, so publish them with the correct triage label unless instructed otherwise.
 
-Publish issues in dependency order (blockers first) so you can reference real issue identifiers in the "Blocked by" field.
+Publish issues in dependency order (blockers first). After creating each dependent issue, add GitHub's native blocking relationship(s) with `gh issue edit`, for example:
+
+```sh
+gh issue edit <dependent-issue-number> --add-blocked-by <blocking-issue-number>
+# or, equivalently from the blocker side:
+gh issue edit <blocking-issue-number> --add-blocking <dependent-issue-number>
+```
+
+Do not represent issue-to-issue dependencies only as Markdown in the issue body. If the platform command fails or the tracker does not support native relationships, stop and report the failure instead of silently falling back to a Markdown dependency list.
 
 <issue-template>
 ## Parent
@@ -71,12 +79,6 @@ Avoid specific file paths or code snippets — they go stale fast. Exception: if
 - [ ] Criterion 1
 - [ ] Criterion 2
 - [ ] Criterion 3
-
-## Blocked by
-
-- A reference to the blocking ticket (if any)
-
-Or "None - can start immediately" if no blockers.
 
 </issue-template>
 
