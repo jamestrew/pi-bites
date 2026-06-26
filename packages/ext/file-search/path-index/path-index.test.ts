@@ -1,8 +1,10 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
-const listProjectPathsMock = mock(async (cwd: string) => [`${cwd}/file.ts`]);
+const { listProjectPathsMock } = vi.hoisted(() => ({
+  listProjectPathsMock: vi.fn(async (cwd: string) => [`${cwd}/file.ts`]),
+}));
 
-mock.module("../fd-index/index.js", () => ({
+vi.mock("../fd-index/index.js", () => ({
   listProjectPaths: listProjectPathsMock,
 }));
 

@@ -1,15 +1,17 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { listProjectPaths } from "./index.js";
 
-const fdAvailable = Bun.which("fd") !== null;
+const fdAvailable = spawnSync("fd", ["--version"], { stdio: "ignore" }).status === 0;
 const describeIfFd = fdAvailable ? describe : describe.skip;
 
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = await Bun.$`mktemp -d`.text().then((path) => path.trim());
+  tmpDir = await mkdtemp(join(tmpdir(), "pi-bites-fd-index-"));
 });
 
 afterEach(async () => {

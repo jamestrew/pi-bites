@@ -1,7 +1,7 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { expandMention, parseAtMentions } from "./index.js";
 
 async function fixture() {

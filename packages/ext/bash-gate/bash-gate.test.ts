@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { extractBashFacts } from "./bash-command-facts.js";
 import { findMatchedPattern, findMatchedPatterns } from "./index.js";
 
@@ -51,7 +51,7 @@ describe("findMatchedPattern", () => {
   test("matches every gated command in a compound command", async () => {
     const matches = await findMatchedPatterns("chmod +x foo && rm bar");
 
-    expect(matches.map((match) => match.label)).toContainValues(["chmod", "rm"]);
+    expect(matches.map((match) => match.label)).toEqual(expect.arrayContaining(["chmod", "rm"]));
   });
 
   test("matches every gated command separated by semicolons", async () => {

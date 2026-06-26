@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 
 import { visibleWidth } from "@earendil-works/pi-tui";
 

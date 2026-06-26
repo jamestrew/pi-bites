@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { buildDoneStats } from "./index.js";
 
 test("buildDoneStats renders pi-style token usage", () => {
