@@ -129,16 +129,22 @@ test("surfaces lastError for failed sidecars even when freshness metadata is sta
   );
 });
 
-test("renders missing session file targets safely", () => {
-  const lines = renderTauDashboard(
-    [session({ sessionId: "missing", sessionFileExists: false })],
+test("omits missing session file targets safely", () => {
+  const view = buildTauDashboardView(
+    [
+      session({ sessionId: "missing", sessionFileExists: false }),
+      session({ sessionId: "existing" }),
+    ],
     [],
-    { now: NOW, width: 120 },
+    { now: NOW, width: 120, selectedSessionId: "missing" },
   );
 
-  expect(lines).toContain(
-    "  • missing session file in pi-bites — missing session file · pi-bites · 20s ago",
-  );
+  expect(view.lines.join("\n")).not.toContain("missing");
+  expect(view.rows.filter((row) => row.kind === "session").map((row) => row.sessionId)).toEqual([
+    "existing",
+  ]);
+  expect(view.selectableSessionIds).toEqual(["existing"]);
+  expect(view.lines).toContain("  • observing in pi-bites — observing · pi-bites · 20s ago");
 });
 
 test("renders selected sessions distinctly and exposes concise help", () => {

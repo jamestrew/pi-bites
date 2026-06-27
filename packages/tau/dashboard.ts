@@ -145,21 +145,28 @@ function summarizeIssues(issues: readonly TauStatusLoadIssue[]): string | undefi
   return `Warning: skipped ${issues.length} Tau status record${issues.length === 1 ? "" : "s"} (${summary}).`;
 }
 
+function renderableSessions(
+  sessions: readonly TauDashboardSession[],
+): readonly TauDashboardSession[] {
+  return sessions.filter((session) => session.sessionFileExists);
+}
+
 export function reconcileTauDashboardSelection(
   sessions: readonly TauDashboardSession[],
   options: ReconcileTauDashboardSelectionOptions = {},
 ): TauDashboardSelectionState {
-  if (sessions.length === 0) return { selectedIndex: -1 };
+  const visibleSessions = renderableSessions(sessions);
+  if (visibleSessions.length === 0) return { selectedIndex: -1 };
 
   const existingIndex = options.previousSessionId
-    ? sessions.findIndex((session) => session.sessionId === options.previousSessionId)
+    ? visibleSessions.findIndex((session) => session.sessionId === options.previousSessionId)
     : -1;
   const selectedIndex =
     existingIndex >= 0
       ? existingIndex
-      : Math.min(Math.max(options.previousIndex ?? 0, 0), sessions.length - 1);
+      : Math.min(Math.max(options.previousIndex ?? 0, 0), visibleSessions.length - 1);
 
-  return { selectedSessionId: sessions[selectedIndex]?.sessionId, selectedIndex };
+  return { selectedSessionId: visibleSessions[selectedIndex]?.sessionId, selectedIndex };
 }
 
 export function moveTauDashboardSelection(
@@ -167,15 +174,16 @@ export function moveTauDashboardSelection(
   state: TauDashboardSelectionState,
   delta: number,
 ): TauDashboardSelectionState {
-  if (sessions.length === 0) return { selectedIndex: -1 };
+  const visibleSessions = renderableSessions(sessions);
+  if (visibleSessions.length === 0) return { selectedIndex: -1 };
   const currentIndex = state.selectedSessionId
-    ? sessions.findIndex((session) => session.sessionId === state.selectedSessionId)
+    ? visibleSessions.findIndex((session) => session.sessionId === state.selectedSessionId)
     : state.selectedIndex;
   const selectedIndex = Math.min(
     Math.max((currentIndex >= 0 ? currentIndex : 0) + delta, 0),
-    sessions.length - 1,
+    visibleSessions.length - 1,
   );
-  return { selectedSessionId: sessions[selectedIndex]?.sessionId, selectedIndex };
+  return { selectedSessionId: visibleSessions[selectedIndex]?.sessionId, selectedIndex };
 }
 
 function pushRow(rows: TauDashboardRow[], row: TauDashboardRow): void {
@@ -227,6 +235,7 @@ export function buildTauDashboardView(
   options: RenderTauDashboardOptions = {},
 ): TauDashboardViewModel {
   const now = options.now ?? Date.now();
+  const visibleSessions = renderableSessions(sessions);
   const rows: TauDashboardRow[] = [];
   pushRow(rows, { kind: "chrome", line: TAU_DASHBOARD_TITLE });
   pushRow(rows, { kind: "chrome", line: PRODUCT_BOUNDARY_COPY });
@@ -237,11 +246,11 @@ export function buildTauDashboardView(
     pushRow(rows, { kind: "chrome", line: "" });
   }
 
-  if (sessions.length === 0) {
+  if (visibleSessions.length === 0) {
     pushRow(rows, { kind: "empty", line: EMPTY_STATE_COPY });
   } else {
     const byState = new Map<TauStatusValue, TauDashboardSession[]>();
-    for (const session of sessions) {
+    for (const session of visibleSessions) {
       const bucket = byState.get(session.state) ?? [];
       bucket.push(session);
       byState.set(session.state, bucket);
@@ -283,7 +292,7 @@ export function buildTauDashboardView(
     title: TAU_DASHBOARD_TITLE,
     lines,
     rows,
-    selectableSessionIds: sessions.map((session) => session.sessionId),
+    selectableSessionIds: visibleSessions.map((session) => session.sessionId),
   };
 }
 
