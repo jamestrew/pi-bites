@@ -2,12 +2,10 @@ import { Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui
 
 import type { TauDashboardSession, TauStatusLoadIssue, TauStatusValue } from "./index.js";
 
-export const TAU_DASHBOARD_TITLE = "Tau · Pi agents dashboard";
+export const TAU_DASHBOARD_TITLE = "Tau · Pi agents";
 
-const PRODUCT_BOUNDARY_COPY =
-  "Tau observes sidecar status and opens sessions; native pi remains the session UI.";
-const EMPTY_STATE_COPY =
-  "No Tau sidecar statuses were found yet. Start pi with Tau enabled to populate ~/.pi/agents/sessions.";
+const PRODUCT_BOUNDARY_COPY = "observes Pi sessions · enter opens native pi";
+const EMPTY_STATE_COPY = "No Tau sessions yet.";
 
 const GROUP_ORDER = [
   "working",
@@ -91,50 +89,27 @@ function compactPath(path: string): string {
   return parts.at(-1) ?? path;
 }
 
-interface TauSessionRowParts {
-  identity: string;
-  action: string;
+function sessionLabel(session: TauDashboardSession): string {
+  return session.title?.trim() || session.sessionId;
 }
 
-function activityLabel(session: TauDashboardSession, separator: " · " | " ("): string | undefined {
+function actionLabel(session: TauDashboardSession): string {
+  if (!session.sessionFileExists) return "missing session file";
+  if ((session.state === "failed" || session.sourceStatus === "failed") && session.lastError)
+    return session.lastError;
+  if (session.state === "stopped") return "stopped";
+  if (session.state === "stale") return "stale";
   if (session.currentAction && session.currentTool) {
-    return separator === " ("
-      ? `${session.currentAction} (${session.currentTool})`
-      : `${session.currentAction}${separator}${session.currentTool}`;
+    return `${session.currentAction} · ${session.currentTool}`;
   }
-  return session.currentAction || session.currentTool;
-}
-
-function describeSessionRow(session: TauDashboardSession): TauSessionRowParts {
-  const title = session.title?.trim();
-  const activity = activityLabel(session, " · ");
-  const status = !session.sessionFileExists
-    ? "missing session file"
-    : session.state === "idle"
-      ? "observing"
-      : GROUP_LABELS[session.state].toLowerCase();
-  const cwd = compactPath(session.cwd);
-
-  if (title) return { identity: title, action: activity ?? session.lastError ?? status };
-
-  if ((session.state === "failed" || session.sourceStatus === "failed") && session.lastError) {
-    return { identity: `Failed: ${session.lastError}`, action: "failed" };
-  }
-
-  const identity = activityLabel(session, " (") ?? (cwd ? `${status} in ${cwd}` : status);
-  return { identity, action: activity ?? session.lastError ?? status };
+  return session.currentAction || session.currentTool || session.lastError || "observing";
 }
 
 function renderRow(session: TauDashboardSession, now: number, selected: boolean): string {
   const cwd = compactPath(session.cwd);
   const age = formatAge(now - session.activityAt);
   const marker = selected ? "›" : " ";
-  const { identity, action } = describeSessionRow(session);
-  return `${marker} • ${identity} — ${action} · ${cwd} · ${age}`;
-}
-
-function renderSelectedDetail(session: TauDashboardSession): string {
-  return `    cwd ${session.cwd} · id ${session.sessionId}`;
+  return `${marker} • ${sessionLabel(session)} — ${actionLabel(session)} · ${cwd} · ${age}`;
 }
 
 function summarizeIssues(issues: readonly TauStatusLoadIssue[]): string | undefined {
@@ -151,22 +126,52 @@ function renderableSessions(
   return sessions.filter((session) => session.sessionFileExists);
 }
 
+function summarizeSessions(sessions: readonly TauDashboardSession[]): string {
+  const counts = new Map<TauStatusValue, number>();
+  for (const session of sessions) counts.set(session.state, (counts.get(session.state) ?? 0) + 1);
+  const parts = GROUP_ORDER.map((state) => {
+    const count = counts.get(state) ?? 0;
+    if (count === 0) return undefined;
+    return `${count} ${GROUP_LABELS[state].toLowerCase()}`;
+  }).filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(" · ") : "0 sessions";
+}
+
+function groupSessionsByDashboardOrder(
+  sessions: readonly TauDashboardSession[],
+): Array<[TauStatusValue, TauDashboardSession[]]> {
+  const byState = new Map<TauStatusValue, TauDashboardSession[]>();
+  for (const session of sessions) {
+    const bucket = byState.get(session.state) ?? [];
+    bucket.push(session);
+    byState.set(session.state, bucket);
+  }
+
+  return GROUP_ORDER.map((state) => [state, byState.get(state) ?? []]);
+}
+
+function orderSessionsForDashboard(
+  sessions: readonly TauDashboardSession[],
+): TauDashboardSession[] {
+  return groupSessionsByDashboardOrder(renderableSessions(sessions)).flatMap(([, group]) => group);
+}
+
 export function reconcileTauDashboardSelection(
   sessions: readonly TauDashboardSession[],
   options: ReconcileTauDashboardSelectionOptions = {},
 ): TauDashboardSelectionState {
-  const visibleSessions = renderableSessions(sessions);
-  if (visibleSessions.length === 0) return { selectedIndex: -1 };
+  const orderedSessions = orderSessionsForDashboard(sessions);
+  if (orderedSessions.length === 0) return { selectedIndex: -1 };
 
   const existingIndex = options.previousSessionId
-    ? visibleSessions.findIndex((session) => session.sessionId === options.previousSessionId)
+    ? orderedSessions.findIndex((session) => session.sessionId === options.previousSessionId)
     : -1;
   const selectedIndex =
     existingIndex >= 0
       ? existingIndex
-      : Math.min(Math.max(options.previousIndex ?? 0, 0), visibleSessions.length - 1);
+      : Math.min(Math.max(options.previousIndex ?? 0, 0), orderedSessions.length - 1);
 
-  return { selectedSessionId: visibleSessions[selectedIndex]?.sessionId, selectedIndex };
+  return { selectedSessionId: orderedSessions[selectedIndex]?.sessionId, selectedIndex };
 }
 
 export function moveTauDashboardSelection(
@@ -174,16 +179,16 @@ export function moveTauDashboardSelection(
   state: TauDashboardSelectionState,
   delta: number,
 ): TauDashboardSelectionState {
-  const visibleSessions = renderableSessions(sessions);
-  if (visibleSessions.length === 0) return { selectedIndex: -1 };
+  const orderedSessions = orderSessionsForDashboard(sessions);
+  if (orderedSessions.length === 0) return { selectedIndex: -1 };
   const currentIndex = state.selectedSessionId
-    ? visibleSessions.findIndex((session) => session.sessionId === state.selectedSessionId)
+    ? orderedSessions.findIndex((session) => session.sessionId === state.selectedSessionId)
     : state.selectedIndex;
   const selectedIndex = Math.min(
     Math.max((currentIndex >= 0 ? currentIndex : 0) + delta, 0),
-    visibleSessions.length - 1,
+    orderedSessions.length - 1,
   );
-  return { selectedSessionId: visibleSessions[selectedIndex]?.sessionId, selectedIndex };
+  return { selectedSessionId: orderedSessions[selectedIndex]?.sessionId, selectedIndex };
 }
 
 function pushRow(rows: TauDashboardRow[], row: TauDashboardRow): void {
@@ -237,8 +242,9 @@ export function buildTauDashboardView(
   const now = options.now ?? Date.now();
   const visibleSessions = renderableSessions(sessions);
   const rows: TauDashboardRow[] = [];
-  pushRow(rows, { kind: "chrome", line: TAU_DASHBOARD_TITLE });
-  pushRow(rows, { kind: "chrome", line: PRODUCT_BOUNDARY_COPY });
+  pushRow(rows, { kind: "chrome", line: `▐▛███▜▌  ${TAU_DASHBOARD_TITLE}` });
+  pushRow(rows, { kind: "chrome", line: `  ▘▘ ▝▝   ${summarizeSessions(visibleSessions)}` });
+  pushRow(rows, { kind: "chrome", line: `          ${PRODUCT_BOUNDARY_COPY}` });
   pushRow(rows, { kind: "chrome", line: "" });
   const warning = summarizeIssues(issues);
   if (warning) {
@@ -249,28 +255,15 @@ export function buildTauDashboardView(
   if (visibleSessions.length === 0) {
     pushRow(rows, { kind: "empty", line: EMPTY_STATE_COPY });
   } else {
-    const byState = new Map<TauStatusValue, TauDashboardSession[]>();
-    for (const session of visibleSessions) {
-      const bucket = byState.get(session.state) ?? [];
-      bucket.push(session);
-      byState.set(session.state, bucket);
-    }
-
-    for (const state of GROUP_ORDER) {
-      const group = byState.get(state) ?? [];
-      pushRow(rows, { kind: "header", line: `${GROUP_LABELS[state]} (${group.length})` });
-      if (group.length === 0) {
-        pushRow(rows, { kind: "empty", line: "  none" });
-      } else {
-        for (const session of group) {
-          const selected = session.sessionId === options.selectedSessionId;
-          pushRow(rows, {
-            kind: "session",
-            line: renderRow(session, now, selected),
-            sessionId: session.sessionId,
-          });
-          if (selected) pushRow(rows, { kind: "chrome", line: renderSelectedDetail(session) });
-        }
+    for (const [state, group] of groupSessionsByDashboardOrder(visibleSessions)) {
+      if (group.length === 0) continue;
+      pushRow(rows, { kind: "header", line: GROUP_LABELS[state] });
+      for (const session of group) {
+        pushRow(rows, {
+          kind: "session",
+          line: renderRow(session, now, session.sessionId === options.selectedSessionId),
+          sessionId: session.sessionId,
+        });
       }
       pushRow(rows, { kind: "chrome", line: "" });
     }
@@ -278,12 +271,12 @@ export function buildTauDashboardView(
   }
 
   pushRow(rows, { kind: "chrome", line: "" });
-  pushRow(rows, { kind: "chrome", line: "enter open · r refresh · q quit · ? help" });
+  pushRow(rows, { kind: "chrome", line: "enter open · ↑/↓ move · q quit · ? help" });
   if (options.showHelp) {
     pushRow(rows, { kind: "chrome", line: "" });
     pushRow(rows, {
       kind: "chrome",
-      line: "Help: ↑/↓ or j/k move selection; Enter opens the selected session in native pi; r refreshes; q quits; ? toggles help.",
+      line: "Help: ↑/↓ or j/k move selection; Enter opens the selected session in native pi; q quits; ? toggles help.",
     });
   }
 
@@ -292,7 +285,7 @@ export function buildTauDashboardView(
     title: TAU_DASHBOARD_TITLE,
     lines,
     rows,
-    selectableSessionIds: visibleSessions.map((session) => session.sessionId),
+    selectableSessionIds: orderSessionsForDashboard(sessions).map((session) => session.sessionId),
   };
 }
 
