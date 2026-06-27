@@ -10,6 +10,13 @@ import {
 } from "./status.js";
 
 export { TAU_STATUS_SCHEMA_VERSION, type TauStatusRecord, type TauStatusValue } from "./status.js";
+export {
+  TAU_DASHBOARD_TITLE,
+  buildTauDashboardView,
+  renderTauDashboard,
+  type RenderTauDashboardOptions,
+  type TauDashboardViewModel,
+} from "./dashboard.js";
 
 export const DEFAULT_TAU_STALE_AFTER_MS = 30_000;
 

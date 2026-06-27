@@ -4,12 +4,16 @@
   "keywords": [
     "pi-package"
   ],
+  "bin": {
+    "tau": "./packages/tau/cli.ts"
+  },
   "type": "module",
   "imports": {
     "#tau/*.js": "./packages/tau/*.ts"
   },
   "scripts": {
     "dev": "pi -ne -e ./packages/ext/index.ts",
+    "tau": "bun ./packages/tau/cli.ts",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "fmt": "oxfmt --write .",
