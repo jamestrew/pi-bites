@@ -63,9 +63,17 @@ export interface TauStatusRuntimeOptions extends PublishTauStatusOptions {
   clearInterval?: typeof clearInterval;
 }
 
+export interface TauStatusRuntimeEventMetadata {
+  currentAction?: string;
+  currentTool?: string;
+}
+
 export interface TauStatusRuntime {
   start(ctx: TauStatusContext): Promise<void>;
-  recordEvent(status?: TauSessionStatusValue): Promise<void>;
+  recordEvent(
+    status?: TauSessionStatusValue,
+    metadata?: TauStatusRuntimeEventMetadata,
+  ): Promise<void>;
   stop(status?: TauSessionStatusValue): Promise<void>;
 }
 
@@ -192,10 +200,26 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
       heartbeatTimer.unref?.();
     },
 
-    async recordEvent(status = current?.status ?? "idle") {
+    async recordEvent(status = current?.status ?? "idle", metadata = {}) {
       if (!current) return;
       const eventAt = now();
-      current = { ...current, status, heartbeatAt: eventAt, lastEventAt: eventAt };
+      const next: TauSessionStatus = {
+        ...current,
+        status,
+        heartbeatAt: eventAt,
+        lastEventAt: eventAt,
+      };
+
+      if ("currentAction" in metadata) {
+        if (metadata.currentAction === undefined) delete next.currentAction;
+        else next.currentAction = metadata.currentAction;
+      }
+      if ("currentTool" in metadata) {
+        if (metadata.currentTool === undefined) delete next.currentTool;
+        else next.currentTool = metadata.currentTool;
+      }
+
+      current = next;
       await writeCurrent();
     },
 
@@ -204,10 +228,19 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
       if (!current) return;
       const stoppedAt = now();
       current = { ...current, status, heartbeatAt: stoppedAt, lastEventAt: stoppedAt };
+      delete current.currentAction;
+      delete current.currentTool;
       await writeCurrent();
       current = undefined;
     },
   };
+}
+
+function describeToolAction(toolName: string, input: Record<string, unknown>): string {
+  if (toolName === "bash" && typeof input.command === "string" && input.command.trim() !== "") {
+    return `Running ${input.command.trim()}`;
+  }
+  return `Running ${toolName}`;
 }
 
 export function registerTauStatusHandlers(
@@ -215,6 +248,12 @@ export function registerTauStatusHandlers(
   statusRuntime: TauStatusRuntime,
 ): void {
   let agentRunActive = false;
+  const activeTools = new Map<string, TauStatusRuntimeEventMetadata>();
+
+  const currentToolMetadata = (): TauStatusRuntimeEventMetadata => {
+    const last = Array.from(activeTools.values()).at(-1);
+    return last ?? { currentAction: undefined, currentTool: undefined };
+  };
 
   pi.on("session_start", async (_event, ctx) => {
     await statusRuntime.start(ctx);
@@ -225,17 +264,30 @@ export function registerTauStatusHandlers(
     await statusRuntime.recordEvent("working");
   });
 
-  pi.on("tool_call", async () => {
-    await statusRuntime.recordEvent("working");
+  pi.on("tool_call", async (event) => {
+    const metadata = {
+      currentAction: describeToolAction(event.toolName, event.input),
+      currentTool: event.toolName,
+    };
+    activeTools.set(event.toolCallId, metadata);
+    await statusRuntime.recordEvent("working", metadata);
+  });
+
+  pi.on("tool_result", async (event) => {
+    activeTools.delete(event.toolCallId);
+    const metadata = currentToolMetadata();
+    await statusRuntime.recordEvent(agentRunActive ? "working" : "idle", metadata);
   });
 
   pi.on("agent_end", async () => {
     agentRunActive = false;
-    await statusRuntime.recordEvent("idle");
+    activeTools.clear();
+    await statusRuntime.recordEvent("idle", { currentAction: undefined, currentTool: undefined });
   });
 
   pi.on("turn_end", async () => {
-    if (!agentRunActive) await statusRuntime.recordEvent("idle");
+    if (!agentRunActive)
+      await statusRuntime.recordEvent("idle", { currentAction: undefined, currentTool: undefined });
   });
 
   pi.on("session_shutdown", async () => {
