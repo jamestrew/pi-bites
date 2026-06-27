@@ -16,6 +16,7 @@ A small collection of personal extensions for the pi coding agent.
 - Custom todo and question tools
 - Optional notifications
 - Session-scoped `/rollback` checkpoints for Pi-authored `edit`/`write` changes
+- Tau sidecar status files for multi-agent dashboards
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
 - Inline `$skill:name` / `$prompt:name` references with hidden context injection
 
@@ -68,7 +69,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, rollback, spotme, inlineReferences, promptNormalization, atMentionContext
+bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, rollback, tau, spotme, inlineReferences, promptNormalization, atMentionContext
 ```
 
 You can also edit config directly:
@@ -102,6 +103,10 @@ Or disable the extension entirely with `/bites:off rollback`.
 Run `/usage` inside pi to open an interactive dashboard of local session usage. It reads session JSONL files from `~/.pi/agent/sessions` (or `PI_CODING_AGENT_DIR/sessions`) and summarizes cost, messages, sessions, and token counts by provider/model.
 
 Controls: `Tab`/arrow keys switch periods, `↑`/`↓` selects providers, `Enter` expands models, `v` toggles insights, and `q` closes.
+
+## Tau sidecar contract
+
+The Tau extension publishes per-session status sidecars for dashboards under `~/.pi/agents/sessions/<sessionId>/status.json`. See [docs/tau-sidecar-contract.md](docs/tau-sidecar-contract.md) for the schema, heartbeat/stale semantics, file ownership rules, and `/agents` return-to-dashboard behavior.
 
 ## Inline references
 
