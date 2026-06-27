@@ -2,7 +2,8 @@ import { Container, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui
 
 import type { TauDashboardSession, TauStatusLoadIssue, TauStatusValue } from "./index.js";
 
-export const TAU_DASHBOARD_TITLE = "Tau · Pi agents";
+export const TAU_DASHBOARD_MARK = "◖τ◗";
+export const TAU_DASHBOARD_TITLE = `${TAU_DASHBOARD_MARK} Tau · Pi agents`;
 
 const PRODUCT_BOUNDARY_COPY = "observes Pi sessions · enter opens native pi";
 const EMPTY_STATE_COPY = "No Tau sessions yet.";
