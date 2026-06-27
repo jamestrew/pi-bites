@@ -9,6 +9,7 @@ const defaults = {
   repo: "jamestrew/pi-bites",
   limit: 0,
   jobs: 1,
+  loops: 1,
   label: "ready-for-agent",
   baseBranch: "master",
   reviewSkill: "/home/jt/.agents/skills/thermonuclear-review/SKILL.md",
@@ -28,8 +29,9 @@ native GitHub blocking relationship and do not already have an open linked PR,
 then run a non-interactive pi implementation/review/fix/PR pipeline for each issue.
 
 Options:
-  -n, --limit N              Maximum number of issues to work on (default: no cap)
+  -n, --limit N              Maximum number of issues to work on per loop (default: no cap)
   -j, --jobs N               Number of issues to run in parallel (default: ${defaults.jobs})
+  --loops N                  Number of discovery/work loops to run (default: ${defaults.loops}; 0 = until no candidates)
   -R, --repo REPO            GitHub repo (default: ${defaults.repo})
   -l, --label LABEL          Ready label (default: ${defaults.label}; also falls back to read-for-agent)
   -b, --base BRANCH          Base branch for work branches/PRs (default: ${defaults.baseBranch})
@@ -61,6 +63,9 @@ function parseArgs(argv) {
       case "-j":
       case "--jobs":
         opts.jobs = Number(value());
+        break;
+      case "--loops":
+        opts.loops = Number(value());
         break;
       case "-R":
       case "--repo":
@@ -104,6 +109,8 @@ function parseArgs(argv) {
     throw new Error("--limit must be a non-negative integer");
   if (!Number.isInteger(opts.jobs) || opts.jobs < 1)
     throw new Error("--jobs must be a positive integer");
+  if (!Number.isInteger(opts.loops) || opts.loops < 0)
+    throw new Error("--loops must be a non-negative integer");
   return opts;
 }
 
@@ -351,57 +358,79 @@ async function main() {
   await $`jj git fetch --remote origin`;
   const piArgs = await prepareExtensionRuntime(opts);
 
-  const numbers = [
-    ...new Set([
-      ...(await fetchCandidates(opts, opts.label)),
-      ...(await fetchCandidates(opts, "read-for-agent")),
-    ]),
-  ].sort((a, b) => a - b);
-  const selected = [];
-  for (const number of numbers) {
-    const json =
-      await $`gh issue view ${number} -R ${opts.repo} --json number,title,body,url,labels,author,comments,blockedBy,closedByPullRequestsReferences`.text();
-    const issue = JSON.parse(json);
-    if (!issueIsUnblocked(issue)) {
-      const blockers = nodes(issue.blockedBy)
-        .filter((blocker) => blocker.state !== "CLOSED")
-        .map((blocker) => `#${blocker.number}`)
-        .join(", ");
-      console.log(`Skipping #${number}: blocked by ${blockers || "unknown open blocker"}`);
-      continue;
-    }
-    if (issueHasOpenPr(issue)) {
-      const prs = nodes(issue.closedByPullRequestsReferences)
-        .filter((pr) => pr.state === "OPEN")
-        .map((pr) => `#${pr.number}`)
-        .join(", ");
-      console.log(`Skipping #${number}: already has open PR ${prs || "unknown"}`);
-      continue;
-    }
-    selected.push(issue);
-    if (opts.limit > 0 && selected.length >= opts.limit) break;
-  }
+  let totalSelected = 0;
+  let totalFailures = 0;
+  let loop = 0;
+  while (opts.loops === 0 || loop < opts.loops) {
+    loop += 1;
+    console.log(
+      `Starting issue discovery loop ${loop}${opts.loops === 0 ? "" : `/${opts.loops}`}.`,
+    );
 
-  let failures = 0;
-  let index = 0;
-  async function worker() {
-    while (index < selected.length) {
-      const issue = selected[index++];
-      try {
-        await processIssue(issue, opts, piArgs);
-      } catch (error) {
-        failures += 1;
-        console.error(`Issue #${issue.number} failed:`);
-        console.error(error);
+    await $`jj git fetch --remote origin`;
+    const numbers = [
+      ...new Set([
+        ...(await fetchCandidates(opts, opts.label)),
+        ...(await fetchCandidates(opts, "read-for-agent")),
+      ]),
+    ].sort((a, b) => a - b);
+    const selected = [];
+    for (const number of numbers) {
+      const json =
+        await $`gh issue view ${number} -R ${opts.repo} --json number,title,body,url,labels,author,comments,blockedBy,closedByPullRequestsReferences`.text();
+      const issue = JSON.parse(json);
+      if (!issueIsUnblocked(issue)) {
+        const blockers = nodes(issue.blockedBy)
+          .filter((blocker) => blocker.state !== "CLOSED")
+          .map((blocker) => `#${blocker.number}`)
+          .join(", ");
+        console.log(`Skipping #${number}: blocked by ${blockers || "unknown open blocker"}`);
+        continue;
+      }
+      if (issueHasOpenPr(issue)) {
+        const prs = nodes(issue.closedByPullRequestsReferences)
+          .filter((pr) => pr.state === "OPEN")
+          .map((pr) => `#${pr.number}`)
+          .join(", ");
+        console.log(`Skipping #${number}: already has open PR ${prs || "unknown"}`);
+        continue;
+      }
+      selected.push(issue);
+      if (opts.limit > 0 && selected.length >= opts.limit) break;
+    }
+
+    if (selected.length === 0) {
+      console.log(`No candidate issues found in loop ${loop}.`);
+      break;
+    }
+
+    let failures = 0;
+    let index = 0;
+    async function worker() {
+      while (index < selected.length) {
+        const issue = selected[index++];
+        try {
+          await processIssue(issue, opts, piArgs);
+        } catch (error) {
+          failures += 1;
+          console.error(`Issue #${issue.number} failed:`);
+          console.error(error);
+        }
       }
     }
+
+    await Promise.all(Array.from({ length: Math.min(opts.jobs, selected.length) }, () => worker()));
+    totalSelected += selected.length;
+    totalFailures += failures;
+    console.log(`Loop ${loop} processed ${selected.length} issue(s) with ${failures} failure(s).`);
+
+    if (failures > 0) break;
   }
 
-  await Promise.all(Array.from({ length: Math.min(opts.jobs, selected.length) }, () => worker()));
   if (originalRev) await $`jj edit ${originalRev}`.quiet().nothrow();
 
-  console.log(`Processed ${selected.length} issue(s) with ${failures} failure(s).`);
-  if (failures > 0) process.exit(1);
+  console.log(`Processed ${totalSelected} issue(s) with ${totalFailures} failure(s).`);
+  if (totalFailures > 0) process.exit(1);
 }
 
 main().catch((error) => {
