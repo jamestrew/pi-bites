@@ -60,10 +60,29 @@ test("renders Tau product title, boundary copy, grouped states, and compact rows
   expect(lines).toContain("Idle (1)");
   expect(lines).toContain("Stopped (1)");
   expect(lines).toContain("Stale (1)");
-  expect(lines).toContain("  • stop-1 — stopped · pi-bites · 20s ago");
-  expect(lines).toContain("  • stale-1 — stale · pi-bites · 20s ago");
+  expect(lines).toContain("  • stopped in pi-bites — stopped · pi-bites · 20s ago");
+  expect(lines).toContain("  • stale in pi-bites — stale · pi-bites · 20s ago");
   expect(lines).toContain("  • Implement dashboard — editing · write · pi-bites · 1m ago");
   expect(lines).toContain("enter open · r refresh · q quit · ? help");
+});
+
+test("uses useful activity fallback for untitled sessions", () => {
+  const lines = renderTauDashboard(
+    [
+      session({
+        sessionId: "550e8400-e29b-41d4-a716-446655440000",
+        state: "working",
+        sourceStatus: "working",
+        currentAction: "running tests",
+        currentTool: "bash",
+      }),
+    ],
+    [],
+    { now: NOW, width: 120 },
+  );
+
+  expect(lines).toContain("  • running tests (bash) — running tests · bash · pi-bites · 20s ago");
+  expect(lines.join("\n")).not.toContain("550e8400-e29b-41d4-a716-446655440000");
 });
 
 test("renders uncommon statuses when present", () => {
@@ -85,7 +104,7 @@ test("renders uncommon statuses when present", () => {
   expect(lines).toContain("Needs permission (1)");
   expect(lines).toContain("Needs input (1)");
   expect(lines).toContain("Failed (1)");
-  expect(lines).toContain("  • failed — tool failed · pi-bites · 20s ago");
+  expect(lines).toContain("  • Failed: tool failed — failed · pi-bites · 20s ago");
 });
 
 test("surfaces lastError for failed sidecars even when freshness metadata is stale", () => {
@@ -106,7 +125,7 @@ test("surfaces lastError for failed sidecars even when freshness metadata is sta
 
   expect(lines).toContain("Stale (1)");
   expect(lines).toContain(
-    "  • failed-stale — tool failed before heartbeat expired · pi-bites · 20s ago",
+    "  • Failed: tool failed before heartbeat expired — failed · pi-bites · 20s ago",
   );
 });
 
@@ -117,7 +136,9 @@ test("renders missing session file targets safely", () => {
     { now: NOW, width: 120 },
   );
 
-  expect(lines).toContain("  • missing — missing session file · pi-bites · 20s ago");
+  expect(lines).toContain(
+    "  • missing session file in pi-bites — missing session file · pi-bites · 20s ago",
+  );
 });
 
 test("renders selected sessions distinctly and exposes concise help", () => {
@@ -131,6 +152,7 @@ test("renders selected sessions distinctly and exposes concise help", () => {
   );
 
   expect(lines).toContain("› • Resting — observing · pi-bites · 20s ago");
+  expect(lines).toContain("    cwd /work/pi-bites · id idle-1");
   expect(lines).toContain(
     "Help: ↑/↓ or j/k move selection; Enter opens the selected session in native pi; r refreshes; q quits; ? toggles help.",
   );
