@@ -9,7 +9,7 @@ const defaults = {
   repo: "jamestrew/pi-bites",
   limit: 0,
   jobs: 1,
-  loops: 1,
+  loops: 2,
   label: "ready-for-agent",
   baseBranch: "master",
   reviewSkill: "/home/jt/.agents/skills/thermonuclear-review/SKILL.md",
@@ -31,7 +31,7 @@ then run a non-interactive pi implementation/review/fix/PR pipeline for each iss
 Options:
   -n, --limit N              Maximum number of issues to work on per loop (default: no cap)
   -j, --jobs N               Number of issues to run in parallel (default: ${defaults.jobs})
-  --loops N                  Number of discovery/work loops to run (default: ${defaults.loops}; 0 = until no candidates)
+  --loops N                  Number of discovery/work loops to run, allowing newly unblocked issues to be picked up (default: ${defaults.loops}; 0 = until no candidates)
   -R, --repo REPO            GitHub repo (default: ${defaults.repo})
   -l, --label LABEL          Ready label (default: ${defaults.label}; also falls back to read-for-agent)
   -b, --base BRANCH          Base branch for work branches/PRs (default: ${defaults.baseBranch})
