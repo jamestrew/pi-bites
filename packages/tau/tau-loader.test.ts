@@ -4,7 +4,11 @@ import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
-import { loadTauDashboardSessions, type TauStatusRecord } from "./index.js";
+import {
+  DEFAULT_TAU_STALE_AFTER_MS,
+  loadTauDashboardSessions,
+  type TauStatusRecord,
+} from "./index.js";
 
 async function writeStatus(root: string, sessionId: string, status: unknown): Promise<void> {
   const dir = join(root, "sessions", sessionId);
@@ -75,6 +79,24 @@ test("reports invalid JSON, unsupported schemas, missing required fields, and mi
     "missing-status",
     "unsupported-schema",
   ]);
+});
+
+test("uses the documented 60 second stale threshold by default", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-loader-"));
+  await writeStatus(
+    root,
+    "fresh-enough",
+    status({ sessionId: "fresh-enough", heartbeatAt: 1_000 }),
+  );
+
+  const result = await loadTauDashboardSessions({
+    agentsDir: root,
+    now: () => 1_000 + DEFAULT_TAU_STALE_AFTER_MS,
+    isPidLive: () => true,
+  });
+
+  expect(result.sessions[0]?.state).toBe("idle");
+  expect(result.sessions[0]?.isStale).toBe(false);
 });
 
 test("derives stopped and stale dashboard states from status, heartbeat, and pid", async () => {

@@ -18,7 +18,7 @@ export {
   type TauDashboardViewModel,
 } from "./dashboard.js";
 
-export const DEFAULT_TAU_STALE_AFTER_MS = 30_000;
+export const DEFAULT_TAU_STALE_AFTER_MS = 60_000;
 
 export interface TauDashboardSession {
   sessionId: string;
