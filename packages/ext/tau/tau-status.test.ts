@@ -155,6 +155,123 @@ test("Tau status runtime records agent turns as working then idle", async () => 
   await runtime.stop();
 });
 
+test("Tau status runtime records and clears current activity metadata", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_700_000_000_000);
+  const writes: unknown[] = [];
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    heartbeatIntervalMs: 20_000,
+    writeSidecar: async (payload) => {
+      writes.push({ ...payload });
+    },
+  });
+
+  await runtime.start({
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+
+  vi.setSystemTime(1_700_000_005_000);
+  await runtime.recordEvent("working", { currentAction: "Running bun test", currentTool: "bash" });
+  vi.setSystemTime(1_700_000_010_000);
+  await runtime.recordEvent("idle", { currentAction: undefined, currentTool: undefined });
+
+  expect(writes[1]).toMatchObject({
+    status: "working",
+    currentAction: "Running bun test",
+    currentTool: "bash",
+    heartbeatAt: 1_700_000_005_000,
+    lastEventAt: 1_700_000_005_000,
+  });
+  expect(writes[2]).toMatchObject({
+    status: "idle",
+    heartbeatAt: 1_700_000_010_000,
+    lastEventAt: 1_700_000_010_000,
+  });
+  expect(writes[2]).not.toHaveProperty("currentAction");
+  expect(writes[2]).not.toHaveProperty("currentTool");
+
+  await runtime.stop();
+});
+
+test("Tau status handlers track overlapping tool activity predictably", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_700_000_000_000);
+  const writes: unknown[] = [];
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    heartbeatIntervalMs: 20_000,
+    writeSidecar: async (payload) => {
+      writes.push({ ...payload });
+    },
+  });
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const pi = {
+    on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
+      handlers.set(event, handler);
+    },
+  };
+
+  registerTauStatusHandlers(pi as never, runtime);
+
+  await handlers.get("session_start")?.(undefined, {
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+  vi.setSystemTime(1_700_000_005_000);
+  await handlers.get("agent_start")?.();
+  vi.setSystemTime(1_700_000_006_000);
+  await handlers.get("tool_call")?.({
+    toolCallId: "tool-1",
+    toolName: "bash",
+    input: { command: "bun test" },
+  });
+  vi.setSystemTime(1_700_000_007_000);
+  await handlers.get("tool_call")?.({
+    toolCallId: "tool-2",
+    toolName: "read",
+    input: { path: "README.md" },
+  });
+  vi.setSystemTime(1_700_000_008_000);
+  await handlers.get("tool_result")?.({ toolCallId: "tool-2" });
+  vi.setSystemTime(1_700_000_009_000);
+  await handlers.get("tool_result")?.({ toolCallId: "tool-1" });
+
+  expect(writes[2]).toMatchObject({
+    status: "working",
+    currentAction: "Running bun test",
+    currentTool: "bash",
+    lastEventAt: 1_700_000_006_000,
+  });
+  expect(writes[3]).toMatchObject({
+    status: "working",
+    currentAction: "Running read",
+    currentTool: "read",
+    lastEventAt: 1_700_000_007_000,
+  });
+  expect(writes[4]).toMatchObject({
+    status: "working",
+    currentAction: "Running bun test",
+    currentTool: "bash",
+    lastEventAt: 1_700_000_008_000,
+  });
+  expect(writes[5]).toMatchObject({
+    status: "working",
+    lastEventAt: 1_700_000_009_000,
+  });
+  expect(writes[5]).not.toHaveProperty("currentAction");
+  expect(writes[5]).not.toHaveProperty("currentTool");
+
+  await runtime.stop();
+});
+
 test("Tau status handlers keep agent runs working until agent_end", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1_700_000_000_000);
