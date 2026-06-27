@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
 
-import { renderTauDashboard, type TauDashboardSession, type TauStatusLoadIssue } from "./index.js";
+import {
+  buildTauDashboardView,
+  handleTauDashboardKey,
+  moveTauDashboardSelection,
+  reconcileTauDashboardSelection,
+  renderTauDashboard,
+  type TauDashboardSession,
+  type TauStatusLoadIssue,
+} from "./index.js";
 
 const NOW = 120_000;
 
@@ -52,6 +60,7 @@ test("renders Tau product title, boundary copy, grouped states, and compact rows
   expect(lines).toContain("Stopped (1)");
   expect(lines).toContain("Stale (1)");
   expect(lines).toContain("  • Implement dashboard — editing · write · pi-bites · 1m ago");
+  expect(lines).toContain("enter open · r refresh · q quit · ? help");
 });
 
 test("renders uncommon statuses when present", () => {
@@ -74,6 +83,106 @@ test("renders uncommon statuses when present", () => {
   expect(lines).toContain("Needs input (1)");
   expect(lines).toContain("Failed (1)");
   expect(lines).toContain("  • failed — tool failed · pi-bites · 20s ago");
+});
+
+test("renders selected sessions distinctly and exposes concise help", () => {
+  const lines = renderTauDashboard(
+    [
+      session({ sessionId: "work-1", title: "Implement dashboard", state: "working" }),
+      session({ sessionId: "idle-1", title: "Resting", state: "idle" }),
+    ],
+    [],
+    { now: NOW, width: 120, selectedSessionId: "idle-1", showHelp: true },
+  );
+
+  expect(lines).toContain("› • Resting — observing · pi-bites · 20s ago");
+  expect(lines).toContain(
+    "Help: ↑/↓ or j/k move selection; r refreshes; q quits; ? toggles help. Enter is read-only in this slice.",
+  );
+});
+
+test("tracks selectable session rows without selecting headers or empty states", () => {
+  const view = buildTauDashboardView([session({ sessionId: "work-1", state: "working" })], [], {
+    now: NOW,
+  });
+
+  expect(view.selectableSessionIds).toEqual(["work-1"]);
+  expect(view.rows.filter((row) => row.kind === "session").map((row) => row.sessionId)).toEqual([
+    "work-1",
+  ]);
+  expect(
+    view.rows.filter((row) => row.kind === "header" || row.kind === "empty"),
+  ).not.toContainEqual(expect.objectContaining({ sessionId: expect.any(String) }));
+});
+
+test("reconciles and moves selection across refreshes", () => {
+  const sessions = [
+    session({ sessionId: "first", state: "working" }),
+    session({ sessionId: "second", state: "idle" }),
+    session({ sessionId: "third", state: "stopped" }),
+  ];
+
+  expect(reconcileTauDashboardSelection(sessions, { previousSessionId: "second" })).toEqual({
+    selectedSessionId: "second",
+    selectedIndex: 1,
+  });
+  expect(
+    moveTauDashboardSelection(sessions, { selectedSessionId: "second", selectedIndex: 1 }, 1),
+  ).toEqual({
+    selectedSessionId: "third",
+    selectedIndex: 2,
+  });
+  expect(
+    reconcileTauDashboardSelection([sessions[0], sessions[2]], {
+      previousSessionId: "second",
+      previousIndex: 1,
+    }),
+  ).toEqual({
+    selectedSessionId: "third",
+    selectedIndex: 1,
+  });
+  expect(reconcileTauDashboardSelection([])).toEqual({ selectedIndex: -1 });
+});
+
+test("handles dashboard keys with a small controller", () => {
+  const sessions = [
+    session({ sessionId: "first", state: "working" }),
+    session({ sessionId: "second", state: "idle" }),
+  ];
+  const baseState = {
+    sessions,
+    selection: reconcileTauDashboardSelection(sessions),
+    showHelp: false,
+    quitting: false,
+  };
+
+  const moved = handleTauDashboardKey(baseState, "down");
+  expect(moved.effect).toBe("render");
+  expect(moved.state.selection).toEqual({ selectedSessionId: "second", selectedIndex: 1 });
+
+  const helped = handleTauDashboardKey(moved.state, "?");
+  expect(helped.effect).toBe("render");
+  expect(helped.state.showHelp).toBe(true);
+
+  expect(handleTauDashboardKey(helped.state, "r").effect).toBe("refresh");
+  expect(handleTauDashboardKey(helped.state, "enter").effect).toBe("render");
+});
+
+test("ignores keys after quit so q wins over pending refreshes", () => {
+  const state = {
+    sessions: [session({ sessionId: "first", state: "working" })],
+    selection: { selectedSessionId: "first", selectedIndex: 0 },
+    showHelp: false,
+    quitting: false,
+  };
+
+  const quitting = handleTauDashboardKey(state, "q");
+  expect(quitting.effect).toBe("quit");
+  expect(quitting.state.quitting).toBe(true);
+
+  const ignored = handleTauDashboardKey(quitting.state, "r");
+  expect(ignored.effect).toBeUndefined();
+  expect(ignored.state).toBe(quitting.state);
 });
 
 test("renders empty state and concise skipped-record warning", () => {

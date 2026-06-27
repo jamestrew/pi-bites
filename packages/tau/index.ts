@@ -13,8 +13,18 @@ export { TAU_STATUS_SCHEMA_VERSION, type TauStatusRecord, type TauStatusValue } 
 export {
   TAU_DASHBOARD_TITLE,
   buildTauDashboardView,
+  handleTauDashboardKey,
+  moveTauDashboardSelection,
+  reconcileTauDashboardSelection,
   renderTauDashboard,
+  type ReconcileTauDashboardSelectionOptions,
   type RenderTauDashboardOptions,
+  type TauDashboardRow,
+  type TauDashboardControllerEffect,
+  type TauDashboardControllerResult,
+  type TauDashboardControllerState,
+  type TauDashboardRowKind,
+  type TauDashboardSelectionState,
   type TauDashboardViewModel,
 } from "./dashboard.js";
 
