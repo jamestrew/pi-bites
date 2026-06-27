@@ -2,6 +2,12 @@
 
 Tau discovers live Pi agents through sidecar status files written by the `tau` extension. Dashboard implementations should treat this document as the compatibility contract between Pi sessions and Tau readers.
 
+## Dashboard workflow
+
+Tau is the multi-agent dashboard for Pi sessions. Start it with the Pi package command exposed for the dashboard, such as `pi agents` or `pi tau` depending on the installed Pi command surface. In this repository, the dashboard binary is also available as `tau` and can be run during development with `bun run tau`.
+
+The dashboard scans the sidecar directory, groups the discovered sessions, and refreshes while it is open. Selecting a session opens native Pi with that session's `sessionFile`; Tau pauses its dashboard refresh while the child Pi process owns the terminal. Native Pi remains the session UI. Tau is only the observer/launcher around those sessions.
+
 ## Directory layout and ownership
 
 The extension writes one status file per Pi session:
@@ -69,4 +75,8 @@ Tau and dashboard code must also avoid writing `status.json`; only the Pi extens
 
 ## Returning from Pi to Tau
 
-The extension registers an `/agents` command inside Pi. Running `/agents` cooperatively shuts down the Pi session. If the session was launched from Tau or another waiting parent process, that shutdown returns control to the dashboard/parent instead of leaving the user stranded inside the child Pi session.
+The extension registers an `/agents` command inside Pi. Running `/agents` cooperatively shuts down the Pi session. If the session was launched from Tau or another waiting parent process, that shutdown returns control to the dashboard/parent instead of leaving the user stranded inside the child Pi session. If native Pi was launched directly from a shell with no waiting parent, `/agents` only exits that Pi process; there is no Tau dashboard to return to.
+
+## Related issues
+
+This MVP contract is part of the pi-tau fold-in tracked by [pi-bites #22](https://github.com/jamestrew/pi-bites/issues/22). Related extension-side and dashboard issues: [#28](https://github.com/jamestrew/pi-bites/issues/28), [#29](https://github.com/jamestrew/pi-bites/issues/29), [#30](https://github.com/jamestrew/pi-bites/issues/30), and [#40](https://github.com/jamestrew/pi-bites/issues/40).

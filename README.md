@@ -104,9 +104,13 @@ Run `/usage` inside pi to open an interactive dashboard of local session usage. 
 
 Controls: `Tab`/arrow keys switch periods, `↑`/`↓` selects providers, `Enter` expands models, `v` toggles insights, and `q` closes.
 
-## Tau sidecar contract
+## Tau dashboard and sidecar contract
 
-The Tau extension publishes per-session status sidecars for dashboards under `~/.pi/agents/sessions/<sessionId>/status.json`. See [docs/tau-sidecar-contract.md](docs/tau-sidecar-contract.md) for the schema, heartbeat/stale semantics, file ownership rules, and `/agents` return-to-dashboard behavior.
+Open the Tau multi-agent dashboard with `pi agents` / `pi tau` when those package commands are available, or run the repository binary directly with `tau` (`bun run tau` during development). Tau reads per-session sidecars under `~/.pi/agents/sessions/<sessionId>/status.json`, opens selected sessions in native Pi, and pauses while that child Pi process owns the terminal.
+
+Tau never writes Pi session JSONL files. The Pi extension owns `status.json` writes; Tau and dashboards consume those files as read-only status. Inside native Pi, `/agents` returns to Tau only when that Pi process was launched by Tau or another waiting parent.
+
+See [docs/tau-sidecar-contract.md](docs/tau-sidecar-contract.md) for the full workflow, schema, heartbeat/stale semantics, file ownership rules, `/agents` behavior, and related pi-bites issues.
 
 ## Inline references
 
