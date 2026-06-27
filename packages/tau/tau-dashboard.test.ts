@@ -52,7 +52,7 @@ test("renders compact Tau shell, boundary copy, grouped states, and compact rows
     { now: NOW, width: 120 },
   );
 
-  expect(lines).toContain("▐▛███▜▌  Tau · Pi agents");
+  expect(lines).toContain("▐▛███▜▌  ◖τ◗ Tau · Pi agents");
   expect(lines).toContain("  ▘▘ ▝▝   1 working · 1 idle · 1 stopped · 1 stale");
   expect(lines).toContain("          observes Pi sessions · enter opens native pi");
   expect(lines.filter((line) => ["Working", "Idle", "Stopped", "Stale"].includes(line))).toEqual([
@@ -66,6 +66,19 @@ test("renders compact Tau shell, boundary copy, grouped states, and compact rows
   expect(lines).toContain("  • Implement dashboard — editing · write · pi-bites · 1m ago");
   expect(lines).toContain("enter open · ↑/↓ move · q quit · ? help");
   expect(lines).not.toContain("enter open · r refresh · q quit · ? help");
+});
+
+test("builds a compact plain-text Tau branded header", () => {
+  const view = buildTauDashboardView([], [], { now: NOW, width: 120 });
+
+  expect(view.title).toBe("◖τ◗ Tau · Pi agents");
+  expect(view.rows[0]).toEqual({ kind: "chrome", line: "▐▛███▜▌  ◖τ◗ Tau · Pi agents" });
+  expect(view.lines.slice(0, 4)).toEqual([
+    "▐▛███▜▌  ◖τ◗ Tau · Pi agents",
+    "  ▘▘ ▝▝   0 sessions",
+    "          observes Pi sessions · enter opens native pi",
+    "",
+  ]);
 });
 
 test("renders uncommon statuses when present", () => {
