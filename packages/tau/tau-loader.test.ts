@@ -16,6 +16,12 @@ async function writeStatus(root: string, sessionId: string, status: unknown): Pr
   await writeFile(join(dir, "status.json"), JSON.stringify(status), "utf-8");
 }
 
+async function writeSessionFile(root: string, sessionId: string): Promise<string> {
+  const sessionFile = join(root, `${sessionId}.jsonl`);
+  await writeFile(sessionFile, "", "utf-8");
+  return sessionFile;
+}
+
 function status(overrides: Partial<TauStatusRecord> = {}): TauStatusRecord {
   return {
     schemaVersion: 1,
@@ -33,17 +39,25 @@ function status(overrides: Partial<TauStatusRecord> = {}): TauStatusRecord {
 
 test("loads valid Tau status sidecars into dashboard sessions sorted by recent activity", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-loader-"));
-  const sessionFile = join(root, "newer.jsonl");
-  await writeFile(sessionFile, "", "utf-8");
   await writeStatus(
     root,
     "older",
-    status({ sessionId: "older", heartbeatAt: 10_000, lastEventAt: 12_000 }),
+    status({
+      sessionId: "older",
+      sessionFile: await writeSessionFile(root, "older"),
+      heartbeatAt: 10_000,
+      lastEventAt: 12_000,
+    }),
   );
   await writeStatus(
     root,
     "newer",
-    status({ sessionId: "newer", sessionFile, heartbeatAt: 20_000, lastEventAt: 15_000 }),
+    status({
+      sessionId: "newer",
+      sessionFile: await writeSessionFile(root, "newer"),
+      heartbeatAt: 20_000,
+      lastEventAt: 15_000,
+    }),
   );
 
   const result = await loadTauDashboardSessions({
@@ -84,9 +98,17 @@ test("reports invalid JSON, unsupported schemas, missing required fields, and mi
   ]);
 });
 
-test("marks missing session file targets without rejecting the status record", async () => {
+test("omits status records whose referenced session file is missing", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-loader-"));
   await writeStatus(root, "missing-target", status({ sessionId: "missing-target" }));
+  await writeStatus(
+    root,
+    "existing-target",
+    status({
+      sessionId: "existing-target",
+      sessionFile: await writeSessionFile(root, "existing-target"),
+    }),
+  );
 
   const result = await loadTauDashboardSessions({
     agentsDir: root,
@@ -95,10 +117,8 @@ test("marks missing session file targets without rejecting the status record", a
   });
 
   expect(result.issues).toEqual([]);
-  expect(result.sessions[0]).toMatchObject({
-    sessionId: "missing-target",
-    sessionFileExists: false,
-  });
+  expect(result.sessions.map((session) => session.sessionId)).toEqual(["existing-target"]);
+  expect(result.sessions[0]?.sessionFileExists).toBe(true);
 });
 
 test("uses the documented 60 second stale threshold by default", async () => {
@@ -106,7 +126,11 @@ test("uses the documented 60 second stale threshold by default", async () => {
   await writeStatus(
     root,
     "fresh-enough",
-    status({ sessionId: "fresh-enough", heartbeatAt: 1_000 }),
+    status({
+      sessionId: "fresh-enough",
+      sessionFile: await writeSessionFile(root, "fresh-enough"),
+      heartbeatAt: 1_000,
+    }),
   );
 
   const result = await loadTauDashboardSessions({
@@ -121,17 +145,32 @@ test("uses the documented 60 second stale threshold by default", async () => {
 
 test("derives stopped and stale dashboard states from status, heartbeat, and pid", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-loader-"));
-  await writeStatus(root, "stopped", status({ sessionId: "stopped", status: "stopped", pid: 222 }));
+  await writeStatus(
+    root,
+    "stopped",
+    status({
+      sessionId: "stopped",
+      sessionFile: await writeSessionFile(root, "stopped"),
+      status: "stopped",
+      pid: 222,
+    }),
+  );
   await writeStatus(
     root,
     "dead-pid",
-    status({ sessionId: "dead-pid", status: "working", pid: 333 }),
+    status({
+      sessionId: "dead-pid",
+      sessionFile: await writeSessionFile(root, "dead-pid"),
+      status: "working",
+      pid: 333,
+    }),
   );
   await writeStatus(
     root,
     "old-heartbeat",
     status({
       sessionId: "old-heartbeat",
+      sessionFile: await writeSessionFile(root, "old-heartbeat"),
       status: "idle",
       pid: 444,
       heartbeatAt: 1_000,
@@ -143,6 +182,7 @@ test("derives stopped and stale dashboard states from status, heartbeat, and pid
     "failed",
     status({
       sessionId: "failed",
+      sessionFile: await writeSessionFile(root, "failed"),
       status: "failed",
       pid: 555,
       heartbeatAt: 1_000,

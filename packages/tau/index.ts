@@ -243,16 +243,10 @@ export async function loadTauDashboardSessions(
           return;
         }
 
-        sessions.push(
-          toDashboardSession(
-            record,
-            statusFile,
-            now,
-            staleAfterMs,
-            isPidLive,
-            await sessionFileExists(record.sessionFile),
-          ),
-        );
+        const exists = await sessionFileExists(record.sessionFile);
+        if (!exists) return;
+
+        sessions.push(toDashboardSession(record, statusFile, now, staleAfterMs, isPidLive, exists));
       }),
   );
 
