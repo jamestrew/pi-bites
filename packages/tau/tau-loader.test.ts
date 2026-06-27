@@ -33,6 +33,8 @@ function status(overrides: Partial<TauStatusRecord> = {}): TauStatusRecord {
 
 test("loads valid Tau status sidecars into dashboard sessions sorted by recent activity", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-loader-"));
+  const sessionFile = join(root, "newer.jsonl");
+  await writeFile(sessionFile, "", "utf-8");
   await writeStatus(
     root,
     "older",
@@ -41,7 +43,7 @@ test("loads valid Tau status sidecars into dashboard sessions sorted by recent a
   await writeStatus(
     root,
     "newer",
-    status({ sessionId: "newer", heartbeatAt: 20_000, lastEventAt: 15_000 }),
+    status({ sessionId: "newer", sessionFile, heartbeatAt: 20_000, lastEventAt: 15_000 }),
   );
 
   const result = await loadTauDashboardSessions({
@@ -59,6 +61,7 @@ test("loads valid Tau status sidecars into dashboard sessions sorted by recent a
     activityAt: 20_000,
     isLive: true,
     isStale: false,
+    sessionFileExists: true,
   });
 });
 
@@ -79,6 +82,23 @@ test("reports invalid JSON, unsupported schemas, missing required fields, and mi
     "missing-status",
     "unsupported-schema",
   ]);
+});
+
+test("marks missing session file targets without rejecting the status record", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-loader-"));
+  await writeStatus(root, "missing-target", status({ sessionId: "missing-target" }));
+
+  const result = await loadTauDashboardSessions({
+    agentsDir: root,
+    now: () => 10_000,
+    isPidLive: () => true,
+  });
+
+  expect(result.issues).toEqual([]);
+  expect(result.sessions[0]).toMatchObject({
+    sessionId: "missing-target",
+    sessionFileExists: false,
+  });
 });
 
 test("uses the documented 60 second stale threshold by default", async () => {
@@ -118,6 +138,18 @@ test("derives stopped and stale dashboard states from status, heartbeat, and pid
       lastEventAt: 1_000,
     }),
   );
+  await writeStatus(
+    root,
+    "failed",
+    status({
+      sessionId: "failed",
+      status: "failed",
+      pid: 555,
+      heartbeatAt: 1_000,
+      lastEventAt: 1_000,
+      lastError: "tool failed",
+    }),
+  );
 
   const result = await loadTauDashboardSessions({
     agentsDir: root,
@@ -131,9 +163,11 @@ test("derives stopped and stale dashboard states from status, heartbeat, and pid
   ).toEqual({
     "dead-pid": "stale",
     stopped: "stopped",
+    failed: "failed",
     "old-heartbeat": "stale",
   });
   expect(result.sessions.find((session) => session.sessionId === "stopped")?.isLive).toBe(false);
+  expect(result.sessions.find((session) => session.sessionId === "failed")?.isLive).toBe(false);
 });
 
 test("missing Tau sessions directory does not crash", async () => {

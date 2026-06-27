@@ -96,6 +96,11 @@ function sessionLabel(session: TauDashboardSession): string {
 }
 
 function actionLabel(session: TauDashboardSession): string {
+  if (!session.sessionFileExists) return "missing session file";
+  if ((session.state === "failed" || session.sourceStatus === "failed") && session.lastError)
+    return session.lastError;
+  if (session.state === "stopped") return "stopped";
+  if (session.state === "stale") return "stale";
   if (session.currentAction && session.currentTool) {
     return `${session.currentAction} · ${session.currentTool}`;
   }

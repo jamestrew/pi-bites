@@ -26,6 +26,7 @@ function session(overrides: Partial<TauDashboardSession>): TauDashboardSession {
     state: "idle",
     isLive: true,
     isStale: false,
+    sessionFileExists: true,
     statusFile: "/home/me/.pi/agents/sessions/session-a/status.json",
     ...overrides,
   };
@@ -59,6 +60,8 @@ test("renders Tau product title, boundary copy, grouped states, and compact rows
   expect(lines).toContain("Idle (1)");
   expect(lines).toContain("Stopped (1)");
   expect(lines).toContain("Stale (1)");
+  expect(lines).toContain("  • stop-1 — stopped · pi-bites · 20s ago");
+  expect(lines).toContain("  • stale-1 — stale · pi-bites · 20s ago");
   expect(lines).toContain("  • Implement dashboard — editing · write · pi-bites · 1m ago");
   expect(lines).toContain("enter open · r refresh · q quit · ? help");
 });
@@ -83,6 +86,38 @@ test("renders uncommon statuses when present", () => {
   expect(lines).toContain("Needs input (1)");
   expect(lines).toContain("Failed (1)");
   expect(lines).toContain("  • failed — tool failed · pi-bites · 20s ago");
+});
+
+test("surfaces lastError for failed sidecars even when freshness metadata is stale", () => {
+  const lines = renderTauDashboard(
+    [
+      session({
+        sessionId: "failed-stale",
+        state: "stale",
+        sourceStatus: "failed",
+        lastError: "tool failed before heartbeat expired",
+        isLive: false,
+        isStale: true,
+      }),
+    ],
+    [],
+    { now: NOW, width: 120 },
+  );
+
+  expect(lines).toContain("Stale (1)");
+  expect(lines).toContain(
+    "  • failed-stale — tool failed before heartbeat expired · pi-bites · 20s ago",
+  );
+});
+
+test("renders missing session file targets safely", () => {
+  const lines = renderTauDashboard(
+    [session({ sessionId: "missing", sessionFileExists: false })],
+    [],
+    { now: NOW, width: 120 },
+  );
+
+  expect(lines).toContain("  • missing — missing session file · pi-bites · 20s ago");
 });
 
 test("renders selected sessions distinctly and exposes concise help", () => {

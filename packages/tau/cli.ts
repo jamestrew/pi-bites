@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { spawn } from "node:child_process";
+import { access } from "node:fs/promises";
 import { emitKeypressEvents } from "node:readline";
 
 import {
@@ -85,6 +86,14 @@ export async function main(): Promise<void> {
   };
 
   const runNativePi = async (sessionFile: string): Promise<void> => {
+    try {
+      await access(sessionFile);
+    } catch {
+      launchError = `Cannot open missing Tau session file: ${sessionFile}`;
+      render();
+      return;
+    }
+
     childPiRunning = true;
     clearInterval(refreshTimer);
     process.stdin.setRawMode(false);
