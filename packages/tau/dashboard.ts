@@ -68,7 +68,7 @@ export interface TauDashboardControllerState {
   quitting: boolean;
 }
 
-export type TauDashboardControllerEffect = "render" | "refresh" | "quit";
+export type TauDashboardControllerEffect = "render" | "refresh" | "open" | "quit";
 
 export interface TauDashboardControllerResult {
   state: TauDashboardControllerState;
@@ -185,7 +185,7 @@ export function handleTauDashboardKey(
       return { state: { ...state, showHelp: !state.showHelp }, effect: "render" };
     case "return":
     case "enter":
-      return { state, effect: "render" };
+      return { state, effect: state.selection.selectedSessionId ? "open" : "render" };
     case "q":
       return { state: { ...state, quitting: true }, effect: "quit" };
     default:
@@ -244,7 +244,7 @@ export function buildTauDashboardView(
     pushRow(rows, { kind: "chrome", line: "" });
     pushRow(rows, {
       kind: "chrome",
-      line: "Help: ↑/↓ or j/k move selection; r refreshes; q quits; ? toggles help. Enter is read-only in this slice.",
+      line: "Help: ↑/↓ or j/k move selection; Enter opens the selected session in native pi; r refreshes; q quits; ? toggles help.",
     });
   }
 

@@ -97,7 +97,7 @@ test("renders selected sessions distinctly and exposes concise help", () => {
 
   expect(lines).toContain("› • Resting — observing · pi-bites · 20s ago");
   expect(lines).toContain(
-    "Help: ↑/↓ or j/k move selection; r refreshes; q quits; ? toggles help. Enter is read-only in this slice.",
+    "Help: ↑/↓ or j/k move selection; Enter opens the selected session in native pi; r refreshes; q quits; ? toggles help.",
   );
 });
 
@@ -165,7 +165,13 @@ test("handles dashboard keys with a small controller", () => {
   expect(helped.state.showHelp).toBe(true);
 
   expect(handleTauDashboardKey(helped.state, "r").effect).toBe("refresh");
-  expect(handleTauDashboardKey(helped.state, "enter").effect).toBe("render");
+  expect(handleTauDashboardKey(helped.state, "enter").effect).toBe("open");
+  expect(
+    handleTauDashboardKey(
+      { ...helped.state, selection: { selectedIndex: -1, selectedSessionId: undefined } },
+      "enter",
+    ).effect,
+  ).toBe("render");
 });
 
 test("ignores keys after quit so q wins over pending refreshes", () => {
