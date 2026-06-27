@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { spawn } from "node:child_process";
 import { emitKeypressEvents } from "node:readline";
 
 import {
@@ -30,6 +31,7 @@ export async function main(): Promise<void> {
   let result: LoadTauDashboardSessionsResult = await loadTauDashboardSessions();
   let selection: TauDashboardSelectionState = reconcileTauDashboardSelection(result.sessions);
   let showHelp = false;
+  let launchError: string | undefined;
   let quitting = false;
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
 
@@ -41,6 +43,7 @@ export async function main(): Promise<void> {
       showHelp,
     });
     if (interactive) clearScreen();
+    if (launchError) lines.push("", launchError);
     process.stdout.write(`${lines.join("\n")}\n`);
   };
 
@@ -50,13 +53,14 @@ export async function main(): Promise<void> {
   }
 
   let refreshInFlight = false;
+  let childPiRunning = false;
   const refresh = async (): Promise<void> => {
-    if (refreshInFlight || quitting) return;
+    if (refreshInFlight || quitting || childPiRunning) return;
     refreshInFlight = true;
     const previous = selection;
     try {
       const nextResult = await loadTauDashboardSessions();
-      if (quitting) return;
+      if (quitting || childPiRunning) return;
       result = nextResult;
       selection = reconcileTauDashboardSelection(result.sessions, {
         previousSessionId: previous.selectedSessionId,
@@ -68,7 +72,7 @@ export async function main(): Promise<void> {
     }
   };
 
-  const refreshTimer = setInterval(() => void refresh(), TAU_DASHBOARD_REFRESH_INTERVAL_MS);
+  let refreshTimer = setInterval(() => void refresh(), TAU_DASHBOARD_REFRESH_INTERVAL_MS);
 
   const quit = (): void => {
     if (quitting) return;
@@ -78,6 +82,36 @@ export async function main(): Promise<void> {
     process.stdin.pause();
     showCursor();
     process.stdout.write("\n");
+  };
+
+  const runNativePi = async (sessionFile: string): Promise<void> => {
+    childPiRunning = true;
+    clearInterval(refreshTimer);
+    process.stdin.setRawMode(false);
+    process.stdin.pause();
+    showCursor();
+    process.stdout.write("\n");
+
+    try {
+      await new Promise<void>((resolve) => {
+        const child = spawn("pi", ["--session", sessionFile], { stdio: "inherit" });
+        child.once("error", (error) => {
+          launchError = `Failed to launch native pi for ${sessionFile}: ${error.message}`;
+          process.stderr.write(`${launchError}\n`);
+          resolve();
+        });
+        child.once("exit", () => resolve());
+      });
+    } finally {
+      if (!quitting) {
+        childPiRunning = false;
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        await refresh();
+        render();
+        refreshTimer = setInterval(() => void refresh(), TAU_DASHBOARD_REFRESH_INTERVAL_MS);
+      }
+    }
   };
 
   emitKeypressEvents(process.stdin);
@@ -98,6 +132,15 @@ export async function main(): Promise<void> {
       case "refresh":
         await refresh();
         break;
+      case "open": {
+        launchError = undefined;
+        const selected = result.sessions.find(
+          (session) => session.sessionId === selection.selectedSessionId,
+        );
+        if (selected) await runNativePi(selected.sessionFile);
+        else render();
+        break;
+      }
       case "quit":
         quit();
         break;
