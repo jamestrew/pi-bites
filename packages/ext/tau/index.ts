@@ -244,10 +244,11 @@ function describeToolAction(toolName: string, input: Record<string, unknown>): s
 }
 
 export function registerTauStatusHandlers(
-  pi: Pick<ExtensionAPI, "on">,
+  pi: Pick<ExtensionAPI, "on" | "events">,
   statusRuntime: TauStatusRuntime,
 ): void {
   let agentRunActive = false;
+  let permissionGateActive = false;
   const activeTools = new Map<string, TauStatusRuntimeEventMetadata>();
 
   const currentToolMetadata = (): TauStatusRuntimeEventMetadata => {
@@ -270,7 +271,27 @@ export function registerTauStatusHandlers(
       currentTool: event.toolName,
     };
     activeTools.set(event.toolCallId, metadata);
-    await statusRuntime.recordEvent("working", metadata);
+    await statusRuntime.recordEvent(
+      permissionGateActive ? "needs-permission" : "working",
+      metadata,
+    );
+  });
+
+  pi.events.on("bites:bash_gate", async (data) => {
+    permissionGateActive = true;
+    const command = (data as { command?: unknown }).command;
+    await statusRuntime.recordEvent("needs-permission", {
+      currentAction:
+        typeof command === "string" && command.trim() !== ""
+          ? `Approve ${command.trim()}`
+          : "Approve bash command",
+      currentTool: "bash",
+    });
+  });
+
+  pi.events.on("bites:bash_gate_resolved", async () => {
+    permissionGateActive = false;
+    await statusRuntime.recordEvent(agentRunActive ? "working" : "idle", currentToolMetadata());
   });
 
   pi.on("tool_result", async (event) => {

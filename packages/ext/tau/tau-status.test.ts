@@ -214,6 +214,7 @@ test("Tau status handlers track overlapping tool activity predictably", async ()
     on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
       handlers.set(event, handler);
     },
+    events: { on: () => undefined },
   };
 
   registerTauStatusHandlers(pi as never, runtime);
@@ -272,6 +273,62 @@ test("Tau status handlers track overlapping tool activity predictably", async ()
   await runtime.stop();
 });
 
+test("Tau status handlers surface and clear bash permission gates", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_700_000_000_000);
+  const writes: unknown[] = [];
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    heartbeatIntervalMs: 20_000,
+    writeSidecar: async (payload) => {
+      writes.push({ ...payload });
+    },
+  });
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const eventHandlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const pi = {
+    on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
+      handlers.set(event, handler);
+    },
+    events: {
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
+        eventHandlers.set(event, handler);
+      },
+    },
+  };
+
+  registerTauStatusHandlers(pi as never, runtime);
+
+  await handlers.get("session_start")?.(undefined, {
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+  vi.setSystemTime(1_700_000_005_000);
+  await handlers.get("agent_start")?.();
+  vi.setSystemTime(1_700_000_006_000);
+  await eventHandlers.get("bites:bash_gate")?.({ cwd: "/repo", command: "rm -rf dist" });
+  vi.setSystemTime(1_700_000_007_000);
+  await eventHandlers.get("bites:bash_gate_resolved")?.({ cwd: "/repo", command: "rm -rf dist" });
+
+  expect(writes[2]).toMatchObject({
+    status: "needs-permission",
+    currentAction: "Approve rm -rf dist",
+    currentTool: "bash",
+    lastEventAt: 1_700_000_006_000,
+  });
+  expect(writes[3]).toMatchObject({
+    status: "working",
+    lastEventAt: 1_700_000_007_000,
+  });
+  expect(writes[3]).not.toHaveProperty("currentAction");
+  expect(writes[3]).not.toHaveProperty("currentTool");
+
+  await runtime.stop();
+});
+
 test("Tau status handlers keep agent runs working until agent_end", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1_700_000_000_000);
@@ -288,6 +345,7 @@ test("Tau status handlers keep agent runs working until agent_end", async () => 
     on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
       handlers.set(event, handler);
     },
+    events: { on: () => undefined },
   };
 
   registerTauStatusHandlers(pi as never, runtime);
