@@ -305,23 +305,27 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       reasons.length > 0
         ? `🔒 Bash gate — ${reasons.join("; ")} (${matchedPatternLabels.join(", ")})`
         : `🔒 Bash gate — command requires approval (${matchedPatternLabels.join(", ")})`;
-    const choice = await ctx.ui.select(prompt, [
-      "Allow",
-      `Allow for session ("${sessionAllowKey}")`,
-      "Deny",
-    ]);
+    try {
+      const choice = await ctx.ui.select(prompt, [
+        "Allow",
+        `Allow for session ("${sessionAllowKey}")`,
+        "Deny",
+      ]);
 
-    if (choice?.startsWith("Allow for session")) {
-      sessionAllowed.add(sessionAllowKey);
-      compensateTimeout(event.input, gateStartMs);
-      return undefined; // proceed
+      if (choice?.startsWith("Allow for session")) {
+        sessionAllowed.add(sessionAllowKey);
+        compensateTimeout(event.input, gateStartMs);
+        return undefined; // proceed
+      }
+
+      if (choice === "Allow") {
+        compensateTimeout(event.input, gateStartMs);
+        return undefined; // proceed just this once
+      }
+
+      return { block: true, reason: "Bash gate: command was denied by the user." };
+    } finally {
+      pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
     }
-
-    if (choice === "Allow") {
-      compensateTimeout(event.input, gateStartMs);
-      return undefined; // proceed just this once
-    }
-
-    return { block: true, reason: "Bash gate: command was denied by the user." };
   });
 }
