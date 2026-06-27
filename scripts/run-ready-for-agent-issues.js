@@ -288,7 +288,7 @@ Instructions:
 - The PR description should summarize the implementation, explain non-obvious code areas and critical code paths, and explicitly cover review comments that were not addressed by the fix agent.
 - The PR description must highlight the changeset seams: the critical interfaces/places where behavior changed or can be altered, and what the maintainer should understand or pay attention to when reviewing them.
 - Keep the PR description extremely concise. Sacrifice grammar for the sake of concision.
-- After creating the PR, inspect the review/fix handoff. If it shows 0 remaining review issues / no intentionally unaddressed review findings, merge the PR non-interactively with gh. If any review issue remains, leave the PR open for human review.`,
+- After creating the PR, inspect the review/fix handoff. If it shows 0 remaining review issues / no intentionally unaddressed review findings, fetch origin, rebase the current jj change onto latest ${opts.baseBranch}@origin, update the ${branch} bookmark, push it, then merge the PR non-interactively with gh using rebase semantics. If any review issue remains, leave the PR open for human review.`,
   );
 }
 
