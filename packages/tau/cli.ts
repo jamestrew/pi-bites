@@ -11,6 +11,7 @@ import {
   renderTauDashboard,
   type LoadTauDashboardSessionsResult,
   type TauDashboardSelectionState,
+  type TauDashboardSession,
 } from "./index.js";
 
 function clearScreen(): void {
@@ -33,6 +34,7 @@ export async function main(): Promise<void> {
   let selection: TauDashboardSelectionState = reconcileTauDashboardSelection(result.sessions);
   let showHelp = false;
   let launchError: string | undefined;
+  let ownerWarningSessionId: string | undefined;
   let quitting = false;
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
 
@@ -44,6 +46,21 @@ export async function main(): Promise<void> {
       showHelp,
     });
     if (interactive) clearScreen();
+    if (ownerWarningSessionId) {
+      const warningSession = result.sessions.find(
+        (session) => session.sessionId === ownerWarningSessionId,
+      );
+      if (warningSession) {
+        lines.push(
+          "",
+          `Warning: ${warningSession.sessionId} appears to already have a live native pi owner (pid ${warningSession.pid}, heartbeat ${new Date(warningSession.heartbeatAt).toISOString()}).`,
+          "Multiple native pi processes for one session are best-effort and undefined.",
+          "Press o to open anyway, or c/Esc to cancel.",
+        );
+      } else {
+        ownerWarningSessionId = undefined;
+      }
+    }
     if (launchError) lines.push("", launchError);
     process.stdout.write(`${lines.join("\n")}\n`);
   };
@@ -84,6 +101,9 @@ export async function main(): Promise<void> {
     showCursor();
     process.stdout.write("\n");
   };
+
+  const hasLikelyLiveOwner = (session: TauDashboardSession): boolean =>
+    session.isLive && !session.isStale;
 
   const runNativePi = async (sessionFile: string): Promise<void> => {
     try {
@@ -127,9 +147,28 @@ export async function main(): Promise<void> {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on("keypress", async (input, key) => {
+    const name = keyName(input, key);
+
+    if (ownerWarningSessionId) {
+      const warningSession = result.sessions.find(
+        (session) => session.sessionId === ownerWarningSessionId,
+      );
+      if (name === "o" && warningSession) {
+        ownerWarningSessionId = undefined;
+        launchError = undefined;
+        await runNativePi(warningSession.sessionFile);
+      } else if (name === "c" || name === "escape") {
+        ownerWarningSessionId = undefined;
+        render();
+      } else {
+        render();
+      }
+      return;
+    }
+
     const handled = handleTauDashboardKey(
       { sessions: result.sessions, selection, showHelp, quitting },
-      keyName(input, key),
+      name,
     );
     selection = handled.state.selection;
     showHelp = handled.state.showHelp;
@@ -146,8 +185,14 @@ export async function main(): Promise<void> {
         const selected = result.sessions.find(
           (session) => session.sessionId === selection.selectedSessionId,
         );
-        if (selected) await runNativePi(selected.sessionFile);
-        else render();
+        if (selected) {
+          if (hasLikelyLiveOwner(selected)) {
+            ownerWarningSessionId = selected.sessionId;
+            render();
+          } else {
+            await runNativePi(selected.sessionFile);
+          }
+        } else render();
         break;
       }
       case "quit":
