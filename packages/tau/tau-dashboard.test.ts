@@ -32,7 +32,7 @@ function session(overrides: Partial<TauDashboardSession>): TauDashboardSession {
   };
 }
 
-test("renders Tau product title, boundary copy, grouped states, and compact rows", () => {
+test("renders compact Tau shell, boundary copy, grouped states, and compact rows", () => {
   const lines = renderTauDashboard(
     [
       session({
@@ -52,37 +52,20 @@ test("renders Tau product title, boundary copy, grouped states, and compact rows
     { now: NOW, width: 120 },
   );
 
-  expect(lines).toContain("Tau · Pi agents dashboard");
-  expect(lines).toContain(
-    "Tau observes sidecar status and opens sessions; native pi remains the session UI.",
-  );
-  expect(lines).toContain("Working (1)");
-  expect(lines).toContain("Idle (1)");
-  expect(lines).toContain("Stopped (1)");
-  expect(lines).toContain("Stale (1)");
-  expect(lines).toContain("  • stopped in pi-bites — stopped · pi-bites · 20s ago");
-  expect(lines).toContain("  • stale in pi-bites — stale · pi-bites · 20s ago");
+  expect(lines).toContain("▐▛███▜▌  Tau · Pi agents");
+  expect(lines).toContain("  ▘▘ ▝▝   1 working · 1 idle · 1 stopped · 1 stale");
+  expect(lines).toContain("          observes Pi sessions · enter opens native pi");
+  expect(lines.filter((line) => ["Working", "Idle", "Stopped", "Stale"].includes(line))).toEqual([
+    "Working",
+    "Idle",
+    "Stopped",
+    "Stale",
+  ]);
+  expect(lines).toContain("  • stop-1 — stopped · pi-bites · 20s ago");
+  expect(lines).toContain("  • stale-1 — stale · pi-bites · 20s ago");
   expect(lines).toContain("  • Implement dashboard — editing · write · pi-bites · 1m ago");
-  expect(lines).toContain("enter open · r refresh · q quit · ? help");
-});
-
-test("uses useful activity fallback for untitled sessions", () => {
-  const lines = renderTauDashboard(
-    [
-      session({
-        sessionId: "550e8400-e29b-41d4-a716-446655440000",
-        state: "working",
-        sourceStatus: "working",
-        currentAction: "running tests",
-        currentTool: "bash",
-      }),
-    ],
-    [],
-    { now: NOW, width: 120 },
-  );
-
-  expect(lines).toContain("  • running tests (bash) — running tests · bash · pi-bites · 20s ago");
-  expect(lines.join("\n")).not.toContain("550e8400-e29b-41d4-a716-446655440000");
+  expect(lines).toContain("enter open · ↑/↓ move · q quit · ? help");
+  expect(lines).not.toContain("enter open · r refresh · q quit · ? help");
 });
 
 test("renders uncommon statuses when present", () => {
@@ -101,10 +84,10 @@ test("renders uncommon statuses when present", () => {
     { now: NOW, width: 120 },
   );
 
-  expect(lines).toContain("Needs permission (1)");
-  expect(lines).toContain("Needs input (1)");
-  expect(lines).toContain("Failed (1)");
-  expect(lines).toContain("  • Failed: tool failed — failed · pi-bites · 20s ago");
+  expect(lines).toContain("Needs permission");
+  expect(lines).toContain("Needs input");
+  expect(lines).toContain("Failed");
+  expect(lines).toContain("  • failed — tool failed · pi-bites · 20s ago");
 });
 
 test("surfaces lastError for failed sidecars even when freshness metadata is stale", () => {
@@ -123,9 +106,9 @@ test("surfaces lastError for failed sidecars even when freshness metadata is sta
     { now: NOW, width: 120 },
   );
 
-  expect(lines).toContain("Stale (1)");
+  expect(lines).toContain("Stale");
   expect(lines).toContain(
-    "  • Failed: tool failed before heartbeat expired — failed · pi-bites · 20s ago",
+    "  • failed-stale — tool failed before heartbeat expired · pi-bites · 20s ago",
   );
 });
 
@@ -144,7 +127,7 @@ test("omits missing session file targets safely", () => {
     "existing",
   ]);
   expect(view.selectableSessionIds).toEqual(["existing"]);
-  expect(view.lines).toContain("  • observing in pi-bites — observing · pi-bites · 20s ago");
+  expect(view.lines).toContain("  • existing — observing · pi-bites · 20s ago");
 });
 
 test("renders selected sessions distinctly and exposes concise help", () => {
@@ -158,31 +141,45 @@ test("renders selected sessions distinctly and exposes concise help", () => {
   );
 
   expect(lines).toContain("› • Resting — observing · pi-bites · 20s ago");
-  expect(lines).toContain("    cwd /work/pi-bites · id idle-1");
   expect(lines).toContain(
-    "Help: ↑/↓ or j/k move selection; Enter opens the selected session in native pi; r refreshes; q quits; ? toggles help.",
+    "Help: ↑/↓ or j/k move selection; Enter opens the selected session in native pi; q quits; ? toggles help.",
   );
+  expect(lines.join("\n")).not.toContain("refresh");
 });
 
-test("tracks selectable session rows without selecting headers or empty states", () => {
-  const view = buildTauDashboardView([session({ sessionId: "work-1", state: "working" })], [], {
-    now: NOW,
-  });
+test("tracks selectable session rows in visual group order without selecting headers or empty states", () => {
+  const view = buildTauDashboardView(
+    [
+      session({ sessionId: "idle-1", state: "idle" }),
+      session({ sessionId: "stop-1", state: "stopped" }),
+      session({ sessionId: "work-1", state: "working" }),
+    ],
+    [],
+    { now: NOW },
+  );
 
-  expect(view.selectableSessionIds).toEqual(["work-1"]);
+  expect(view.selectableSessionIds).toEqual(["work-1", "idle-1", "stop-1"]);
   expect(view.rows.filter((row) => row.kind === "session").map((row) => row.sessionId)).toEqual([
     "work-1",
+    "idle-1",
+    "stop-1",
   ]);
+  expect(view.rows.filter((row) => row.kind === "header").map((row) => row.line)).toEqual([
+    "Working",
+    "Idle",
+    "Stopped",
+  ]);
+  expect(view.rows.some((row) => row.line === "  none")).toBe(false);
   expect(
     view.rows.filter((row) => row.kind === "header" || row.kind === "empty"),
   ).not.toContainEqual(expect.objectContaining({ sessionId: expect.any(String) }));
 });
 
-test("reconciles and moves selection across refreshes", () => {
+test("reconciles and moves selection across refreshes in visual group order", () => {
   const sessions = [
-    session({ sessionId: "first", state: "working" }),
     session({ sessionId: "second", state: "idle" }),
     session({ sessionId: "third", state: "stopped" }),
+    session({ sessionId: "first", state: "working" }),
   ];
 
   expect(reconcileTauDashboardSelection(sessions, { previousSessionId: "second" })).toEqual({
@@ -196,7 +193,7 @@ test("reconciles and moves selection across refreshes", () => {
     selectedIndex: 2,
   });
   expect(
-    reconcileTauDashboardSelection([sessions[0], sessions[2]], {
+    reconcileTauDashboardSelection([sessions[1], sessions[2]], {
       previousSessionId: "second",
       previousIndex: 1,
     }),
@@ -265,7 +262,5 @@ test("renders empty state and concise skipped-record warning", () => {
   expect(lines).toContain(
     "Warning: skipped 2 Tau status records (1 invalid-json, 1 missing-status).",
   );
-  expect(lines).toContain(
-    "No Tau sidecar statuses were found yet. Start pi with Tau enabled to populate ~/.pi/agents/sessions.",
-  );
+  expect(lines).toContain("No Tau sessions yet.");
 });
