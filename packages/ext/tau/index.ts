@@ -1,12 +1,14 @@
+import { spawn } from "node:child_process";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import {
   TAU_STATUS_SCHEMA_VERSION,
   type TauStatusRecord as TauSessionStatus,
 } from "#tau/status.js";
+import type { SnacksConfig } from "../config.js";
+import { DEFAULT_EXPLORE_MODEL } from "../explore/index.js";
 
 // Tau readers should treat heartbeatAt as the process-liveness signal, not
 // lastEventAt. Pi refreshes heartbeatAt every 20s; readers should consider a
@@ -49,23 +51,28 @@ export interface TauStatusContext {
   };
 }
 
-export interface PublishTauStatusOptions {
-  now?: () => number;
-  pid?: number;
-  ppid?: number;
-  writeSidecar?: (payload: TauSessionStatus) => Promise<void>;
-  onError?: (error: unknown) => void;
+interface TauStatusPublisherDeps {
+  now: () => number;
+  pid: number;
+  ppid: number;
+  writeSidecar: (payload: TauSessionStatus) => Promise<void>;
+  onError: (error: unknown) => void;
 }
 
-export interface TauStatusRuntimeOptions extends PublishTauStatusOptions {
-  heartbeatIntervalMs?: number;
-  setInterval?: typeof setInterval;
-  clearInterval?: typeof clearInterval;
+export type PublishTauStatusOptions = Partial<TauStatusPublisherDeps>;
+
+interface TauStatusRuntimeDeps extends TauStatusPublisherDeps {
+  heartbeatIntervalMs: number;
+  setInterval: typeof setInterval;
+  clearInterval: typeof clearInterval;
 }
+
+export type TauStatusRuntimeOptions = Partial<TauStatusRuntimeDeps>;
 
 export interface TauStatusRuntimeEventMetadata {
   currentAction?: string;
   currentTool?: string;
+  title?: string;
 }
 
 export interface TauStatusRuntime {
@@ -75,6 +82,160 @@ export interface TauStatusRuntime {
     metadata?: TauStatusRuntimeEventMetadata,
   ): Promise<void>;
   stop(status?: TauSessionStatusValue): Promise<void>;
+}
+
+interface TauTitleGenerationFallback {
+  reason: "empty-output" | "error";
+  error?: unknown;
+}
+
+interface TauTitleGeneratorDeps {
+  model: string;
+  runPi: (args: string[]) => Promise<string>;
+  onFallback: (fallback: TauTitleGenerationFallback) => void;
+}
+
+export type TauTitleGeneratorOptions = Partial<TauTitleGeneratorDeps>;
+
+const TAU_TITLE_PROMPT = `
+You are a title generator. You output ONLY a thread title. Nothing else.
+
+<task>
+Generate a brief title that would help the user find this conversation later.
+
+Follow all rules in <rules>
+Use the <examples> so you know what a good title looks like.
+Your output must be:
+- A single line
+- <=50 characters
+- No explanations
+</task>
+
+<rules>
+- you MUST use the same language as the user message you are summarizing
+- Title must be grammatically correct and read naturally - no word salad
+- Never include tool names in the title (e.g. "read tool", "bash tool", "edit tool")
+- Focus on the main topic or question the user needs to retrieve
+- Vary your phrasing - avoid repetitive patterns like always starting with "Analyzing"
+- When a file is mentioned, focus on WHAT the user wants to do WITH the file, not just that they shared it
+- Keep exact: technical terms, numbers, filenames, HTTP codes
+- Remove: the, this, my, a, an
+- Never assume tech stack
+- Never use tools
+- NEVER respond to questions, just generate a title for the conversation
+- The title should NEVER include "summarizing" or "generating" when generating a title
+- DO NOT SAY YOU CANNOT GENERATE A TITLE OR COMPLAIN ABOUT THE INPUT
+- Always output something meaningful, even if the input is minimal.
+</rules>
+
+<examples>
+"debug 500 errors in production" -> Debugging production 500 errors
+"refactor user service" -> Refactoring user service
+"why is app.js failing" -> app.js failure investigation
+"implement rate limiting" -> Rate limiting implementation
+"@src/auth.ts can you add refresh token support" -> Auth refresh token support
+</examples>`;
+
+export function sanitizeTauGeneratedTitle(title: string): string | undefined {
+  const firstLine = title.trim().split(/\r?\n/)[0]?.trim();
+  if (!firstLine) return undefined;
+  return (
+    firstLine
+      .replace(/^['"]|['"]$/g, "")
+      .slice(0, 50)
+      .trim() || undefined
+  );
+}
+
+function titleCaseFirstWord(text: string): string {
+  return text.replace(/^\p{Ll}/u, (char) => char.toLocaleUpperCase());
+}
+
+function imperativeVerb(verb: string): string {
+  const normalized = verb.toLowerCase();
+  if (normalized === "shown") return "Show";
+  if (normalized === "displayed") return "Display";
+  if (normalized === "rendered") return "Render";
+  if (normalized === "added") return "Add";
+  return titleCaseFirstWord(verb.replace(/ed$/, ""));
+}
+
+export function fallbackTauSessionTitle(message: string): string {
+  const text = message
+    .replace(/@([^\s/]+\/)*([^\s]+)/g, "$2")
+    .replace(/\s+/g, " ")
+    .trim();
+  const wantMatch = text.match(/\bI want (?:this |the )?(.+?) to be (\w+)(?: in ([^\s]+))?/i);
+  if (wantMatch) {
+    const [, subject, verb, location] = wantMatch;
+    const title = `${imperativeVerb(verb ?? "show")} ${subject}${location ? ` in ${location}` : ""}`;
+    return sanitizeTauGeneratedTitle(title) ?? "New conversation";
+  }
+  return sanitizeTauGeneratedTitle(text) ?? "New conversation";
+}
+
+function logTauTitleFallback(fallback: TauTitleGenerationFallback): void {
+  if (fallback.reason === "empty-output") {
+    console.warn("pi-bites: Tau title generation returned no usable title; using fallback title");
+    return;
+  }
+  console.warn(`pi-bites: Tau title generation failed; using fallback title: ${fallback.error}`);
+}
+
+function createTauTitleGeneratorDeps(
+  overrides: TauTitleGeneratorOptions = {},
+): TauTitleGeneratorDeps {
+  return {
+    model: overrides.model ?? DEFAULT_EXPLORE_MODEL,
+    runPi:
+      overrides.runPi ??
+      ((args) =>
+        new Promise<string>((resolve, reject) => {
+          const child = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"] });
+          let stdout = "";
+          child.stdout.on("data", (chunk: Buffer) => {
+            stdout += chunk.toString();
+          });
+          child.on("error", reject);
+          child.on("close", (code) => {
+            code === 0 ? resolve(stdout) : reject(new Error(`pi exited ${code}`));
+          });
+        })),
+    onFallback: overrides.onFallback ?? logTauTitleFallback,
+  };
+}
+
+export async function generateTauSessionTitle(
+  firstUserMessage: string,
+  options: TauTitleGeneratorOptions = {},
+): Promise<string> {
+  const deps = createTauTitleGeneratorDeps(options);
+  const prompt = `${TAU_TITLE_PROMPT}\n\n<user_message>\n${firstUserMessage}\n</user_message>`;
+  const args = [
+    "-p",
+    "--no-session",
+    "--no-extensions",
+    "--no-skills",
+    "--no-context-files",
+    "--no-tools",
+    "--model",
+    deps.model,
+    "--thinking",
+    "off",
+    prompt,
+  ];
+
+  try {
+    const output = await deps.runPi(args);
+    const title = sanitizeTauGeneratedTitle(output);
+    if (title) return title;
+
+    deps.onFallback({ reason: "empty-output" });
+    return fallbackTauSessionTitle(firstUserMessage);
+  } catch (error) {
+    deps.onFallback({ reason: "error", error });
+    return fallbackTauSessionTitle(firstUserMessage);
+  }
 }
 
 export function getDefaultTauAgentsDir(agentDir = getAgentDir()): string {
@@ -123,14 +284,35 @@ function logTauStatusPublishError(error: unknown): void {
   console.error(`pi-bites: failed to write Tau status sidecar: ${error}`);
 }
 
+function createTauStatusPublisherDeps(
+  overrides: PublishTauStatusOptions = {},
+): TauStatusPublisherDeps {
+  return {
+    now: overrides.now ?? Date.now,
+    pid: overrides.pid ?? process.pid,
+    ppid: overrides.ppid ?? process.ppid,
+    writeSidecar: overrides.writeSidecar ?? writeTauStatusSidecar,
+    onError: overrides.onError ?? logTauStatusPublishError,
+  };
+}
+
+function createTauStatusRuntimeDeps(overrides: TauStatusRuntimeOptions = {}): TauStatusRuntimeDeps {
+  return {
+    ...createTauStatusPublisherDeps(overrides),
+    heartbeatIntervalMs: overrides.heartbeatIntervalMs ?? TAU_HEARTBEAT_INTERVAL_MS,
+    setInterval: overrides.setInterval ?? setInterval,
+    clearInterval: overrides.clearInterval ?? clearInterval,
+  };
+}
+
 async function writeTauStatusSafely(
   payload: TauSessionStatus,
-  options: PublishTauStatusOptions,
+  deps: Pick<TauStatusPublisherDeps, "writeSidecar" | "onError">,
 ): Promise<void> {
   try {
-    await (options.writeSidecar ?? writeTauStatusSidecar)(payload);
+    await deps.writeSidecar(payload);
   } catch (error) {
-    (options.onError ?? logTauStatusPublishError)(error);
+    deps.onError(error);
   }
 }
 
@@ -138,6 +320,7 @@ export async function publishTauStatusForSession(
   ctx: TauStatusContext,
   options: PublishTauStatusOptions = {},
 ): Promise<void> {
+  const deps = createTauStatusPublisherDeps(options);
   const sessionId = ctx.sessionManager.getSessionId();
   const sessionFile = ctx.sessionManager.getSessionFile();
   if (!sessionFile) return;
@@ -146,22 +329,22 @@ export async function publishTauStatusForSession(
     sessionId,
     sessionFile,
     cwd: ctx.cwd,
-    pid: options.pid ?? process.pid,
-    ppid: options.ppid ?? process.ppid,
-    now: options.now?.() ?? Date.now(),
+    pid: deps.pid,
+    ppid: deps.ppid,
+    now: deps.now(),
   });
 
-  await writeTauStatusSafely(payload, options);
+  await writeTauStatusSafely(payload, deps);
 }
 
 export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): TauStatusRuntime {
+  const deps = createTauStatusRuntimeDeps(options);
   let current: TauSessionStatus | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let writeQueue = Promise.resolve();
 
-  const now = () => options.now?.() ?? Date.now();
   const enqueueWrite = (payload: TauSessionStatus): Promise<void> => {
-    const write = writeQueue.then(() => writeTauStatusSafely(payload, options));
+    const write = writeQueue.then(() => writeTauStatusSafely(payload, deps));
     writeQueue = write.catch(() => {});
     return write;
   };
@@ -170,7 +353,7 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
   };
   const clearHeartbeat = () => {
     if (!heartbeatTimer) return;
-    (options.clearInterval ?? clearInterval)(heartbeatTimer);
+    deps.clearInterval(heartbeatTimer);
     heartbeatTimer = undefined;
   };
 
@@ -186,23 +369,23 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
         sessionId,
         sessionFile,
         cwd: ctx.cwd,
-        pid: options.pid ?? process.pid,
-        ppid: options.ppid ?? process.ppid,
-        now: now(),
+        pid: deps.pid,
+        ppid: deps.ppid,
+        now: deps.now(),
       });
       await writeCurrent();
 
-      heartbeatTimer = (options.setInterval ?? setInterval)(() => {
+      heartbeatTimer = deps.setInterval(() => {
         if (!current) return;
-        current = { ...current, heartbeatAt: now() };
+        current = { ...current, heartbeatAt: deps.now() };
         void writeCurrent();
-      }, options.heartbeatIntervalMs ?? TAU_HEARTBEAT_INTERVAL_MS);
+      }, deps.heartbeatIntervalMs);
       heartbeatTimer.unref?.();
     },
 
     async recordEvent(status = current?.status ?? "idle", metadata = {}) {
       if (!current) return;
-      const eventAt = now();
+      const eventAt = deps.now();
       const next: TauSessionStatus = {
         ...current,
         status,
@@ -218,6 +401,10 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
         if (metadata.currentTool === undefined) delete next.currentTool;
         else next.currentTool = metadata.currentTool;
       }
+      if ("title" in metadata) {
+        if (metadata.title === undefined) delete next.title;
+        else next.title = metadata.title;
+      }
 
       current = next;
       await writeCurrent();
@@ -226,7 +413,7 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
     async stop(status = "stopped") {
       clearHeartbeat();
       if (!current) return;
-      const stoppedAt = now();
+      const stoppedAt = deps.now();
       current = { ...current, status, heartbeatAt: stoppedAt, lastEventAt: stoppedAt };
       delete current.currentAction;
       delete current.currentTool;
@@ -243,12 +430,34 @@ function describeToolAction(toolName: string, input: Record<string, unknown>): s
   return `Running ${toolName}`;
 }
 
+interface TauStatusHandlerDeps {
+  generateTitle: (firstUserMessage: string) => Promise<string>;
+}
+
+export interface RegisterTauStatusHandlersOptions {
+  generateTitle?: (firstUserMessage: string) => Promise<string>;
+  titleModel?: () => string | undefined;
+}
+
+function createTauStatusHandlerDeps(
+  options: RegisterTauStatusHandlersOptions = {},
+): TauStatusHandlerDeps {
+  return {
+    generateTitle:
+      options.generateTitle ??
+      ((prompt) => generateTauSessionTitle(prompt, { model: options.titleModel?.() })),
+  };
+}
+
 export function registerTauStatusHandlers(
   pi: Pick<ExtensionAPI, "on" | "events">,
   statusRuntime: TauStatusRuntime,
+  options: RegisterTauStatusHandlersOptions = {},
 ): void {
+  const deps = createTauStatusHandlerDeps(options);
   let agentRunActive = false;
   let permissionGateActive = false;
+  let titleCaptured = false;
   const activeTools = new Map<string, TauStatusRuntimeEventMetadata>();
 
   const currentToolMetadata = (): TauStatusRuntimeEventMetadata => {
@@ -257,7 +466,18 @@ export function registerTauStatusHandlers(
   };
 
   pi.on("session_start", async (_event, ctx) => {
+    titleCaptured = false;
     await statusRuntime.start(ctx);
+  });
+
+  pi.on("before_agent_start", (event) => {
+    if (titleCaptured) return;
+    titleCaptured = true;
+
+    void deps
+      .generateTitle(event.prompt)
+      .then((title) => statusRuntime.recordEvent(undefined, { title }))
+      .catch(() => {});
   });
 
   pi.on("agent_start", async () => {
@@ -316,9 +536,14 @@ export function registerTauStatusHandlers(
   });
 }
 
-export default function registerTau(pi: ExtensionAPI): void {
+export default function registerTau(
+  pi: ExtensionAPI,
+  configRef: { current: SnacksConfig } = { current: {} },
+): void {
   const statusRuntime = createTauStatusRuntime();
-  registerTauStatusHandlers(pi, statusRuntime);
+  registerTauStatusHandlers(pi, statusRuntime, {
+    titleModel: () => configRef.current.explore?.defaultModel ?? DEFAULT_EXPLORE_MODEL,
+  });
 
   // /agents -----------------------------------------------------------------
   pi.registerCommand("agents", {

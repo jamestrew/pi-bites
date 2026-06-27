@@ -41,7 +41,7 @@ export default function (pi: ExtensionAPI) {
 
   if (isExploreSubagent) return;
 
-  if (!isNonInteractive && !disabled.has("tau")) registerTau(pi);
+  if (!isNonInteractive && !disabled.has("tau")) registerTau(pi, configRef);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);

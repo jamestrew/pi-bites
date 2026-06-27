@@ -23,6 +23,11 @@ export interface TauStatusRecord {
   heartbeatAt: number;
   lastEventAt: number;
   status: TauStatusValue;
+  /**
+   * Human-readable session title shown by Tau dashboards. Pi may provide this
+   * natively in the future; until then the Tau extension writes a generated or
+   * deterministic fallback title here from the first user input.
+   */
   title?: string;
   currentAction?: string;
   currentTool?: string;

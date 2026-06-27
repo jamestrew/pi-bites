@@ -10,7 +10,7 @@ import { Type } from "typebox";
 import { buildDoneStats, type Usage } from "./format/index.js";
 import type { SnacksConfig } from "../config.js";
 
-const DEFAULT_MODEL = "github-copilot/claude-haiku-4.5";
+export const DEFAULT_EXPLORE_MODEL = "github-copilot/claude-haiku-4.5";
 const DEFAULT_TOOLS = "read,ls,bash";
 const SELF_EXTENSION = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -279,7 +279,8 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
 
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const cwd = params.cwd ?? ctx.cwd;
-      const model = params.model ?? configRef.current.explore?.defaultModel ?? DEFAULT_MODEL;
+      const model =
+        params.model ?? configRef.current.explore?.defaultModel ?? DEFAULT_EXPLORE_MODEL;
       const usage: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 };
       const usageRecords: SubagentUsageRecord[] = [];
       const exploreSessionId = `explore-${randomUUID()}`;
@@ -471,7 +472,8 @@ export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } 
 
     renderCall(args, theme) {
       const preview = args.description || summarizeText(args.prompt ?? "", 80) || "no prompt";
-      const selectedModel = args.model ?? configRef.current.explore?.defaultModel ?? DEFAULT_MODEL;
+      const selectedModel =
+        args.model ?? configRef.current.explore?.defaultModel ?? DEFAULT_EXPLORE_MODEL;
       const { provider, model } = splitProviderModel(selectedModel);
       const modelSuffix = theme.fg("dim", `: ${provider}/${model}`);
       const cwdSuffix = args.cwd ? theme.fg("dim", `: [${args.cwd}]`) : "";

@@ -9,6 +9,8 @@ import {
   TAU_HEARTBEAT_INTERVAL_MS,
   TAU_READER_STALE_AFTER_MS,
   buildTauStatusPayload,
+  fallbackTauSessionTitle,
+  generateTauSessionTitle,
   createTauStatusRuntime,
   deriveTauStatusPaths,
   publishTauStatusForSession,
@@ -194,6 +196,136 @@ test("Tau status runtime records and clears current activity metadata", async ()
   });
   expect(writes[2]).not.toHaveProperty("currentAction");
   expect(writes[2]).not.toHaveProperty("currentTool");
+
+  await runtime.stop();
+});
+
+test("Tau title generation sanitizes model output and falls back without live calls", async () => {
+  await expect(
+    generateTauSessionTitle("@packages/tau/status.ts add session titles", {
+      model: "test/title-model",
+      runPi: async (args) => {
+        expect(args).toContain("test/title-model");
+        expect(args).toContain("--no-tools");
+        return "Status title support\nextra explanation";
+      },
+    }),
+  ).resolves.toBe("Status title support");
+
+  await expect(
+    generateTauSessionTitle("@packages/tau/status.ts add session titles", {
+      runPi: async () => {
+        throw new Error("no model");
+      },
+    }),
+  ).resolves.toBe("status.ts add session titles");
+
+  expect(fallbackTauSessionTitle("hello")).toBe("hello");
+  expect(
+    fallbackTauSessionTitle(
+      "I added session title generation in @packages/tau/index.ts I want this session title to be shown in @packages/tau/dashboard.ts",
+    ),
+  ).toBe("Show session title in dashboard.ts");
+});
+
+test("Tau status handlers publish generated title in the background", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_700_000_000_000);
+  const writes: unknown[] = [];
+  let resolveTitle: (title: string) => void = () => {};
+  const titleGenerated = new Promise<string>((resolve) => {
+    resolveTitle = resolve;
+  });
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    heartbeatIntervalMs: 20_000,
+    writeSidecar: async (payload) => {
+      writes.push({ ...payload });
+    },
+  });
+  const handlers = new Map<string, (...args: unknown[]) => unknown>();
+  const pi = {
+    on: (event: string, handler: (...args: unknown[]) => unknown) => {
+      handlers.set(event, handler);
+    },
+    events: { on: () => undefined },
+  };
+
+  registerTauStatusHandlers(pi as never, runtime, {
+    generateTitle: () => titleGenerated,
+  });
+
+  await handlers.get("session_start")?.(undefined, {
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+  vi.setSystemTime(1_700_000_005_000);
+  const beforeAgentResult = handlers.get("before_agent_start")?.({
+    prompt: "@packages/tau/status.ts add titles",
+  });
+  expect(beforeAgentResult).toBeUndefined();
+  vi.setSystemTime(1_700_000_010_000);
+  await handlers.get("agent_start")?.();
+
+  expect(writes).toHaveLength(2);
+  expect(writes[1]).toMatchObject({
+    status: "working",
+    lastEventAt: 1_700_000_010_000,
+  });
+  expect(writes[1]).not.toHaveProperty("title");
+
+  vi.setSystemTime(1_700_000_015_000);
+  resolveTitle("status.ts add titles");
+  await vi.advanceTimersByTimeAsync(0);
+  await handlers.get("before_agent_start")?.({ prompt: "second message" });
+
+  expect(writes).toHaveLength(3);
+  expect(writes[2]).toMatchObject({
+    status: "working",
+    title: "status.ts add titles",
+    lastEventAt: 1_700_000_015_000,
+  });
+
+  await runtime.stop();
+});
+
+test("Tau status handlers save generated title to the session status.json", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-title-"));
+  const paths = deriveTauStatusPaths("session-123", root);
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    now: () => 1_700_000_000_000,
+    writeSidecar: (payload) => writeTauStatusSidecar(payload, paths),
+  });
+  const handlers = new Map<string, (...args: unknown[]) => unknown>();
+  const pi = {
+    on: (event: string, handler: (...args: unknown[]) => unknown) => {
+      handlers.set(event, handler);
+    },
+    events: { on: () => undefined },
+  };
+
+  registerTauStatusHandlers(pi as never, runtime, {
+    generateTitle: async () => "status.json title persistence",
+  });
+
+  await handlers.get("session_start")?.(undefined, {
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+  handlers.get("before_agent_start")?.({ prompt: "demo title persistence" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  expect(JSON.parse(readFileSync(paths.statusFile, "utf-8"))).toMatchObject({
+    sessionId: "session-123",
+    title: "status.json title persistence",
+  });
 
   await runtime.stop();
 });

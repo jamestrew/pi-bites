@@ -43,7 +43,7 @@ Optional fields:
 
 - `ppid`: parent process id.
 - `tty`: terminal identifier, when known.
-- `title`: human-readable session title.
+- `title`: human-readable session title. If Pi does not provide a native title, the Tau extension may generate one from the first non-extension user input and publish it here.
 - `currentAction`: human-readable description of current work, such as a tool command.
 - `currentTool`: current Pi tool name.
 - `lastError`: latest error summary, when known.
@@ -58,6 +58,12 @@ Status values:
 - `stopped`: session shut down cleanly. Readers should not treat this as stale.
 - `stale`: reader-derived state for a session whose heartbeat or process liveness failed. The extension does not need to write this during normal operation.
 - `failed`: session ended or entered a known failure state.
+
+## Generated session titles
+
+Tau uses `title` as the primary dashboard row label when present. The Tau extension generates a title once, from the first user-authored prompt before the first agent run, only when the sidecar does not already have a title. Generated titles are short (at most 50 characters), stable for the lifetime of the sidecar, and stored only in `status.json`'s optional `title` field.
+
+The generation policy is intentionally cheap and best-effort: the extension uses the same default model policy as the Explore subagent (`explore.defaultModel`, falling back to `github-copilot/claude-haiku-4.5`) with a single-line title prompt that disables tools. If model invocation is unavailable, times out, returns an empty title, or otherwise fails, the extension falls back to a deterministic title derived from the first user input. Tests must inject/mock title generation and must not require live model calls.
 
 ## Heartbeat, stale detection, and shutdown
 

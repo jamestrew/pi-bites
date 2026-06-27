@@ -57,6 +57,7 @@ test("loads valid Tau status sidecars into dashboard sessions sorted by recent a
       sessionFile: await writeSessionFile(root, "newer"),
       heartbeatAt: 20_000,
       lastEventAt: 15_000,
+      title: "Status title support",
     }),
   );
 
@@ -76,6 +77,7 @@ test("loads valid Tau status sidecars into dashboard sessions sorted by recent a
     isLive: true,
     isStale: false,
     sessionFileExists: true,
+    title: "Status title support",
   });
 });
 
