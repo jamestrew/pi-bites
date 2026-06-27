@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -49,6 +49,7 @@ export interface TauDashboardSession {
   state: TauStatusValue;
   isLive: boolean;
   isStale: boolean;
+  sessionFileExists: boolean;
   statusFile: string;
 }
 
@@ -134,17 +135,28 @@ function parseTauStatusRecord(value: unknown): TauStatusRecord | string {
   return record as unknown as TauStatusRecord;
 }
 
+async function sessionFileExists(sessionFile: string): Promise<boolean> {
+  try {
+    await access(sessionFile);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function toDashboardSession(
   record: TauStatusRecord,
   statusFile: string,
   now: number,
   staleAfterMs: number,
   isPidLive: (pid: number) => boolean,
+  sessionFileExists: boolean,
 ): TauDashboardSession {
   const activityAt = Math.max(record.lastEventAt, record.heartbeatAt);
   const pidLive = isPidLive(record.pid);
   const heartbeatFresh = now - record.heartbeatAt <= staleAfterMs;
-  const isStale = record.status !== "stopped" && (!pidLive || !heartbeatFresh);
+  const isTerminal = record.status === "stopped" || record.status === "failed";
+  const isStale = !isTerminal && (!pidLive || !heartbeatFresh);
   const state = isStale ? "stale" : record.status;
 
   return {
@@ -164,8 +176,9 @@ function toDashboardSession(
     activityAt,
     sourceStatus: record.status,
     state,
-    isLive: state !== "stale" && state !== "stopped" && pidLive,
+    isLive: state !== "stale" && state !== "stopped" && state !== "failed" && pidLive,
     isStale,
+    sessionFileExists,
     statusFile,
   };
 }
@@ -230,7 +243,16 @@ export async function loadTauDashboardSessions(
           return;
         }
 
-        sessions.push(toDashboardSession(record, statusFile, now, staleAfterMs, isPidLive));
+        sessions.push(
+          toDashboardSession(
+            record,
+            statusFile,
+            now,
+            staleAfterMs,
+            isPidLive,
+            await sessionFileExists(record.sessionFile),
+          ),
+        );
       }),
   );
 
