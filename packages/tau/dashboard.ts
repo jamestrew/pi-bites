@@ -91,27 +91,50 @@ function compactPath(path: string): string {
   return parts.at(-1) ?? path;
 }
 
-function sessionLabel(session: TauDashboardSession): string {
-  return session.title?.trim() || session.sessionId;
+interface TauSessionRowParts {
+  identity: string;
+  action: string;
 }
 
-function actionLabel(session: TauDashboardSession): string {
-  if (!session.sessionFileExists) return "missing session file";
-  if ((session.state === "failed" || session.sourceStatus === "failed") && session.lastError)
-    return session.lastError;
-  if (session.state === "stopped") return "stopped";
-  if (session.state === "stale") return "stale";
+function activityLabel(session: TauDashboardSession, separator: " · " | " ("): string | undefined {
   if (session.currentAction && session.currentTool) {
-    return `${session.currentAction} · ${session.currentTool}`;
+    return separator === " ("
+      ? `${session.currentAction} (${session.currentTool})`
+      : `${session.currentAction}${separator}${session.currentTool}`;
   }
-  return session.currentAction || session.currentTool || session.lastError || "observing";
+  return session.currentAction || session.currentTool;
+}
+
+function describeSessionRow(session: TauDashboardSession): TauSessionRowParts {
+  const title = session.title?.trim();
+  const activity = activityLabel(session, " · ");
+  const status = !session.sessionFileExists
+    ? "missing session file"
+    : session.state === "idle"
+      ? "observing"
+      : GROUP_LABELS[session.state].toLowerCase();
+  const cwd = compactPath(session.cwd);
+
+  if (title) return { identity: title, action: activity ?? session.lastError ?? status };
+
+  if ((session.state === "failed" || session.sourceStatus === "failed") && session.lastError) {
+    return { identity: `Failed: ${session.lastError}`, action: "failed" };
+  }
+
+  const identity = activityLabel(session, " (") ?? (cwd ? `${status} in ${cwd}` : status);
+  return { identity, action: activity ?? session.lastError ?? status };
 }
 
 function renderRow(session: TauDashboardSession, now: number, selected: boolean): string {
   const cwd = compactPath(session.cwd);
   const age = formatAge(now - session.activityAt);
   const marker = selected ? "›" : " ";
-  return `${marker} • ${sessionLabel(session)} — ${actionLabel(session)} · ${cwd} · ${age}`;
+  const { identity, action } = describeSessionRow(session);
+  return `${marker} • ${identity} — ${action} · ${cwd} · ${age}`;
+}
+
+function renderSelectedDetail(session: TauDashboardSession): string {
+  return `    cwd ${session.cwd} · id ${session.sessionId}`;
 }
 
 function summarizeIssues(issues: readonly TauStatusLoadIssue[]): string | undefined {
@@ -231,11 +254,13 @@ export function buildTauDashboardView(
         pushRow(rows, { kind: "empty", line: "  none" });
       } else {
         for (const session of group) {
+          const selected = session.sessionId === options.selectedSessionId;
           pushRow(rows, {
             kind: "session",
-            line: renderRow(session, now, session.sessionId === options.selectedSessionId),
+            line: renderRow(session, now, selected),
             sessionId: session.sessionId,
           });
+          if (selected) pushRow(rows, { kind: "chrome", line: renderSelectedDetail(session) });
         }
       }
       pushRow(rows, { kind: "chrome", line: "" });
