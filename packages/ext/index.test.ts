@@ -19,6 +19,7 @@ const registerModules = [
   "./spotme/index.js",
   "./inline-references/index.js",
   "./tau/index.js",
+  "./ponytail/index.js",
 ] as const;
 
 type RegisterModule = (typeof registerModules)[number];
@@ -70,6 +71,7 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./tau/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();

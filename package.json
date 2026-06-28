@@ -44,6 +44,9 @@
   "pi": {
     "extensions": [
       "./packages/ext/index.ts"
+    ],
+    "skills": [
+      "./packages/ext/ponytail/skills"
     ]
   }
 }
