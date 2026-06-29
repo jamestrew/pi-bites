@@ -1,7 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { loadConfig, writePonytailDefaultMode, type SnacksConfig } from "../config.js";
 
 const DEFAULT_MODE = "full" as const;
 const VALID_MODES = ["off", "lite", "full", "ultra", "review"] as const;
@@ -25,34 +24,8 @@ function normalizePersistedMode(mode: unknown): ConfigMode | RuntimeMode | null 
   return normalizeMode(mode) ?? normalizeConfigMode(mode);
 }
 
-function getConfigPath(): string {
-  const base = process.env.XDG_CONFIG_HOME
-    ? join(process.env.XDG_CONFIG_HOME, "ponytail")
-    : process.platform === "win32"
-      ? join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "ponytail")
-      : join(homedir(), ".config", "ponytail");
-  return join(base, "config.json");
-}
-
-function getDefaultMode(): ConfigMode {
-  const envMode = normalizeConfigMode(process.env.PONYTAIL_DEFAULT_MODE);
-  if (envMode) return envMode;
-
-  try {
-    const config = JSON.parse(readFileSync(getConfigPath(), "utf8")) as { defaultMode?: unknown };
-    return normalizeConfigMode(config.defaultMode) ?? DEFAULT_MODE;
-  } catch {
-    return DEFAULT_MODE;
-  }
-}
-
-function writeDefaultMode(mode: unknown): ConfigMode | null {
-  const normalized = normalizeConfigMode(mode);
-  if (!normalized) return null;
-  const configPath = getConfigPath();
-  mkdirSync(dirname(configPath), { recursive: true });
-  writeFileSync(configPath, JSON.stringify({ defaultMode: normalized }, null, 2) + "\n", "utf8");
-  return normalized;
+function getDefaultMode(config: SnacksConfig): ConfigMode {
+  return normalizeConfigMode(config.ponytail?.defaultMode) ?? DEFAULT_MODE;
 }
 
 function isDeactivationCommand(text: unknown): boolean {
@@ -150,9 +123,12 @@ function sendAlias(pi: ExtensionAPI, skillName: string, ctx: ExtensionContext): 
   pi.sendUserMessage(skillName);
 }
 
-export default function registerPonytail(pi: ExtensionAPI): void {
+export default function registerPonytail(
+  pi: ExtensionAPI,
+  configRef: { current: SnacksConfig } = { current: {} },
+): void {
   let currentMode: ConfigMode = DEFAULT_MODE;
-  let configuredDefaultMode = getDefaultMode();
+  let configuredDefaultMode = getDefaultMode(configRef.current);
   let isActive = false;
   let lastCtx: ExtensionContext | undefined;
 
@@ -191,15 +167,10 @@ export default function registerPonytail(pi: ExtensionAPI): void {
           "info",
         );
       if (parsed.type === "set-default") {
-        const written = writeDefaultMode(parsed.mode);
-        if (!written) return;
-        configuredDefaultMode = getDefaultMode();
-        return ctx.ui.notify(
-          configuredDefaultMode === written
-            ? `Default Ponytail mode set to ${written}.`
-            : `Saved default ${written}, but env override keeps default at ${configuredDefaultMode}.`,
-          "info",
-        );
+        writePonytailDefaultMode(ctx.cwd, parsed.mode);
+        configRef.current = loadConfig(ctx.cwd);
+        configuredDefaultMode = getDefaultMode(configRef.current);
+        return ctx.ui.notify(`Default Ponytail mode set to ${configuredDefaultMode}.`, "info");
       }
       if (parsed.type === "set-mode") return setMode(parsed.mode, ctx);
       ctx.ui.notify(
@@ -229,7 +200,7 @@ export default function registerPonytail(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     const entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries?.() ?? [];
-    configuredDefaultMode = getDefaultMode();
+    configuredDefaultMode = getDefaultMode(configRef.current);
     currentMode = resolveSessionMode(entries, configuredDefaultMode);
     syncStatus(ctx);
     ctx.ui.notify(`Ponytail loaded: ${currentMode}`, "info");

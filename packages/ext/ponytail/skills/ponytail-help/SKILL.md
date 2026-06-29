@@ -41,24 +41,17 @@ Say "stop ponytail" or "normal mode". Resume anytime with `/ponytail`.
 
 ## Configure Default Mode
 
-Default mode = `full`, auto-active every session. Change it:
-
-**Environment variable** (highest priority):
-
-```bash
-export PONYTAIL_DEFAULT_MODE=ultra
-```
-
-**Config file** (`~/.config/ponytail/config.json`, Windows: `%APPDATA%\ponytail\config.json`):
+Default mode = `full`, auto-active every session. Change it with native
+pi-bites config (`~/.pi/agent/pi-bites.json` or `<project>/.pi/pi-bites.json`):
 
 ```json
-{ "defaultMode": "lite" }
+{ "ponytail": { "defaultMode": "lite" } }
 ```
+
+Or run `/ponytail default lite`.
 
 Set `"off"` to disable auto-activation on session start, activate manually
 with `/ponytail` when wanted.
-
-Resolution: env var > config file > `full`.
 
 ## Update
 
