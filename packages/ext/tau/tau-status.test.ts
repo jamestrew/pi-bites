@@ -157,6 +157,39 @@ test("Tau status runtime records agent turns as working then idle", async () => 
   await runtime.stop();
 });
 
+test("Tau status runtime records last message metadata", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_700_000_000_000);
+  const writes: unknown[] = [];
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    heartbeatIntervalMs: 20_000,
+    writeSidecar: async (payload) => {
+      writes.push({ ...payload });
+    },
+  });
+
+  await runtime.start({
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+
+  vi.setSystemTime(1_700_000_005_000);
+  await runtime.recordEvent("idle", { lastMessage: "Done wiring Tau last messages" });
+
+  expect(writes[1]).toMatchObject({
+    status: "idle",
+    lastMessage: "Done wiring Tau last messages",
+    heartbeatAt: 1_700_000_005_000,
+    lastEventAt: 1_700_000_005_000,
+  });
+
+  await runtime.stop();
+});
+
 test("Tau status runtime records and clears current activity metadata", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1_700_000_000_000);
@@ -270,22 +303,28 @@ test("Tau status handlers publish generated title in the background", async () =
   vi.setSystemTime(1_700_000_010_000);
   await handlers.get("agent_start")?.();
 
-  expect(writes).toHaveLength(2);
-  expect(writes[1]).toMatchObject({
+  expect(writes).toHaveLength(3);
+  expect(writes[2]).toMatchObject({
     status: "working",
+    lastMessage: "@packages/tau/status.ts add titles",
     lastEventAt: 1_700_000_010_000,
   });
-  expect(writes[1]).not.toHaveProperty("title");
+  expect(writes[2]).not.toHaveProperty("title");
 
   vi.setSystemTime(1_700_000_015_000);
   resolveTitle("status.ts add titles");
   await vi.advanceTimersByTimeAsync(0);
   await handlers.get("before_agent_start")?.({ prompt: "second message" });
 
-  expect(writes).toHaveLength(3);
-  expect(writes[2]).toMatchObject({
+  expect(writes).toHaveLength(5);
+  expect(writes[3]).toMatchObject({
     status: "working",
     title: "status.ts add titles",
+    lastEventAt: 1_700_000_015_000,
+  });
+  expect(writes[4]).toMatchObject({
+    status: "working",
+    lastMessage: "second message",
     lastEventAt: 1_700_000_015_000,
   });
 
@@ -320,6 +359,7 @@ test("Tau status handlers save generated title to the session status.json", asyn
     },
   });
   handlers.get("before_agent_start")?.({ prompt: "demo title persistence" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   expect(JSON.parse(readFileSync(paths.statusFile, "utf-8"))).toMatchObject({
@@ -457,6 +497,50 @@ test("Tau status handlers surface and clear bash permission gates", async () => 
   });
   expect(writes[3]).not.toHaveProperty("currentAction");
   expect(writes[3]).not.toHaveProperty("currentTool");
+
+  await runtime.stop();
+});
+
+test("Tau status handlers publish assistant response as last message", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_700_000_000_000);
+  const writes: unknown[] = [];
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    heartbeatIntervalMs: 20_000,
+    writeSidecar: async (payload) => {
+      writes.push({ ...payload });
+    },
+  });
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const pi = {
+    on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
+      handlers.set(event, handler);
+    },
+    events: { on: () => undefined },
+  };
+
+  registerTauStatusHandlers(pi as never, runtime);
+
+  await handlers.get("session_start")?.(undefined, {
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+  vi.setSystemTime(1_700_000_005_000);
+  await handlers.get("agent_end")?.({
+    messages: [
+      { role: "assistant", content: [{ type: "text", text: "Implemented Tau last messages" }] },
+    ],
+  });
+
+  expect(writes[1]).toMatchObject({
+    status: "idle",
+    lastMessage: "Implemented Tau last messages",
+    lastEventAt: 1_700_000_005_000,
+  });
 
   await runtime.stop();
 });

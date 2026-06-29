@@ -8,6 +8,19 @@ export const TAU_DASHBOARD_TITLE = `${TAU_DASHBOARD_MARK} Tau · Pi agents`;
 const PRODUCT_BOUNDARY_COPY = "observes Pi sessions · enter opens native pi";
 const EMPTY_STATE_COPY = "No Tau sessions yet.";
 
+const ANSI_RESET = "\x1b[0m";
+const ANSI_BOLD = "\x1b[1m";
+const ANSI_DIM = "\x1b[2m";
+const ANSI_CYAN = "\x1b[36m";
+
+function ansi(codes: string, text: string): string {
+  return text.length === 0 ? text : `${codes}${text}${ANSI_RESET}`;
+}
+
+const dim = (text: string): string => ansi(ANSI_DIM, text);
+const cyan = (text: string): string => ansi(ANSI_CYAN, text);
+const bold = (text: string): string => ansi(ANSI_BOLD, text);
+
 const GROUP_ORDER = [
   "working",
   "needs-permission",
@@ -94,23 +107,48 @@ function sessionLabel(session: TauDashboardSession): string {
   return session.title?.trim() || session.sessionId;
 }
 
-function actionLabel(session: TauDashboardSession): string {
-  if (!session.sessionFileExists) return "missing session file";
-  if ((session.state === "failed" || session.sourceStatus === "failed") && session.lastError)
-    return session.lastError;
-  if (session.state === "stopped") return "stopped";
-  if (session.state === "stale") return "stale";
-  if (session.currentAction && session.currentTool) {
-    return `${session.currentAction} · ${session.currentTool}`;
-  }
-  return session.currentAction || session.currentTool || session.lastError || "observing";
+function lastMessage(session: TauDashboardSession): string {
+  const message = session.lastMessage?.split(/[\r\n]/, 1)[0]?.trim();
+  return message || session.lastError || "";
 }
 
-function renderRow(session: TauDashboardSession, now: number, selected: boolean): string {
-  const cwd = compactPath(session.cwd);
-  const age = formatAge(now - session.activityAt);
+interface TauDashboardTableWidths {
+  title: number;
+  cwd: number;
+  age: number;
+}
+
+function tableWidths(
+  sessions: readonly TauDashboardSession[],
+  now: number,
+): TauDashboardTableWidths {
+  return sessions.reduce<TauDashboardTableWidths>(
+    (widths, session) => ({
+      title: Math.max(widths.title, sessionLabel(session).length),
+      cwd: Math.max(widths.cwd, compactPath(session.cwd).length),
+      age: Math.max(widths.age, formatAge(now - session.lastEventAt).length),
+    }),
+    { title: 0, cwd: 0, age: 0 },
+  );
+}
+
+function renderRow(
+  session: TauDashboardSession,
+  now: number,
+  selected: boolean,
+  widths: TauDashboardTableWidths,
+  width: number,
+): string {
   const marker = selected ? "›" : " ";
-  return `${marker} • ${sessionLabel(session)} — ${actionLabel(session)} · ${cwd} · ${age}`;
+  const title = sessionLabel(session).padEnd(widths.title);
+  const cwd = compactPath(session.cwd).padStart(widths.cwd);
+  const age = formatAge(now - session.lastEventAt).padStart(widths.age);
+  const prefix = `${marker} ${title}  `;
+  const suffix = `  ${cwd}  ${age}`;
+  const messageWidth = Math.max(width - prefix.length - suffix.length, 0);
+  const line = `${prefix}${truncateToWidth(lastMessage(session), messageWidth).padEnd(messageWidth)}${suffix}`;
+  if (selected) return cyan(line);
+  return `${dim(`${marker} `)}${dim(title)}${dim("  ")}${dim(truncateToWidth(lastMessage(session), messageWidth).padEnd(messageWidth))}${dim(suffix)}`;
 }
 
 function summarizeIssues(issues: readonly TauStatusLoadIssue[]): string | undefined {
@@ -241,7 +279,9 @@ export function buildTauDashboardView(
   options: RenderTauDashboardOptions = {},
 ): TauDashboardViewModel {
   const now = options.now ?? Date.now();
+  const width = options.width ?? 100;
   const visibleSessions = renderableSessions(sessions);
+  const widths = tableWidths(visibleSessions, now);
   const rows: TauDashboardRow[] = [];
   pushRow(rows, { kind: "chrome", line: `▐▛███▜▌  ${TAU_DASHBOARD_TITLE}` });
   pushRow(rows, { kind: "chrome", line: `  ▘▘ ▝▝   ${summarizeSessions(visibleSessions)}` });
@@ -258,11 +298,22 @@ export function buildTauDashboardView(
   } else {
     for (const [state, group] of groupSessionsByDashboardOrder(visibleSessions)) {
       if (group.length === 0) continue;
-      pushRow(rows, { kind: "header", line: GROUP_LABELS[state] });
+      pushRow(rows, {
+        kind: "header",
+        line: group.some((session) => session.sessionId === options.selectedSessionId)
+          ? bold(GROUP_LABELS[state])
+          : dim(GROUP_LABELS[state]),
+      });
       for (const session of group) {
         pushRow(rows, {
           kind: "session",
-          line: renderRow(session, now, session.sessionId === options.selectedSessionId),
+          line: renderRow(
+            session,
+            now,
+            session.sessionId === options.selectedSessionId,
+            widths,
+            width,
+          ),
           sessionId: session.sessionId,
         });
       }
@@ -302,5 +353,5 @@ export function renderTauDashboard(
     if (line === "") container.addChild(new Spacer(1));
     else container.addChild(new Text(truncateToWidth(line, width), 0, 0));
   }
-  return container.render(width).map((line) => line.trimEnd());
+  return container.render(width);
 }

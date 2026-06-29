@@ -31,6 +31,7 @@ export interface TauStatusRecord {
   title?: string;
   currentAction?: string;
   currentTool?: string;
+  lastMessage?: string;
   lastError?: string;
   model?: string;
 }

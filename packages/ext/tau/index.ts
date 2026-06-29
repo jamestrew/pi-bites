@@ -72,6 +72,7 @@ export type TauStatusRuntimeOptions = Partial<TauStatusRuntimeDeps>;
 export interface TauStatusRuntimeEventMetadata {
   currentAction?: string;
   currentTool?: string;
+  lastMessage?: string;
   title?: string;
 }
 
@@ -401,6 +402,10 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
         if (metadata.currentTool === undefined) delete next.currentTool;
         else next.currentTool = metadata.currentTool;
       }
+      if ("lastMessage" in metadata) {
+        if (metadata.lastMessage === undefined) delete next.lastMessage;
+        else next.lastMessage = metadata.lastMessage;
+      }
       if ("title" in metadata) {
         if (metadata.title === undefined) delete next.title;
         else next.title = metadata.title;
@@ -421,6 +426,17 @@ export function createTauStatusRuntime(options: TauStatusRuntimeOptions = {}): T
       current = undefined;
     },
   };
+}
+
+function extractTextMessage(message: { content?: unknown }): string | undefined {
+  if (typeof message.content === "string") return message.content.trim() || undefined;
+  if (!Array.isArray(message.content)) return undefined;
+  const text = (message.content as Array<{ type?: unknown; text?: unknown }>)
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("")
+    .trim();
+  return text || undefined;
 }
 
 function describeToolAction(toolName: string, input: Record<string, unknown>): string {
@@ -471,6 +487,8 @@ export function registerTauStatusHandlers(
   });
 
   pi.on("before_agent_start", (event) => {
+    void statusRuntime.recordEvent(undefined, { lastMessage: event.prompt });
+
     if (titleCaptured) return;
     titleCaptured = true;
 
@@ -520,10 +538,17 @@ export function registerTauStatusHandlers(
     await statusRuntime.recordEvent(agentRunActive ? "working" : "idle", metadata);
   });
 
-  pi.on("agent_end", async () => {
+  pi.on("agent_end", async (event) => {
     agentRunActive = false;
     activeTools.clear();
-    await statusRuntime.recordEvent("idle", { currentAction: undefined, currentTool: undefined });
+    const assistantMessage = [...(event?.messages ?? [])]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    await statusRuntime.recordEvent("idle", {
+      currentAction: undefined,
+      currentTool: undefined,
+      lastMessage: assistantMessage ? extractTextMessage(assistantMessage) : undefined,
+    });
   });
 
   pi.on("turn_end", async () => {

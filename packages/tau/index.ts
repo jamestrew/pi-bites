@@ -39,6 +39,7 @@ export interface TauDashboardSession {
   title?: string;
   currentAction?: string;
   currentTool?: string;
+  lastMessage?: string;
   lastError?: string;
   model?: string;
   startedAt: number;
@@ -168,6 +169,7 @@ function toDashboardSession(
     title: record.title,
     currentAction: record.currentAction,
     currentTool: record.currentTool,
+    lastMessage: record.lastMessage,
     lastError: record.lastError,
     model: record.model,
     startedAt: record.startedAt,
