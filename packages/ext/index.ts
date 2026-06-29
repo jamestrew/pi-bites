@@ -17,6 +17,7 @@ import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
 import registerTau from "./tau/index.js";
 import registerPonytail from "./ponytail/index.js";
+import registerSkillDisableModelInvocation from "./skill-disable-model-invocation.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 
@@ -38,6 +39,7 @@ export default function (pi: ExtensionAPI) {
 
   if (!disabled.has("bashGate")) registerBashGate(pi, configRef);
   if (!disabled.has("rtk")) registerRtk(pi);
+  registerSkillDisableModelInvocation(pi);
 
   if (isExploreSubagent) return;
 

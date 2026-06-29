@@ -20,6 +20,7 @@ const registerModules = [
   "./inline-references/index.js",
   "./tau/index.js",
   "./ponytail/index.js",
+  "./skill-disable-model-invocation.js",
 ] as const;
 
 type RegisterModule = (typeof registerModules)[number];
@@ -72,6 +73,9 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./skill-disable-model-invocation.js")).toHaveBeenCalledTimes(
+        1,
+      );
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();
