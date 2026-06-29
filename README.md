@@ -49,6 +49,9 @@ Example:
   "notifications": {
     "command": "notify-send 'pi'"
   },
+  "ponytail": {
+    "defaultMode": "full"
+  },
   "bashGate": {
     "rules": [{ "cmd": "bun", "subcommands": ["check", "test"] }, { "cmd": "pytest" }]
   },
@@ -69,7 +72,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, rollback, tau, spotme, inlineReferences, promptNormalization, atMentionContext
+bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, rollback, tau, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail
 ```
 
 You can also edit config directly:

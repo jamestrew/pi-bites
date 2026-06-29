@@ -62,6 +62,11 @@ export interface RollbackConfig {
   enabled?: boolean;
 }
 
+export interface PonytailConfig {
+  /** Default Ponytail mode for new sessions. Default: "full". */
+  defaultMode?: "off" | "lite" | "full" | "ultra" | "review";
+}
+
 export interface NotificationsConfig {
   /**
    * Shell command to run when the agent loop ends.
@@ -130,6 +135,7 @@ export interface SnacksConfig {
   bashGate?: BashGateConfig;
   notifications?: NotificationsConfig;
   rollback?: RollbackConfig;
+  ponytail?: PonytailConfig;
   /**
    * List of extension names to disable entirely.
    * Global and project-local arrays are unioned.
@@ -169,6 +175,7 @@ export function loadConfig(cwd: string): SnacksConfig {
     bashGate: { ...global.bashGate, ...project.bashGate },
     notifications: { ...global.notifications, ...project.notifications },
     rollback: { ...global.rollback, ...project.rollback },
+    ponytail: { ...global.ponytail, ...project.ponytail },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
 }
@@ -217,6 +224,16 @@ function readConfigFile(filePath: string): SnacksConfig {
 function writeConfigFile(filePath: string, config: SnacksConfig): void {
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+}
+
+export function writePonytailDefaultMode(
+  cwd: string,
+  defaultMode: PonytailConfig["defaultMode"],
+): void {
+  const targetPath = resolveWritePath(cwd);
+  const config = readConfigFile(targetPath);
+  config.ponytail = { ...config.ponytail, defaultMode };
+  writeConfigFile(targetPath, config);
 }
 
 // ---------------------------------------------------------------------------

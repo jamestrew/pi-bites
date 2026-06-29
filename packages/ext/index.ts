@@ -59,6 +59,6 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("spotme")) registerSpotme(pi);
   if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
     registerInlineReferences(pi);
-  if (!disabled.has("ponytail")) registerPonytail(pi);
+  if (!disabled.has("ponytail")) registerPonytail(pi, configRef);
   registerBitesCommands(pi);
 }
