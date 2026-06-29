@@ -1,5 +1,6 @@
 ---
 name: ponytail-review
+disable-model-invocation: true
 description: >
   Code review focused exclusively on over-engineering. Finds what to delete:
   reinvented standard library, unneeded dependencies, speculative abstractions,
