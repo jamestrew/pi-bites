@@ -199,7 +199,11 @@ function createTauTitleGeneratorDeps(
           });
           child.on("error", reject);
           child.on("close", (code) => {
-            code === 0 ? resolve(stdout) : reject(new Error(`pi exited ${code}`));
+            if (code === 0) {
+              resolve(stdout);
+              return;
+            }
+            reject(new Error(`pi exited ${code}`));
           });
         })),
     onFallback: overrides.onFallback ?? logTauTitleFallback,
