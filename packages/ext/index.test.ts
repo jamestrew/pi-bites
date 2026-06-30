@@ -14,7 +14,7 @@ const registerModules = [
   "./todo/index.js",
   "./question/index.js",
   "./notifications.js",
-  "./rollback.js",
+  "./checkpoints.js",
   "./prompt-normalization/index.js",
   "./spotme/index.js",
   "./inline-references/index.js",

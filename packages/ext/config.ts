@@ -57,8 +57,8 @@ export interface StatuslineConfig {
   command?: string;
 }
 
-export interface RollbackConfig {
-  /** Set to false to disable checkpoint tracking and /rollback. Default: true. */
+export interface CheckpointsConfig {
+  /** Set to false to disable checkpoint tracking and /rewind. Default: true. */
   enabled?: boolean;
 }
 
@@ -119,7 +119,7 @@ export type ExtensionName =
   | "fzf"
   | "question"
   | "notifications"
-  | "rollback"
+  | "checkpoints"
   | "spotme"
   | "inlineReferences"
   /** @deprecated Use "inlineReferences". */
@@ -134,7 +134,7 @@ export interface SnacksConfig {
   statusline?: StatuslineConfig;
   bashGate?: BashGateConfig;
   notifications?: NotificationsConfig;
-  rollback?: RollbackConfig;
+  checkpoints?: CheckpointsConfig;
   ponytail?: PonytailConfig;
   /**
    * List of extension names to disable entirely.
@@ -174,7 +174,7 @@ export function loadConfig(cwd: string): SnacksConfig {
     statusline: { ...global.statusline, ...project.statusline },
     bashGate: { ...global.bashGate, ...project.bashGate },
     notifications: { ...global.notifications, ...project.notifications },
-    rollback: { ...global.rollback, ...project.rollback },
+    checkpoints: { ...global.checkpoints, ...project.checkpoints },
     ponytail: { ...global.ponytail, ...project.ponytail },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
@@ -198,7 +198,7 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "todo",
   "question",
   "notifications",
-  "rollback",
+  "checkpoints",
   "spotme",
   "inlineReferences",
   "promptNormalization",
