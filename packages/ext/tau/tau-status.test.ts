@@ -250,6 +250,7 @@ test("Tau title generation sanitizes model output and falls back without live ca
       runPi: async () => {
         throw new Error("no model");
       },
+      onFallback: () => undefined,
     }),
   ).resolves.toBe("status.ts add session titles");
 
