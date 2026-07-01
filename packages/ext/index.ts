@@ -43,7 +43,8 @@ export default function (pi: ExtensionAPI) {
 
   if (!isNonInteractive && !disabled.has("tau")) registerTau(pi, configRef);
 
-  if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
+  if (!isNonInteractive && !disabled.has("footer"))
+    registerFooter(pi, { showTauStatus: !disabled.has("tau") });
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!isNonInteractive && !disabled.has("tokenCount")) registerTokenCount(pi);
   if (!isNonInteractive && !disabled.has("usageDashboard")) registerUsageDashboard(pi);

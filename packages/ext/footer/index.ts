@@ -5,6 +5,13 @@ import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import {
+  loadTauDashboardSessions,
+  type LoadTauDashboardSessionsResult,
+  type TauDashboardSession,
+} from "../../tau/index.js";
+import { getDefaultTauAgentsDir } from "../tau/index.js";
+
 type ReadonlyFooterDataProvider = {
   getGitBranch(): string | null;
   getExtensionStatuses(): ReadonlyMap<string, string>;
@@ -131,6 +138,90 @@ export function formatUsageStats(usage: UsageTotals): string {
   return parts.join(" ");
 }
 
+const TAU_FOOTER_REFRESH_MS = 10_000;
+const BLOCKED_TAU_STATES = new Set(["needs-input", "needs-permission"]);
+
+function cwdBasename(cwd: string): string {
+  return path.basename(cwd) || cwd;
+}
+
+export function formatTauFooterStatus(sessions: readonly TauDashboardSession[]): string {
+  if (sessions.length === 0) return "";
+
+  const blocked = sessions.find((session) => BLOCKED_TAU_STATES.has(session.state));
+  const counts = new Map<string, number>();
+  for (const session of sessions) counts.set(session.state, (counts.get(session.state) ?? 0) + 1);
+
+  const summary = [
+    "needs-input",
+    "needs-permission",
+    "working",
+    "idle",
+    "stale",
+    "failed",
+    "stopped",
+  ]
+    .map((state) => {
+      const count = counts.get(state);
+      return count ? `${state}:${count}` : "";
+    })
+    .filter(Boolean)
+    .join(" ");
+
+  if (blocked) return `Tau ${blocked.state} ${cwdBasename(blocked.cwd)} · ${summary}`;
+  return `Tau ${summary}`;
+}
+
+export class TauFooterStatusReader {
+  private status = "";
+  private timer?: ReturnType<typeof setInterval>;
+  private agentsDir: string;
+  private loadSessions: (options: { agentsDir: string }) => Promise<LoadTauDashboardSessionsResult>;
+
+  constructor(
+    private requestRender: () => void,
+    options: {
+      agentsDir?: string;
+      loadSessions?: (options: { agentsDir: string }) => Promise<LoadTauDashboardSessionsResult>;
+    } = {},
+  ) {
+    this.agentsDir = options.agentsDir ?? getDefaultTauAgentsDir();
+    this.loadSessions = options.loadSessions ?? loadTauDashboardSessions;
+  }
+
+  start(): void {
+    this.stop();
+    void this.refresh();
+    this.timer = setInterval(() => void this.refresh(), TAU_FOOTER_REFRESH_MS);
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+    this.status = "";
+  }
+
+  getStatus(): string {
+    return this.status;
+  }
+
+  async refresh(): Promise<void> {
+    try {
+      const { sessions } = await this.loadSessions({ agentsDir: this.agentsDir });
+      const next = formatTauFooterStatus(sessions);
+      if (next !== this.status) {
+        this.status = next;
+        this.requestRender();
+      }
+    } catch {
+      if (this.status) {
+        this.status = "";
+        this.requestRender();
+      }
+    }
+  }
+}
+
 function sumUsage(a: UsageTotals, b: UsageTotals): UsageTotals {
   return {
     input: a.input + b.input,
@@ -215,6 +306,7 @@ class BitesFooter implements Component {
     private theme: any,
     private footerData: ReadonlyFooterDataProvider,
     private exploreUsageReader: ExploreUsageReader,
+    private tauStatusReader: TauFooterStatusReader | undefined,
     private requestRender: () => void,
   ) {
     this.unsubscribe = footerData.onBranchChange(requestRender);
@@ -226,6 +318,7 @@ class BitesFooter implements Component {
 
   dispose(): void {
     this.unsubscribe?.();
+    this.tauStatusReader?.stop();
   }
 
   render(width: number): string[] {
@@ -245,6 +338,8 @@ class BitesFooter implements Component {
           .trim(),
       )
       .filter(Boolean);
+    const tauStatus = this.tauStatusReader?.getStatus();
+    if (tauStatus) statuses.unshift(tauStatus);
 
     const lines = [this.theme.fg("dim", line)];
     if (statuses.length > 0) {
@@ -254,16 +349,30 @@ class BitesFooter implements Component {
   }
 }
 
-export default function registerFooter(pi: ExtensionAPI): void {
+export default function registerFooter(
+  pi: ExtensionAPI,
+  options: { showTauStatus?: boolean } = {},
+): void {
   const exploreUsageReader = new ExploreUsageReader();
+  let tauStatusReader: TauFooterStatusReader | undefined;
 
   pi.on("session_start", async (_event, ctx) => {
     exploreUsageReader.reset();
 
     ctx.ui.setFooter((tui, theme, footerData) => {
-      return new BitesFooter(ctx, theme, footerData, exploreUsageReader, () => {
-        (tui as any).requestRender();
-      });
+      const requestRender = () => (tui as any).requestRender();
+      tauStatusReader?.stop();
+      tauStatusReader =
+        options.showTauStatus === false ? undefined : new TauFooterStatusReader(requestRender);
+      tauStatusReader?.start();
+      return new BitesFooter(
+        ctx,
+        theme,
+        footerData,
+        exploreUsageReader,
+        tauStatusReader,
+        requestRender,
+      );
     });
   });
 }

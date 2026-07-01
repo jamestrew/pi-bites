@@ -9,9 +9,12 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   buildFooterLine,
   ExploreUsageReader,
+  TauFooterStatusReader,
+  formatTauFooterStatus,
   formatUsageStats,
   type UsageTotals,
 } from "./index.js";
+import type { TauDashboardSession } from "../../tau/index.js";
 
 const footerData = {
   getGitBranch: () => "main",
@@ -21,6 +24,26 @@ const footerData = {
 
 function usage(overrides: Partial<UsageTotals> = {}): UsageTotals {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, ...overrides };
+}
+
+function tauSession(overrides: Partial<TauDashboardSession>): TauDashboardSession {
+  return {
+    sessionId: "session-1",
+    sessionFile: "/tmp/session.jsonl",
+    cwd: "/repo",
+    pid: 1,
+    startedAt: 1,
+    heartbeatAt: 1,
+    lastEventAt: 1,
+    activityAt: 1,
+    sourceStatus: "idle",
+    state: "idle",
+    isLive: true,
+    isStale: false,
+    sessionFileExists: true,
+    statusFile: "/tmp/status.json",
+    ...overrides,
+  };
 }
 
 test("formatUsageStats renders compact labels and cache hit percentage", () => {
@@ -64,6 +87,52 @@ test("buildFooterLine combines main and explore token usage", () => {
   expect(line).toContain("openai-codex/gpt-5.5 low · 27k/272k 7.7%");
   expect(line).toContain("↑46k ↓3.1k R83k CH64.3% $0.368");
   expect(line).toContain("/repo (main)");
+});
+
+test("formatTauFooterStatus summarizes session states", () => {
+  expect(
+    formatTauFooterStatus([
+      tauSession({ state: "working" }),
+      tauSession({ sessionId: "session-2", state: "idle", cwd: "/other" }),
+      tauSession({ sessionId: "session-3", state: "idle", cwd: "/third" }),
+    ]),
+  ).toBe("Tau working:1 idle:2");
+});
+
+test("formatTauFooterStatus shows blocked session first", () => {
+  expect(
+    formatTauFooterStatus([
+      tauSession({ state: "working", cwd: "/repo" }),
+      tauSession({ sessionId: "session-2", state: "needs-permission", cwd: "/work/pi-bites" }),
+      tauSession({ sessionId: "session-3", state: "idle", cwd: "/idle" }),
+    ]),
+  ).toBe("Tau needs-permission pi-bites · needs-permission:1 working:1 idle:1");
+});
+
+test("TauFooterStatusReader loads from the extension Tau agents dir", async () => {
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const agentDir = join(tmpdir(), "pi", "agent");
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const calls: string[] = [];
+
+  try {
+    const reader = new TauFooterStatusReader(() => undefined, {
+      loadSessions: async ({ agentsDir }) => {
+        calls.push(agentsDir);
+        return { sessions: [], issues: [] };
+      },
+    });
+
+    await reader.refresh();
+
+    expect(calls).toEqual([join(tmpdir(), "pi", "agents")]);
+  } finally {
+    if (previousAgentDir === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }
 });
 
 test("ExploreUsageReader reset starts counting from current file end", () => {
