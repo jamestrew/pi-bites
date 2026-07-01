@@ -127,6 +127,7 @@ export type ExtensionName =
   | "promptNormalization"
   | "atMentionContext"
   | "tau"
+  | "sessionTracker"
   | "ponytail";
 
 export interface SnacksConfig {
@@ -204,6 +205,7 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "promptNormalization",
   "atMentionContext",
   "tau",
+  "sessionTracker",
   "ponytail",
 ];
 
