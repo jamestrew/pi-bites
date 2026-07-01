@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { basename } from "node:path";
 import {
@@ -51,15 +52,17 @@ export async function requestSessionTracker(
 ): Promise<TrackerResponse> {
   const send = options.send ?? requestTracker;
   const spawnDaemon = options.spawnDaemon ?? spawnSessionTrackerDaemon;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await send(socketPath, request);
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if ((code !== "ENOENT" && code !== "ECONNREFUSED") || attempt >= 3) throw error;
-      if (attempt === 0) spawnDaemon();
-      await new Promise((resolve) => setTimeout(resolve, 25));
+  try {
+    return await send(socketPath, request);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ECONNREFUSED") throw error;
+    spawnDaemon();
+    if (!options.send) {
+      for (let i = 0; i < 20 && !existsSync(socketPath); i++)
+        await new Promise((resolve) => setTimeout(resolve, 25));
     }
+    return send(socketPath, request);
   }
 }
 

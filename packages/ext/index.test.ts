@@ -80,10 +80,11 @@ describe("extension entrypoint", () => {
     }
   });
 
-  test("can disable Tau without disabling unrelated extensions", async () => {
-    const loaded = await loadExtension({ disable: ["tau"] });
+  test("can disable Tau/session tracker without disabling unrelated extensions", async () => {
+    const loaded = await loadExtension({ disable: ["tau", "sessionTracker"] });
     try {
       expect(loaded.registerSpies.get("./tau/index.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./session-tracker/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./explore/index.js")).toHaveBeenCalledTimes(1);

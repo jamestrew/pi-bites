@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { createServer, createConnection, type Server } from "node:net";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 export type TrackerState = "idle" | "working" | "needs-permission";
 
@@ -159,17 +159,25 @@ export async function startSessionTrackerDaemon(
   tracker = new SessionTracker(),
   options: SessionTrackerDaemonOptions = {},
 ): Promise<Server> {
+  mkdirSync(dirname(socketPath), { recursive: true });
   if (existsSync(socketPath)) unlinkSync(socketPath);
   const server = createServer((socket) => {
     let data = "";
-    socket.setEncoding("utf8");
-    socket.on("data", (chunk) => (data += chunk));
-    socket.on("end", () => {
+    let handled = false;
+    const handleLine = () => {
+      if (handled || !data.includes("\n")) return;
+      handled = true;
       void tracker
         .handle(JSON.parse(data.trim()) as TrackerRequest)
         .then((response) => socket.end(`${JSON.stringify(response)}\n`))
         .catch((error) => socket.end(`${JSON.stringify({ ok: false, error: String(error) })}\n`));
+    };
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      data += chunk;
+      handleLine();
     });
+    socket.on("end", handleLine);
   });
   const setTimer = options.setInterval ?? setInterval;
   const clearTimer = options.clearInterval ?? clearInterval;
@@ -187,7 +195,8 @@ export async function startSessionTrackerDaemon(
 }
 
 export function spawnSessionTrackerDaemon(): void {
-  const child = spawn(process.execPath, [new URL("./serve.ts", import.meta.url).pathname], {
+  const runner = basename(process.execPath).startsWith("bun") ? process.execPath : "bun";
+  const child = spawn(runner, [new URL("./serve.ts", import.meta.url).pathname], {
     detached: true,
     stdio: "ignore",
   });

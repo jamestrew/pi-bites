@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 
-import { SessionTracker, startSessionTrackerDaemon, type PaneRecord } from "./index.js";
+import {
+  requestTracker,
+  SessionTracker,
+  startSessionTrackerDaemon,
+  type PaneRecord,
+} from "./index.js";
 
 function record(overrides: Partial<PaneRecord> = {}): PaneRecord {
   return {
@@ -25,6 +30,24 @@ test("release removes only the owning runtime pane record", async () => {
 
   await tracker.handle({ type: "release", paneId: "%1", runtimeId: "runtime-a" });
   expect(tracker.snapshot()).toEqual([]);
+});
+
+test("stores current state by pane and ignores stale same-runtime sequences", async () => {
+  const tracker = new SessionTracker({ now: () => 1_000, tmuxPaneExists: () => true });
+  await tracker.handle({
+    type: "report",
+    record: record({ paneId: "%1", runtimeId: "old", seq: 3 }),
+  });
+  await tracker.handle({
+    type: "report",
+    record: record({ paneId: "%1", runtimeId: "old", seq: 2 }),
+  });
+  await tracker.handle({
+    type: "report",
+    record: record({ paneId: "%1", runtimeId: "new", seq: 1 }),
+  });
+
+  expect(tracker.snapshot()).toEqual([record({ paneId: "%1", runtimeId: "new", seq: 1 })]);
 });
 
 test("heartbeat refreshes current pane state", async () => {
@@ -62,6 +85,32 @@ test("prunes records for missing tmux panes", async () => {
 
   await tracker.prune();
   expect(tracker.snapshot()).toEqual([record({ paneId: "%2" })]);
+});
+
+test("daemon ingests reports and returns snapshots over newline JSON", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const socketPath = join(dir, "tracker.sock");
+  const server = await startSessionTrackerDaemon(
+    socketPath,
+    new SessionTracker({ now: () => 1_000, tmuxPaneExists: () => true }),
+    {
+      setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+      clearInterval: (() => {}) as typeof clearInterval,
+    },
+  );
+
+  try {
+    await expect(
+      requestTracker(socketPath, { type: "report", record: record({ sessionId: "session-1" }) }),
+    ).resolves.toEqual({ ok: true });
+    await expect(requestTracker(socketPath, { type: "snapshot" })).resolves.toEqual({
+      ok: true,
+      records: [record({ heartbeatAt: 1_000, sessionId: "session-1" })],
+    });
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("daemon periodically prunes without a request", async () => {

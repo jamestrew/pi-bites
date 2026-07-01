@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import {
   createSessionTrackerRuntime,
   formatPaneRecordLabel,
+  requestSessionTracker,
   runPiSessionsPicker,
   sortPaneRecordsForPicker,
 } from "./index.js";
@@ -27,6 +28,29 @@ test("sorts and labels pi-sessions picker records", () => {
     "working · app · %2",
     "idle · idle · %3",
   ]);
+});
+
+test("starts daemon and retries a missing socket report once", async () => {
+  const calls: unknown[] = [];
+  const spawned: string[] = [];
+
+  await expect(
+    requestSessionTracker(
+      "sock",
+      { type: "snapshot" },
+      {
+        spawnDaemon: () => spawned.push("spawn"),
+        send: async (_socketPath, request) => {
+          calls.push(request);
+          if (calls.length === 1) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+          return { ok: true, records: [] };
+        },
+      },
+    ),
+  ).resolves.toEqual({ ok: true, records: [] });
+
+  expect(spawned).toEqual(["spawn"]);
+  expect(calls).toHaveLength(2);
 });
 
 test("pi-sessions focuses the selected pane", async () => {
