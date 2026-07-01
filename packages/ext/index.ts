@@ -17,6 +17,7 @@ import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
 import registerTau from "./tau/index.js";
 import registerPonytail from "./ponytail/index.js";
+import registerSessionTracker from "./session-tracker/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 
@@ -60,5 +61,6 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
     registerInlineReferences(pi);
   if (!disabled.has("ponytail")) registerPonytail(pi, configRef);
+  if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi);
   registerBitesCommands(pi);
 }

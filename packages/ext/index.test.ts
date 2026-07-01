@@ -20,6 +20,7 @@ const registerModules = [
   "./inline-references/index.js",
   "./tau/index.js",
   "./ponytail/index.js",
+  "./session-tracker/index.js",
 ] as const;
 
 type RegisterModule = (typeof registerModules)[number];
@@ -72,16 +73,18 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();
     }
   });
 
-  test("can disable Tau without disabling unrelated extensions", async () => {
-    const loaded = await loadExtension({ disable: ["tau"] });
+  test("can disable session tracker without disabling unrelated extensions", async () => {
+    const loaded = await loadExtension({ disable: ["sessionTracker"] });
     try {
-      expect(loaded.registerSpies.get("./tau/index.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./session-tracker/index.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./tau/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./explore/index.js")).toHaveBeenCalledTimes(1);
