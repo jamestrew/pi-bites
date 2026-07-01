@@ -30,6 +30,14 @@ export interface TrackerRuntimeOptions {
   now?: () => number;
 }
 
+export interface TrackerFooterOptions {
+  socketPath?: string;
+  intervalMs?: number;
+  setInterval?: typeof setInterval;
+  clearInterval?: typeof clearInterval;
+  send?: typeof requestTracker;
+}
+
 const STATE_ORDER: Record<TrackerState, number> = { "needs-permission": 0, working: 1, idle: 2 };
 
 export function sortPaneRecordsForPicker(records: readonly PaneRecord[]): PaneRecord[] {
@@ -43,6 +51,31 @@ export function sortPaneRecordsForPicker(records: readonly PaneRecord[]): PaneRe
 
 export function formatPaneRecordLabel(record: PaneRecord): string {
   return `${record.state} · ${basename(record.cwd) || record.cwd} · ${record.paneId}`;
+}
+
+export function formatSessionTrackerFooter(records: readonly PaneRecord[]): string | undefined {
+  if (records.length === 0) return undefined;
+
+  const counts = { idle: 0, working: 0, "needs-permission": 0 } satisfies Record<
+    TrackerState,
+    number
+  >;
+  for (const record of records) counts[record.state]++;
+
+  const blocked = sortPaneRecordsForPicker(records).find(
+    (record) => record.state === "needs-permission",
+  );
+  const blockedName = blocked ? basename(blocked.cwd) || blocked.cwd : "?";
+  const parts = [
+    `pi-sessions: ${records.length}`,
+    counts["needs-permission"]
+      ? `blocked ${blockedName}${counts["needs-permission"] > 1 ? ` +${counts["needs-permission"] - 1}` : ""}`
+      : undefined,
+    counts.working ? `${counts.working} working` : undefined,
+    counts.idle ? `${counts.idle} idle` : undefined,
+  ].filter(Boolean);
+
+  return parts.join(" · ");
 }
 
 export async function requestSessionTracker(
@@ -117,6 +150,40 @@ export async function runPiSessionsPicker(
   }
 }
 
+export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions = {}) {
+  const socketPath = options.socketPath ?? getTrackerSocketPath();
+  const intervalMs = options.intervalMs ?? TRACKER_HEARTBEAT_INTERVAL_MS;
+  const setTimer = options.setInterval ?? setInterval;
+  const clearTimer = options.clearInterval ?? clearInterval;
+  const send = options.send ?? requestTracker;
+  let timer: ReturnType<typeof setInterval> | undefined;
+
+  return {
+    start(
+      ctx: TrackerContext & {
+        ui: { setStatus(id: string, text: string | undefined): void; theme?: any };
+      },
+    ) {
+      const update = async () => {
+        try {
+          const response = await send(socketPath, { type: "snapshot" });
+          ctx.ui.setStatus("session-tracker", formatSessionTrackerFooter(response.records ?? []));
+        } catch {
+          ctx.ui.setStatus("session-tracker", undefined);
+        }
+      };
+      void update();
+      timer = setTimer(() => void update(), intervalMs);
+      timer.unref?.();
+    },
+    stop(ctx?: { ui?: { setStatus(id: string, text: string | undefined): void } }) {
+      if (timer) clearTimer(timer);
+      timer = undefined;
+      ctx?.ui?.setStatus("session-tracker", undefined);
+    },
+  };
+}
+
 export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {}) {
   const runtimeId = options.runtimeId ?? randomUUID();
   const paneId = options.paneId ?? process.env.TMUX_PANE;
@@ -173,13 +240,25 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {})
 
 export default function registerSessionTracker(pi: ExtensionAPI): void {
   const runtime = createSessionTrackerRuntime();
-  pi.on("session_start", async (_event, ctx) => runtime.start(ctx));
+  const footerRuntime = createSessionTrackerFooterRuntime();
+  let currentCtx:
+    | (TrackerContext & { ui: { setStatus(id: string, text: string | undefined): void } })
+    | undefined;
+  pi.on("session_start", async (_event, ctx) => {
+    currentCtx = ctx;
+    await runtime.start(ctx);
+    footerRuntime.start(ctx);
+  });
   pi.on("agent_start", async () => runtime.setState("working"));
   pi.events?.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
   pi.events?.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
   pi.on("agent_end", async () => runtime.setState("idle"));
   pi.on("turn_end", async () => runtime.setState("idle"));
-  pi.on("session_shutdown", async (event) => runtime.stop(event.reason === "quit"));
+  pi.on("session_shutdown", async (event) => {
+    footerRuntime.stop(currentCtx);
+    currentCtx = undefined;
+    await runtime.stop(event.reason === "quit");
+  });
 
   pi.registerCommand("pi-sessions", {
     description: "Pick a tracked Pi tmux pane to focus",

@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 
 import {
+  buildExtensionStatusLines,
   buildFooterLine,
   ExploreUsageReader,
   formatUsageStats,
@@ -64,6 +65,19 @@ test("buildFooterLine combines main and explore token usage", () => {
   expect(line).toContain("openai-codex/gpt-5.5 low · 27k/272k 7.7%");
   expect(line).toContain("↑46k ↓3.1k R83k CH64.3% $0.368");
   expect(line).toContain("/repo (main)");
+});
+
+test("buildExtensionStatusLines gives session tracker its own line", () => {
+  expect(
+    buildExtensionStatusLines(
+      new Map([
+        ["token-count", "codex: 5h: 4%"],
+        ["ponytail", "○ 🐴 ponytail: ⚡ FULL"],
+        ["session-tracker", "pi-sessions: 1 · 1 idle"],
+      ]),
+      120,
+    ),
+  ).toEqual(["○ 🐴 ponytail: ⚡ FULL codex: 5h: 4%", "pi-sessions: 1 · 1 idle"]);
 });
 
 test("ExploreUsageReader reset starts counting from current file end", () => {

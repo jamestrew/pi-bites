@@ -1,9 +1,11 @@
 import { expect, test } from "vitest";
 
 import {
+  createSessionTrackerFooterRuntime,
   createSessionTrackerRuntime,
   formatPaneRecordLabel,
   requestSessionTracker,
+  formatSessionTrackerFooter,
   runPiSessionsPicker,
   sortPaneRecordsForPicker,
 } from "./index.js";
@@ -51,6 +53,80 @@ test("starts daemon and retries a missing socket report once", async () => {
 
   expect(spawned).toEqual(["spawn"]);
   expect(calls).toHaveLength(2);
+});
+
+test("formats session tracker footer with blocked panes first", () => {
+  expect(
+    formatSessionTrackerFooter([
+      { paneId: "%3", cwd: "/work/idle", runtimeId: "r", seq: 1, state: "idle", heartbeatAt: 1 },
+      {
+        paneId: "%1",
+        cwd: "/work/blocked",
+        runtimeId: "r",
+        seq: 1,
+        state: "needs-permission",
+        heartbeatAt: 1,
+      },
+      {
+        paneId: "%2",
+        cwd: "/work/app",
+        runtimeId: "r",
+        seq: 1,
+        state: "working",
+        heartbeatAt: 1,
+      },
+    ]),
+  ).toBe("pi-sessions: 3 · blocked blocked · 1 working · 1 idle");
+});
+
+test("formats session tracker footer counts without blocked panes", () => {
+  expect(
+    formatSessionTrackerFooter([
+      { paneId: "%1", cwd: "/work/a", runtimeId: "r", seq: 1, state: "idle", heartbeatAt: 1 },
+      { paneId: "%2", cwd: "/work/b", runtimeId: "r", seq: 1, state: "working", heartbeatAt: 1 },
+    ]),
+  ).toBe("pi-sessions: 2 · 1 working · 1 idle");
+});
+
+test("session tracker footer periodically reads snapshots and fails quietly", async () => {
+  const statuses: unknown[] = [];
+  let timer: (() => void) | undefined;
+  let fail = false;
+  const runtime = createSessionTrackerFooterRuntime({
+    socketPath: "sock",
+    send: async (_socketPath, request) => {
+      if (fail) throw new Error("down");
+      expect(request).toEqual({ type: "snapshot" });
+      return {
+        ok: true,
+        records: [
+          {
+            paneId: "%1",
+            cwd: "/work/repo",
+            runtimeId: "r",
+            seq: 1,
+            state: "working",
+            heartbeatAt: 1,
+          },
+        ],
+      };
+    },
+    setInterval: ((callback: () => void) => {
+      timer = callback;
+      return { unref() {} } as ReturnType<typeof setInterval>;
+    }) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  runtime.start({ cwd: "/work/repo", ui: { setStatus: (...args) => statuses.push(args) } });
+  await Promise.resolve();
+  fail = true;
+  await timer?.();
+
+  expect(statuses).toEqual([
+    ["session-tracker", "pi-sessions: 1 · 1 working"],
+    ["session-tracker", undefined],
+  ]);
 });
 
 test("pi-sessions focuses the selected pane", async () => {

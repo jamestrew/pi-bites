@@ -207,6 +207,34 @@ export function buildFooterLine(
   return truncateToWidth(left, width, "…");
 }
 
+function cleanStatusText(text: string): string {
+  return String(text)
+    .replace(/[\r\n\t]/g, " ")
+    .replace(/ +/g, " ")
+    .trim();
+}
+
+export function buildExtensionStatusLines(
+  statuses: ReadonlyMap<string, string>,
+  width: number,
+  ellipsis = "…",
+): string[] {
+  const entries = Array.from(statuses.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, text]) => [id, cleanStatusText(text)] as const)
+    .filter(([, text]) => text);
+
+  const lines: string[] = [];
+  const inlineStatuses = entries.filter(([id]) => id !== "session-tracker").map(([, text]) => text);
+  if (inlineStatuses.length > 0)
+    lines.push(truncateToWidth(inlineStatuses.join(" "), width, ellipsis));
+
+  const sessionTracker = entries.find(([id]) => id === "session-tracker")?.[1];
+  if (sessionTracker) lines.push(truncateToWidth(sessionTracker, width, ellipsis));
+
+  return lines;
+}
+
 class BitesFooter implements Component {
   private unsubscribe?: () => void;
 
@@ -236,21 +264,14 @@ class BitesFooter implements Component {
       width,
       colorizeContextUsage(this.theme),
     );
-    const statuses = Array.from(this.footerData.getExtensionStatuses().entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([, text]) =>
-        String(text)
-          .replace(/[\r\n\t]/g, " ")
-          .replace(/ +/g, " ")
-          .trim(),
-      )
-      .filter(Boolean);
-
-    const lines = [this.theme.fg("dim", line)];
-    if (statuses.length > 0) {
-      lines.push(truncateToWidth(statuses.join(" "), width, this.theme.fg("dim", "…")));
-    }
-    return lines;
+    return [
+      this.theme.fg("dim", line),
+      ...buildExtensionStatusLines(
+        this.footerData.getExtensionStatuses(),
+        width,
+        this.theme.fg("dim", "…"),
+      ),
+    ];
   }
 }
 
