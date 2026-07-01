@@ -6,7 +6,7 @@ import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent"
 import {
   TAU_STATUS_SCHEMA_VERSION,
   type TauStatusRecord as TauSessionStatus,
-} from "#tau/status.js";
+} from "../../tau/status.js";
 import type { SnacksConfig } from "../config.js";
 import { DEFAULT_EXPLORE_MODEL } from "../explore/index.js";
 

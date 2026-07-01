@@ -14,12 +14,16 @@ import {
   type TauDashboardSession,
 } from "./index.js";
 
-function clearScreen(): void {
-  process.stdout.write("\x1b[?25l\x1b[2J\x1b[H");
+function enterDashboardScreen(): void {
+  process.stdout.write("\x1b[?1049h\x1b[?25l");
 }
 
-function showCursor(): void {
-  process.stdout.write("\x1b[?25h");
+function renderDashboardScreen(lines: readonly string[]): void {
+  process.stdout.write(`\x1b[H${lines.map((line) => `${line}\x1b[K`).join("\n")}\x1b[J`);
+}
+
+function leaveDashboardScreen(): void {
+  process.stdout.write("\x1b[?25h\x1b[?1049l");
 }
 
 const TAU_DASHBOARD_REFRESH_INTERVAL_MS = 1_000;
@@ -45,7 +49,6 @@ export async function main(): Promise<void> {
       selectedSessionId: selection.selectedSessionId,
       showHelp,
     });
-    if (interactive) clearScreen();
     if (ownerWarningSessionId) {
       const warningSession = result.sessions.find(
         (session) => session.sessionId === ownerWarningSessionId,
@@ -62,13 +65,16 @@ export async function main(): Promise<void> {
       }
     }
     if (launchError) lines.push("", launchError);
-    process.stdout.write(`${lines.join("\n")}\n`);
+    if (interactive) renderDashboardScreen(lines);
+    else process.stdout.write(`${lines.join("\n")}\n`);
   };
 
   if (!interactive) {
     render();
     return;
   }
+
+  enterDashboardScreen();
 
   let refreshInFlight = false;
   let childPiRunning = false;
@@ -98,8 +104,7 @@ export async function main(): Promise<void> {
     clearInterval(refreshTimer);
     process.stdin.setRawMode(false);
     process.stdin.pause();
-    showCursor();
-    process.stdout.write("\n");
+    leaveDashboardScreen();
   };
 
   const hasLikelyLiveOwner = (session: TauDashboardSession): boolean =>
@@ -118,8 +123,7 @@ export async function main(): Promise<void> {
     clearInterval(refreshTimer);
     process.stdin.setRawMode(false);
     process.stdin.pause();
-    showCursor();
-    process.stdout.write("\n");
+    leaveDashboardScreen();
 
     try {
       await new Promise<void>((resolve) => {
@@ -134,6 +138,7 @@ export async function main(): Promise<void> {
     } finally {
       if (!quitting) {
         childPiRunning = false;
+        enterDashboardScreen();
         process.stdin.setRawMode(true);
         process.stdin.resume();
         await refresh();
@@ -202,7 +207,7 @@ export async function main(): Promise<void> {
     if (handled.effect !== "quit") quitting = handled.state.quitting;
   });
   process.once("SIGINT", quit);
-  process.once("exit", showCursor);
+  process.once("exit", leaveDashboardScreen);
   render();
 }
 
