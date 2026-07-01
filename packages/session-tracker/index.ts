@@ -1,6 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { createServer, createConnection, type Server } from "node:net";
+import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 
 export type TrackerState = "idle" | "working" | "needs-permission";
@@ -194,9 +195,25 @@ export async function startSessionTrackerDaemon(
   return server;
 }
 
+function isDebugExecArgv(arg: string): boolean {
+  return arg === "--inspect" || arg.startsWith("--inspect=") || arg.startsWith("--inspect-");
+}
+
+export function getSessionTrackerDaemonCommand(
+  runtime: Pick<NodeJS.Process, "execPath" | "execArgv"> = process,
+): { command: string; args: string[] } {
+  const servePath = fileURLToPath(new URL("./serve.ts", import.meta.url));
+  if (basename(runtime.execPath).startsWith("bun"))
+    return { command: runtime.execPath, args: [servePath] };
+  return {
+    command: runtime.execPath,
+    args: [...runtime.execArgv.filter((arg) => !isDebugExecArgv(arg)), servePath],
+  };
+}
+
 export function spawnSessionTrackerDaemon(): void {
-  const runner = basename(process.execPath).startsWith("bun") ? process.execPath : "bun";
-  const child = spawn(runner, [new URL("./serve.ts", import.meta.url).pathname], {
+  const { command, args } = getSessionTrackerDaemonCommand();
+  const child = spawn(command, args, {
     detached: true,
     stdio: "ignore",
   });
