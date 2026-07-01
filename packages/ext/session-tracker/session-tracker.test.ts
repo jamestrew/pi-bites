@@ -1,6 +1,154 @@
 import { expect, test } from "vitest";
 
-import { createSessionTrackerRuntime } from "./index.js";
+import {
+  createSessionTrackerRuntime,
+  formatPaneRecordLabel,
+  runPiSessionsPicker,
+  sortPaneRecordsForPicker,
+} from "./index.js";
+
+test("sorts and labels pi-sessions picker records", () => {
+  const records = sortPaneRecordsForPicker([
+    { paneId: "%3", cwd: "/work/idle", runtimeId: "r", seq: 1, state: "idle", heartbeatAt: 1 },
+    {
+      paneId: "%1",
+      cwd: "/work/blocked",
+      runtimeId: "r",
+      seq: 1,
+      state: "needs-permission",
+      heartbeatAt: 1,
+    },
+    { paneId: "%2", cwd: "/work/app", runtimeId: "r", seq: 1, state: "working", heartbeatAt: 1 },
+  ]);
+
+  expect(records.map((record) => record.paneId)).toEqual(["%1", "%2", "%3"]);
+  expect(records.map(formatPaneRecordLabel)).toEqual([
+    "needs-permission · blocked · %1",
+    "working · app · %2",
+    "idle · idle · %3",
+  ]);
+});
+
+test("pi-sessions focuses the selected pane", async () => {
+  const requests: unknown[] = [];
+  await runPiSessionsPicker(
+    {
+      ui: {
+        notify() {},
+        select: async () => "working · repo · %2",
+      },
+    },
+    {
+      socketPath: "sock",
+      send: async (_socketPath, request) => {
+        requests.push(request);
+        if (request.type === "snapshot")
+          return {
+            ok: true,
+            records: [
+              {
+                paneId: "%2",
+                cwd: "/work/repo",
+                runtimeId: "r",
+                seq: 1,
+                state: "working",
+                heartbeatAt: 1,
+              },
+            ],
+          };
+        return { ok: true };
+      },
+    },
+  );
+
+  expect(requests).toEqual([{ type: "snapshot" }, { type: "focus_pane", paneId: "%2" }]);
+});
+
+test("pi-sessions shows a small warning for stale panes", async () => {
+  const notices: unknown[] = [];
+  await runPiSessionsPicker(
+    {
+      ui: {
+        notify: (message, level) => notices.push([message, level]),
+        select: async () => "idle · repo · %1",
+      },
+    },
+    {
+      socketPath: "sock",
+      send: async (_socketPath, request) =>
+        request.type === "snapshot"
+          ? {
+              ok: true,
+              records: [
+                {
+                  paneId: "%1",
+                  cwd: "/work/repo",
+                  runtimeId: "r",
+                  seq: 1,
+                  state: "idle",
+                  heartbeatAt: 1,
+                },
+              ],
+            }
+          : { ok: false, error: "not-found" },
+    },
+  );
+
+  expect(notices).toEqual([["That tmux pane disappeared. Refresh and try again.", "warning"]]);
+});
+
+test("pi-sessions shows unavailable when snapshot fails", async () => {
+  const notices: unknown[] = [];
+  await runPiSessionsPicker(
+    {
+      ui: {
+        notify: (message, level) => notices.push([message, level]),
+        select: async () => undefined,
+      },
+    },
+    {
+      socketPath: "sock",
+      send: async () => {
+        throw new Error("boom");
+      },
+    },
+  );
+
+  expect(notices).toEqual([["Pi sessions are unavailable.", "warning"]]);
+});
+
+test("pi-sessions shows focus errors", async () => {
+  const notices: unknown[] = [];
+  await runPiSessionsPicker(
+    {
+      ui: {
+        notify: (message, level) => notices.push([message, level]),
+        select: async () => "idle · repo · %1",
+      },
+    },
+    {
+      socketPath: "sock",
+      send: async (_socketPath, request) =>
+        request.type === "snapshot"
+          ? {
+              ok: true,
+              records: [
+                {
+                  paneId: "%1",
+                  cwd: "/work/repo",
+                  runtimeId: "r",
+                  seq: 1,
+                  state: "idle",
+                  heartbeatAt: 1,
+                },
+              ],
+            }
+          : { ok: false, error: "tmux failed" },
+    },
+  );
+
+  expect(notices).toEqual([["Failed to focus tmux pane: tmux failed", "error"]]);
+});
 
 test("extension sends full-state heartbeats and releases on shutdown", async () => {
   const requests: unknown[] = [];

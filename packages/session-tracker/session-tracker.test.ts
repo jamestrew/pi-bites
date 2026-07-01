@@ -93,3 +93,54 @@ test("daemon periodically prunes without a request", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("focuses a tracked existing pane by tmux pane id", async () => {
+  const calls: string[][] = [];
+  const tracker = new SessionTracker({
+    tmuxPaneExists: () => true,
+    tmuxRunner: (args) => {
+      calls.push(args);
+    },
+  });
+  await tracker.handle({ type: "report", record: record({ paneId: "%7" }) });
+
+  await expect(tracker.handle({ type: "focus_pane", paneId: "%7" })).resolves.toEqual({ ok: true });
+  expect(calls).toEqual([["switch-client", "-t", "%7"]]);
+});
+
+test("focus returns not-found for unknown panes", async () => {
+  const tracker = new SessionTracker({ tmuxPaneExists: () => true });
+
+  await expect(tracker.handle({ type: "focus_pane", paneId: "%404" })).resolves.toEqual({
+    ok: false,
+    error: "not-found",
+  });
+});
+
+test("focus prunes panes that vanish before selection", async () => {
+  const tracker = new SessionTracker({ tmuxPaneExists: () => false });
+  await tracker.handle({ type: "report", record: record({ paneId: "%9" }) });
+
+  await expect(tracker.handle({ type: "focus_pane", paneId: "%9" })).resolves.toEqual({
+    ok: false,
+    error: "not-found",
+  });
+  expect(tracker.snapshot()).toEqual([]);
+});
+
+test("focus reports tmux command failures without deleting live panes", async () => {
+  const tracker = new SessionTracker({
+    now: () => 1_000,
+    tmuxPaneExists: () => true,
+    tmuxRunner: () => {
+      throw new Error("tmux failed");
+    },
+  });
+  await tracker.handle({ type: "report", record: record({ paneId: "%3" }) });
+
+  const response = await tracker.handle({ type: "focus_pane", paneId: "%3" });
+
+  expect(response.ok).toBe(false);
+  expect(response.error).toContain("tmux failed");
+  expect(tracker.snapshot()).toEqual([record({ paneId: "%3" })]);
+});
