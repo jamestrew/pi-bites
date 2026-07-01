@@ -9,6 +9,7 @@ import {
 } from "../../tau/status.js";
 import type { SnacksConfig } from "../config.js";
 import { DEFAULT_EXPLORE_MODEL } from "../explore/index.js";
+import { handlePiSessionsCommand } from "./pi-sessions.js";
 
 // Tau readers should treat heartbeatAt as the process-liveness signal, not
 // lastEventAt. Pi refreshes heartbeatAt every 20s; readers should consider a
@@ -578,6 +579,11 @@ export default function registerTau(
   const statusRuntime = createTauStatusRuntime();
   registerTauStatusHandlers(pi, statusRuntime, {
     titleModel: () => configRef.current.explore?.defaultModel ?? DEFAULT_EXPLORE_MODEL,
+  });
+
+  pi.registerCommand("pi-sessions", {
+    description: "Pick from tracked Pi sessions",
+    handler: async (_args, ctx) => handlePiSessionsCommand(ctx),
   });
 
   // /agents -----------------------------------------------------------------
