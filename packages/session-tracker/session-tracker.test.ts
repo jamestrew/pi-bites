@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import {
+  getSessionTrackerDaemonCommand,
   requestTracker,
   SessionTracker,
   startSessionTrackerDaemon,
@@ -85,6 +86,36 @@ test("prunes records for missing tmux panes", async () => {
 
   await tracker.prune();
   expect(tracker.snapshot()).toEqual([record({ paneId: "%2" })]);
+});
+
+test("daemon command uses the current Node runtime instead of requiring bun", () => {
+  const command = getSessionTrackerDaemonCommand({
+    execPath: "/usr/bin/node",
+    execArgv: ["--experimental-strip-types"],
+  });
+
+  expect(command.command).toBe("/usr/bin/node");
+  expect(command.args.at(-1)).toMatch(/serve\.ts$/);
+  expect(command.args).toContain("--experimental-strip-types");
+});
+
+test("daemon command omits Node debug flags that would collide in the child", () => {
+  const command = getSessionTrackerDaemonCommand({
+    execPath: "/usr/bin/node",
+    execArgv: ["--experimental-strip-types", "--inspect=127.0.0.1:9229", "--inspect-brk"],
+  });
+
+  expect(command.args).toContain("--experimental-strip-types");
+  expect(command.args).not.toContain("--inspect=127.0.0.1:9229");
+  expect(command.args).not.toContain("--inspect-brk");
+});
+
+test("daemon command keeps the bun source-development flow", () => {
+  const command = getSessionTrackerDaemonCommand({ execPath: "/usr/bin/bun", execArgv: [] });
+
+  expect(command.command).toBe("/usr/bin/bun");
+  expect(command.args).toHaveLength(1);
+  expect(command.args[0]).toMatch(/serve\.ts$/);
 });
 
 test("daemon ingests reports and returns snapshots over newline JSON", async () => {
