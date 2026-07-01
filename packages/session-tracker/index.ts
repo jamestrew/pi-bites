@@ -19,7 +19,8 @@ export type TrackerRequest =
   | { type: "report"; record: PaneRecord }
   | { type: "heartbeat"; record: PaneRecord }
   | { type: "release"; paneId: string; runtimeId: string }
-  | { type: "snapshot" };
+  | { type: "snapshot" }
+  | { type: "focus_pane"; paneId: string };
 
 export interface TrackerResponse {
   ok: boolean;
@@ -27,10 +28,13 @@ export interface TrackerResponse {
   error?: string;
 }
 
+export type TmuxRunner = (args: string[]) => void | Promise<void>;
+
 export interface SessionTrackerOptions {
   now?: () => number;
   staleTimeoutMs?: number;
   tmuxPaneExists?: (paneId: string) => boolean | Promise<boolean>;
+  tmuxRunner?: TmuxRunner;
 }
 
 export interface SessionTrackerDaemonOptions {
@@ -55,6 +59,7 @@ export class SessionTracker {
   private now: () => number;
   private staleTimeoutMs: number;
   private tmuxPaneExists: (paneId: string) => boolean | Promise<boolean>;
+  private tmuxRunner: TmuxRunner;
 
   constructor(options: SessionTrackerOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -71,11 +76,17 @@ export class SessionTracker {
           return false;
         }
       });
+    this.tmuxRunner =
+      options.tmuxRunner ??
+      ((args) => {
+        execFileSync("tmux", args, { stdio: "ignore" });
+      });
   }
 
   async handle(request: TrackerRequest): Promise<TrackerResponse> {
     await this.prune();
     if (request.type === "snapshot") return { ok: true, records: this.snapshot() };
+    if (request.type === "focus_pane") return this.focusPane(request.paneId);
     if (request.type === "release") {
       const current = this.records.get(request.paneId);
       if (current?.runtimeId === request.runtimeId) this.records.delete(request.paneId);
@@ -90,6 +101,23 @@ export class SessionTracker {
     )
       this.records.set(request.record.paneId, { ...request.record, heartbeatAt: this.now() });
     return { ok: true };
+  }
+
+  async focusPane(paneId: string): Promise<TrackerResponse> {
+    if (!this.records.has(paneId) || !(await this.tmuxPaneExists(paneId))) {
+      this.records.delete(paneId);
+      return { ok: false, error: "not-found" };
+    }
+    try {
+      await this.tmuxRunner(["switch-client", "-t", paneId]);
+      return { ok: true };
+    } catch (error) {
+      if (!(await this.tmuxPaneExists(paneId))) {
+        this.records.delete(paneId);
+        return { ok: false, error: "not-found" };
+      }
+      return { ok: false, error: String(error) };
+    }
   }
 
   snapshot(): PaneRecord[] {

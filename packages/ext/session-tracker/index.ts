@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { basename } from "node:path";
 import {
   getTrackerSocketPath,
   requestTracker,
   spawnSessionTrackerDaemon,
   TRACKER_HEARTBEAT_INTERVAL_MS,
   type PaneRecord,
+  type TrackerRequest,
+  type TrackerResponse,
   type TrackerState,
 } from "../../session-tracker/index.js";
 
@@ -26,6 +29,91 @@ export interface TrackerRuntimeOptions {
   now?: () => number;
 }
 
+const STATE_ORDER: Record<TrackerState, number> = { "needs-permission": 0, working: 1, idle: 2 };
+
+export function sortPaneRecordsForPicker(records: readonly PaneRecord[]): PaneRecord[] {
+  return [...records].sort(
+    (a, b) =>
+      STATE_ORDER[a.state] - STATE_ORDER[b.state] ||
+      basename(a.cwd).localeCompare(basename(b.cwd)) ||
+      a.paneId.localeCompare(b.paneId),
+  );
+}
+
+export function formatPaneRecordLabel(record: PaneRecord): string {
+  return `${record.state} · ${basename(record.cwd) || record.cwd} · ${record.paneId}`;
+}
+
+export async function requestSessionTracker(
+  socketPath: string,
+  request: TrackerRequest,
+  options: Pick<TrackerRuntimeOptions, "send" | "spawnDaemon"> = {},
+): Promise<TrackerResponse> {
+  const send = options.send ?? requestTracker;
+  const spawnDaemon = options.spawnDaemon ?? spawnSessionTrackerDaemon;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await send(socketPath, request);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if ((code !== "ENOENT" && code !== "ECONNREFUSED") || attempt >= 3) throw error;
+      if (attempt === 0) spawnDaemon();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+}
+
+interface PiSessionsPickerContext {
+  ui: {
+    notify(message: string, level: "info" | "warning" | "error"): void;
+    select(title: string, choices: string[]): Promise<string | undefined>;
+  };
+}
+
+export async function runPiSessionsPicker(
+  ctx: PiSessionsPickerContext,
+  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon"> = {},
+): Promise<void> {
+  const socketPath = options.socketPath ?? getTrackerSocketPath();
+  let records: PaneRecord[];
+  try {
+    const snapshot = await requestSessionTracker(socketPath, { type: "snapshot" }, options);
+    records = sortPaneRecordsForPicker(snapshot.records ?? []);
+  } catch {
+    ctx.ui.notify("Pi sessions are unavailable.", "warning");
+    return;
+  }
+  if (records.length === 0) {
+    ctx.ui.notify("No tracked Pi sessions.", "info");
+    return;
+  }
+
+  const labels = records.map(formatPaneRecordLabel);
+  const selected = await ctx.ui.select("Pi sessions", labels);
+  const record = records[labels.indexOf(selected ?? "")];
+  if (!record) return;
+
+  let response: TrackerResponse;
+  try {
+    response = await requestSessionTracker(
+      socketPath,
+      { type: "focus_pane", paneId: record.paneId },
+      options,
+    );
+  } catch {
+    ctx.ui.notify("Pi sessions are unavailable.", "warning");
+    return;
+  }
+  if (!response.ok) {
+    ctx.ui.notify(
+      response.error === "not-found"
+        ? "That tmux pane disappeared. Refresh and try again."
+        : `Failed to focus tmux pane: ${response.error ?? "unknown error"}`,
+      response.error === "not-found" ? "warning" : "error",
+    );
+  }
+}
+
 export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {}) {
   const runtimeId = options.runtimeId ?? randomUUID();
   const paneId = options.paneId ?? process.env.TMUX_PANE;
@@ -33,8 +121,6 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {})
   const heartbeatIntervalMs = options.heartbeatIntervalMs ?? TRACKER_HEARTBEAT_INTERVAL_MS;
   const setTimer = options.setInterval ?? setInterval;
   const clearTimer = options.clearInterval ?? clearInterval;
-  const send = options.send ?? requestTracker;
-  const spawnDaemon = options.spawnDaemon ?? spawnSessionTrackerDaemon;
   const now = options.now ?? Date.now;
   let seq = 0;
   let state: TrackerState = "idle";
@@ -55,18 +141,7 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {})
     };
   };
 
-  const call = async (request: Parameters<typeof send>[1]) => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        return await send(socketPath, request);
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if ((code !== "ENOENT" && code !== "ECONNREFUSED") || attempt >= 3) throw error;
-        if (attempt === 0) spawnDaemon();
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    }
-  };
+  const call = (request: TrackerRequest) => requestSessionTracker(socketPath, request, options);
 
   const report = async (type: "report" | "heartbeat") => {
     const current = record();
@@ -102,4 +177,9 @@ export default function registerSessionTracker(pi: ExtensionAPI): void {
   pi.on("agent_end", async () => runtime.setState("idle"));
   pi.on("turn_end", async () => runtime.setState("idle"));
   pi.on("session_shutdown", async (event) => runtime.stop(event.reason === "quit"));
+
+  pi.registerCommand("pi-sessions", {
+    description: "Pick a tracked Pi tmux pane to focus",
+    handler: async (_args, ctx) => runPiSessionsPicker(ctx),
+  });
 }
