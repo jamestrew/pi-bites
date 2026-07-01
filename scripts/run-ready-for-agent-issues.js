@@ -155,6 +155,51 @@ async function fetchCandidates(opts, label) {
   }
 }
 
+async function reconcileStaleWorkspaces() {
+  // Cleanup-on-exit (the finally in processIssue) can't run if the process is
+  // killed mid-flight, leaving orphaned `issue-<n>-<pid>` workspaces behind.
+  // Sweep them at startup; abandon their working-copy commit only if it is
+  // empty and unbookmarked, so no real work is ever destroyed.
+  const list = await $`jj workspace list`
+    .quiet()
+    .text()
+    .catch(() => "");
+  const names = list
+    .split("\n")
+    .map((line) => line.split(":", 1)[0].trim())
+    .filter((name) => /^issue-\d+-\d+$/.test(name));
+  for (const name of names) {
+    // Resolve before forgetting: `name@` stops resolving once forgotten.
+    const abandonable = (
+      await $`jj log --no-graph -r ${`(${name}@ & empty()) ~ bookmarks()`} -T change_id`
+        .quiet()
+        .text()
+        .catch(() => "")
+    ).trim();
+    console.log(
+      `Reconciling stale workspace ${name}${abandonable ? " (abandoning empty orphan change)" : ""}`,
+    );
+    await $`jj workspace forget ${name}`.quiet().nothrow();
+    if (abandonable) await $`jj abandon ${abandonable}`.quiet().nothrow();
+  }
+}
+
+async function existingAgentIssueNumbers() {
+  // Issues that already have a local agent/issue-<n>-* bookmark from a prior
+  // (possibly interrupted) run. Belt-and-suspenders with the in-memory set:
+  // survives across separate script invocations, unlike the set.
+  const out = await $`jj bookmark list`
+    .quiet()
+    .text()
+    .catch(() => "");
+  const nums = new Set();
+  for (const line of out.split("\n")) {
+    const m = line.match(/^agent\/issue-(\d+)-/);
+    if (m) nums.add(Number(m[1]));
+  }
+  return nums;
+}
+
 async function prepareExtensionRuntime(opts) {
   if (!opts.extensionSnapshot) return opts.piArgs;
 
@@ -178,7 +223,7 @@ async function ensureJjDescription(cwd, number, title) {
       .text()
       .catch(() => "")
   ).trimEnd();
-  if (!description) await $`jj describe -m ${`feat: ${title} (#${number})`}`.cwd(cwd);
+  if (!description) await $`jj describe -m ${`feat: ${title}\n\nRefs #${number}`}`.cwd(cwd);
 }
 
 async function writeTemp(prefix, content = "") {
@@ -214,7 +259,7 @@ function buildIssuePrompt(issue, opts) {
     `- This may be a jj workspace without .git metadata; gh cannot infer the repo. Pass \`-R ${opts.repo}\` to every gh command.`,
     `- For diffs, compare against ${opts.baseBranch}@origin with jj, for example \`jj diff --from ${opts.baseBranch}@origin\`.`,
     "- Run relevant checks, including `bun check` before finishing.",
-    `- Describe the current jj change with a clear git conventional message mentioning #${number}.`,
+    `- Describe the current jj change with a clear conventional-commit subject line. Do NOT put the issue number in the subject line; GitHub appends the PR number there on merge. Reference the issue in the body only, e.g. a trailing \`Refs #${number}\` line.`,
     "- Do not create a PR yet; a separate review/fix/PR pipeline will run next.",
     "- If you cannot safely complete the issue, leave the worktree clean and explain why.",
   ].join("\n");
@@ -286,7 +331,7 @@ Instructions:
 - Use jj, not git, for VCS operations. Do not run git diff/status/commit.
 - This may be a jj workspace without .git metadata; gh cannot infer the repo. Pass '-R ${opts.repo}' to every gh command.
 - For diffs, compare against ${opts.baseBranch}@origin with jj, for example 'jj diff --from ${opts.baseBranch}@origin'; do not assume the base branch is main.
-- Ensure the current jj change has a good description mentioning #${issue.number}.
+- Ensure the current jj change has a good conventional-commit description. Keep the issue number OUT of the subject line (GitHub appends the PR number there on merge); put \`Refs #${issue.number}\` in the body instead.
 - Create or update a jj bookmark named ${branch} pointing at the current change.
 - Push it with jj to GitHub.
 - Create the PR non-interactively with 'gh pr create -R ${opts.repo} -B ${opts.baseBranch} -H ${branch} --title ... --body ...' or '--body-file ...'.
@@ -356,8 +401,10 @@ async function main() {
       .catch(() => "")
   ).trim();
   await $`jj git fetch --remote origin`;
+  await reconcileStaleWorkspaces();
   const piArgs = await prepareExtensionRuntime(opts);
 
+  const attempted = new Set();
   let totalSelected = 0;
   let totalFailures = 0;
   let loop = 0;
@@ -374,8 +421,17 @@ async function main() {
         ...(await fetchCandidates(opts, "read-for-agent")),
       ]),
     ].sort((a, b) => a - b);
+    const bookmarked = await existingAgentIssueNumbers();
     const selected = [];
     for (const number of numbers) {
+      if (attempted.has(number)) {
+        console.log(`Skipping #${number}: already attempted this run`);
+        continue;
+      }
+      if (bookmarked.has(number)) {
+        console.log(`Skipping #${number}: already has a local agent/issue-${number}-* bookmark`);
+        continue;
+      }
       const json =
         await $`gh issue view ${number} -R ${opts.repo} --json number,title,body,url,labels,author,comments,blockedBy,closedByPullRequestsReferences`.text();
       const issue = JSON.parse(json);
@@ -395,6 +451,7 @@ async function main() {
         console.log(`Skipping #${number}: already has open PR ${prs || "unknown"}`);
         continue;
       }
+      attempted.add(number);
       selected.push(issue);
       if (opts.limit > 0 && selected.length >= opts.limit) break;
     }
