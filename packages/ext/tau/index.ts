@@ -20,6 +20,7 @@ export const TAU_READER_STALE_AFTER_MS = 60_000;
 export type TauSessionStatusValue =
   | "idle"
   | "working"
+  | "blocked"
   | "needs-input"
   | "needs-permission"
   | "stopped"
@@ -476,9 +477,14 @@ export function registerTauStatusHandlers(
 ): void {
   const deps = createTauStatusHandlerDeps(options);
   let agentRunActive = false;
-  let permissionGateActive = false;
+  let activeBlockers = 0;
   let titleCaptured = false;
   const activeTools = new Map<string, TauStatusRuntimeEventMetadata>();
+
+  const derivedStatus = (): TauSessionStatusValue => {
+    if (activeBlockers > 0) return "blocked";
+    return agentRunActive ? "working" : "idle";
+  };
 
   const currentToolMetadata = (): TauStatusRuntimeEventMetadata => {
     const last = Array.from(activeTools.values()).at(-1);
@@ -504,7 +510,7 @@ export function registerTauStatusHandlers(
 
   pi.on("agent_start", async () => {
     agentRunActive = true;
-    await statusRuntime.recordEvent("working");
+    await statusRuntime.recordEvent(derivedStatus());
   });
 
   pi.on("tool_call", async (event) => {
@@ -513,16 +519,13 @@ export function registerTauStatusHandlers(
       currentTool: event.toolName,
     };
     activeTools.set(event.toolCallId, metadata);
-    await statusRuntime.recordEvent(
-      permissionGateActive ? "needs-permission" : "working",
-      metadata,
-    );
+    await statusRuntime.recordEvent(derivedStatus(), metadata);
   });
 
   pi.events.on("bites:bash_gate", async (data) => {
-    permissionGateActive = true;
+    activeBlockers += 1;
     const command = (data as { command?: unknown }).command;
-    await statusRuntime.recordEvent("needs-permission", {
+    await statusRuntime.recordEvent("blocked", {
       currentAction:
         typeof command === "string" && command.trim() !== ""
           ? `Approve ${command.trim()}`
@@ -532,14 +535,14 @@ export function registerTauStatusHandlers(
   });
 
   pi.events.on("bites:bash_gate_resolved", async () => {
-    permissionGateActive = false;
-    await statusRuntime.recordEvent(agentRunActive ? "working" : "idle", currentToolMetadata());
+    activeBlockers = Math.max(0, activeBlockers - 1);
+    await statusRuntime.recordEvent(derivedStatus(), currentToolMetadata());
   });
 
   pi.on("tool_result", async (event) => {
     activeTools.delete(event.toolCallId);
     const metadata = currentToolMetadata();
-    await statusRuntime.recordEvent(agentRunActive ? "working" : "idle", metadata);
+    await statusRuntime.recordEvent(derivedStatus(), metadata);
   });
 
   pi.on("agent_end", async (event) => {
@@ -548,7 +551,7 @@ export function registerTauStatusHandlers(
     const assistantMessage = [...(event?.messages ?? [])]
       .reverse()
       .find((message) => message.role === "assistant");
-    await statusRuntime.recordEvent("idle", {
+    await statusRuntime.recordEvent(derivedStatus(), {
       currentAction: undefined,
       currentTool: undefined,
       lastMessage: assistantMessage ? extractTextMessage(assistantMessage) : undefined,
@@ -557,7 +560,10 @@ export function registerTauStatusHandlers(
 
   pi.on("turn_end", async () => {
     if (!agentRunActive)
-      await statusRuntime.recordEvent("idle", { currentAction: undefined, currentTool: undefined });
+      await statusRuntime.recordEvent(derivedStatus(), {
+        currentAction: undefined,
+        currentTool: undefined,
+      });
   });
 
   pi.on("session_shutdown", async () => {

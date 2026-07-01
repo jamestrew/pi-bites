@@ -446,7 +446,7 @@ test("Tau status handlers track overlapping tool activity predictably", async ()
   await runtime.stop();
 });
 
-test("Tau status handlers surface and clear bash permission gates", async () => {
+test("Tau status handlers surface and clear bash blockers during active work", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
@@ -487,7 +487,7 @@ test("Tau status handlers surface and clear bash permission gates", async () => 
   await eventHandlers.get("bites:bash_gate_resolved")?.({ cwd: "/repo", command: "rm -rf dist" });
 
   expect(writes[2]).toMatchObject({
-    status: "needs-permission",
+    status: "blocked",
     currentAction: "Approve rm -rf dist",
     currentTool: "bash",
     lastEventAt: 1_700_000_006_000,
@@ -498,6 +498,67 @@ test("Tau status handlers surface and clear bash permission gates", async () => 
   });
   expect(writes[3]).not.toHaveProperty("currentAction");
   expect(writes[3]).not.toHaveProperty("currentTool");
+
+  await runtime.stop();
+});
+
+test("Tau status handlers derive blocker state from active blockers and agent work", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_700_000_000_000);
+  const writes: unknown[] = [];
+  const runtime = createTauStatusRuntime({
+    pid: 1234,
+    heartbeatIntervalMs: 20_000,
+    writeSidecar: async (payload) => {
+      writes.push({ ...payload });
+    },
+  });
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const eventHandlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const pi = {
+    on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
+      handlers.set(event, handler);
+    },
+    events: {
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) => {
+        eventHandlers.set(event, handler);
+      },
+    },
+  };
+
+  registerTauStatusHandlers(pi as never, runtime);
+
+  await handlers.get("session_start")?.(undefined, {
+    cwd: "/repo",
+    sessionManager: {
+      getSessionId: () => "session-123",
+      getSessionFile: () => "/home/me/.pi/agent/sessions/repo/session-123.jsonl",
+    },
+  });
+  await eventHandlers.get("bites:bash_gate")?.({ cwd: "/repo", command: "rm a" });
+  await handlers.get("agent_start")?.();
+  await eventHandlers.get("bites:bash_gate")?.({ cwd: "/repo", command: "rm b" });
+  await eventHandlers.get("bites:bash_gate_resolved")?.({ cwd: "/repo", command: "rm a" });
+  await eventHandlers.get("bites:bash_gate_resolved")?.({ cwd: "/repo", command: "rm b" });
+  await handlers.get("agent_end")?.({ messages: [] });
+  await handlers.get("agent_start")?.();
+  await eventHandlers.get("bites:bash_gate")?.({ cwd: "/repo", command: "rm c" });
+  await handlers.get("agent_end")?.({ messages: [] });
+  await eventHandlers.get("bites:bash_gate_resolved")?.({ cwd: "/repo", command: "rm c" });
+
+  expect(writes.map((write) => (write as { status: string }).status)).toEqual([
+    "idle",
+    "blocked",
+    "blocked",
+    "blocked",
+    "blocked",
+    "working",
+    "idle",
+    "working",
+    "blocked",
+    "blocked",
+    "idle",
+  ]);
 
   await runtime.stop();
 });

@@ -2,6 +2,7 @@ export const TAU_STATUS_SCHEMA_VERSION = 1;
 export const TAU_STATUS_VALUES = [
   "idle",
   "working",
+  "blocked",
   "needs-input",
   "needs-permission",
   "stopped",
