@@ -33,6 +33,7 @@ export interface TrackerRuntimeOptions {
 export interface TrackerFooterOptions {
   socketPath?: string;
   intervalMs?: number;
+  paneId?: string;
   setInterval?: typeof setInterval;
   clearInterval?: typeof clearInterval;
   send?: typeof requestTracker;
@@ -54,17 +55,23 @@ export function formatPaneRecordLabel(record: PaneRecord): string {
   return `${record.state} · ${basename(record.cwd) || record.cwd} · ${record.paneId}`;
 }
 
-export function formatSessionTrackerFooter(records: readonly PaneRecord[]): string | undefined {
+export function formatSessionTrackerFooter(
+  records: readonly PaneRecord[],
+  focusedPaneId?: string,
+): string | undefined {
   if (records.length === 0) return undefined;
 
   const counts = { idle: 0, working: 0, "needs-permission": 0 } satisfies Record<
     TrackerState,
     number
   >;
-  for (const record of records) counts[record.state]++;
+  for (const record of records) {
+    if (record.state === "needs-permission" && record.paneId === focusedPaneId) continue;
+    counts[record.state]++;
+  }
 
   const blocked = sortPaneRecordsForPicker(records).find(
-    (record) => record.state === "needs-permission",
+    (record) => record.state === "needs-permission" && record.paneId !== focusedPaneId,
   );
   const blockedName = blocked ? basename(blocked.cwd) || blocked.cwd : "?";
   const parts = [
@@ -81,7 +88,10 @@ export function formatSessionTrackerFooter(records: readonly PaneRecord[]): stri
 
 export function colorizeSessionTrackerFooter(
   text: string | undefined,
-  theme?: { fg(color: "dim" | "warning" | "error", text: string): string; getFgAnsi?(color: "dim"): string },
+  theme?: {
+    fg(color: "dim" | "warning" | "error", text: string): string;
+    getFgAnsi?(color: "dim"): string;
+  },
 ): string | undefined {
   if (!text || !theme) return text;
   const blocked = text.match(/blocked [^·]+/);
@@ -173,6 +183,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions 
   const setTimer = options.setInterval ?? setInterval;
   const clearTimer = options.clearInterval ?? clearInterval;
   const send = options.send ?? requestTracker;
+  const paneId = options.paneId ?? process.env.TMUX_PANE;
   let timer: ReturnType<typeof setInterval> | undefined;
 
   return {
@@ -187,7 +198,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions 
           ctx.ui.setStatus(
             "session-tracker",
             colorizeSessionTrackerFooter(
-              formatSessionTrackerFooter(response.records ?? []),
+              formatSessionTrackerFooter(response.records ?? [], paneId),
               ctx.ui.theme,
             ),
           );

@@ -89,14 +89,40 @@ test("formats session tracker footer counts without blocked panes", () => {
   ).toBe("pi-sessions: 2 · 1 working · 1 idle");
 });
 
+test("hides blocked footer entry for the focused pane", () => {
+  expect(
+    formatSessionTrackerFooter(
+      [
+        {
+          paneId: "%1",
+          cwd: "/work/blocked",
+          runtimeId: "r",
+          seq: 1,
+          state: "needs-permission",
+          heartbeatAt: 1,
+        },
+        {
+          paneId: "%2",
+          cwd: "/work/app",
+          runtimeId: "r",
+          seq: 1,
+          state: "working",
+          heartbeatAt: 1,
+        },
+      ],
+      "%1",
+    ),
+  ).toBe("pi-sessions: 2 · 1 working");
+});
+
 test("colors pi-sessions footer dim with blocked warning", () => {
   const theme = {
-    fg: (color: "dim" | "warning", text: string) => `<${color}>${text}</${color}>`,
+    fg: (color: "dim" | "error", text: string) => `<${color}>${text}</${color}>`,
     getFgAnsi: (color: "dim") => `<${color}>`,
   };
 
   expect(colorizeSessionTrackerFooter("pi-sessions: 2 · blocked repo · 1 idle", theme)).toBe(
-    "<dim>pi-sessions: 2 · </dim><warning>blocked repo</warning><dim><dim> · 1 idle</dim>",
+    "<dim>pi-sessions: 2 · </dim><error>blocked repo</error><dim><dim> · 1 idle</dim>",
   );
 });
 
