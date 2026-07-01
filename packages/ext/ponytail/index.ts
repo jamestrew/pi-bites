@@ -123,6 +123,14 @@ function sendAlias(pi: ExtensionAPI, skillName: string, ctx: ExtensionContext): 
   pi.sendUserMessage(skillName);
 }
 
+function dimStatus(ctx: ExtensionContext, text: string): string {
+  try {
+    return ctx.ui.theme.fg("dim", text);
+  } catch {
+    return text;
+  }
+}
+
 export default function registerPonytail(
   pi: ExtensionAPI,
   configRef: { current: SnacksConfig } = { current: {} },
@@ -140,7 +148,10 @@ export default function registerPonytail(
     const icons: Record<string, string> = { lite: "🌿", full: "⚡", ultra: "🔥", review: "🔎" };
     target.ui.setStatus(
       "ponytail",
-      `${isActive ? "●" : "○"} 🐴 ponytail: ${icons[currentMode] ?? ""} ${currentMode.toUpperCase()}`,
+      dimStatus(
+        target,
+        `${isActive ? "●" : "○"} 🐴 ponytail: ${icons[currentMode] ?? ""} ${currentMode.toUpperCase()}`,
+      ),
     );
   }
 

@@ -79,6 +79,22 @@ export function formatSessionTrackerFooter(records: readonly PaneRecord[]): stri
   return parts.join(" · ");
 }
 
+export function colorizeSessionTrackerFooter(
+  text: string | undefined,
+  theme?: { fg(color: "dim" | "warning" | "error", text: string): string; getFgAnsi?(color: "dim"): string },
+): string | undefined {
+  if (!text || !theme) return text;
+  const blocked = text.match(/blocked [^·]+/);
+  if (blocked?.index === undefined) return theme.fg("dim", text);
+  const blockedText = blocked[0].trimEnd();
+  return (
+    theme.fg("dim", text.slice(0, blocked.index)) +
+    theme.fg("error", blockedText) +
+    (theme.getFgAnsi?.("dim") ?? "") +
+    theme.fg("dim", text.slice(blocked.index + blockedText.length))
+  );
+}
+
 export async function requestSessionTracker(
   socketPath: string,
   request: TrackerRequest,
@@ -168,7 +184,13 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions 
       const update = async () => {
         try {
           const response = await send(socketPath, { type: "snapshot" });
-          ctx.ui.setStatus("session-tracker", formatSessionTrackerFooter(response.records ?? []));
+          ctx.ui.setStatus(
+            "session-tracker",
+            colorizeSessionTrackerFooter(
+              formatSessionTrackerFooter(response.records ?? []),
+              ctx.ui.theme,
+            ),
+          );
         } catch {
           ctx.ui.setStatus("session-tracker", undefined);
         }

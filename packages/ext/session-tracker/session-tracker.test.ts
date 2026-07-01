@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import {
+  colorizeSessionTrackerFooter,
   createSessionTrackerFooterRuntime,
   createSessionTrackerRuntime,
   formatPaneRecordLabel,
@@ -86,6 +87,17 @@ test("formats session tracker footer counts without blocked panes", () => {
       { paneId: "%2", cwd: "/work/b", runtimeId: "r", seq: 1, state: "working", heartbeatAt: 1 },
     ]),
   ).toBe("pi-sessions: 2 · 1 working · 1 idle");
+});
+
+test("colors pi-sessions footer dim with blocked warning", () => {
+  const theme = {
+    fg: (color: "dim" | "warning", text: string) => `<${color}>${text}</${color}>`,
+    getFgAnsi: (color: "dim") => `<${color}>`,
+  };
+
+  expect(colorizeSessionTrackerFooter("pi-sessions: 2 · blocked repo · 1 idle", theme)).toBe(
+    "<dim>pi-sessions: 2 · </dim><warning>blocked repo</warning><dim><dim> · 1 idle</dim>",
+  );
 });
 
 test("session tracker footer periodically reads snapshots and fails quietly", async () => {
