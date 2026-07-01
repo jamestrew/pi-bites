@@ -91,6 +91,7 @@ test("formats session tracker footer counts without blocked panes", () => {
 test("session tracker footer periodically reads snapshots and fails quietly", async () => {
   const statuses: unknown[] = [];
   let timer: (() => void) | undefined;
+  let intervalMs: number | undefined;
   let fail = false;
   const runtime = createSessionTrackerFooterRuntime({
     socketPath: "sock",
@@ -111,8 +112,9 @@ test("session tracker footer periodically reads snapshots and fails quietly", as
         ],
       };
     },
-    setInterval: ((callback: () => void) => {
+    setInterval: ((callback: () => void, ms?: number) => {
       timer = callback;
+      intervalMs = ms;
       return { unref() {} } as ReturnType<typeof setInterval>;
     }) as typeof setInterval,
     clearInterval: (() => {}) as typeof clearInterval,
@@ -123,6 +125,7 @@ test("session tracker footer periodically reads snapshots and fails quietly", as
   fail = true;
   await timer?.();
 
+  expect(intervalMs).toBe(1_000);
   expect(statuses).toEqual([
     ["session-tracker", "pi-sessions: 1 · 1 working"],
     ["session-tracker", undefined],

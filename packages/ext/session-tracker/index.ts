@@ -39,6 +39,7 @@ export interface TrackerFooterOptions {
 }
 
 const STATE_ORDER: Record<TrackerState, number> = { "needs-permission": 0, working: 1, idle: 2 };
+export const SESSION_TRACKER_FOOTER_INTERVAL_MS = 1_000;
 
 export function sortPaneRecordsForPicker(records: readonly PaneRecord[]): PaneRecord[] {
   return [...records].sort(
@@ -152,7 +153,7 @@ export async function runPiSessionsPicker(
 
 export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions = {}) {
   const socketPath = options.socketPath ?? getTrackerSocketPath();
-  const intervalMs = options.intervalMs ?? TRACKER_HEARTBEAT_INTERVAL_MS;
+  const intervalMs = options.intervalMs ?? SESSION_TRACKER_FOOTER_INTERVAL_MS;
   const setTimer = options.setInterval ?? setInterval;
   const clearTimer = options.clearInterval ?? clearInterval;
   const send = options.send ?? requestTracker;
