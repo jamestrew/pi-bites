@@ -23,6 +23,7 @@ const bold = (text: string): string => ansi(ANSI_BOLD, text);
 
 const GROUP_ORDER = [
   "working",
+  "blocked",
   "needs-permission",
   "needs-input",
   "failed",
@@ -33,6 +34,7 @@ const GROUP_ORDER = [
 
 const GROUP_LABELS: Record<TauStatusValue, string> = {
   working: "Working",
+  blocked: "Blocked",
   "needs-permission": "Needs permission",
   "needs-input": "Needs input",
   failed: "Failed",
