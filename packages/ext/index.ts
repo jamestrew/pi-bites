@@ -17,6 +17,7 @@ import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
 import registerTau from "./tau/index.js";
 import registerPonytail from "./ponytail/index.js";
+import registerSessionTracker from "./session-tracker/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
 
@@ -42,6 +43,7 @@ export default function (pi: ExtensionAPI) {
   if (isExploreSubagent) return;
 
   if (!isNonInteractive && !disabled.has("tau")) registerTau(pi, configRef);
+  if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
