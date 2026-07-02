@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { createConnection } from "node:net";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { basename } from "node:path";
 import {
@@ -42,10 +42,34 @@ export interface TrackerFooterOptions {
 
 const STATE_ORDER: Record<TrackerState, number> = { "needs-permission": 0, working: 1, idle: 2 };
 export const SESSION_TRACKER_FOOTER_INTERVAL_MS = 1_000;
+const DAEMON_READY_MAX_ATTEMPTS = 40;
+const DAEMON_READY_POLL_INTERVAL_MS = 50;
+
+function isSocketUnavailableError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ECONNREFUSED";
+}
+
+function probeTrackerSocket(socketPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(socketPath);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve();
+    });
+    socket.on("error", reject);
+  });
+}
 
 async function awaitTrackerSocket(socketPath: string): Promise<void> {
-  for (let i = 0; i < 20 && !existsSync(socketPath); i++)
-    await new Promise((resolve) => setTimeout(resolve, 25));
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await probeTrackerSocket(socketPath);
+    } catch (error) {
+      if (!isSocketUnavailableError(error) || attempt >= DAEMON_READY_MAX_ATTEMPTS) throw error;
+      await new Promise((resolve) => setTimeout(resolve, DAEMON_READY_POLL_INTERVAL_MS));
+    }
+  }
 }
 
 export const defaultTrackerRuntimeOptions: Omit<TrackerRuntimeOptions, "runtimeId" | "socketPath"> =
@@ -129,6 +153,23 @@ export function colorizeSessionTrackerFooter(
   );
 }
 
+const inflightDaemonStarts = new Map<string, Promise<void>>();
+
+function startDaemonCoalesced(
+  socketPath: string,
+  options: Pick<TrackerRuntimeOptions, "spawnDaemon" | "awaitDaemonReady">,
+): Promise<void> {
+  let inflight = inflightDaemonStarts.get(socketPath);
+  if (!inflight) {
+    inflight = (async () => {
+      options.spawnDaemon();
+      await options.awaitDaemonReady(socketPath);
+    })().finally(() => inflightDaemonStarts.delete(socketPath));
+    inflightDaemonStarts.set(socketPath, inflight);
+  }
+  return inflight;
+}
+
 export async function requestSessionTracker(
   socketPath: string,
   request: TrackerRequest,
@@ -137,10 +178,8 @@ export async function requestSessionTracker(
   try {
     return await options.send(socketPath, request);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT" && code !== "ECONNREFUSED") throw error;
-    options.spawnDaemon();
-    await options.awaitDaemonReady(socketPath);
+    if (!isSocketUnavailableError(error)) throw error;
+    await startDaemonCoalesced(socketPath, options);
     return options.send(socketPath, request);
   }
 }
@@ -158,8 +197,7 @@ export async function restartPiSessionsDaemon(
   try {
     await options.send(options.socketPath, { type: "shutdown" });
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT" && code !== "ECONNREFUSED") throw error;
+    if (!isSocketUnavailableError(error)) throw error;
   }
   options.spawnDaemon();
 }

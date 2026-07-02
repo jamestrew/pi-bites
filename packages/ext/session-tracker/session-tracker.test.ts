@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import {
@@ -37,17 +41,19 @@ test("sorts and labels pi-sessions picker records", () => {
   ]);
 });
 
-test("starts daemon and retries a missing socket report once", async () => {
+test("starts daemon and resends a missing socket report once ready", async () => {
   const calls: unknown[] = [];
-  const spawned: string[] = [];
+  const events: string[] = [];
 
   await expect(
     requestSessionTracker(
-      "sock",
+      "sock-missing",
       { type: "snapshot" },
       {
-        spawnDaemon: () => spawned.push("spawn"),
-        awaitDaemonReady: async () => {},
+        spawnDaemon: () => events.push("spawn"),
+        awaitDaemonReady: async () => {
+          events.push("ready");
+        },
         send: async (_socketPath, request) => {
           calls.push(request);
           if (calls.length === 1) throw Object.assign(new Error("missing"), { code: "ENOENT" });
@@ -57,8 +63,174 @@ test("starts daemon and retries a missing socket report once", async () => {
     ),
   ).resolves.toEqual({ ok: true, records: [] });
 
+  expect(events).toEqual(["spawn", "ready"]);
+  expect(calls).toHaveLength(2);
+});
+
+test("treats ECONNREFUSED like a missing socket", async () => {
+  const calls: unknown[] = [];
+  const spawned: string[] = [];
+
+  await expect(
+    requestSessionTracker(
+      "sock-refused",
+      { type: "snapshot" },
+      {
+        spawnDaemon: () => spawned.push("spawn"),
+        awaitDaemonReady: async () => {},
+        send: async (_socketPath, request) => {
+          calls.push(request);
+          if (calls.length === 1)
+            throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+          return { ok: true, records: [] };
+        },
+      },
+    ),
+  ).resolves.toEqual({ ok: true, records: [] });
+
   expect(spawned).toEqual(["spawn"]);
   expect(calls).toHaveLength(2);
+});
+
+test("rejects when the daemon never becomes ready", async () => {
+  let sends = 0;
+  let spawns = 0;
+
+  await expect(
+    requestSessionTracker(
+      "sock-dead",
+      { type: "snapshot" },
+      {
+        spawnDaemon: () => {
+          spawns++;
+        },
+        awaitDaemonReady: async () => {
+          throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+        },
+        send: async () => {
+          sends++;
+          throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+        },
+      },
+    ),
+  ).rejects.toMatchObject({ code: "ECONNREFUSED" });
+
+  expect(spawns).toBe(1);
+  expect(sends).toBe(1);
+});
+
+test("rejects when sends keep failing after the daemon is ready", async () => {
+  let sends = 0;
+
+  await expect(
+    requestSessionTracker(
+      "sock-flaky",
+      { type: "snapshot" },
+      {
+        spawnDaemon: () => {},
+        awaitDaemonReady: async () => {},
+        send: async () => {
+          sends++;
+          throw Object.assign(new Error("missing"), { code: "ENOENT" });
+        },
+      },
+    ),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+
+  expect(sends).toBe(2);
+});
+
+test("rethrows a non-retryable error without spawning", async () => {
+  let sends = 0;
+  let spawns = 0;
+
+  await expect(
+    requestSessionTracker(
+      "sock-denied",
+      { type: "snapshot" },
+      {
+        spawnDaemon: () => {
+          spawns++;
+        },
+        awaitDaemonReady: async () => {},
+        send: async () => {
+          sends++;
+          throw Object.assign(new Error("denied"), { code: "EACCES" });
+        },
+      },
+    ),
+  ).rejects.toMatchObject({ code: "EACCES" });
+
+  expect(spawns).toBe(0);
+  expect(sends).toBe(1);
+});
+
+test("rethrows a non-retryable error after respawn", async () => {
+  let sends = 0;
+
+  await expect(
+    requestSessionTracker(
+      "sock-denied-late",
+      { type: "snapshot" },
+      {
+        spawnDaemon: () => {},
+        awaitDaemonReady: async () => {},
+        send: async () => {
+          sends++;
+          if (sends === 1) throw Object.assign(new Error("missing"), { code: "ENOENT" });
+          throw Object.assign(new Error("denied"), { code: "EACCES" });
+        },
+      },
+    ),
+  ).rejects.toMatchObject({ code: "EACCES" });
+
+  expect(sends).toBe(2);
+});
+
+test("coalesces concurrent daemon spawns for the same socket", async () => {
+  let spawns = 0;
+  let ready = false;
+  const options = {
+    spawnDaemon: () => {
+      spawns++;
+    },
+    awaitDaemonReady: async () => {
+      await Promise.resolve();
+      ready = true;
+    },
+    send: async () => {
+      if (!ready) throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+      return { ok: true };
+    },
+  };
+
+  await expect(
+    Promise.all([
+      requestSessionTracker("sock-coalesce", { type: "snapshot" }, options),
+      requestSessionTracker("sock-coalesce", { type: "snapshot" }, options),
+    ]),
+  ).resolves.toEqual([{ ok: true }, { ok: true }]);
+
+  expect(spawns).toBe(1);
+});
+
+test("default awaitDaemonReady polls a stale socket until it accepts connections", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-tracker-"));
+  const socketPath = join(dir, "tracker.sock");
+  writeFileSync(socketPath, "");
+  const server = createServer();
+  const timer = setTimeout(() => {
+    unlinkSync(socketPath);
+    server.listen(socketPath);
+  }, 60);
+
+  try {
+    await defaultTrackerRuntimeOptions.awaitDaemonReady(socketPath);
+  } finally {
+    clearTimeout(timer);
+    await new Promise((resolve) => server.close(resolve));
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("formats session tracker footer with blocked panes first", () => {
