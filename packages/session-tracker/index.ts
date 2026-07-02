@@ -110,7 +110,7 @@ export function getTrackerLogPath(socketPath = getTrackerSocketPath()): string {
 
 export function writeSessionTrackerLog(socketPath: string, message: string, error?: unknown): void {
   try {
-    mkdirSync(dirname(socketPath), { recursive: true });
+    mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 });
     const logPath = getTrackerLogPath(socketPath);
     if (existsSync(logPath) && statSync(logPath).size > TRACKER_LOG_MAX_BYTES)
       rmSync(logPath, { force: true });
@@ -159,8 +159,11 @@ function socketAcceptsConnections(socketPath: string): Promise<boolean> {
 }
 
 export function getTrackerSocketPath(): string {
+  // Must be host-local: unix sockets bound on an NFS-mounted home only
+  // rendezvous on the binding host, so shared homes cause daemon churn.
   return join(
-    process.env.PI_AGENT_DIR ?? join(process.env.HOME ?? ".", ".pi", "agent"),
+    "/tmp",
+    `pi-session-tracker-${process.getuid?.() ?? "default"}`,
     "session-tracker.sock",
   );
 }
@@ -284,7 +287,7 @@ export async function startSessionTrackerDaemon(
   tracker: SessionTracker,
   options: SessionTrackerDaemonOptions,
 ): Promise<Server> {
-  mkdirSync(dirname(socketPath), { recursive: true });
+  mkdirSync(dirname(socketPath), { recursive: true, mode: 0o700 });
   writeSessionTrackerLog(socketPath, "daemon start");
   const releaseLock = await acquireDaemonStartLock(socketPath);
   try {
@@ -310,8 +313,9 @@ export async function startSessionTrackerDaemon(
   server = createServer((socket) => {
     let data = "";
     let handled = false;
-    const writeResponse = (response: TrackerResponse) =>
-      socket.end(`${JSON.stringify(response)}\n`);
+    const writeResponse = (response: TrackerResponse) => {
+      if (socket.writable) socket.end(`${JSON.stringify(response)}\n`);
+    };
     const handleLine = () => {
       if (handled || !data.includes("\n")) return;
       handled = true;
@@ -330,7 +334,12 @@ export async function startSessionTrackerDaemon(
         .catch((error) => writeResponse({ ok: false, error: String(error) }));
     };
     socket.setEncoding("utf8");
-    socket.on("error", (error) => writeSessionTrackerLog(socketPath, "client socket error", error));
+    socket.on("error", (error) => {
+      const code = codeOf(error);
+      if (code === "EPIPE" || code === "ECONNRESET")
+        writeSessionTrackerLog(socketPath, `client disconnected mid-request (${code})`);
+      else writeSessionTrackerLog(socketPath, "client socket error", error);
+    });
     socket.on("data", (chunk) => {
       data += chunk;
       handleLine();

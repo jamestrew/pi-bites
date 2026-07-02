@@ -50,6 +50,7 @@ test("starts daemon and resends a missing socket report once ready", async () =>
       "sock-missing",
       { type: "snapshot" },
       {
+        log: () => {},
         spawnDaemon: () => events.push("spawn"),
         awaitDaemonReady: async () => {
           events.push("ready");
@@ -78,6 +79,7 @@ test("treats ECONNREFUSED like a missing socket", async () => {
       {
         spawnDaemon: () => spawned.push("spawn"),
         awaitDaemonReady: async () => {},
+        log: () => {},
         send: async (_socketPath, request) => {
           calls.push(request);
           if (calls.length === 1)
@@ -107,6 +109,7 @@ test("rejects when the daemon never becomes ready", async () => {
         awaitDaemonReady: async () => {
           throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
         },
+        log: () => {},
         send: async () => {
           sends++;
           throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
@@ -133,6 +136,7 @@ test("backs off repeated daemon starts after startup failure", async () => {
       sends++;
       throw Object.assign(new Error("missing"), { code: "ENOENT" });
     },
+    log: () => {},
   };
 
   await expect(
@@ -156,6 +160,7 @@ test("rejects when sends keep failing after the daemon is ready", async () => {
       {
         spawnDaemon: () => {},
         awaitDaemonReady: async () => {},
+        log: () => {},
         send: async () => {
           sends++;
           throw Object.assign(new Error("missing"), { code: "ENOENT" });
@@ -180,6 +185,7 @@ test("rethrows a non-retryable error without spawning", async () => {
           spawns++;
         },
         awaitDaemonReady: async () => {},
+        log: () => {},
         send: async () => {
           sends++;
           throw Object.assign(new Error("denied"), { code: "EACCES" });
@@ -202,6 +208,7 @@ test("rethrows a non-retryable error after respawn", async () => {
       {
         spawnDaemon: () => {},
         awaitDaemonReady: async () => {},
+        log: () => {},
         send: async () => {
           sends++;
           if (sends === 1) throw Object.assign(new Error("missing"), { code: "ENOENT" });
@@ -225,6 +232,7 @@ test("coalesces concurrent daemon spawns for the same socket", async () => {
       await Promise.resolve();
       ready = true;
     },
+    log: () => {},
     send: async () => {
       if (!ready) throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
       return { ok: true };
@@ -338,6 +346,7 @@ test("session tracker footer periodically reads snapshots and fails quietly", as
   const runtime = createSessionTrackerFooterRuntime({
     ...defaultTrackerFooterOptions,
     socketPath: "sock",
+    log: () => {},
     send: async (_socketPath, request) => {
       if (fail) throw new Error("down");
       expect(request).toEqual({ type: "snapshot" });
@@ -375,6 +384,37 @@ test("session tracker footer periodically reads snapshots and fails quietly", as
   ]);
 });
 
+test("logs repeated client failures once and logs recovery", async () => {
+  const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const lines: string[] = [];
+  let fail = true;
+  let timer: (() => void) | undefined;
+  const runtime = createSessionTrackerFooterRuntime({
+    ...defaultTrackerFooterOptions,
+    socketPath: "sock-failure-log",
+    log: (_socketPath, message) => lines.push(message),
+    send: async () => {
+      if (fail) throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+      return { ok: true, records: [] };
+    },
+    setInterval: ((callback: () => void) => {
+      timer = callback;
+      return { unref() {} } as ReturnType<typeof setInterval>;
+    }) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  runtime.start({ cwd: "/repo", ui: { setStatus: () => {} } });
+  await flush();
+  timer?.();
+  await flush();
+  fail = false;
+  timer?.();
+  await flush();
+
+  expect(lines).toEqual(["client footer snapshot failed", "client footer snapshot recovered"]);
+});
+
 test("pi-sessions focuses the selected pane", async () => {
   const requests: unknown[] = [];
   await runPiSessionsPicker(
@@ -388,6 +428,7 @@ test("pi-sessions focuses the selected pane", async () => {
       socketPath: "sock",
       spawnDaemon: () => {},
       awaitDaemonReady: async () => {},
+      log: () => {},
       send: async (_socketPath, request) => {
         requests.push(request);
         if (request.type === "snapshot")
@@ -425,6 +466,7 @@ test("pi-sessions shows a small warning for stale panes", async () => {
       socketPath: "sock",
       spawnDaemon: () => {},
       awaitDaemonReady: async () => {},
+      log: () => {},
       send: async (_socketPath, request) =>
         request.type === "snapshot"
           ? {
@@ -460,6 +502,7 @@ test("pi-sessions shows unavailable when snapshot fails", async () => {
       socketPath: "sock",
       spawnDaemon: () => {},
       awaitDaemonReady: async () => {},
+      log: () => {},
       send: async () => {
         throw new Error("boom");
       },
@@ -494,6 +537,7 @@ test("pi-sessions shortcut focuses the next pane", async () => {
       paneId: "%2",
       spawnDaemon: () => {},
       awaitDaemonReady: async () => {},
+      log: () => {},
       send: async (_socketPath, request) => {
         requests.push(request);
         return { ok: true };
@@ -517,6 +561,7 @@ test("pi-sessions shows focus errors", async () => {
       socketPath: "sock",
       spawnDaemon: () => {},
       awaitDaemonReady: async () => {},
+      log: () => {},
       send: async (_socketPath, request) =>
         request.type === "snapshot"
           ? {
@@ -547,6 +592,7 @@ test("extension tracking failures are best-effort and shutdown does not respawn"
     runtimeId: "runtime-a",
     socketPath: "sock-best-effort",
     paneId: "%1",
+    log: () => {},
     send: async () => {
       sends++;
       throw Object.assign(new Error("missing"), { code: "ENOENT" });

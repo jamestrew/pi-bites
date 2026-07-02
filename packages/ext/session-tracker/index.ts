@@ -6,6 +6,7 @@ import {
   getTrackerSocketPath,
   requestTracker,
   spawnSessionTrackerDaemon,
+  writeSessionTrackerLog,
   TRACKER_HEARTBEAT_INTERVAL_MS,
   type PaneRecord,
   type TrackerRequest,
@@ -28,6 +29,7 @@ export interface TrackerRuntimeOptions {
   send: typeof requestTracker;
   spawnDaemon: typeof spawnSessionTrackerDaemon;
   awaitDaemonReady: (socketPath: string) => Promise<void>;
+  log: typeof writeSessionTrackerLog;
   now: () => number;
 }
 
@@ -38,6 +40,7 @@ export interface TrackerFooterOptions {
   setInterval: typeof setInterval;
   clearInterval: typeof clearInterval;
   send: typeof requestTracker;
+  log: typeof writeSessionTrackerLog;
 }
 
 const STATE_ORDER: Record<TrackerState, number> = { "needs-permission": 0, working: 1, idle: 2 };
@@ -82,6 +85,7 @@ export const defaultTrackerRuntimeOptions: Omit<TrackerRuntimeOptions, "runtimeI
     send: requestTracker,
     spawnDaemon: spawnSessionTrackerDaemon,
     awaitDaemonReady: awaitTrackerSocket,
+    log: writeSessionTrackerLog,
   };
 
 export const defaultTrackerFooterOptions: Omit<TrackerFooterOptions, "socketPath"> = {
@@ -89,6 +93,7 @@ export const defaultTrackerFooterOptions: Omit<TrackerFooterOptions, "socketPath
   setInterval,
   clearInterval,
   send: requestTracker,
+  log: writeSessionTrackerLog,
 };
 
 export function sortPaneRecordsForPicker(records: readonly PaneRecord[]): PaneRecord[] {
@@ -156,10 +161,38 @@ export function colorizeSessionTrackerFooter(
 
 const inflightDaemonStarts = new Map<string, Promise<void>>();
 const daemonStartFailures = new Map<string, { at: number; error: unknown }>();
+const lastLoggedFailures = new Map<string, string>();
+
+function failureLogCode(error: unknown): string {
+  return (
+    (error as NodeJS.ErrnoException).code ??
+    (error instanceof Error ? error.message : String(error))
+  );
+}
+
+function logTrackerFailure(
+  options: Pick<TrackerRuntimeOptions, "socketPath" | "log">,
+  context: string,
+  error: unknown,
+): void {
+  const key = `${options.socketPath}\n${context}`;
+  const code = failureLogCode(error);
+  if (lastLoggedFailures.get(key) === code) return;
+  lastLoggedFailures.set(key, code);
+  options.log(options.socketPath, `client ${context} failed`, error);
+}
+
+function logTrackerRecovery(
+  options: Pick<TrackerRuntimeOptions, "socketPath" | "log">,
+  context: string,
+): void {
+  if (!lastLoggedFailures.delete(`${options.socketPath}\n${context}`)) return;
+  options.log(options.socketPath, `client ${context} recovered`);
+}
 
 function startDaemonCoalesced(
   socketPath: string,
-  options: Pick<TrackerRuntimeOptions, "spawnDaemon" | "awaitDaemonReady">,
+  options: Pick<TrackerRuntimeOptions, "spawnDaemon" | "awaitDaemonReady" | "log">,
 ): Promise<void> {
   const failure = daemonStartFailures.get(socketPath);
   if (failure && Date.now() - failure.at < DAEMON_START_FAILURE_COOLDOWN_MS)
@@ -174,6 +207,7 @@ function startDaemonCoalesced(
     })()
       .catch((error) => {
         daemonStartFailures.set(socketPath, { at: Date.now(), error });
+        options.log(socketPath, "client daemon start failed", error);
         throw error;
       })
       .finally(() => inflightDaemonStarts.delete(socketPath));
@@ -185,7 +219,7 @@ function startDaemonCoalesced(
 export async function requestSessionTracker(
   socketPath: string,
   request: TrackerRequest,
-  options: Pick<TrackerRuntimeOptions, "send" | "spawnDaemon" | "awaitDaemonReady">,
+  options: Pick<TrackerRuntimeOptions, "send" | "spawnDaemon" | "awaitDaemonReady" | "log">,
 ): Promise<TrackerResponse> {
   try {
     return await options.send(socketPath, request);
@@ -218,7 +252,7 @@ export async function runPiSessionsNext(
   ctx: Pick<PiSessionsPickerContext, "ui">,
   options: Pick<
     TrackerRuntimeOptions,
-    "socketPath" | "send" | "spawnDaemon" | "awaitDaemonReady" | "paneId"
+    "socketPath" | "send" | "spawnDaemon" | "awaitDaemonReady" | "paneId" | "log"
   >,
 ): Promise<void> {
   try {
@@ -228,20 +262,25 @@ export async function runPiSessionsNext(
       options,
     );
     if (!response.ok) ctx.ui.notify("No tracked Pi sessions to focus.", "info");
-  } catch {
+  } catch (error) {
+    logTrackerFailure(options, "focus_next", error);
     ctx.ui.notify("Pi sessions are unavailable.", "warning");
   }
 }
 
 export async function runPiSessionsPicker(
   ctx: PiSessionsPickerContext,
-  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon" | "awaitDaemonReady">,
+  options: Pick<
+    TrackerRuntimeOptions,
+    "socketPath" | "send" | "spawnDaemon" | "awaitDaemonReady" | "log"
+  >,
 ): Promise<void> {
   let records: PaneRecord[];
   try {
     const snapshot = await requestSessionTracker(options.socketPath, { type: "snapshot" }, options);
     records = sortPaneRecordsForPicker(snapshot.records ?? []);
-  } catch {
+  } catch (error) {
+    logTrackerFailure(options, "picker snapshot", error);
     ctx.ui.notify("Pi sessions are unavailable.", "warning");
     return;
   }
@@ -262,7 +301,8 @@ export async function runPiSessionsPicker(
       { type: "focus_pane", paneId: record.paneId },
       options,
     );
-  } catch {
+  } catch (error) {
+    logTrackerFailure(options, "focus_pane", error);
     ctx.ui.notify("Pi sessions are unavailable.", "warning");
     return;
   }
@@ -288,6 +328,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
       const update = async () => {
         try {
           const response = await options.send(options.socketPath, { type: "snapshot" });
+          logTrackerRecovery(options, "footer snapshot");
           ctx.ui.setStatus(
             "session-tracker",
             colorizeSessionTrackerFooter(
@@ -295,7 +336,8 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
               ctx.ui.theme,
             ),
           );
-        } catch {
+        } catch (error) {
+          logTrackerFailure(options, "footer snapshot", error);
           ctx.ui.setStatus("session-tracker", undefined);
         }
       };
@@ -338,7 +380,10 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
     try {
       if (autostart) await call(request);
       else await options.send(options.socketPath, request);
-    } catch {}
+      logTrackerRecovery(options, request.type);
+    } catch (error) {
+      logTrackerFailure(options, request.type, error);
+    }
   };
 
   const report = async (type: "report" | "heartbeat") => {
@@ -418,7 +463,8 @@ export default function registerSessionTracker(pi: ExtensionAPI): void {
       try {
         await restartPiSessionsDaemon(defaultCallOptions);
         ctx.ui.notify("Pi sessions daemon restarted.", "info");
-      } catch {
+      } catch (error) {
+        logTrackerFailure(defaultCallOptions, "daemon restart", error);
         ctx.ui.notify("Failed to restart Pi sessions daemon.", "error");
       }
     },

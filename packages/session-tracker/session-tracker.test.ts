@@ -9,6 +9,7 @@ import {
   defaultSessionTrackerOptions,
   getSessionTrackerDaemonCommand,
   getTrackerLogPath,
+  getTrackerSocketPath,
   requestTracker,
   SessionTracker,
   startSessionTrackerDaemon,
@@ -155,6 +156,12 @@ test("daemon command falls back to node when pi is the executable", () => {
   expect(command.args).not.toContain("--inspect=127.0.0.1:9229");
 });
 
+test("tracker socket lives in a host-local per-user directory", () => {
+  expect(getTrackerSocketPath()).toBe(
+    join("/tmp", `pi-session-tracker-${process.getuid?.() ?? "default"}`, "session-tracker.sock"),
+  );
+});
+
 test("writes daemon debug logs beside the socket", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
   const socketPath = join(dir, "tracker.sock");
@@ -288,6 +295,9 @@ test("daemon keeps serving after a client disconnects before the response", asyn
       ok: true,
       records: [],
     });
+    expect(readFileSync(getTrackerLogPath(socketPath), "utf8")).not.toContain(
+      "client socket error",
+    );
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });
