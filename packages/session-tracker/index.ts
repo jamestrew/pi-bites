@@ -1,5 +1,14 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { createServer, createConnection, type Server } from "node:net";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
@@ -51,6 +60,7 @@ export const TRACKER_STALE_TIMEOUT_MS = 30_000;
 export const TRACKER_PRUNE_INTERVAL_MS = 10_000;
 const DAEMON_START_LOCK_STALE_MS = 10_000;
 const DAEMON_START_LOCK_POLL_INTERVAL_MS = 25;
+const TRACKER_LOG_MAX_BYTES = 512_000;
 
 function tmuxPaneExists(paneId: string): boolean {
   try {
@@ -86,6 +96,29 @@ function codeOf(error: unknown): string | undefined {
 
 function codedError(message: string, code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(message), { code });
+}
+
+function formatLogError(error: unknown): string {
+  const code = codeOf(error);
+  const text = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  return `${code ? `${code} ` : ""}${text}`.replaceAll("\n", " | ");
+}
+
+export function getTrackerLogPath(socketPath = getTrackerSocketPath()): string {
+  return join(dirname(socketPath), "session-tracker.log");
+}
+
+export function writeSessionTrackerLog(socketPath: string, message: string, error?: unknown): void {
+  try {
+    mkdirSync(dirname(socketPath), { recursive: true });
+    const logPath = getTrackerLogPath(socketPath);
+    if (existsSync(logPath) && statSync(logPath).size > TRACKER_LOG_MAX_BYTES)
+      rmSync(logPath, { force: true });
+    appendFileSync(
+      logPath,
+      `${new Date().toISOString()} pid=${process.pid} ${message}${error ? ` error=${formatLogError(error)}` : ""}\n`,
+    );
+  } catch {}
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -252,6 +285,7 @@ export async function startSessionTrackerDaemon(
   options: SessionTrackerDaemonOptions,
 ): Promise<Server> {
   mkdirSync(dirname(socketPath), { recursive: true });
+  writeSessionTrackerLog(socketPath, "daemon start");
   const releaseLock = await acquireDaemonStartLock(socketPath);
   try {
     if (await socketAcceptsConnections(socketPath))
@@ -262,27 +296,41 @@ export async function startSessionTrackerDaemon(
     throw error;
   }
 
-  const server = createServer((socket) => {
+  let closing = false;
+  let server: Server;
+  const closeServer = () => {
+    if (closing) return;
+    closing = true;
+    server.close();
+  };
+  const closeIfIdle = () => {
+    if (tracker.snapshot().length === 0) closeServer();
+  };
+
+  server = createServer((socket) => {
     let data = "";
     let handled = false;
+    const writeResponse = (response: TrackerResponse) =>
+      socket.end(`${JSON.stringify(response)}\n`);
     const handleLine = () => {
       if (handled || !data.includes("\n")) return;
       handled = true;
       const request = JSON.parse(data.trim()) as TrackerRequest;
       if (request.type === "shutdown") {
-        socket.end(`${JSON.stringify({ ok: true })}\n`, () => server.close());
+        writeResponse({ ok: true });
+        closeServer();
         return;
       }
       void tracker
         .handle(request)
-        .then((response) =>
-          socket.end(`${JSON.stringify(response)}\n`, () => {
-            if (request.type === "release" && tracker.snapshot().length === 0) server.close();
-          }),
-        )
-        .catch((error) => socket.end(`${JSON.stringify({ ok: false, error: String(error) })}\n`));
+        .then((response) => {
+          writeResponse(response);
+          if (request.type === "release") closeIfIdle();
+        })
+        .catch((error) => writeResponse({ ok: false, error: String(error) }));
     };
     socket.setEncoding("utf8");
+    socket.on("error", (error) => writeSessionTrackerLog(socketPath, "client socket error", error));
     socket.on("data", (chunk) => {
       data += chunk;
       handleLine();
@@ -291,6 +339,7 @@ export async function startSessionTrackerDaemon(
   });
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
+      writeSessionTrackerLog(socketPath, "daemon listen error", error);
       releaseLock();
       reject(error);
     };
@@ -298,15 +347,22 @@ export async function startSessionTrackerDaemon(
     server.listen(socketPath, () => {
       server.off("error", onError);
       releaseLock();
+      writeSessionTrackerLog(socketPath, `daemon listening socket=${socketPath}`);
       resolve();
     });
   });
 
   const setTimer = options.setInterval;
   const clearTimer = options.clearInterval;
-  const pruneTimer = setTimer(() => void tracker.prune(), options.pruneIntervalMs);
+  const pruneTimer = setTimer(
+    () => void tracker.prune().then(closeIfIdle),
+    options.pruneIntervalMs,
+  );
   pruneTimer.unref?.();
-  server.on("close", () => clearTimer(pruneTimer));
+  server.on("close", () => {
+    clearTimer(pruneTimer);
+    writeSessionTrackerLog(socketPath, "daemon closed");
+  });
   return server;
 }
 
@@ -327,10 +383,28 @@ export function getSessionTrackerDaemonCommand(
 }
 
 export function spawnSessionTrackerDaemon(): void {
+  const socketPath = getTrackerSocketPath();
   const { command, args } = getSessionTrackerDaemonCommand();
-  const child = spawn(command, args, {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  writeSessionTrackerLog(
+    socketPath,
+    `spawn daemon command=${command} args=${JSON.stringify(args)}`,
+  );
+
+  let logFd: number | undefined;
+  try {
+    logFd = openSync(getTrackerLogPath(socketPath), "a");
+  } catch {}
+  try {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
+    });
+    writeSessionTrackerLog(socketPath, `spawned daemon childPid=${child.pid ?? "unknown"}`);
+    child.on("error", (error) => writeSessionTrackerLog(socketPath, "spawn daemon error", error));
+    child.unref();
+  } finally {
+    try {
+      if (logFd !== undefined) closeSync(logFd);
+    } catch {}
+  }
 }

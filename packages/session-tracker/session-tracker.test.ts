@@ -1,5 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:net";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -8,9 +8,11 @@ import {
   defaultSessionTrackerDaemonOptions,
   defaultSessionTrackerOptions,
   getSessionTrackerDaemonCommand,
+  getTrackerLogPath,
   requestTracker,
   SessionTracker,
   startSessionTrackerDaemon,
+  writeSessionTrackerLog,
   type PaneRecord,
 } from "./index.js";
 
@@ -141,6 +143,21 @@ test("daemon command keeps the bun source-development flow", () => {
   expect(command.args[0]).toMatch(/serve\.ts$/);
 });
 
+test("writes daemon debug logs beside the socket", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const socketPath = join(dir, "tracker.sock");
+
+  try {
+    writeSessionTrackerLog(socketPath, "spawned daemon childPid=123");
+
+    const log = readFileSync(getTrackerLogPath(socketPath), "utf8");
+    expect(log).toContain(`pid=${process.pid}`);
+    expect(log).toContain("spawned daemon childPid=123");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("daemon ingests reports and returns snapshots over newline JSON", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
   const socketPath = join(dir, "tracker.sock");
@@ -221,6 +238,50 @@ test("daemon exits when the last pane releases", async () => {
   }
 });
 
+test("daemon keeps serving after a client disconnects before the response", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const socketPath = join(dir, "tracker.sock");
+  let paneCheckStarted: (() => void) | undefined;
+  let finishPaneCheck: ((exists: boolean) => void) | undefined;
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    now: () => 1_000,
+    tmuxPaneExists: () => {
+      paneCheckStarted?.();
+      return new Promise<boolean>((resolve) => {
+        finishPaneCheck = resolve;
+      });
+    },
+  });
+  await tracker.handle({ type: "report", record: record() });
+  const server = await startSessionTrackerDaemon(socketPath, tracker, {
+    ...defaultSessionTrackerDaemonOptions,
+    setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  try {
+    const paneCheck = new Promise<void>((resolve) => {
+      paneCheckStarted = resolve;
+    });
+    const client = createConnection(socketPath);
+    client.on("error", () => {});
+    await new Promise<void>((resolve) => client.once("connect", resolve));
+    client.write(`${JSON.stringify({ type: "focus_pane", paneId: "%1" })}\n`);
+    await paneCheck;
+    client.destroy();
+    finishPaneCheck?.(false);
+
+    await expect(requestTracker(socketPath, { type: "snapshot" })).resolves.toEqual({
+      ok: true,
+      records: [],
+    });
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("daemon start leaves a live socket alone", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
   const socketPath = join(dir, "tracker.sock");
@@ -249,7 +310,7 @@ test("daemon start leaves a live socket alone", async () => {
   }
 });
 
-test("daemon periodically prunes without a request", async () => {
+test("daemon exits when periodic prune removes the last pane", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
   const socketPath = join(dir, "tracker.sock");
   let prune: (() => void) | undefined;
@@ -271,9 +332,11 @@ test("daemon periodically prunes without a request", async () => {
 
   try {
     await tracker.handle({ type: "report", record: record() });
+    const closed = new Promise((resolve) => server.once("close", resolve));
     now = 1_011;
-    await prune?.();
+    prune?.();
 
+    await closed;
     expect(tracker.snapshot()).toEqual([]);
   } finally {
     server.close();

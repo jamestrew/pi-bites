@@ -4,14 +4,23 @@ import {
   getTrackerSocketPath,
   SessionTracker,
   startSessionTrackerDaemon,
+  writeSessionTrackerLog,
 } from "./index.ts";
+
+const socketPath = getTrackerSocketPath();
+writeSessionTrackerLog(socketPath, "serve starting");
 
 try {
   await startSessionTrackerDaemon(
-    getTrackerSocketPath(),
+    socketPath,
     new SessionTracker(defaultSessionTrackerOptions),
     defaultSessionTrackerDaemonOptions,
   );
 } catch (error) {
-  if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+  if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+    writeSessionTrackerLog(socketPath, "serve exiting: daemon already running");
+  } else {
+    writeSessionTrackerLog(socketPath, "serve failed", error);
+    throw error;
+  }
 }
