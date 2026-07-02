@@ -4,6 +4,8 @@ import {
   colorizeSessionTrackerFooter,
   createSessionTrackerFooterRuntime,
   createSessionTrackerRuntime,
+  defaultTrackerFooterOptions,
+  defaultTrackerRuntimeOptions,
   formatPaneRecordLabel,
   requestSessionTracker,
   formatSessionTrackerFooter,
@@ -45,6 +47,7 @@ test("starts daemon and retries a missing socket report once", async () => {
       { type: "snapshot" },
       {
         spawnDaemon: () => spawned.push("spawn"),
+        awaitDaemonReady: async () => {},
         send: async (_socketPath, request) => {
           calls.push(request);
           if (calls.length === 1) throw Object.assign(new Error("missing"), { code: "ENOENT" });
@@ -134,6 +137,7 @@ test("session tracker footer periodically reads snapshots and fails quietly", as
   let intervalMs: number | undefined;
   let fail = false;
   const runtime = createSessionTrackerFooterRuntime({
+    ...defaultTrackerFooterOptions,
     socketPath: "sock",
     send: async (_socketPath, request) => {
       if (fail) throw new Error("down");
@@ -183,6 +187,8 @@ test("pi-sessions focuses the selected pane", async () => {
     },
     {
       socketPath: "sock",
+      spawnDaemon: () => {},
+      awaitDaemonReady: async () => {},
       send: async (_socketPath, request) => {
         requests.push(request);
         if (request.type === "snapshot")
@@ -218,6 +224,8 @@ test("pi-sessions shows a small warning for stale panes", async () => {
     },
     {
       socketPath: "sock",
+      spawnDaemon: () => {},
+      awaitDaemonReady: async () => {},
       send: async (_socketPath, request) =>
         request.type === "snapshot"
           ? {
@@ -251,6 +259,8 @@ test("pi-sessions shows unavailable when snapshot fails", async () => {
     },
     {
       socketPath: "sock",
+      spawnDaemon: () => {},
+      awaitDaemonReady: async () => {},
       send: async () => {
         throw new Error("boom");
       },
@@ -283,6 +293,8 @@ test("pi-sessions shortcut focuses the next pane", async () => {
     {
       socketPath: "sock",
       paneId: "%2",
+      spawnDaemon: () => {},
+      awaitDaemonReady: async () => {},
       send: async (_socketPath, request) => {
         requests.push(request);
         return { ok: true };
@@ -304,6 +316,8 @@ test("pi-sessions shows focus errors", async () => {
     },
     {
       socketPath: "sock",
+      spawnDaemon: () => {},
+      awaitDaemonReady: async () => {},
       send: async (_socketPath, request) =>
         request.type === "snapshot"
           ? {
@@ -330,8 +344,10 @@ test("extension sends full-state heartbeats and releases on shutdown", async () 
   const requests: unknown[] = [];
   let timer: (() => void) | undefined;
   const runtime = createSessionTrackerRuntime({
-    paneId: "%1",
+    ...defaultTrackerRuntimeOptions,
     runtimeId: "runtime-a",
+    socketPath: "sock",
+    paneId: "%1",
     now: () => 1_000,
     send: async (_socketPath, request) => {
       requests.push(request);
@@ -393,8 +409,10 @@ test("extension sends full-state heartbeats and releases on shutdown", async () 
 test("extension does not release on non-quit shutdown", async () => {
   const requests: unknown[] = [];
   const runtime = createSessionTrackerRuntime({
-    paneId: "%1",
+    ...defaultTrackerRuntimeOptions,
     runtimeId: "runtime-a",
+    socketPath: "sock",
+    paneId: "%1",
     send: async (_socketPath, request) => {
       requests.push(request);
       return { ok: true };

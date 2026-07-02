@@ -34,21 +34,49 @@ export interface TrackerResponse {
 export type TmuxRunner = (args: string[]) => void | Promise<void>;
 
 export interface SessionTrackerOptions {
-  now?: () => number;
-  staleTimeoutMs?: number;
-  tmuxPaneExists?: (paneId: string) => boolean | Promise<boolean>;
-  tmuxRunner?: TmuxRunner;
+  now: () => number;
+  staleTimeoutMs: number;
+  tmuxPaneExists: (paneId: string) => boolean | Promise<boolean>;
+  tmuxRunner: TmuxRunner;
 }
 
 export interface SessionTrackerDaemonOptions {
-  pruneIntervalMs?: number;
-  setInterval?: typeof setInterval;
-  clearInterval?: typeof clearInterval;
+  pruneIntervalMs: number;
+  setInterval: typeof setInterval;
+  clearInterval: typeof clearInterval;
 }
 
 export const TRACKER_HEARTBEAT_INTERVAL_MS = 10_000;
 export const TRACKER_STALE_TIMEOUT_MS = 30_000;
 export const TRACKER_PRUNE_INTERVAL_MS = 10_000;
+
+function tmuxPaneExists(paneId: string): boolean {
+  try {
+    execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{pane_id}"], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const tmuxRunner: TmuxRunner = (args) => {
+  execFileSync("tmux", args, { stdio: "ignore" });
+};
+
+export const defaultSessionTrackerOptions: SessionTrackerOptions = {
+  now: Date.now,
+  staleTimeoutMs: TRACKER_STALE_TIMEOUT_MS,
+  tmuxPaneExists,
+  tmuxRunner,
+};
+
+export const defaultSessionTrackerDaemonOptions: SessionTrackerDaemonOptions = {
+  pruneIntervalMs: TRACKER_PRUNE_INTERVAL_MS,
+  setInterval,
+  clearInterval,
+};
 
 export function getTrackerSocketPath(): string {
   return join(
@@ -65,26 +93,11 @@ export class SessionTracker {
   private tmuxRunner: TmuxRunner;
   private focusedPaneId: string | undefined;
 
-  constructor(options: SessionTrackerOptions = {}) {
-    this.now = options.now ?? Date.now;
-    this.staleTimeoutMs = options.staleTimeoutMs ?? TRACKER_STALE_TIMEOUT_MS;
-    this.tmuxPaneExists =
-      options.tmuxPaneExists ??
-      ((paneId) => {
-        try {
-          execFileSync("tmux", ["display-message", "-p", "-t", paneId, "#{pane_id}"], {
-            stdio: "ignore",
-          });
-          return true;
-        } catch {
-          return false;
-        }
-      });
-    this.tmuxRunner =
-      options.tmuxRunner ??
-      ((args) => {
-        execFileSync("tmux", args, { stdio: "ignore" });
-      });
+  constructor(options: SessionTrackerOptions) {
+    this.now = options.now;
+    this.staleTimeoutMs = options.staleTimeoutMs;
+    this.tmuxPaneExists = options.tmuxPaneExists;
+    this.tmuxRunner = options.tmuxRunner;
   }
 
   async handle(request: TrackerRequest): Promise<TrackerResponse> {
@@ -182,9 +195,9 @@ export async function requestTracker(
 }
 
 export async function startSessionTrackerDaemon(
-  socketPath = getTrackerSocketPath(),
-  tracker = new SessionTracker(),
-  options: SessionTrackerDaemonOptions = {},
+  socketPath: string,
+  tracker: SessionTracker,
+  options: SessionTrackerDaemonOptions,
 ): Promise<Server> {
   mkdirSync(dirname(socketPath), { recursive: true });
   if (existsSync(socketPath)) unlinkSync(socketPath);
@@ -211,12 +224,9 @@ export async function startSessionTrackerDaemon(
     });
     socket.on("end", handleLine);
   });
-  const setTimer = options.setInterval ?? setInterval;
-  const clearTimer = options.clearInterval ?? clearInterval;
-  const pruneTimer = setTimer(
-    () => void tracker.prune(),
-    options.pruneIntervalMs ?? TRACKER_PRUNE_INTERVAL_MS,
-  );
+  const setTimer = options.setInterval;
+  const clearTimer = options.clearInterval;
+  const pruneTimer = setTimer(() => void tracker.prune(), options.pruneIntervalMs);
   pruneTimer.unref?.();
   server.on("close", () => {
     clearTimer(pruneTimer);

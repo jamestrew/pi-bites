@@ -5,6 +5,7 @@ import { access } from "node:fs/promises";
 import { emitKeypressEvents } from "node:readline";
 
 import {
+  defaultLoadTauDashboardSessionsOptions,
   handleTauDashboardKey,
   loadTauDashboardSessions,
   reconcileTauDashboardSelection,
@@ -34,7 +35,9 @@ function keyName(input: string, key?: { name?: string; ctrl?: boolean }): string
 }
 
 export async function main(): Promise<void> {
-  let result: LoadTauDashboardSessionsResult = await loadTauDashboardSessions();
+  let result: LoadTauDashboardSessionsResult = await loadTauDashboardSessions(
+    defaultLoadTauDashboardSessionsOptions,
+  );
   let selection: TauDashboardSelectionState = reconcileTauDashboardSelection(result.sessions);
   let showHelp = false;
   let launchError: string | undefined;
@@ -83,7 +86,7 @@ export async function main(): Promise<void> {
     refreshInFlight = true;
     const previous = selection;
     try {
-      const nextResult = await loadTauDashboardSessions();
+      const nextResult = await loadTauDashboardSessions(defaultLoadTauDashboardSessionsOptions);
       if (quitting || childPiRunning) return;
       result = nextResult;
       selection = reconcileTauDashboardSelection(result.sessions, {

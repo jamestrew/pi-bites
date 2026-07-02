@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 
 import {
   DEFAULT_TAU_STALE_AFTER_MS,
+  defaultLoadTauDashboardSessionsOptions,
   loadTauDashboardSessions,
   type TauStatusRecord,
 } from "./index.js";
@@ -62,6 +63,7 @@ test("loads valid Tau status sidecars into dashboard sessions sorted by recent a
   );
 
   const result = await loadTauDashboardSessions({
+    ...defaultLoadTauDashboardSessionsOptions,
     agentsDir: root,
     now: () => 21_000,
     isPidLive: () => true,
@@ -89,7 +91,10 @@ test("reports invalid JSON, unsupported schemas, missing required fields, and mi
   await writeStatus(root, "schema", { ...status(), schemaVersion: 2 });
   await writeStatus(root, "missing-field", { ...status(), sessionId: undefined });
 
-  const result = await loadTauDashboardSessions({ agentsDir: root });
+  const result = await loadTauDashboardSessions({
+    ...defaultLoadTauDashboardSessionsOptions,
+    agentsDir: root,
+  });
 
   expect(result.sessions).toEqual([]);
   expect(result.issues.map((issue) => issue.kind).sort()).toEqual([
@@ -113,6 +118,7 @@ test("omits status records whose referenced session file is missing", async () =
   );
 
   const result = await loadTauDashboardSessions({
+    ...defaultLoadTauDashboardSessionsOptions,
     agentsDir: root,
     now: () => 10_000,
     isPidLive: () => true,
@@ -136,6 +142,7 @@ test("uses the documented 60 second stale threshold by default", async () => {
   );
 
   const result = await loadTauDashboardSessions({
+    ...defaultLoadTauDashboardSessionsOptions,
     agentsDir: root,
     now: () => 1_000 + DEFAULT_TAU_STALE_AFTER_MS,
     isPidLive: () => true,
@@ -194,6 +201,7 @@ test("derives stopped and stale dashboard states from status, heartbeat, and pid
   );
 
   const result = await loadTauDashboardSessions({
+    ...defaultLoadTauDashboardSessionsOptions,
     agentsDir: root,
     now: () => 60_000,
     staleAfterMs: 30_000,
@@ -215,7 +223,10 @@ test("derives stopped and stale dashboard states from status, heartbeat, and pid
 test("missing Tau sessions directory does not crash", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-loader-"));
 
-  const result = await loadTauDashboardSessions({ agentsDir: join(root, "does-not-exist") });
+  const result = await loadTauDashboardSessions({
+    ...defaultLoadTauDashboardSessionsOptions,
+    agentsDir: join(root, "does-not-exist"),
+  });
 
   expect(result.sessions).toEqual([]);
   expect(result.issues).toHaveLength(1);

@@ -69,9 +69,9 @@ export interface TauStatusLoadIssue {
 
 export interface LoadTauDashboardSessionsOptions {
   agentsDir?: string;
-  now?: () => number;
-  staleAfterMs?: number;
-  isPidLive?: (pid: number) => boolean;
+  now: () => number;
+  staleAfterMs: number;
+  isPidLive: (pid: number) => boolean;
 }
 
 export interface LoadTauDashboardSessionsResult {
@@ -98,6 +98,12 @@ function defaultIsPidLive(pid: number): boolean {
     return false;
   }
 }
+
+export const defaultLoadTauDashboardSessionsOptions: LoadTauDashboardSessionsOptions = {
+  now: Date.now,
+  staleAfterMs: DEFAULT_TAU_STALE_AFTER_MS,
+  isPidLive: defaultIsPidLive,
+};
 
 function requiredString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -133,7 +139,26 @@ function parseTauStatusRecord(value: unknown): TauStatusRecord | string {
 
   if (missing.length > 0) return `missing or invalid required fields: ${missing.join(", ")}`;
 
-  return record as unknown as TauStatusRecord;
+  const parsed: TauStatusRecord = {
+    schemaVersion: TAU_STATUS_SCHEMA_VERSION,
+    sessionId: record.sessionId as string,
+    sessionFile: record.sessionFile as string,
+    cwd: record.cwd as string,
+    pid: record.pid as number,
+    startedAt: record.startedAt as number,
+    heartbeatAt: record.heartbeatAt as number,
+    lastEventAt: record.lastEventAt as number,
+    status: record.status as TauStatusValue,
+  };
+  if (typeof record.ppid === "number") parsed.ppid = record.ppid;
+  if (typeof record.tty === "string") parsed.tty = record.tty;
+  if (typeof record.title === "string") parsed.title = record.title;
+  if (typeof record.currentAction === "string") parsed.currentAction = record.currentAction;
+  if (typeof record.currentTool === "string") parsed.currentTool = record.currentTool;
+  if (typeof record.lastMessage === "string") parsed.lastMessage = record.lastMessage;
+  if (typeof record.lastError === "string") parsed.lastError = record.lastError;
+  if (typeof record.model === "string") parsed.model = record.model;
+  return parsed;
 }
 
 async function sessionFileExists(sessionFile: string): Promise<boolean> {
@@ -186,14 +211,14 @@ function toDashboardSession(
 }
 
 export async function loadTauDashboardSessions(
-  options: LoadTauDashboardSessionsOptions = {},
+  options: LoadTauDashboardSessionsOptions,
 ): Promise<LoadTauDashboardSessionsResult> {
   const sessionsDir = getTauSessionsDir(options.agentsDir);
   const issues: TauStatusLoadIssue[] = [];
   const sessions: TauDashboardSession[] = [];
-  const now = options.now?.() ?? Date.now();
-  const staleAfterMs = options.staleAfterMs ?? DEFAULT_TAU_STALE_AFTER_MS;
-  const isPidLive = options.isPidLive ?? defaultIsPidLive;
+  const now = options.now();
+  const staleAfterMs = options.staleAfterMs;
+  const isPidLive = options.isPidLive;
 
   let entries;
   try {

@@ -19,28 +19,52 @@ interface TrackerContext {
 }
 
 export interface TrackerRuntimeOptions {
-  runtimeId?: string;
+  runtimeId: string;
   paneId?: string;
-  socketPath?: string;
-  heartbeatIntervalMs?: number;
-  setInterval?: typeof setInterval;
-  clearInterval?: typeof clearInterval;
-  send?: typeof requestTracker;
-  spawnDaemon?: typeof spawnSessionTrackerDaemon;
-  now?: () => number;
+  socketPath: string;
+  heartbeatIntervalMs: number;
+  setInterval: typeof setInterval;
+  clearInterval: typeof clearInterval;
+  send: typeof requestTracker;
+  spawnDaemon: typeof spawnSessionTrackerDaemon;
+  awaitDaemonReady: (socketPath: string) => Promise<void>;
+  now: () => number;
 }
 
 export interface TrackerFooterOptions {
-  socketPath?: string;
-  intervalMs?: number;
+  socketPath: string;
+  intervalMs: number;
   paneId?: string;
-  setInterval?: typeof setInterval;
-  clearInterval?: typeof clearInterval;
-  send?: typeof requestTracker;
+  setInterval: typeof setInterval;
+  clearInterval: typeof clearInterval;
+  send: typeof requestTracker;
 }
 
 const STATE_ORDER: Record<TrackerState, number> = { "needs-permission": 0, working: 1, idle: 2 };
 export const SESSION_TRACKER_FOOTER_INTERVAL_MS = 1_000;
+
+async function awaitTrackerSocket(socketPath: string): Promise<void> {
+  for (let i = 0; i < 20 && !existsSync(socketPath); i++)
+    await new Promise((resolve) => setTimeout(resolve, 25));
+}
+
+export const defaultTrackerRuntimeOptions: Omit<TrackerRuntimeOptions, "runtimeId" | "socketPath"> =
+  {
+    heartbeatIntervalMs: TRACKER_HEARTBEAT_INTERVAL_MS,
+    setInterval,
+    clearInterval,
+    now: Date.now,
+    send: requestTracker,
+    spawnDaemon: spawnSessionTrackerDaemon,
+    awaitDaemonReady: awaitTrackerSocket,
+  };
+
+export const defaultTrackerFooterOptions: Omit<TrackerFooterOptions, "socketPath"> = {
+  intervalMs: SESSION_TRACKER_FOOTER_INTERVAL_MS,
+  setInterval,
+  clearInterval,
+  send: requestTracker,
+};
 
 export function sortPaneRecordsForPicker(records: readonly PaneRecord[]): PaneRecord[] {
   return [...records].sort(
@@ -108,21 +132,16 @@ export function colorizeSessionTrackerFooter(
 export async function requestSessionTracker(
   socketPath: string,
   request: TrackerRequest,
-  options: Pick<TrackerRuntimeOptions, "send" | "spawnDaemon"> = {},
+  options: Pick<TrackerRuntimeOptions, "send" | "spawnDaemon" | "awaitDaemonReady">,
 ): Promise<TrackerResponse> {
-  const send = options.send ?? requestTracker;
-  const spawnDaemon = options.spawnDaemon ?? spawnSessionTrackerDaemon;
   try {
-    return await send(socketPath, request);
+    return await options.send(socketPath, request);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT" && code !== "ECONNREFUSED") throw error;
-    spawnDaemon();
-    if (!options.send) {
-      for (let i = 0; i < 20 && !existsSync(socketPath); i++)
-        await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return send(socketPath, request);
+    options.spawnDaemon();
+    await options.awaitDaemonReady(socketPath);
+    return options.send(socketPath, request);
   }
 }
 
@@ -134,28 +153,28 @@ interface PiSessionsPickerContext {
 }
 
 export async function restartPiSessionsDaemon(
-  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon"> = {},
+  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon">,
 ): Promise<void> {
-  const socketPath = options.socketPath ?? getTrackerSocketPath();
-  const spawnDaemon = options.spawnDaemon ?? spawnSessionTrackerDaemon;
   try {
-    await (options.send ?? requestTracker)(socketPath, { type: "shutdown" });
+    await options.send(options.socketPath, { type: "shutdown" });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== "ENOENT" && code !== "ECONNREFUSED") throw error;
   }
-  spawnDaemon();
+  options.spawnDaemon();
 }
 
 export async function runPiSessionsNext(
   ctx: Pick<PiSessionsPickerContext, "ui">,
-  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon" | "paneId"> = {},
+  options: Pick<
+    TrackerRuntimeOptions,
+    "socketPath" | "send" | "spawnDaemon" | "awaitDaemonReady" | "paneId"
+  >,
 ): Promise<void> {
-  const socketPath = options.socketPath ?? getTrackerSocketPath();
   try {
     const response = await requestSessionTracker(
-      socketPath,
-      { type: "focus_next", currentPaneId: options.paneId ?? process.env.TMUX_PANE },
+      options.socketPath,
+      { type: "focus_next", currentPaneId: options.paneId },
       options,
     );
     if (!response.ok) ctx.ui.notify("No tracked Pi sessions to focus.", "info");
@@ -166,12 +185,11 @@ export async function runPiSessionsNext(
 
 export async function runPiSessionsPicker(
   ctx: PiSessionsPickerContext,
-  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon"> = {},
+  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon" | "awaitDaemonReady">,
 ): Promise<void> {
-  const socketPath = options.socketPath ?? getTrackerSocketPath();
   let records: PaneRecord[];
   try {
-    const snapshot = await requestSessionTracker(socketPath, { type: "snapshot" }, options);
+    const snapshot = await requestSessionTracker(options.socketPath, { type: "snapshot" }, options);
     records = sortPaneRecordsForPicker(snapshot.records ?? []);
   } catch {
     ctx.ui.notify("Pi sessions are unavailable.", "warning");
@@ -190,7 +208,7 @@ export async function runPiSessionsPicker(
   let response: TrackerResponse;
   try {
     response = await requestSessionTracker(
-      socketPath,
+      options.socketPath,
       { type: "focus_pane", paneId: record.paneId },
       options,
     );
@@ -208,13 +226,7 @@ export async function runPiSessionsPicker(
   }
 }
 
-export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions = {}) {
-  const socketPath = options.socketPath ?? getTrackerSocketPath();
-  const intervalMs = options.intervalMs ?? SESSION_TRACKER_FOOTER_INTERVAL_MS;
-  const setTimer = options.setInterval ?? setInterval;
-  const clearTimer = options.clearInterval ?? clearInterval;
-  const send = options.send ?? requestTracker;
-  const paneId = options.paneId ?? process.env.TMUX_PANE;
+export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions) {
   let timer: ReturnType<typeof setInterval> | undefined;
 
   return {
@@ -225,11 +237,11 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions 
     ) {
       const update = async () => {
         try {
-          const response = await send(socketPath, { type: "snapshot" });
+          const response = await options.send(options.socketPath, { type: "snapshot" });
           ctx.ui.setStatus(
             "session-tracker",
             colorizeSessionTrackerFooter(
-              formatSessionTrackerFooter(response.records ?? [], paneId),
+              formatSessionTrackerFooter(response.records ?? [], options.paneId),
               ctx.ui.theme,
             ),
           );
@@ -238,45 +250,39 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions 
         }
       };
       void update();
-      timer = setTimer(() => void update(), intervalMs);
+      timer = options.setInterval(() => void update(), options.intervalMs);
       timer.unref?.();
     },
     stop(ctx?: { ui?: { setStatus(id: string, text: string | undefined): void } }) {
-      if (timer) clearTimer(timer);
+      if (timer) options.clearInterval(timer);
       timer = undefined;
       ctx?.ui?.setStatus("session-tracker", undefined);
     },
   };
 }
 
-export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {}) {
-  const runtimeId = options.runtimeId ?? randomUUID();
-  const paneId = options.paneId ?? process.env.TMUX_PANE;
-  const socketPath = options.socketPath ?? getTrackerSocketPath();
-  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? TRACKER_HEARTBEAT_INTERVAL_MS;
-  const setTimer = options.setInterval ?? setInterval;
-  const clearTimer = options.clearInterval ?? clearInterval;
-  const now = options.now ?? Date.now;
+export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
   let seq = 0;
   let state: TrackerState = "idle";
   let ctx: TrackerContext | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
 
   const record = (): PaneRecord | undefined => {
-    if (!paneId || !ctx) return undefined;
+    if (!options.paneId || !ctx) return undefined;
     const sessionId = ctx.sessionManager?.getSessionId?.();
     return {
-      paneId,
+      paneId: options.paneId,
       cwd: ctx.cwd,
-      runtimeId,
+      runtimeId: options.runtimeId,
       seq: ++seq,
       state,
-      heartbeatAt: now(),
+      heartbeatAt: options.now(),
       ...(sessionId ? { sessionId } : {}),
     };
   };
 
-  const call = (request: TrackerRequest) => requestSessionTracker(socketPath, request, options);
+  const call = (request: TrackerRequest) =>
+    requestSessionTracker(options.socketPath, request, options);
 
   const report = async (type: "report" | "heartbeat") => {
     const current = record();
@@ -287,7 +293,7 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {})
     async start(startCtx: TrackerContext) {
       ctx = startCtx;
       await report("report");
-      timer = setTimer(() => void report("heartbeat"), heartbeatIntervalMs);
+      timer = options.setInterval(() => void report("heartbeat"), options.heartbeatIntervalMs);
       timer.unref?.();
     },
     async setState(next: TrackerState) {
@@ -295,17 +301,32 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions = {})
       await report("report");
     },
     async stop(release = false) {
-      if (timer) clearTimer(timer);
+      if (timer) options.clearInterval(timer);
       timer = undefined;
-      if (release && paneId) await call({ type: "release", paneId, runtimeId });
+      if (release && options.paneId)
+        await call({ type: "release", paneId: options.paneId, runtimeId: options.runtimeId });
       ctx = undefined;
     },
   };
 }
 
 export default function registerSessionTracker(pi: ExtensionAPI): void {
-  const runtime = createSessionTrackerRuntime();
-  const footerRuntime = createSessionTrackerFooterRuntime();
+  const runtimeId = randomUUID();
+  const socketPath = getTrackerSocketPath();
+  const paneId = process.env.TMUX_PANE;
+
+  const runtime = createSessionTrackerRuntime({
+    ...defaultTrackerRuntimeOptions,
+    runtimeId,
+    socketPath,
+    paneId,
+  });
+  const footerRuntime = createSessionTrackerFooterRuntime({
+    ...defaultTrackerFooterOptions,
+    socketPath,
+    paneId,
+  });
+
   let currentCtx:
     | (TrackerContext & { ui: { setStatus(id: string, text: string | undefined): void } })
     | undefined;
@@ -325,15 +346,17 @@ export default function registerSessionTracker(pi: ExtensionAPI): void {
     await runtime.stop(event.reason === "quit");
   });
 
+  const defaultCallOptions = { ...defaultTrackerRuntimeOptions, socketPath };
+
   pi.registerCommand("pi-sessions", {
     description: "Pick a tracked Pi tmux pane to focus",
-    handler: async (_args, ctx) => runPiSessionsPicker(ctx),
+    handler: async (_args, ctx) => runPiSessionsPicker(ctx, defaultCallOptions),
   });
   pi.registerCommand("pi-sessions-restart-daemon", {
     description: "Restart the Pi sessions daemon",
     handler: async (_args, ctx) => {
       try {
-        await restartPiSessionsDaemon();
+        await restartPiSessionsDaemon(defaultCallOptions);
         ctx.ui.notify("Pi sessions daemon restarted.", "info");
       } catch {
         ctx.ui.notify("Failed to restart Pi sessions daemon.", "error");
@@ -342,6 +365,6 @@ export default function registerSessionTracker(pi: ExtensionAPI): void {
   });
   pi.registerShortcut("ctrl+alt+s", {
     description: "Focus next tracked Pi tmux pane",
-    handler: async (ctx) => runPiSessionsNext(ctx),
+    handler: async (ctx) => runPiSessionsNext(ctx, { ...defaultCallOptions, paneId }),
   });
 }

@@ -9,6 +9,10 @@ import {
   TAU_HEARTBEAT_INTERVAL_MS,
   TAU_READER_STALE_AFTER_MS,
   buildTauStatusPayload,
+  defaultTauStatusHandlerDeps,
+  defaultTauStatusPublisherDeps,
+  defaultTauStatusRuntimeDeps,
+  defaultTauTitleGeneratorDeps,
   fallbackTauSessionTitle,
   generateTauSessionTitle,
   createTauStatusRuntime,
@@ -83,6 +87,10 @@ test("Tau status runtime refreshes heartbeat without activity", async () => {
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -116,6 +124,10 @@ test("Tau status runtime records agent turns as working then idle", async () => 
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -162,6 +174,10 @@ test("Tau status runtime records last message metadata", async () => {
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -195,6 +211,10 @@ test("Tau status runtime records and clears current activity metadata", async ()
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -236,6 +256,7 @@ test("Tau status runtime records and clears current activity metadata", async ()
 test("Tau title generation sanitizes model output and falls back without live calls", async () => {
   await expect(
     generateTauSessionTitle("@packages/tau/status.ts add session titles", {
+      ...defaultTauTitleGeneratorDeps,
       model: "test/title-model",
       runPi: async (args) => {
         expect(args).toContain("test/title-model");
@@ -247,6 +268,7 @@ test("Tau title generation sanitizes model output and falls back without live ca
 
   await expect(
     generateTauSessionTitle("@packages/tau/status.ts add session titles", {
+      ...defaultTauTitleGeneratorDeps,
       runPi: async () => {
         throw new Error("no model");
       },
@@ -271,6 +293,10 @@ test("Tau status handlers publish generated title in the background", async () =
     resolveTitle = resolve;
   });
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -336,6 +362,7 @@ test("Tau status handlers save generated title to the session status.json", asyn
   const root = await mkdtemp(join(tmpdir(), "pi-bites-tau-title-"));
   const paths = deriveTauStatusPaths("session-123", root);
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
     pid: 1234,
     now: () => 1_700_000_000_000,
     writeSidecar: (payload) => writeTauStatusSidecar(payload, paths),
@@ -376,6 +403,10 @@ test("Tau status handlers track overlapping tool activity predictably", async ()
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -390,7 +421,7 @@ test("Tau status handlers track overlapping tool activity predictably", async ()
     events: { on: () => undefined },
   };
 
-  registerTauStatusHandlers(pi as never, runtime);
+  registerTauStatusHandlers(pi as never, runtime, defaultTauStatusHandlerDeps);
 
   await handlers.get("session_start")?.(undefined, {
     cwd: "/repo",
@@ -451,6 +482,10 @@ test("Tau status handlers surface and clear bash blockers during active work", a
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -470,7 +505,7 @@ test("Tau status handlers surface and clear bash blockers during active work", a
     },
   };
 
-  registerTauStatusHandlers(pi as never, runtime);
+  registerTauStatusHandlers(pi as never, runtime, defaultTauStatusHandlerDeps);
 
   await handlers.get("session_start")?.(undefined, {
     cwd: "/repo",
@@ -507,6 +542,10 @@ test("Tau status handlers derive blocker state from active blockers and agent wo
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -526,7 +565,7 @@ test("Tau status handlers derive blocker state from active blockers and agent wo
     },
   };
 
-  registerTauStatusHandlers(pi as never, runtime);
+  registerTauStatusHandlers(pi as never, runtime, defaultTauStatusHandlerDeps);
 
   await handlers.get("session_start")?.(undefined, {
     cwd: "/repo",
@@ -568,6 +607,10 @@ test("Tau status handlers publish assistant response as last message", async () 
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -582,7 +625,7 @@ test("Tau status handlers publish assistant response as last message", async () 
     events: { on: () => undefined },
   };
 
-  registerTauStatusHandlers(pi as never, runtime);
+  registerTauStatusHandlers(pi as never, runtime, defaultTauStatusHandlerDeps);
 
   await handlers.get("session_start")?.(undefined, {
     cwd: "/repo",
@@ -612,6 +655,10 @@ test("Tau status handlers keep agent runs working until agent_end", async () => 
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -626,7 +673,7 @@ test("Tau status handlers keep agent runs working until agent_end", async () => 
     events: { on: () => undefined },
   };
 
-  registerTauStatusHandlers(pi as never, runtime);
+  registerTauStatusHandlers(pi as never, runtime, defaultTauStatusHandlerDeps);
 
   await handlers.get("session_start")?.(undefined, {
     cwd: "/repo",
@@ -662,6 +709,10 @@ test("Tau status runtime writes stopped status and clears heartbeat on shutdown"
   vi.setSystemTime(1_700_000_000_000);
   const writes: unknown[] = [];
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -707,6 +758,10 @@ test("Tau status runtime serializes heartbeat and shutdown writes", async () => 
     releaseHeartbeat = resolve;
   });
   const runtime = createTauStatusRuntime({
+    ...defaultTauStatusRuntimeDeps,
+    now: Date.now,
+    setInterval,
+    clearInterval,
     pid: 1234,
     heartbeatIntervalMs: 20_000,
     writeSidecar: async (payload) => {
@@ -752,6 +807,7 @@ test("publishTauStatusForSession reports write failures without throwing", async
         },
       },
       {
+        ...defaultTauStatusPublisherDeps,
         pid: 1234,
         now: () => 1_700_000_000_000,
         writeSidecar: async () => {

@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 
 import {
+  defaultSessionTrackerDaemonOptions,
+  defaultSessionTrackerOptions,
   getSessionTrackerDaemonCommand,
   requestTracker,
   SessionTracker,
@@ -24,7 +26,10 @@ function record(overrides: Partial<PaneRecord> = {}): PaneRecord {
 }
 
 test("release removes only the owning runtime pane record", async () => {
-  const tracker = new SessionTracker({ tmuxPaneExists: () => true });
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    tmuxPaneExists: () => true,
+  });
   await tracker.handle({ type: "report", record: record() });
   await tracker.handle({ type: "release", paneId: "%1", runtimeId: "other" });
   expect(tracker.snapshot()).toHaveLength(1);
@@ -34,7 +39,11 @@ test("release removes only the owning runtime pane record", async () => {
 });
 
 test("stores current state by pane and ignores stale same-runtime sequences", async () => {
-  const tracker = new SessionTracker({ now: () => 1_000, tmuxPaneExists: () => true });
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    now: () => 1_000,
+    tmuxPaneExists: () => true,
+  });
   await tracker.handle({
     type: "report",
     record: record({ paneId: "%1", runtimeId: "old", seq: 3 }),
@@ -53,7 +62,11 @@ test("stores current state by pane and ignores stale same-runtime sequences", as
 
 test("heartbeat refreshes current pane state", async () => {
   let now = 1_000;
-  const tracker = new SessionTracker({ now: () => now, tmuxPaneExists: () => true });
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    now: () => now,
+    tmuxPaneExists: () => true,
+  });
   await tracker.handle({ type: "report", record: record({ seq: 1 }) });
   now = 9_000;
   await tracker.handle({ type: "heartbeat", record: record({ seq: 2, state: "working" }) });
@@ -64,6 +77,7 @@ test("heartbeat refreshes current pane state", async () => {
 test("prunes stale pane records", async () => {
   let now = 1_000;
   const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
     now: () => now,
     staleTimeoutMs: 10,
     tmuxPaneExists: () => true,
@@ -78,6 +92,7 @@ test("prunes stale pane records", async () => {
 test("prunes records for missing tmux panes", async () => {
   const existing = new Set(["%2"]);
   const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
     now: () => 1_000,
     tmuxPaneExists: (paneId) => existing.has(paneId),
   });
@@ -123,8 +138,13 @@ test("daemon ingests reports and returns snapshots over newline JSON", async () 
   const socketPath = join(dir, "tracker.sock");
   const server = await startSessionTrackerDaemon(
     socketPath,
-    new SessionTracker({ now: () => 1_000, tmuxPaneExists: () => true }),
+    new SessionTracker({
+      ...defaultSessionTrackerOptions,
+      now: () => 1_000,
+      tmuxPaneExists: () => true,
+    }),
     {
+      ...defaultSessionTrackerDaemonOptions,
       setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
       clearInterval: (() => {}) as typeof clearInterval,
     },
@@ -149,8 +169,9 @@ test("daemon shuts down over newline JSON", async () => {
   const socketPath = join(dir, "tracker.sock");
   const server = await startSessionTrackerDaemon(
     socketPath,
-    new SessionTracker({ tmuxPaneExists: () => true }),
+    new SessionTracker({ ...defaultSessionTrackerOptions, tmuxPaneExists: () => true }),
     {
+      ...defaultSessionTrackerDaemonOptions,
       setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
       clearInterval: (() => {}) as typeof clearInterval,
     },
@@ -172,11 +193,13 @@ test("daemon periodically prunes without a request", async () => {
   let prune: (() => void) | undefined;
   let now = 1_000;
   const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
     now: () => now,
     staleTimeoutMs: 10,
     tmuxPaneExists: () => true,
   });
   const server = await startSessionTrackerDaemon(socketPath, tracker, {
+    ...defaultSessionTrackerDaemonOptions,
     setInterval: ((callback: () => void) => {
       prune = callback;
       return { unref() {} } as ReturnType<typeof setInterval>;
@@ -199,6 +222,7 @@ test("daemon periodically prunes without a request", async () => {
 test("focuses a tracked existing pane by tmux pane id", async () => {
   const calls: string[][] = [];
   const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
     tmuxPaneExists: () => true,
     tmuxRunner: (args) => {
       calls.push(args);
@@ -213,6 +237,7 @@ test("focuses a tracked existing pane by tmux pane id", async () => {
 test("focus next cycles blocked, idle, then working panes", async () => {
   const calls: string[][] = [];
   const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
     tmuxPaneExists: () => true,
     tmuxRunner: (args) => {
       calls.push(args);
@@ -249,7 +274,10 @@ test("focus next cycles blocked, idle, then working panes", async () => {
 });
 
 test("focus returns not-found for unknown panes", async () => {
-  const tracker = new SessionTracker({ tmuxPaneExists: () => true });
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    tmuxPaneExists: () => true,
+  });
 
   await expect(tracker.handle({ type: "focus_pane", paneId: "%404" })).resolves.toEqual({
     ok: false,
@@ -258,7 +286,10 @@ test("focus returns not-found for unknown panes", async () => {
 });
 
 test("focus prunes panes that vanish before selection", async () => {
-  const tracker = new SessionTracker({ tmuxPaneExists: () => false });
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    tmuxPaneExists: () => false,
+  });
   await tracker.handle({ type: "report", record: record({ paneId: "%9" }) });
 
   await expect(tracker.handle({ type: "focus_pane", paneId: "%9" })).resolves.toEqual({
@@ -270,6 +301,7 @@ test("focus prunes panes that vanish before selection", async () => {
 
 test("focus reports tmux command failures without deleting live panes", async () => {
   const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
     now: () => 1_000,
     tmuxPaneExists: () => true,
     tmuxRunner: () => {

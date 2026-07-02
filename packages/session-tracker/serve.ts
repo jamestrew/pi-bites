@@ -1,3 +1,13 @@
-import { startSessionTrackerDaemon } from "./index.ts";
+import {
+  defaultSessionTrackerDaemonOptions,
+  defaultSessionTrackerOptions,
+  getTrackerSocketPath,
+  SessionTracker,
+  startSessionTrackerDaemon,
+} from "./index.ts";
 
-await startSessionTrackerDaemon();
+await startSessionTrackerDaemon(
+  getTrackerSocketPath(),
+  new SessionTracker(defaultSessionTrackerOptions),
+  defaultSessionTrackerDaemonOptions,
+);
