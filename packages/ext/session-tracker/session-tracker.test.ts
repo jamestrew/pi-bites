@@ -7,6 +7,8 @@ import {
   formatPaneRecordLabel,
   requestSessionTracker,
   formatSessionTrackerFooter,
+  restartPiSessionsDaemon,
+  runPiSessionsNext,
   runPiSessionsPicker,
   sortPaneRecordsForPicker,
 } from "./index.js";
@@ -256,6 +258,39 @@ test("pi-sessions shows unavailable when snapshot fails", async () => {
   );
 
   expect(notices).toEqual([["Pi sessions are unavailable.", "warning"]]);
+});
+
+test("restarts the pi-sessions daemon", async () => {
+  const requests: unknown[] = [];
+  const spawned: string[] = [];
+  await restartPiSessionsDaemon({
+    socketPath: "sock",
+    send: async (_socketPath, request) => {
+      requests.push(request);
+      return { ok: true };
+    },
+    spawnDaemon: () => spawned.push("spawn"),
+  });
+
+  expect(requests).toEqual([{ type: "shutdown" }]);
+  expect(spawned).toEqual(["spawn"]);
+});
+
+test("pi-sessions shortcut focuses the next pane", async () => {
+  const requests: unknown[] = [];
+  await runPiSessionsNext(
+    { ui: { notify() {}, select: async () => undefined } },
+    {
+      socketPath: "sock",
+      paneId: "%2",
+      send: async (_socketPath, request) => {
+        requests.push(request);
+        return { ok: true };
+      },
+    },
+  );
+
+  expect(requests).toEqual([{ type: "focus_next", currentPaneId: "%2" }]);
 });
 
 test("pi-sessions shows focus errors", async () => {

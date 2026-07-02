@@ -21,7 +21,9 @@ export type TrackerRequest =
   | { type: "heartbeat"; record: PaneRecord }
   | { type: "release"; paneId: string; runtimeId: string }
   | { type: "snapshot" }
-  | { type: "focus_pane"; paneId: string };
+  | { type: "focus_pane"; paneId: string }
+  | { type: "focus_next"; currentPaneId?: string }
+  | { type: "shutdown" };
 
 export interface TrackerResponse {
   ok: boolean;
@@ -61,6 +63,7 @@ export class SessionTracker {
   private staleTimeoutMs: number;
   private tmuxPaneExists: (paneId: string) => boolean | Promise<boolean>;
   private tmuxRunner: TmuxRunner;
+  private focusedPaneId: string | undefined;
 
   constructor(options: SessionTrackerOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -88,6 +91,8 @@ export class SessionTracker {
     await this.prune();
     if (request.type === "snapshot") return { ok: true, records: this.snapshot() };
     if (request.type === "focus_pane") return this.focusPane(request.paneId);
+    if (request.type === "focus_next") return this.focusNextPane(request.currentPaneId);
+    if (request.type === "shutdown") return { ok: true };
     if (request.type === "release") {
       const current = this.records.get(request.paneId);
       if (current?.runtimeId === request.runtimeId) this.records.delete(request.paneId);
@@ -104,6 +109,20 @@ export class SessionTracker {
     return { ok: true };
   }
 
+  async focusNextPane(currentPaneId?: string): Promise<TrackerResponse> {
+    const records = [...this.records.values()].sort(
+      (a, b) =>
+        nextPaneStateOrder(a.state) - nextPaneStateOrder(b.state) ||
+        basename(a.cwd).localeCompare(basename(b.cwd)) ||
+        a.paneId.localeCompare(b.paneId),
+    );
+    if (records.length === 0) return { ok: false, error: "not-found" };
+    const currentIndex = records.findIndex(
+      (record) => record.paneId === (this.focusedPaneId ?? currentPaneId),
+    );
+    return this.focusPane(records[(currentIndex + 1) % records.length].paneId);
+  }
+
   async focusPane(paneId: string): Promise<TrackerResponse> {
     if (!this.records.has(paneId) || !(await this.tmuxPaneExists(paneId))) {
       this.records.delete(paneId);
@@ -111,6 +130,7 @@ export class SessionTracker {
     }
     try {
       await this.tmuxRunner(["switch-client", "-t", paneId]);
+      this.focusedPaneId = paneId;
       return { ok: true };
     } catch (error) {
       if (!(await this.tmuxPaneExists(paneId))) {
@@ -132,6 +152,12 @@ export class SessionTracker {
         this.records.delete(paneId);
     }
   }
+}
+
+function nextPaneStateOrder(state: TrackerState): number {
+  if (state === "needs-permission") return 0;
+  if (state === "idle") return 1;
+  return 2;
 }
 
 export async function requestTracker(
@@ -168,8 +194,13 @@ export async function startSessionTrackerDaemon(
     const handleLine = () => {
       if (handled || !data.includes("\n")) return;
       handled = true;
+      const request = JSON.parse(data.trim()) as TrackerRequest;
+      if (request.type === "shutdown") {
+        socket.end(`${JSON.stringify({ ok: true })}\n`, () => server.close());
+        return;
+      }
       void tracker
-        .handle(JSON.parse(data.trim()) as TrackerRequest)
+        .handle(request)
         .then((response) => socket.end(`${JSON.stringify(response)}\n`))
         .catch((error) => socket.end(`${JSON.stringify({ ok: false, error: String(error) })}\n`));
     };
@@ -187,7 +218,12 @@ export async function startSessionTrackerDaemon(
     options.pruneIntervalMs ?? TRACKER_PRUNE_INTERVAL_MS,
   );
   pruneTimer.unref?.();
-  server.on("close", () => clearTimer(pruneTimer));
+  server.on("close", () => {
+    clearTimer(pruneTimer);
+    try {
+      if (existsSync(socketPath)) unlinkSync(socketPath);
+    } catch {}
+  });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(socketPath, resolve);

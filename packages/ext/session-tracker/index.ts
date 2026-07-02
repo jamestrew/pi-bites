@@ -133,6 +133,37 @@ interface PiSessionsPickerContext {
   };
 }
 
+export async function restartPiSessionsDaemon(
+  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon"> = {},
+): Promise<void> {
+  const socketPath = options.socketPath ?? getTrackerSocketPath();
+  const spawnDaemon = options.spawnDaemon ?? spawnSessionTrackerDaemon;
+  try {
+    await (options.send ?? requestTracker)(socketPath, { type: "shutdown" });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ECONNREFUSED") throw error;
+  }
+  spawnDaemon();
+}
+
+export async function runPiSessionsNext(
+  ctx: Pick<PiSessionsPickerContext, "ui">,
+  options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon" | "paneId"> = {},
+): Promise<void> {
+  const socketPath = options.socketPath ?? getTrackerSocketPath();
+  try {
+    const response = await requestSessionTracker(
+      socketPath,
+      { type: "focus_next", currentPaneId: options.paneId ?? process.env.TMUX_PANE },
+      options,
+    );
+    if (!response.ok) ctx.ui.notify("No tracked Pi sessions to focus.", "info");
+  } catch {
+    ctx.ui.notify("Pi sessions are unavailable.", "warning");
+  }
+}
+
 export async function runPiSessionsPicker(
   ctx: PiSessionsPickerContext,
   options: Pick<TrackerRuntimeOptions, "socketPath" | "send" | "spawnDaemon"> = {},
@@ -297,5 +328,20 @@ export default function registerSessionTracker(pi: ExtensionAPI): void {
   pi.registerCommand("pi-sessions", {
     description: "Pick a tracked Pi tmux pane to focus",
     handler: async (_args, ctx) => runPiSessionsPicker(ctx),
+  });
+  pi.registerCommand("pi-sessions-restart-daemon", {
+    description: "Restart the Pi sessions daemon",
+    handler: async (_args, ctx) => {
+      try {
+        await restartPiSessionsDaemon();
+        ctx.ui.notify("Pi sessions daemon restarted.", "info");
+      } catch {
+        ctx.ui.notify("Failed to restart Pi sessions daemon.", "error");
+      }
+    },
+  });
+  pi.registerShortcut("ctrl+alt+s", {
+    description: "Focus next tracked Pi tmux pane",
+    handler: async (ctx) => runPiSessionsNext(ctx),
   });
 }

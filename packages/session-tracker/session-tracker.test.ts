@@ -144,6 +144,28 @@ test("daemon ingests reports and returns snapshots over newline JSON", async () 
   }
 });
 
+test("daemon shuts down over newline JSON", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const socketPath = join(dir, "tracker.sock");
+  const server = await startSessionTrackerDaemon(
+    socketPath,
+    new SessionTracker({ tmuxPaneExists: () => true }),
+    {
+      setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+      clearInterval: (() => {}) as typeof clearInterval,
+    },
+  );
+
+  try {
+    const closed = new Promise((resolve) => server.once("close", resolve));
+    await expect(requestTracker(socketPath, { type: "shutdown" })).resolves.toEqual({ ok: true });
+    await closed;
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("daemon periodically prunes without a request", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
   const socketPath = join(dir, "tracker.sock");
@@ -186,6 +208,44 @@ test("focuses a tracked existing pane by tmux pane id", async () => {
 
   await expect(tracker.handle({ type: "focus_pane", paneId: "%7" })).resolves.toEqual({ ok: true });
   expect(calls).toEqual([["switch-client", "-t", "%7"]]);
+});
+
+test("focus next cycles blocked, idle, then working panes", async () => {
+  const calls: string[][] = [];
+  const tracker = new SessionTracker({
+    tmuxPaneExists: () => true,
+    tmuxRunner: (args) => {
+      calls.push(args);
+    },
+  });
+  await tracker.handle({
+    type: "report",
+    record: record({ paneId: "%3", cwd: "/repo/working", state: "working" }),
+  });
+  await tracker.handle({
+    type: "report",
+    record: record({ paneId: "%1", cwd: "/repo/blocked", state: "needs-permission" }),
+  });
+  await tracker.handle({
+    type: "report",
+    record: record({ paneId: "%2", cwd: "/repo/idle", state: "idle" }),
+  });
+
+  await expect(tracker.handle({ type: "focus_next", currentPaneId: "%1" })).resolves.toEqual({
+    ok: true,
+  });
+  await expect(tracker.handle({ type: "focus_next", currentPaneId: "%1" })).resolves.toEqual({
+    ok: true,
+  });
+  await expect(tracker.handle({ type: "focus_next", currentPaneId: "%1" })).resolves.toEqual({
+    ok: true,
+  });
+
+  expect(calls).toEqual([
+    ["switch-client", "-t", "%2"],
+    ["switch-client", "-t", "%3"],
+    ["switch-client", "-t", "%1"],
+  ]);
 });
 
 test("focus returns not-found for unknown panes", async () => {
