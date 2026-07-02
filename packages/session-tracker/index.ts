@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { createServer, createConnection, type Server } from "node:net";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
@@ -49,6 +49,8 @@ export interface SessionTrackerDaemonOptions {
 export const TRACKER_HEARTBEAT_INTERVAL_MS = 10_000;
 export const TRACKER_STALE_TIMEOUT_MS = 30_000;
 export const TRACKER_PRUNE_INTERVAL_MS = 10_000;
+const DAEMON_START_LOCK_STALE_MS = 10_000;
+const DAEMON_START_LOCK_POLL_INTERVAL_MS = 25;
 
 function tmuxPaneExists(paneId: string): boolean {
   try {
@@ -77,6 +79,51 @@ export const defaultSessionTrackerDaemonOptions: SessionTrackerDaemonOptions = {
   setInterval,
   clearInterval,
 };
+
+function codeOf(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException).code;
+}
+
+function codedError(message: string, code: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(message), { code });
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function acquireDaemonStartLock(socketPath: string): Promise<() => void> {
+  const lockPath = `${socketPath}.lock`;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    try {
+      mkdirSync(lockPath);
+      return () => rmSync(lockPath, { recursive: true, force: true });
+    } catch (error) {
+      if (codeOf(error) !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lockPath).mtimeMs > DAEMON_START_LOCK_STALE_MS)
+          rmSync(lockPath, { recursive: true, force: true });
+      } catch (staleError) {
+        if (codeOf(staleError) !== "ENOENT") throw staleError;
+      }
+      await sleep(DAEMON_START_LOCK_POLL_INTERVAL_MS);
+    }
+  }
+  throw codedError(`Timed out waiting for ${lockPath}`, "EBUSY");
+}
+
+function socketAcceptsConnections(socketPath: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(socketPath);
+    socket.on("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on("error", (error) => {
+      const code = codeOf(error);
+      if (code === "ENOENT" || code === "ECONNREFUSED") resolve(false);
+      else reject(error);
+    });
+  });
+}
 
 export function getTrackerSocketPath(): string {
   return join(
@@ -133,7 +180,13 @@ export class SessionTracker {
     const currentIndex = records.findIndex(
       (record) => record.paneId === (this.focusedPaneId ?? currentPaneId),
     );
-    return this.focusPane(records[(currentIndex + 1) % records.length].paneId);
+    for (let offset = 1; offset <= records.length; offset++) {
+      const response = await this.focusPane(
+        records[(currentIndex + offset) % records.length].paneId,
+      );
+      if (response.ok || response.error !== "not-found") return response;
+    }
+    return { ok: false, error: "not-found" };
   }
 
   async focusPane(paneId: string): Promise<TrackerResponse> {
@@ -161,8 +214,7 @@ export class SessionTracker {
   async prune(): Promise<void> {
     const now = this.now();
     for (const [paneId, record] of this.records) {
-      if (now - record.heartbeatAt > this.staleTimeoutMs || !(await this.tmuxPaneExists(paneId)))
-        this.records.delete(paneId);
+      if (now - record.heartbeatAt > this.staleTimeoutMs) this.records.delete(paneId);
     }
   }
 }
@@ -200,7 +252,16 @@ export async function startSessionTrackerDaemon(
   options: SessionTrackerDaemonOptions,
 ): Promise<Server> {
   mkdirSync(dirname(socketPath), { recursive: true });
-  if (existsSync(socketPath)) unlinkSync(socketPath);
+  const releaseLock = await acquireDaemonStartLock(socketPath);
+  try {
+    if (await socketAcceptsConnections(socketPath))
+      throw codedError(`Session tracker already running at ${socketPath}`, "EADDRINUSE");
+    if (existsSync(socketPath)) unlinkSync(socketPath);
+  } catch (error) {
+    releaseLock();
+    throw error;
+  }
+
   const server = createServer((socket) => {
     let data = "";
     let handled = false;
@@ -214,7 +275,11 @@ export async function startSessionTrackerDaemon(
       }
       void tracker
         .handle(request)
-        .then((response) => socket.end(`${JSON.stringify(response)}\n`))
+        .then((response) =>
+          socket.end(`${JSON.stringify(response)}\n`, () => {
+            if (request.type === "release" && tracker.snapshot().length === 0) server.close();
+          }),
+        )
         .catch((error) => socket.end(`${JSON.stringify({ ok: false, error: String(error) })}\n`));
     };
     socket.setEncoding("utf8");
@@ -224,20 +289,24 @@ export async function startSessionTrackerDaemon(
     });
     socket.on("end", handleLine);
   });
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      releaseLock();
+      reject(error);
+    };
+    server.once("error", onError);
+    server.listen(socketPath, () => {
+      server.off("error", onError);
+      releaseLock();
+      resolve();
+    });
+  });
+
   const setTimer = options.setInterval;
   const clearTimer = options.clearInterval;
   const pruneTimer = setTimer(() => void tracker.prune(), options.pruneIntervalMs);
   pruneTimer.unref?.();
-  server.on("close", () => {
-    clearTimer(pruneTimer);
-    try {
-      if (existsSync(socketPath)) unlinkSync(socketPath);
-    } catch {}
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(socketPath, resolve);
-  });
+  server.on("close", () => clearTimer(pruneTimer));
   return server;
 }
 

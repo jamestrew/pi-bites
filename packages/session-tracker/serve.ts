@@ -6,8 +6,12 @@ import {
   startSessionTrackerDaemon,
 } from "./index.ts";
 
-await startSessionTrackerDaemon(
-  getTrackerSocketPath(),
-  new SessionTracker(defaultSessionTrackerOptions),
-  defaultSessionTrackerDaemonOptions,
-);
+try {
+  await startSessionTrackerDaemon(
+    getTrackerSocketPath(),
+    new SessionTracker(defaultSessionTrackerOptions),
+    defaultSessionTrackerDaemonOptions,
+  );
+} catch (error) {
+  if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+}

@@ -42,8 +42,9 @@ export interface TrackerFooterOptions {
 
 const STATE_ORDER: Record<TrackerState, number> = { "needs-permission": 0, working: 1, idle: 2 };
 export const SESSION_TRACKER_FOOTER_INTERVAL_MS = 1_000;
-const DAEMON_READY_MAX_ATTEMPTS = 40;
+const DAEMON_READY_MAX_ATTEMPTS = 100;
 const DAEMON_READY_POLL_INTERVAL_MS = 50;
+const DAEMON_START_FAILURE_COOLDOWN_MS = 60_000;
 
 function isSocketUnavailableError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
@@ -154,17 +155,28 @@ export function colorizeSessionTrackerFooter(
 }
 
 const inflightDaemonStarts = new Map<string, Promise<void>>();
+const daemonStartFailures = new Map<string, { at: number; error: unknown }>();
 
 function startDaemonCoalesced(
   socketPath: string,
   options: Pick<TrackerRuntimeOptions, "spawnDaemon" | "awaitDaemonReady">,
 ): Promise<void> {
+  const failure = daemonStartFailures.get(socketPath);
+  if (failure && Date.now() - failure.at < DAEMON_START_FAILURE_COOLDOWN_MS)
+    return Promise.reject(failure.error);
+
   let inflight = inflightDaemonStarts.get(socketPath);
   if (!inflight) {
     inflight = (async () => {
       options.spawnDaemon();
       await options.awaitDaemonReady(socketPath);
-    })().finally(() => inflightDaemonStarts.delete(socketPath));
+      daemonStartFailures.delete(socketPath);
+    })()
+      .catch((error) => {
+        daemonStartFailures.set(socketPath, { at: Date.now(), error });
+        throw error;
+      })
+      .finally(() => inflightDaemonStarts.delete(socketPath));
     inflightDaemonStarts.set(socketPath, inflight);
   }
   return inflight;
@@ -322,9 +334,16 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
   const call = (request: TrackerRequest) =>
     requestSessionTracker(options.socketPath, request, options);
 
+  const sendBestEffort = async (request: TrackerRequest, autostart = true) => {
+    try {
+      if (autostart) await call(request);
+      else await options.send(options.socketPath, request);
+    } catch {}
+  };
+
   const report = async (type: "report" | "heartbeat") => {
     const current = record();
-    if (current) await call({ type, record: current });
+    if (current) await sendBestEffort({ type, record: current });
   };
 
   return {
@@ -342,7 +361,10 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
       if (timer) options.clearInterval(timer);
       timer = undefined;
       if (release && options.paneId)
-        await call({ type: "release", paneId: options.paneId, runtimeId: options.runtimeId });
+        await sendBestEffort(
+          { type: "release", paneId: options.paneId, runtimeId: options.runtimeId },
+          false,
+        );
       ctx = undefined;
     },
   };

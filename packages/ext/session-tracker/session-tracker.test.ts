@@ -119,6 +119,33 @@ test("rejects when the daemon never becomes ready", async () => {
   expect(sends).toBe(1);
 });
 
+test("backs off repeated daemon starts after startup failure", async () => {
+  let spawns = 0;
+  let sends = 0;
+  const options = {
+    spawnDaemon: () => {
+      spawns++;
+    },
+    awaitDaemonReady: async () => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    send: async () => {
+      sends++;
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+  };
+
+  await expect(
+    requestSessionTracker("sock-startup-fails", { type: "snapshot" }, options),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+  await expect(
+    requestSessionTracker("sock-startup-fails", { type: "snapshot" }, options),
+  ).rejects.toMatchObject({ code: "ENOENT" });
+
+  expect(spawns).toBe(1);
+  expect(sends).toBe(2);
+});
+
 test("rejects when sends keep failing after the daemon is ready", async () => {
   let sends = 0;
 
@@ -510,6 +537,35 @@ test("pi-sessions shows focus errors", async () => {
   );
 
   expect(notices).toEqual([["Failed to focus tmux pane: tmux failed", "error"]]);
+});
+
+test("extension tracking failures are best-effort and shutdown does not respawn", async () => {
+  let sends = 0;
+  let spawns = 0;
+  const runtime = createSessionTrackerRuntime({
+    ...defaultTrackerRuntimeOptions,
+    runtimeId: "runtime-a",
+    socketPath: "sock-best-effort",
+    paneId: "%1",
+    send: async () => {
+      sends++;
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    spawnDaemon: () => {
+      spawns++;
+    },
+    awaitDaemonReady: async () => {
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  await expect(runtime.start({ cwd: "/repo" })).resolves.toBeUndefined();
+  await expect(runtime.stop(true)).resolves.toBeUndefined();
+
+  expect(spawns).toBe(1);
+  expect(sends).toBe(2);
 });
 
 test("extension sends full-state heartbeats and releases on shutdown", async () => {

@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
@@ -89,18 +90,25 @@ test("prunes stale pane records", async () => {
   expect(tracker.snapshot()).toEqual([]);
 });
 
-test("prunes records for missing tmux panes", async () => {
-  const existing = new Set(["%2"]);
+test("keeps tmux checks out of the prune hot path", async () => {
+  let paneChecks = 0;
   const tracker = new SessionTracker({
     ...defaultSessionTrackerOptions,
     now: () => 1_000,
-    tmuxPaneExists: (paneId) => existing.has(paneId),
+    tmuxPaneExists: () => {
+      paneChecks++;
+      return false;
+    },
   });
   await tracker.handle({ type: "report", record: record({ paneId: "%1" }) });
-  await tracker.handle({ type: "report", record: record({ paneId: "%2" }) });
 
   await tracker.prune();
-  expect(tracker.snapshot()).toEqual([record({ paneId: "%2" })]);
+  expect(paneChecks).toBe(0);
+  expect(tracker.snapshot()).toEqual([record({ paneId: "%1" })]);
+
+  await expect(tracker.focusPane("%1")).resolves.toEqual({ ok: false, error: "not-found" });
+  expect(paneChecks).toBe(1);
+  expect(tracker.snapshot()).toEqual([]);
 });
 
 test("daemon command uses the current Node runtime instead of requiring bun", () => {
@@ -183,6 +191,60 @@ test("daemon shuts down over newline JSON", async () => {
     await closed;
   } finally {
     server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("daemon exits when the last pane releases", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const socketPath = join(dir, "tracker.sock");
+  const server = await startSessionTrackerDaemon(
+    socketPath,
+    new SessionTracker({ ...defaultSessionTrackerOptions, tmuxPaneExists: () => true }),
+    {
+      ...defaultSessionTrackerDaemonOptions,
+      setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+      clearInterval: (() => {}) as typeof clearInterval,
+    },
+  );
+
+  try {
+    await requestTracker(socketPath, { type: "report", record: record() });
+    const closed = new Promise((resolve) => server.once("close", resolve));
+    await expect(
+      requestTracker(socketPath, { type: "release", paneId: "%1", runtimeId: "runtime-a" }),
+    ).resolves.toEqual({ ok: true });
+    await closed;
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("daemon start leaves a live socket alone", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const socketPath = join(dir, "tracker.sock");
+  const existing = createServer((socket) => {
+    socket.on("data", () => socket.end(`${JSON.stringify({ ok: true })}\n`));
+  });
+  await new Promise<void>((resolve) => existing.listen(socketPath, resolve));
+
+  try {
+    await expect(
+      startSessionTrackerDaemon(
+        socketPath,
+        new SessionTracker({ ...defaultSessionTrackerOptions, tmuxPaneExists: () => true }),
+        {
+          ...defaultSessionTrackerDaemonOptions,
+          setInterval: (() =>
+            ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+          clearInterval: (() => {}) as typeof clearInterval,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "EADDRINUSE" });
+    await expect(requestTracker(socketPath, { type: "snapshot" })).resolves.toEqual({ ok: true });
+  } finally {
+    existing.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -271,6 +333,25 @@ test("focus next cycles blocked, idle, then working panes", async () => {
     ["switch-client", "-t", "%3"],
     ["switch-client", "-t", "%1"],
   ]);
+});
+
+test("focus next skips panes that vanished before selection", async () => {
+  const calls: string[][] = [];
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    now: () => 1_000,
+    tmuxPaneExists: (paneId) => paneId === "%2",
+    tmuxRunner: (args) => {
+      calls.push(args);
+    },
+  });
+  await tracker.handle({ type: "report", record: record({ paneId: "%1" }) });
+  await tracker.handle({ type: "report", record: record({ paneId: "%2" }) });
+
+  await expect(tracker.handle({ type: "focus_next" })).resolves.toEqual({ ok: true });
+
+  expect(calls).toEqual([["switch-client", "-t", "%2"]]);
+  expect(tracker.snapshot()).toEqual([record({ paneId: "%2" })]);
 });
 
 test("focus returns not-found for unknown panes", async () => {
