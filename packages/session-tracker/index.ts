@@ -269,16 +269,24 @@ export async function requestTracker(
     const socket = createConnection(socketPath);
     let data = "";
     socket.setEncoding("utf8");
-    socket.on("connect", () => socket.end(`${JSON.stringify(request)}\n`));
-    socket.on("data", (chunk) => (data += chunk));
-    socket.on("error", reject);
-    socket.on("end", () => {
+    // Frame by newline, not by connection close: half-closing after the
+    // request (socket.end) tears down the whole connection on some runtimes
+    // (Bun), so the response would be lost.
+    socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
+    socket.on("data", (chunk) => {
+      data += chunk;
+      if (!data.includes("\n")) return;
+      socket.destroy();
       try {
-        resolve(JSON.parse(data) as TrackerResponse);
+        resolve(JSON.parse(data.trim()) as TrackerResponse);
       } catch (error) {
         reject(error);
       }
     });
+    socket.on("error", reject);
+    socket.on("end", () =>
+      reject(codedError("Session tracker closed the connection without a response", "ECONNRESET")),
+    );
   });
 }
 
@@ -310,7 +318,9 @@ export async function startSessionTrackerDaemon(
     if (tracker.snapshot().length === 0) closeServer();
   };
 
-  server = createServer((socket) => {
+  // allowHalfOpen keeps our write side usable if a client half-closes after
+  // sending its request, so the response isn't raced against the auto-close.
+  server = createServer({ allowHalfOpen: true }, (socket) => {
     let data = "";
     let handled = false;
     const writeResponse = (response: TrackerResponse) => {
@@ -344,7 +354,11 @@ export async function startSessionTrackerDaemon(
       data += chunk;
       handleLine();
     });
-    socket.on("end", handleLine);
+    socket.on("end", () => {
+      // With allowHalfOpen we must close our side once the client is done;
+      // if a request was handled, writeResponse's socket.end covers it.
+      if (!handled) socket.end();
+    });
   });
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => {
