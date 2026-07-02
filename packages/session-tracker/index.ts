@@ -374,12 +374,12 @@ export function getSessionTrackerDaemonCommand(
   runtime: Pick<NodeJS.Process, "execPath" | "execArgv"> = process,
 ): { command: string; args: string[] } {
   const servePath = fileURLToPath(new URL("./serve.ts", import.meta.url));
-  if (basename(runtime.execPath).startsWith("bun"))
-    return { command: runtime.execPath, args: [servePath] };
-  return {
-    command: runtime.execPath,
-    args: [...runtime.execArgv.filter((arg) => !isDebugExecArgv(arg)), servePath],
-  };
+  const runtimeName = basename(runtime.execPath);
+  if (runtimeName.startsWith("bun")) return { command: runtime.execPath, args: [servePath] };
+
+  const args = [...runtime.execArgv.filter((arg) => !isDebugExecArgv(arg)), servePath];
+  if (runtimeName.startsWith("node")) return { command: runtime.execPath, args };
+  return { command: "node", args };
 }
 
 export function spawnSessionTrackerDaemon(): void {

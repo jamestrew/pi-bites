@@ -143,6 +143,18 @@ test("daemon command keeps the bun source-development flow", () => {
   expect(command.args[0]).toMatch(/serve\.ts$/);
 });
 
+test("daemon command falls back to node when pi is the executable", () => {
+  const command = getSessionTrackerDaemonCommand({
+    execPath: "/opt/pi/bin/pi",
+    execArgv: ["--experimental-strip-types", "--inspect=127.0.0.1:9229"],
+  });
+
+  expect(command.command).toBe("node");
+  expect(command.args.at(-1)).toMatch(/serve\.ts$/);
+  expect(command.args).toContain("--experimental-strip-types");
+  expect(command.args).not.toContain("--inspect=127.0.0.1:9229");
+});
+
 test("writes daemon debug logs beside the socket", () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
   const socketPath = join(dir, "tracker.sock");
