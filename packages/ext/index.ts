@@ -15,7 +15,6 @@ import registerCheckpoints from "./checkpoints.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
-import registerTau from "./tau/index.js";
 import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -42,7 +41,6 @@ export default function (pi: ExtensionAPI) {
 
   if (isExploreSubagent) return;
 
-  if (!isNonInteractive && !disabled.has("tau")) registerTau(pi, configRef);
   if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);

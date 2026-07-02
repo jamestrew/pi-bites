@@ -18,7 +18,6 @@ const registerModules = [
   "./prompt-normalization/index.js",
   "./spotme/index.js",
   "./inline-references/index.js",
-  "./tau/index.js",
   "./session-tracker/index.js",
   "./ponytail/index.js",
 ] as const;
@@ -66,10 +65,9 @@ afterEach(() => {
 });
 
 describe("extension entrypoint", () => {
-  test("registers Tau by default in normal interactive sessions", async () => {
+  test("default registers in normal interactive sessions", async () => {
     const loaded = await loadExtension();
     try {
-      expect(loaded.registerSpies.get("./tau/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledTimes(1);
@@ -80,10 +78,9 @@ describe("extension entrypoint", () => {
     }
   });
 
-  test("can disable Tau/session tracker without disabling unrelated extensions", async () => {
-    const loaded = await loadExtension({ disable: ["tau", "sessionTracker"] });
+  test("can disable tracker without disabling unrelated extensions", async () => {
+    const loaded = await loadExtension({ disable: ["sessionTracker"] });
     try {
-      expect(loaded.registerSpies.get("./tau/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./session-tracker/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
