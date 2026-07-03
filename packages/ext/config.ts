@@ -30,7 +30,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "spotme" | "inlineReferences" | "promptNormalization" | "atMentionContext" | "tau" | "sessionTracker" | "ponytail"
+ *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "spotme" | "inlineReferences" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -126,7 +126,6 @@ export type ExtensionName =
   | "slashSkillAutocomplete"
   | "promptNormalization"
   | "atMentionContext"
-  | "tau"
   | "sessionTracker"
   | "ponytail";
 
@@ -204,7 +203,6 @@ export const EXTENSION_NAMES: ExtensionName[] = [
   "inlineReferences",
   "promptNormalization",
   "atMentionContext",
-  "tau",
   "sessionTracker",
   "ponytail",
 ];
