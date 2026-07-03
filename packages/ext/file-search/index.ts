@@ -89,7 +89,7 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
 
       const result = FileFinder.create({
         basePath: cwd,
-        aiMode: true,
+        aiMode: false,
         frecencyDbPath,
         historyDbPath,
         disableWatch: true,
