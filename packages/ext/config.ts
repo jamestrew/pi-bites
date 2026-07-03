@@ -105,30 +105,30 @@ export interface BashGateConfig {
   rules?: BashGateRule[];
 }
 
-/** Known extension names that can be disabled. */
-export type ExtensionName =
-  | "bashGate"
-  | "rtk"
-  | "footer"
-  | "statusline"
-  | "tokenCount"
-  | "usageDashboard"
-  | "tools"
-  | "explore"
-  | "todo"
-  | "fzf"
-  | "question"
-  | "notifications"
-  | "checkpoints"
-  | "spotme"
-  | "inlineReferences"
-  /** @deprecated Use "inlineReferences". */
-  | "slashSkillAutocomplete"
-  | "promptNormalization"
-  | "atMentionContext"
-  | "sessionTracker"
-  | "subagents"
-  | "ponytail";
+export const EXTENSION_NAMES = [
+  "bashGate",
+  "rtk",
+  "footer",
+  "statusline",
+  "tokenCount",
+  "usageDashboard",
+  "tools",
+  "explore",
+  "fzf",
+  "todo",
+  "question",
+  "notifications",
+  "checkpoints",
+  "spotme",
+  "inlineReferences",
+  "promptNormalization",
+  "atMentionContext",
+  "sessionTracker",
+  "ponytail",
+  "subagents"
+] as const;
+
+export type ExtensionName = typeof EXTENSION_NAMES[number];
 
 export interface SnacksConfig {
   explore?: ExploreConfig;
@@ -184,29 +184,6 @@ export function loadConfig(cwd: string): SnacksConfig {
 // ---------------------------------------------------------------------------
 // Config-file write helpers
 // ---------------------------------------------------------------------------
-
-/** All valid extension names, in display order. */
-export const EXTENSION_NAMES: ExtensionName[] = [
-  "bashGate",
-  "rtk",
-  "footer",
-  "statusline",
-  "tokenCount",
-  "usageDashboard",
-  "tools",
-  "explore",
-  "fzf",
-  "todo",
-  "question",
-  "notifications",
-  "checkpoints",
-  "spotme",
-  "inlineReferences",
-  "promptNormalization",
-  "atMentionContext",
-  "sessionTracker",
-  "ponytail",
-];
 
 /**
  * Resolve which config file to write to:
