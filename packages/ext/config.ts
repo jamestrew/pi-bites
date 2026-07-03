@@ -127,6 +127,7 @@ export type ExtensionName =
   | "promptNormalization"
   | "atMentionContext"
   | "sessionTracker"
+  | "subagents"
   | "ponytail";
 
 export interface SnacksConfig {
