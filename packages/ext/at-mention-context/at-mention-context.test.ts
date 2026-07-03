@@ -1,16 +1,23 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { expandMention, parseAtMentions } from "./index.js";
+
+const fixtureDirs: string[] = [];
 
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), "pi-bites-at-mention-"));
+  fixtureDirs.push(dir);
   await writeFile(join(dir, "foo.ts"), "one\ntwo\nthree\nfour\nfive\n");
   await writeFile(join(dir, "foo.ts:12"), "literal suffix file\n");
   await writeFile(join(dir, "foo bar.ts"), "alpha\nbeta\ngamma\n");
   return dir;
 }
+
+afterEach(async () => {
+  await Promise.all(fixtureDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 describe("parseAtMentions", () => {
   test("keeps line suffixes on unquoted and quoted mentions", () => {

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { afterEach, expect, test } from "vitest";
 
 import {
   defaultSessionTrackerDaemonOptions,
@@ -16,6 +16,27 @@ import {
   writeSessionTrackerLog,
   type PaneRecord,
 } from "./index.js";
+
+const tempDirs: string[] = [];
+
+function tempDir() {
+  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+async function closeServer(server: ReturnType<typeof createServer>) {
+  if (!server.listening) return;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
 
 function record(overrides: Partial<PaneRecord> = {}): PaneRecord {
   return {
@@ -163,7 +184,7 @@ test("tracker socket lives in a host-local per-user directory", () => {
 });
 
 test("writes daemon debug logs beside the socket", () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
 
   try {
@@ -178,7 +199,7 @@ test("writes daemon debug logs beside the socket", () => {
 });
 
 test("daemon ingests reports and returns snapshots over newline JSON", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
   const server = await startSessionTrackerDaemon(
     socketPath,
@@ -203,13 +224,12 @@ test("daemon ingests reports and returns snapshots over newline JSON", async () 
       records: [record({ heartbeatAt: 1_000, sessionId: "session-1" })],
     });
   } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
+    await closeServer(server);
   }
 });
 
 test("daemon shuts down over newline JSON", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
   const server = await startSessionTrackerDaemon(
     socketPath,
@@ -226,13 +246,12 @@ test("daemon shuts down over newline JSON", async () => {
     await expect(requestTracker(socketPath, { type: "shutdown" })).resolves.toEqual({ ok: true });
     await closed;
   } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
+    await closeServer(server);
   }
 });
 
 test("daemon exits when the last pane releases", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
   const server = await startSessionTrackerDaemon(
     socketPath,
@@ -252,13 +271,12 @@ test("daemon exits when the last pane releases", async () => {
     ).resolves.toEqual({ ok: true });
     await closed;
   } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
+    await closeServer(server);
   }
 });
 
 test("daemon keeps serving after a client disconnects before the response", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
   let paneCheckStarted: (() => void) | undefined;
   let finishPaneCheck: ((exists: boolean) => void) | undefined;
@@ -299,13 +317,12 @@ test("daemon keeps serving after a client disconnects before the response", asyn
       "client socket error",
     );
   } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
+    await closeServer(server);
   }
 });
 
 test("daemon start leaves a live socket alone", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
   const existing = createServer((socket) => {
     socket.on("data", () => socket.end(`${JSON.stringify({ ok: true })}\n`));
@@ -327,13 +344,12 @@ test("daemon start leaves a live socket alone", async () => {
     ).rejects.toMatchObject({ code: "EADDRINUSE" });
     await expect(requestTracker(socketPath, { type: "snapshot" })).resolves.toEqual({ ok: true });
   } finally {
-    existing.close();
-    rmSync(dir, { recursive: true, force: true });
+    await closeServer(existing);
   }
 });
 
 test("daemon exits when periodic prune removes the last pane", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pi-bites-tracker-"));
+  const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
   let prune: (() => void) | undefined;
   let now = 1_000;
@@ -361,8 +377,7 @@ test("daemon exits when periodic prune removes the last pane", async () => {
     await closed;
     expect(tracker.snapshot()).toEqual([]);
   } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
+    await closeServer(server);
   }
 });
 

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -117,6 +117,8 @@ test("ExploreUsageReader reset starts counting from current file end", () => {
       cost: 0.01,
     });
   } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+
     if (previousAgentDir === undefined) {
       delete process.env.PI_CODING_AGENT_DIR;
     } else {
