@@ -43,8 +43,8 @@ describe("buildAgentPrompt", () => {
   it("Explore prompt is read-only", () => {
     const config = getDefaultConfig("Explore");
     const prompt = buildAgentPrompt(config, "/workspace", env);
-    expect(prompt).toContain("READ-ONLY");
-    expect(prompt).toContain("file search specialist");
+    expect(prompt).toContain("READ-ONLY MODE");
+    expect(prompt).toContain("strictly read-only task");
   });
 
   it("Plan prompt is read-only", () => {

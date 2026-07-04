@@ -10,8 +10,9 @@ import { Type } from "typebox";
 import { buildDoneStats, type Usage } from "./format/index.js";
 import type { SnacksConfig } from "../config.js";
 
-export const DEFAULT_EXPLORE_MODEL = "github-copilot/claude-haiku-4.5";
-const DEFAULT_TOOLS = "read,ls,bash";
+export const DEFAULT_EXPLORE_MODEL = "github-copilot/gpt-5.4-mini";
+export const DEFAULT_EXPLORE_TOOLS = ["read", "ls", "bash"] as const;
+const DEFAULT_TOOLS = DEFAULT_EXPLORE_TOOLS.join(",");
 const SELF_EXTENSION = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   `../index${path.extname(fileURLToPath(import.meta.url))}`,
@@ -34,7 +35,7 @@ type SubagentUsageRecord = {
   };
 };
 
-const EXPLORE_SYSTEM_PROMPT = `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
+export const EXPLORE_SYSTEM_PROMPT = `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
 
 Your job is to investigate the repository efficiently and return objective findings to the parent agent.
 

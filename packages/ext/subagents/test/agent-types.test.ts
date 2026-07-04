@@ -15,6 +15,11 @@ import {
   resolveType,
   setDefaultsDisabled,
 } from "../agent-types.js";
+import {
+  DEFAULT_EXPLORE_MODEL,
+  DEFAULT_EXPLORE_TOOLS,
+  EXPLORE_SYSTEM_PROMPT,
+} from "../../explore/index.js";
 import { DEFAULT_AGENTS } from "../default-agents.js";
 import type { AgentConfig } from "../types.js";
 
@@ -65,13 +70,13 @@ describe("agent type registry", () => {
 
     it("case-insensitive lookup works for getAgentConfig", () => {
       const config = getAgentConfig("explore");
-      expect(config?.name).toBe("Explore");
-      expect(config?.model).toBe("anthropic/claude-haiku-4-5");
+      expect(config?.name).toBe("explore");
+      expect(config?.model).toBe(DEFAULT_EXPLORE_MODEL);
     });
 
     it("resolveType returns canonical key or undefined", () => {
-      expect(resolveType("Explore")).toBe("Explore");
-      expect(resolveType("explore")).toBe("Explore");
+      expect(resolveType("Explore")).toBe("explore");
+      expect(resolveType("explore")).toBe("explore");
       expect(resolveType("GENERAL-PURPOSE")).toBe("general-purpose");
       expect(resolveType("nonexistent")).toBeUndefined();
     });
@@ -84,16 +89,14 @@ describe("agent type registry", () => {
       expect(config.skills).toBe(true);
     });
 
-    it("Explore has read-only tools", () => {
+    it("Explore uses standalone explore defaults", () => {
       const config = getConfig("Explore");
-      expect(config.builtinToolNames).toEqual(["read", "bash", "grep", "find", "ls"]);
+      const agentConfig = getAgentConfig("Explore");
+      expect(config.builtinToolNames).toEqual([...DEFAULT_EXPLORE_TOOLS]);
       expect(config.builtinToolNames).not.toContain("edit");
       expect(config.builtinToolNames).not.toContain("write");
-    });
-
-    it("Explore has haiku model in config", () => {
-      const cfg = getAgentConfig("Explore");
-      expect(cfg?.model).toBe("anthropic/claude-haiku-4-5");
+      expect(agentConfig?.model).toBe(DEFAULT_EXPLORE_MODEL);
+      expect(agentConfig?.systemPrompt).toBe(EXPLORE_SYSTEM_PROMPT);
     });
 
     it("default agents are marked isDefault", () => {
@@ -116,7 +119,7 @@ describe("agent type registry", () => {
     it("getDefaultAgentNames returns default agent names", () => {
       const names = getDefaultAgentNames();
       expect(names).toContain("general-purpose");
-      expect(names).toContain("Explore");
+      expect(names).toContain("explore");
       expect(names).toContain("Plan");
     });
 
@@ -202,7 +205,7 @@ describe("agent type registry", () => {
 
       const types = getAvailableTypes();
       expect(types).toContain("general-purpose");
-      expect(types).toContain("Explore");
+      expect(types).toContain("explore");
       expect(types).toContain("auditor");
     });
 

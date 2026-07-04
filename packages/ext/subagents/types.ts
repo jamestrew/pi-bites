@@ -12,7 +12,7 @@ export type { ThinkingLevel };
 export type SubagentType = string;
 
 /** Names of the three embedded default agents. */
-export const DEFAULT_AGENT_NAMES = ["general-purpose", "Explore", "Plan"] as const;
+export const DEFAULT_AGENT_NAMES = ["general-purpose", "explore", "Plan"] as const;
 
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";

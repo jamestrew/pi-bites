@@ -691,7 +691,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ---- Disable default agents configuration ----
-  // When enabled, the three hardcoded default agents (general-purpose, Explore,
+  // When enabled, the three hardcoded default agents (general-purpose, explore,
   // Plan) are not registered. User-defined agents from .pi/agents/*.md are
   // completely unaffected — only DEFAULT_AGENTS are suppressed.
   // Defaults to false; opt-in via `/agents → Settings` or subagents.json.
@@ -974,10 +974,23 @@ Terse command-style prompts produce shallow, generic work.
       description: agentToolDescription,
       promptSnippet: "Launch autonomous sub-agents for complex multi-step tasks",
       promptGuidelines: [
-        "Use Agent with specialized agents when the task matches an agent type's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing — if you delegate research to a subagent, do not also perform the same searches yourself.",
-        "For broad codebase exploration or research, spawn Agent with an appropriate subagent_type (e.g. Explore). Otherwise use direct tools (read, grep, find) when the target is already known.",
-        "When an agent runs in the background, you will be notified on completion — do not poll or sleep waiting for it. Continue with other work instead.",
-        "Trust but verify: an agent's summary describes intent, not outcome. When an agent writes or edits code, check the actual changes before reporting work as done.",
+        [
+          "Use Agent with specialized agents when the task matches an agent type's description.",
+          "Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but should not be used excessively when not needed.",
+          "Importantly, avoid duplicating work that subagents are already doing — if you delegate research to a subagent, do not also perform the same searches yourself.",
+        ].join(" "),
+        [
+          "For broad codebase exploration or research, spawn Agent with an appropriate subagent_type (e.g. explore).",
+          "Otherwise use direct tools (read, grep, find) when the target is already known.",
+        ].join(" "),
+        [
+          "When an agent runs in the background, you will be notified on completion — do not poll or sleep waiting for it.",
+          "Continue with other work instead.",
+        ].join(" "),
+        [
+          "Trust but verify: an agent's summary describes intent, not outcome.",
+          "When an agent writes or edits code, check the actual changes before reporting work as done.",
+        ].join(" "),
       ],
       parameters: Type.Object({
         prompt: Type.String({
@@ -2389,7 +2402,7 @@ ${systemPrompt}
           id: "disableDefaultAgents",
           label: "Disable defaults",
           description:
-            "Hide built-in agents (general-purpose, Explore, Plan) — custom agents are unaffected",
+            "Hide built-in agents (general-purpose, explore, Plan) — custom agents are unaffected",
           currentValue: isDefaultsDisabled() ? "on" : "off",
           values: ["on", "off"],
         },
