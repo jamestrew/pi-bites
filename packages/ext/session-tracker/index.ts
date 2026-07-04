@@ -325,12 +325,18 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
         ui: { setStatus(id: string, text: string | undefined): void; theme?: any };
       },
     ) {
+      const setStatus = (text: string | undefined) => {
+        try {
+          ctx.ui.setStatus("session-tracker", text);
+        } catch {
+          /* stale ctx */
+        }
+      };
       const update = async () => {
         try {
           const response = await options.send(options.socketPath, { type: "snapshot" });
           logTrackerRecovery(options, "footer snapshot");
-          ctx.ui.setStatus(
-            "session-tracker",
+          setStatus(
             colorizeSessionTrackerFooter(
               formatSessionTrackerFooter(response.records ?? [], options.paneId),
               ctx.ui.theme,
@@ -338,7 +344,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
           );
         } catch (error) {
           logTrackerFailure(options, "footer snapshot", error);
-          ctx.ui.setStatus("session-tracker", undefined);
+          setStatus(undefined);
         }
       };
       void update();
@@ -348,7 +354,11 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
     stop(ctx?: { ui?: { setStatus(id: string, text: string | undefined): void } }) {
       if (timer) options.clearInterval(timer);
       timer = undefined;
-      ctx?.ui?.setStatus("session-tracker", undefined);
+      try {
+        ctx?.ui?.setStatus("session-tracker", undefined);
+      } catch {
+        /* stale ctx */
+      }
     },
   };
 }
