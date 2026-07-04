@@ -125,10 +125,10 @@ export const EXTENSION_NAMES = [
   "atMentionContext",
   "sessionTracker",
   "ponytail",
-  "subagents"
+  "subagents",
 ] as const;
 
-export type ExtensionName = typeof EXTENSION_NAMES[number];
+export type ExtensionName = (typeof EXTENSION_NAMES)[number];
 
 export interface SnacksConfig {
   explore?: ExploreConfig;
