@@ -384,6 +384,35 @@ test("session tracker footer periodically reads snapshots and fails quietly", as
   ]);
 });
 
+test("session tracker footer ignores stale ctx status updates", async () => {
+  const runtime = createSessionTrackerFooterRuntime({
+    ...defaultTrackerFooterOptions,
+    socketPath: "sock",
+    log: () => {},
+    send: async () => ({ ok: true, records: [] }),
+    setInterval: ((callback: () => void) => {
+      void callback;
+      return { unref() {} } as ReturnType<typeof setInterval>;
+    }) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  expect(() => {
+    runtime.start({
+      cwd: "/repo",
+      get ui(): never {
+        throw new Error("stale ctx");
+      },
+    });
+    runtime.stop({
+      get ui(): never {
+        throw new Error("stale ctx");
+      },
+    });
+  }).not.toThrow();
+  await Promise.resolve();
+});
+
 test("logs repeated client failures once and logs recovery", async () => {
   const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
   const lines: string[] = [];
