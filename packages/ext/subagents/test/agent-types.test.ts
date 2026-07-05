@@ -37,6 +37,13 @@ describe("agent type registry", () => {
     expect(isValidType("")).toBe(false);
   });
 
+  it("scopes default explore to the bundled extension", () => {
+    const config = getConfig("explore");
+
+    expect(config.builtinToolNames).toEqual(["read", "ls", "bash"]);
+    expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
+  });
+
   describe("user agents", () => {
     it("registers and retrieves user agents", () => {
       registerAgents(

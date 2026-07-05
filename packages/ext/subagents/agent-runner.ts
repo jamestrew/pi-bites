@@ -311,7 +311,7 @@ function getLastAssistantText(session: AgentSession): string {
  * Returns a cleanup function to remove the listener.
  */
 function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
-  if (!signal) return () => { };
+  if (!signal) return () => {};
   const onAbort = () => session.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);
@@ -462,16 +462,16 @@ export async function runAgent(
     noExtensions || (loadAll && !hasExcludes)
       ? undefined
       : (base) => {
-        discoveredNames = new Set(base.extensions.map((e) => extensionCanonicalName(e.path)));
-        return {
-          ...base,
-          extensions: base.extensions.filter((e) => {
-            const name = extensionCanonicalName(e.path);
-            if (excludeNames.has(name)) return false; // exclude wins
-            return loadAll || keepNames.has(name);
-          }),
+          discoveredNames = new Set(base.extensions.map((e) => extensionCanonicalName(e.path)));
+          return {
+            ...base,
+            extensions: base.extensions.filter((e) => {
+              const name = extensionCanonicalName(e.path);
+              if (excludeNames.has(name)) return false; // exclude wins
+              return loadAll || keepNames.has(name);
+            }),
+          };
         };
-      };
 
   const loader = new DefaultResourceLoader({
     cwd: configCwd,
@@ -486,7 +486,19 @@ export async function runAgent(
     systemPromptOverride: () => systemPrompt,
     appendSystemPromptOverride: () => [],
   });
-  await loader.reload();
+
+  const previousSubagentEnv = process.env.PI_BITES_SUBAGENT;
+  const restoreSubagentEnv = () => {
+    if (type !== "explore") return;
+    if (previousSubagentEnv === undefined) delete process.env.PI_BITES_SUBAGENT;
+    else process.env.PI_BITES_SUBAGENT = previousSubagentEnv;
+  };
+  if (type === "explore") process.env.PI_BITES_SUBAGENT = "explore";
+  try {
+    await loader.reload();
+  } finally {
+    restoreSubagentEnv();
+  }
 
   // Plain entries in `tools:` are expected to be built-in names (extension tools
   // go through `ext:`), so an unknown name there is unambiguously a typo. Previously
@@ -761,27 +773,27 @@ export async function resumeAgent(
   const unsubEvents =
     options.onToolActivity || options.onAssistantUsage || options.onCompaction
       ? session.subscribe((event: AgentSessionEvent) => {
-        if (event.type === "tool_execution_start")
-          options.onToolActivity?.({ type: "start", toolName: event.toolName });
-        if (event.type === "tool_execution_end")
-          options.onToolActivity?.({ type: "end", toolName: event.toolName });
-        if (event.type === "message_end" && event.message.role === "assistant") {
-          const u = (event.message as any).usage;
-          if (u)
-            options.onAssistantUsage?.({
-              input: u.input ?? 0,
-              output: u.output ?? 0,
-              cacheWrite: u.cacheWrite ?? 0,
+          if (event.type === "tool_execution_start")
+            options.onToolActivity?.({ type: "start", toolName: event.toolName });
+          if (event.type === "tool_execution_end")
+            options.onToolActivity?.({ type: "end", toolName: event.toolName });
+          if (event.type === "message_end" && event.message.role === "assistant") {
+            const u = (event.message as any).usage;
+            if (u)
+              options.onAssistantUsage?.({
+                input: u.input ?? 0,
+                output: u.output ?? 0,
+                cacheWrite: u.cacheWrite ?? 0,
+              });
+          }
+          if (event.type === "compaction_end" && !event.aborted && event.result) {
+            options.onCompaction?.({
+              reason: event.reason,
+              tokensBefore: event.result.tokensBefore,
             });
-        }
-        if (event.type === "compaction_end" && !event.aborted && event.result) {
-          options.onCompaction?.({
-            reason: event.reason,
-            tokensBefore: event.result.tokensBefore,
-          });
-        }
-      })
-      : () => { };
+          }
+        })
+      : () => {};
 
   try {
     await session.prompt(prompt);

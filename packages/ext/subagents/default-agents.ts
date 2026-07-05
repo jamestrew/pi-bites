@@ -4,6 +4,8 @@
  * These are always available but can be overridden by user .md files with the same name.
  */
 
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   DEFAULT_EXPLORE_MODEL,
   DEFAULT_EXPLORE_TOOLS,
@@ -12,6 +14,11 @@ import {
 import type { AgentConfig } from "./types.js";
 
 // const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];
+
+const SELF_EXTENSION = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  `../index${path.extname(fileURLToPath(import.meta.url))}`,
+);
 
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
   // [
@@ -47,7 +54,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
         "When uncertain about scope, lean toward explore.",
       ].join(" "),
       builtinToolNames: [...DEFAULT_EXPLORE_TOOLS],
-      extensions: true,
+      extensions: [SELF_EXTENSION],
       skills: true,
       model: DEFAULT_EXPLORE_MODEL,
       systemPrompt: EXPLORE_SYSTEM_PROMPT,
