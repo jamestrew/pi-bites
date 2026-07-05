@@ -48,6 +48,10 @@ function ctx() {
 }
 
 const textOf = (r: any): string => r.content[0].text;
+const plainTheme = {
+  fg: (_color: string, s: string) => s,
+  bold: (s: string) => s,
+};
 
 describe("status note reaches the parent through the real handlers", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -76,6 +80,38 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(out).toContain("hit the turn limit"); // getStatusNote("aborted") is wired in
     expect(out).toContain("partial work so far"); // partial result still delivered
     expect(out).not.toContain("STOPPED BY THE USER"); // not mislabelled as a user stop
+  });
+
+  it("renders steered foreground completion as green Done", () => {
+    const { pi, tools } = makePi();
+    subagentsExtension(pi);
+
+    const rendered = tools
+      .get("Agent")
+      .renderResult(
+        {
+          content: [{ type: "text", text: "done" }],
+          details: {
+            status: "steered",
+            description: "d",
+            toolUses: 1,
+            toolCalls: ["Read(a.ts)"],
+            lifetimeUsage: { input: 1, output: 1, cacheWrite: 0 },
+          },
+        },
+        { expanded: false, isPartial: false },
+        {
+          ...plainTheme,
+          fg: (color: string, s: string) => (color === "success" ? `[success]${s}` : s),
+        },
+        { args: { prompt: "go" } },
+      )
+      .render(80)
+      .join("\n");
+
+    expect(rendered).toContain("[success]Done");
+    expect(rendered).toContain("(ctrl+o to expand)");
+    expect(rendered).not.toContain("Wrapped up");
   });
 
   it("background user-stop → get_subagent_result flags STOPPED BY THE USER (not completed)", async () => {

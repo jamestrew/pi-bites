@@ -473,14 +473,10 @@ Terse command-style prompts produce shallow, generic work.
               } else if (details.status === "background") {
                 lines.push(theme.fg("muted", "Background agent running…"));
               } else {
-                const label =
-                  details.status === "steered"
-                    ? "Wrapped up"
-                    : details.status === "completed"
-                      ? "Done"
-                      : "Finished";
+                const isDone = details.status === "completed" || details.status === "steered";
+                const label = isDone ? "Done" : "Finished";
                 lines.push(
-                  theme.fg(details.status === "completed" ? "success" : "muted", label) +
+                  theme.fg(isDone ? "success" : "muted", label) +
                     (statusStats ? theme.fg("muted", ` (${statusStats})`) : ""),
                 );
               }
@@ -516,9 +512,9 @@ Terse command-style prompts produce shallow, generic work.
             } else if (details.status === "aborted") {
               lines.push(theme.fg("warning", "Aborted (max turns exceeded)"));
             } else {
-              const label = details.status === "steered" ? "Wrapped up" : "Done";
+              const isDone = details.status === "completed" || details.status === "steered";
               lines.push(
-                theme.fg(details.status === "completed" ? "success" : "warning", label) +
+                theme.fg(isDone ? "success" : "warning", "Done") +
                   (statusStats ? theme.fg("muted", ` (${statusStats})`) : ""),
               );
               if ((details.toolCalls?.length ?? 0) > 0)
