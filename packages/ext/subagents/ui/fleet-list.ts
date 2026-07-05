@@ -1,10 +1,10 @@
 /**
  * fleet-list.ts — Claude Code-style "FleetView" list rendered above the editor.
  *
- * Shows `main` + each running/queued subagent as a navigable list. Pressing ↓ (or
- * Ctrl+↑ activates the list; ↑/↓ move the selection (filled ⏺ marker),
- * Enter opens the selected agent's live conversation overlay, Esc returns to the prompt.
- * A viewer stays open when its agent finishes; finished agents linger briefly in the list.
+ * Shows `main` + each running/queued background subagent as a navigable list. Pressing
+ * Ctrl+↑ activates the list; ↑/↓ move the selection, Enter opens the selected agent's
+ * live conversation overlay, Esc returns to the prompt. A viewer stays open when its
+ * agent finishes; finished agents linger briefly in the list.
  *
  * Mechanics (see plan): the list is an `aboveEditor` widget (render-only), and ALL key
  * handling goes through `onTerminalInput` — which fires before the focused editor and
@@ -31,7 +31,7 @@ const MAX_AGENT_ROWS = 5;
 /** Re-render cadence so elapsed/token stats tick while agents run. */
 const TICK_MS = 200;
 /** How long a finished agent lingers in the list before it drops out. */
-const FINISHED_LINGER_MS = 4000;
+const FINISHED_LINGER_MS = 500;
 
 /** Minimal UI surface the FleetView needs from `ctx.ui` (structural subset). */
 export type FleetUICtx = {
@@ -216,7 +216,7 @@ export class FleetList {
    * started sooner sit at the top. Every row is openable (has a session), so Enter
    * never dead-ends. Included: running/queued, plus the agent currently being
    * viewed, plus recently-finished ones (they linger briefly before dropping out).
-   * Pending agents with no session yet are hidden until they start.
+   * Foreground agents are hidden because their inline tool result is already visible.
    * (`listAgents()` is newest-first, so we re-sort.)
    */
   private agentRecords(): AgentRecord[] {
@@ -225,11 +225,11 @@ export class FleetList {
       .listAgents()
       .filter(
         (a) =>
-          a.session &&
+          a.isBackground !== false &&
           (a.status === "running" ||
             a.status === "queued" ||
             a.id === this.viewingAgentId ||
-            (a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS)),
+            (a.session && a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS)),
       )
       .sort((a, b) => a.startedAt - b.startedAt);
   }
@@ -385,12 +385,11 @@ export class FleetList {
     const sel = Math.min(this.selectedIndex, agents.length);
 
     const hint = this.active
-      ? "↑↓ select · enter view · esc back"
-      : "esc to interrupt · ctrl+↑ for agents";
+      ? "FleetView focused · ↑↓ select · enter view · esc back"
+      : "ctrl+↑ focus agents";
     const lines: string[] = [];
     lines.push(truncateToWidth("  " + theme.fg("dim", hint), width));
-    lines.push("");
-    lines.push(truncateToWidth(`  ${this.bullet(0, sel, theme)} main`, width));
+    lines.push(truncateToWidth(`${this.cursor(0, sel)}${theme.fg("success", "•")} main`, width));
 
     // Window the agent rows so the selected one stays visible.
     const visible = Math.min(MAX_AGENT_ROWS, agents.length);
@@ -408,8 +407,8 @@ export class FleetList {
     return lines;
   }
 
-  private bullet(rosterIndex: number, sel: number, theme: Theme): string {
-    return rosterIndex === sel ? theme.fg("accent", "⏺") : theme.fg("dim", "◯");
+  private cursor(rosterIndex: number, sel: number): string {
+    return `  ${this.active && rosterIndex === sel ? "▶" : " "} `;
   }
 
   private renderAgentRow(
@@ -419,7 +418,7 @@ export class FleetList {
     width: number,
     theme: Theme,
   ): string {
-    const left = `  ${this.bullet(rosterIndex, sel, theme)} ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}`;
+    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}`;
     const tokens = getLifetimeTotal(
       this.agentActivity.get(record.id)?.lifetimeUsage ?? record.lifetimeUsage,
     );

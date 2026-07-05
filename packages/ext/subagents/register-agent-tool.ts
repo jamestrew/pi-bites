@@ -834,8 +834,6 @@ Terse command-style prompts produce shallow, generic work.
             if (a.session === session) {
               fgId = a.id;
               agentActivity.set(a.id, fgState);
-              fleet.ensureTimer();
-              fleet.update();
               break;
             }
           }
