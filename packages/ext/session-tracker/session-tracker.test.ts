@@ -729,3 +729,76 @@ test("extension does not release on non-quit shutdown", async () => {
 
   expect(requests).toHaveLength(1);
 });
+
+test("heartbeat disarms instead of throwing when ctx goes stale", async () => {
+  const requests: unknown[] = [];
+  let timerCallback: (() => void) | undefined;
+  let cleared = 0;
+  let stale = false;
+  const runtime = createSessionTrackerRuntime({
+    ...defaultTrackerRuntimeOptions,
+    runtimeId: "runtime-a",
+    socketPath: "sock",
+    paneId: "%1",
+    log: () => {},
+    send: async (_socketPath, request) => {
+      requests.push(request);
+      return { ok: true };
+    },
+    setInterval: ((callback: () => void) => {
+      timerCallback = callback;
+      return { unref() {} } as ReturnType<typeof setInterval>;
+    }) as typeof setInterval,
+    clearInterval: (() => {
+      cleared++;
+    }) as typeof clearInterval,
+  });
+
+  await runtime.start({
+    get cwd(): string {
+      if (stale)
+        throw new Error("This extension ctx is stale after session replacement or reload.");
+      return "/repo";
+    },
+  });
+  stale = true;
+
+  expect(() => timerCallback?.()).not.toThrow();
+  await Promise.resolve();
+
+  expect(cleared).toBe(1);
+  expect(requests).toHaveLength(1);
+
+  timerCallback?.();
+  await Promise.resolve();
+  expect(requests).toHaveLength(1);
+});
+
+test("stop during the initial report does not leak a heartbeat timer", async () => {
+  let resolveSend: ((response: { ok: boolean }) => void) | undefined;
+  let intervals = 0;
+  const runtime = createSessionTrackerRuntime({
+    ...defaultTrackerRuntimeOptions,
+    runtimeId: "runtime-a",
+    socketPath: "sock",
+    paneId: "%1",
+    log: () => {},
+    send: (() =>
+      new Promise((resolve) => {
+        resolveSend = resolve;
+      })) as typeof defaultTrackerRuntimeOptions.send,
+    setInterval: ((callback: () => void) => {
+      void callback;
+      intervals++;
+      return { unref() {} } as ReturnType<typeof setInterval>;
+    }) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  const started = runtime.start({ cwd: "/repo" });
+  await runtime.stop(false);
+  resolveSend?.({ ok: true });
+  await started;
+
+  expect(intervals).toBe(0);
+});

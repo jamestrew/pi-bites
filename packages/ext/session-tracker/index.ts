@@ -325,6 +325,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
         ui: { setStatus(id: string, text: string | undefined): void; theme?: any };
       },
     ) {
+      if (timer) options.clearInterval(timer);
       const setStatus = (text: string | undefined) => {
         try {
           ctx.ui.setStatus("session-tracker", text);
@@ -369,12 +370,28 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
   let ctx: TrackerContext | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
 
+  const disarm = () => {
+    if (timer) options.clearInterval(timer);
+    timer = undefined;
+    ctx = undefined;
+  };
+
   const record = (): PaneRecord | undefined => {
     if (!options.paneId || !ctx) return undefined;
-    const sessionId = ctx.sessionManager?.getSessionId?.();
+    let cwd: string;
+    let sessionId: string | undefined;
+    try {
+      // ctx.cwd and ctx.sessionManager are throwing getters once the ctx goes
+      // stale after session replacement or reload.
+      cwd = ctx.cwd;
+      sessionId = ctx.sessionManager?.getSessionId?.();
+    } catch {
+      disarm();
+      return undefined;
+    }
     return {
       paneId: options.paneId,
-      cwd: ctx.cwd,
+      cwd,
       runtimeId: options.runtimeId,
       seq: ++seq,
       state,
@@ -403,8 +420,13 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
 
   return {
     async start(startCtx: TrackerContext) {
+      if (timer) options.clearInterval(timer);
+      timer = undefined;
       ctx = startCtx;
       await report("report");
+      // stop() or a newer start() may have run while the first report was in
+      // flight; creating the interval now would leak it with a stale ctx.
+      if (ctx !== startCtx) return;
       timer = options.setInterval(() => void report("heartbeat"), options.heartbeatIntervalMs);
       timer.unref?.();
     },
