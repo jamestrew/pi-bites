@@ -131,21 +131,21 @@ async function appendSubagentUsageRecords(records: SubagentUsageRecord[]): Promi
   await appendFile(file, records.map((record) => JSON.stringify(record)).join("\n") + "\n", "utf8");
 }
 
-function normalizeToolArg(value: unknown): string {
+export function normalizeToolArg(value: unknown): string {
   return String(value ?? "").trim();
 }
 
-function summarizeToolArg(value: unknown, maxLength = 120): string {
+export function summarizeToolArg(value: unknown, maxLength = 120): string {
   const singleLine = normalizeToolArg(value).replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, maxLength)}...`;
 }
 
-function wrapMultilineText(text: string, width: number): string[] {
+export function wrapMultilineText(text: string, width: number): string[] {
   return text.split("\n").flatMap((line) => wrapTextWithAnsi(line, width));
 }
 
-function formatToolCall(name: string, args: Record<string, unknown>): string {
+export function formatToolCall(name: string, args: Record<string, unknown>): string {
   const cap = name.charAt(0).toUpperCase() + name.slice(1);
 
   if (name === "read") {

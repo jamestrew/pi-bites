@@ -28,8 +28,12 @@ import {
   SettingsList,
   Spacer,
   Text,
+  truncateToWidth,
+  wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { buildDoneStats, type Usage } from "../explore/format/index.js";
+import { formatToolCall, summarizeToolArg, wrapMultilineText } from "../explore/index.js";
 import { AgentManager } from "./agent-manager.js";
 import {
   getAgentConversation,
@@ -128,6 +132,17 @@ function formatLifetimeTokens(o: { lifetimeUsage: LifetimeUsage }): string {
   return t > 0 ? formatTokens(t) : "";
 }
 
+function toDoneUsage(usage: LifetimeUsage): Usage {
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead ?? 0,
+    cacheWrite: usage.cacheWrite,
+    cost: usage.cost ?? 0,
+    turns: 0,
+  };
+}
+
 /**
  * Create an AgentActivity state and spawn callbacks for tracking tool usage.
  * Used by both foreground and background paths to avoid duplication.
@@ -141,13 +156,18 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
     responseText: "",
     session: undefined,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+    toolCalls: [],
   };
 
   const callbacks = {
-    onToolActivity: (activity: { type: "start" | "end"; toolName: string }) => {
+    onToolActivity: (activity: {
+      type: "start" | "end" | "call";
+      toolName: string;
+      arguments?: Record<string, unknown>;
+    }) => {
       if (activity.type === "start") {
         state.activeTools.set(activity.toolName + "_" + Date.now(), activity.toolName);
-      } else {
+      } else if (activity.type === "end") {
         for (const [key, name] of state.activeTools) {
           if (name === activity.toolName) {
             state.activeTools.delete(key);
@@ -155,6 +175,8 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
           }
         }
         state.toolUses++;
+      } else {
+        state.toolCalls?.push(formatToolCall(activity.toolName, activity.arguments ?? {}));
       }
       onStreamUpdate?.();
     },
@@ -169,7 +191,7 @@ function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
     onSessionCreated: (session: any) => {
       state.session = session;
     },
-    onAssistantUsage: (usage: { input: number; output: number; cacheWrite: number }) => {
+    onAssistantUsage: (usage: LifetimeUsage) => {
       addUsage(state.lifetimeUsage, usage);
       onStreamUpdate?.();
     },
@@ -261,6 +283,8 @@ function buildDetails(
     status: record.status as AgentDetails["status"],
     agentId: record.id,
     error: record.error,
+    toolCalls: activity?.toolCalls,
+    lifetimeUsage: record.lifetimeUsage,
     ...overrides,
   };
 }
@@ -1056,100 +1080,167 @@ Terse command-style prompts produce shallow, generic work.
 
       renderCall(args, theme) {
         const displayName = args.subagent_type ? getDisplayName(args.subagent_type) : "Agent";
-        const desc = args.description ?? "";
+        const preview =
+          args.description ||
+          String(args.prompt ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 80) ||
+          "no prompt";
+        const config = args.subagent_type ? getAgentConfig(args.subagent_type) : undefined;
+        const model = config?.model ?? args.model;
+        const thinking = config?.thinking ?? args.thinking;
+        const modelSuffix = [model, thinking].filter(Boolean).join(" ");
+        const suffixes = [
+          modelSuffix || undefined,
+          args.run_in_background ? "background" : undefined,
+        ]
+          .filter(Boolean)
+          .map((s) => theme.fg("dim", `: ${s}`))
+          .join("");
         return new Text(
-          "▸ " +
-            theme.fg("toolTitle", theme.bold(displayName)) +
-            (desc ? "  " + theme.fg("muted", desc) : ""),
+          theme.fg("toolTitle", theme.bold(displayName)) +
+            theme.fg("dim", `(${preview})`) +
+            suffixes,
           0,
           0,
         );
       },
 
-      renderResult(result, { expanded, isPartial }, theme) {
+      renderResult(result, options, theme, context) {
         const details = result.details as AgentDetails | undefined;
-        if (!details) {
-          const text = result.content[0]?.type === "text" ? result.content[0].text : "";
-          return new Text(text, 0, 0);
-        }
+        const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
+        if (!details) return new Text(resultText, 0, 0);
 
-        // Helper: build "haiku · thinking: high · ↻5≤30 · 3 tool uses · 33.8k tokens" stats string
         const stats = (d: AgentDetails) => {
           const parts: string[] = [];
           if (d.modelName) parts.push(d.modelName);
           if (d.tags) parts.push(...d.tags);
-          if (d.turnCount != null && d.turnCount > 0) {
+          if (d.turnCount != null && d.turnCount > 0)
             parts.push(formatTurns(d.turnCount, d.maxTurns));
+          if (d.status === "running") {
+            if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
+            if (d.tokens) parts.push(d.tokens);
+            return parts.join(" · ");
           }
-          if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
-          if (d.tokens) parts.push(d.tokens);
-          return parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
+          const usage = d.lifetimeUsage ?? { input: 0, output: 0, cacheWrite: 0 };
+          return buildDoneStats(
+            d.toolCalls?.length ?? d.toolUses,
+            toDoneUsage(usage),
+            d.durationMs,
+          );
         };
 
-        // ---- While running (streaming) ----
-        if (isPartial || details.status === "running") {
-          const frame = SPINNER[details.spinnerFrame ?? 0];
-          const s = stats(details);
-          return renderRunningAgentStatus(frame, s, details.activity ?? "thinking…", theme);
-        }
+        const prefix0 = theme.fg("dim", "⎿  ");
+        const indent = "   ";
+        const INDENT_WIDTH = 3;
 
-        // ---- Background agent launched ----
-        if (details.status === "background") {
-          return new Text(
-            theme.fg("dim", `  ⎿  Running in background (ID: ${details.agentId})`),
-            0,
-            0,
-          );
-        }
+        return {
+          render(width: number): string[] {
+            const lineWidth = Math.max(1, width - INDENT_WIDTH);
+            const lines: string[] = [];
+            const statusStats = stats(details);
 
-        // ---- Completed / Steered ----
-        if (details.status === "completed" || details.status === "steered") {
-          const duration = formatMs(details.durationMs);
-          const isSteered = details.status === "steered";
-          const icon = isSteered ? theme.fg("warning", "✓") : theme.fg("success", "✓");
-          const s = stats(details);
-          let line = icon + (s ? " " + s : "");
-          line += " " + theme.fg("dim", "·") + " " + theme.fg("dim", duration);
-
-          if (expanded) {
-            const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
-            if (resultText) {
-              const lines = resultText.split("\n").slice(0, 50);
-              for (const l of lines) {
-                line += "\n" + theme.fg("dim", `  ${l}`);
+            if (options.expanded) {
+              const prompt = String(context.args.prompt ?? "").trim();
+              if (prompt) {
+                lines.push(theme.fg("muted", "Prompt:"));
+                for (const l of wrapTextWithAnsi(prompt, lineWidth)) lines.push(theme.fg("dim", l));
+                lines.push("");
               }
-              if (resultText.split("\n").length > 50) {
-                line +=
-                  "\n" +
-                  theme.fg("muted", "  ... (use get_subagent_result with verbose for full output)");
+
+              if (details.status === "running" || options.isPartial) {
+                const frame = SPINNER[details.spinnerFrame ?? 0];
+                lines.push(
+                  theme.fg("accent", frame) +
+                    (statusStats ? theme.fg("dim", ` ${statusStats}`) : ""),
+                );
+                lines.push(theme.fg("dim", details.activity ?? "thinking…"));
+              } else if (details.status === "background") {
+                lines.push(
+                  theme.fg("accent", "●") +
+                    theme.fg("dim", ` Running in background (ID: ${details.agentId})`),
+                );
+              } else if (details.status === "error") {
+                lines.push(theme.fg("error", `Error: ${details.error ?? "unknown"}`));
+              } else if (details.status === "stopped") {
+                lines.push(theme.fg("muted", "Stopped"));
+              } else if (details.status === "aborted") {
+                lines.push(theme.fg("warning", "Aborted (max turns exceeded)"));
               }
+
+              const toolCalls = details.toolCalls ?? [];
+              for (const call of toolCalls) {
+                for (const l of wrapMultilineText(call, lineWidth)) lines.push(theme.fg("dim", l));
+              }
+
+              if (resultText.trim()) {
+                if (lines.length > 0) lines.push("");
+                for (const l of wrapTextWithAnsi(resultText.trim(), lineWidth)) lines.push(l);
+              }
+
+              lines.push("");
+              if (details.status === "running" || options.isPartial) {
+                lines.push(theme.fg("muted", "Running…"));
+              } else if (details.status === "background") {
+                lines.push(theme.fg("muted", "Background agent running…"));
+              } else {
+                const label =
+                  details.status === "steered"
+                    ? "Wrapped up"
+                    : details.status === "completed"
+                      ? "Done"
+                      : "Finished";
+                lines.push(
+                  theme.fg(details.status === "completed" ? "success" : "muted", label) +
+                    (statusStats ? theme.fg("muted", ` (${statusStats})`) : ""),
+                );
+              }
+            } else if (details.status === "running" || options.isPartial) {
+              const toolCalls = details.toolCalls ?? [];
+              const hiddenCount = Math.max(0, toolCalls.length - 3);
+              for (const call of toolCalls.slice(-3)) {
+                lines.push(
+                  truncateToWidth(theme.fg("dim", summarizeToolArg(call)), lineWidth, "…"),
+                );
+              }
+              if (toolCalls.length === 0) {
+                const frame = SPINNER[details.spinnerFrame ?? 0];
+                lines.push(
+                  theme.fg("accent", frame) +
+                    (statusStats ? theme.fg("dim", ` ${statusStats}`) : ""),
+                );
+                lines.push(
+                  truncateToWidth(theme.fg("dim", details.activity ?? "thinking…"), lineWidth, "…"),
+                );
+              }
+              lines.push(theme.fg("muted", "Running… (ctrl+o to expand)"));
+              if (hiddenCount > 0) lines.push(theme.fg("muted", `+${hiddenCount} more tool uses`));
+            } else if (details.status === "background") {
+              lines.push(
+                theme.fg("accent", "●") +
+                  theme.fg("dim", ` Running in background (ID: ${details.agentId})`),
+              );
+            } else if (details.status === "error") {
+              lines.push(theme.fg("error", `Error: ${details.error ?? "unknown"}`));
+            } else if (details.status === "stopped") {
+              lines.push(theme.fg("muted", "Stopped"));
+            } else if (details.status === "aborted") {
+              lines.push(theme.fg("warning", "Aborted (max turns exceeded)"));
+            } else {
+              const label = details.status === "steered" ? "Wrapped up" : "Done";
+              lines.push(
+                theme.fg(details.status === "completed" ? "success" : "warning", label) +
+                  (statusStats ? theme.fg("muted", ` (${statusStats})`) : ""),
+              );
+              if ((details.toolCalls?.length ?? 0) > 0)
+                lines.push(theme.fg("muted", "(ctrl+o to expand)"));
             }
-          } else {
-            const doneText = isSteered ? "Wrapped up (turn limit)" : "Done";
-            line += "\n" + theme.fg("dim", `  ⎿  ${doneText}`);
-          }
-          return new Text(line, 0, 0);
-        }
 
-        // ---- Stopped (user-initiated abort) ----
-        if (details.status === "stopped") {
-          const s = stats(details);
-          let line = theme.fg("dim", "■") + (s ? " " + s : "");
-          line += "\n" + theme.fg("dim", "  ⎿  Stopped");
-          return new Text(line, 0, 0);
-        }
-
-        // ---- Error / Aborted (hard max_turns) ----
-        const s = stats(details);
-        let line = theme.fg("error", "✗") + (s ? " " + s : "");
-
-        if (details.status === "error") {
-          line += "\n" + theme.fg("error", `  ⎿  Error: ${details.error ?? "unknown"}`);
-        } else {
-          line += "\n" + theme.fg("warning", "  ⎿  Aborted (max turns exceeded)");
-        }
-
-        return new Text(line, 0, 0);
+            return lines.map((l, i) => (i === 0 ? prefix0 + l : indent + l));
+          },
+          invalidate() {},
+        };
       },
 
       // ---- Execute ----
@@ -1444,6 +1535,8 @@ Terse command-style prompts produce shallow, generic work.
             status: "running",
             activity: describeActivity(fgState.activeTools, fgState.responseText),
             spinnerFrame: spinnerFrame % SPINNER.length,
+            toolCalls: fgState.toolCalls,
+            lifetimeUsage: fgState.lifetimeUsage,
           };
           onUpdate?.({
             content: [{ type: "text", text: `${fgState.toolUses} tool uses...` }],

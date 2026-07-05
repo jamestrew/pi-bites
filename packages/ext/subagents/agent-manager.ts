@@ -19,7 +19,7 @@ import type {
   SubagentType,
   ThinkingLevel,
 } from "./types.js";
-import { addUsage } from "./usage.js";
+import { addUsage, type LifetimeUsage } from "./usage.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees } from "./worktree.js";
 
 export type OnAgentComplete = (record: AgentRecord) => void;
@@ -98,7 +98,7 @@ interface SpawnOptions {
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /** Called once per assistant message_end with that message's usage delta. */
-  onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
+  onAssistantUsage?: (usage: LifetimeUsage) => void;
   /** Called when the session successfully compacts. */
   onCompaction?: (info: CompactionInfo) => void;
 }

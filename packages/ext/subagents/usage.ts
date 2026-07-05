@@ -7,7 +7,13 @@
  * the cumulative cached prefix re-read on that one call — summing across
  * turns counts the prefix N times. See issue #38.
  */
-export type LifetimeUsage = { input: number; output: number; cacheWrite: number };
+export type LifetimeUsage = {
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead?: number;
+  cost?: number;
+};
 
 /** Sum of lifetime usage components, or 0 if undefined. */
 export function getLifetimeTotal(u?: LifetimeUsage): number {
@@ -19,6 +25,8 @@ export function addUsage(into: LifetimeUsage, delta: LifetimeUsage): void {
   into.input += delta.input;
   into.output += delta.output;
   into.cacheWrite += delta.cacheWrite;
+  if (delta.cacheRead) into.cacheRead = (into.cacheRead ?? 0) + delta.cacheRead;
+  if (delta.cost) into.cost = (into.cost ?? 0) + delta.cost;
 }
 
 /** Minimal shape we read from upstream `getSessionStats()`. */

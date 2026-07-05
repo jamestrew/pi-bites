@@ -66,6 +66,8 @@ export interface AgentActivity {
   maxTurns?: number;
   /** Lifetime usage breakdown — see LifetimeUsage docs. */
   lifetimeUsage: LifetimeUsage;
+  /** Completed tool call names, in order. */
+  toolCalls?: string[];
 }
 
 /** Metadata attached to Agent tool results for custom rendering. */
@@ -99,6 +101,8 @@ export interface AgentDetails {
   maxTurns?: number;
   agentId?: string;
   error?: string;
+  toolCalls?: string[];
+  lifetimeUsage?: LifetimeUsage;
 }
 
 // ---- Formatting helpers ----

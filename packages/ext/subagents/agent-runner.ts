@@ -208,8 +208,9 @@ function resolveDefaultModel(
 
 /** Info about a tool event in the subagent. */
 export interface ToolActivity {
-  type: "start" | "end";
+  type: "start" | "end" | "call";
   toolName: string;
+  arguments?: Record<string, unknown>;
 }
 
 export interface RunOptions {
@@ -251,7 +252,13 @@ export interface RunOptions {
    * Lets callers maintain a lifetime accumulator that survives compaction
    * (which replaces session.state.messages and resets stats-derived sums).
    */
-  onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
+  onAssistantUsage?: (usage: {
+    input: number;
+    output: number;
+    cacheWrite: number;
+    cacheRead?: number;
+    cost?: number;
+  }) => void;
   /**
    * Called when the session successfully compacts. `tokensBefore` is upstream's
    * pre-compaction context size estimate. Aborted compactions don't fire.
@@ -678,13 +685,30 @@ export async function runAgent(
       options.onToolActivity?.({ type: "end", toolName: event.toolName });
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
+      const content = (event.message as any).content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part?.type === "toolCall" && typeof part.name === "string") {
+            options.onToolActivity?.({
+              type: "call",
+              toolName: part.name,
+              arguments: part.arguments ?? {},
+            });
+          }
+        }
+      }
+
       const u = (event.message as any).usage;
-      if (u)
-        options.onAssistantUsage?.({
+      if (u) {
+        const usage = {
           input: u.input ?? 0,
           output: u.output ?? 0,
           cacheWrite: u.cacheWrite ?? 0,
-        });
+          ...(u.cacheRead ? { cacheRead: u.cacheRead } : {}),
+          ...(u.cost?.total || u.cost ? { cost: u.cost?.total ?? u.cost } : {}),
+        };
+        options.onAssistantUsage?.(usage);
+      }
     }
     if (event.type === "compaction_end" && !event.aborted && event.result) {
       options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
