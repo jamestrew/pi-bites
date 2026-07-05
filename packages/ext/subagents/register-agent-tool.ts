@@ -35,7 +35,6 @@ import {
 import {
   type AgentActivity,
   type AgentDetails,
-  type AgentWidget,
   buildInvocationTags,
   describeActivity,
   formatMs,
@@ -43,15 +42,13 @@ import {
   getDisplayName,
   getPromptModeLabel,
   SPINNER,
-  type UICtx,
-} from "./ui/agent-widget.js";
+} from "./ui/agent-format.js";
 import { type FleetList } from "./ui/fleet-list.js";
 import { type SubagentScheduler } from "./schedule.js";
 
 type RegisterAgentToolDeps = {
   manager: AgentManager;
   agentActivity: Map<string, AgentActivity>;
-  widget: AgentWidget;
   fleet: FleetList;
   scheduler: SubagentScheduler;
   reloadCustomAgents: () => void;
@@ -64,7 +61,6 @@ type RegisterAgentToolDeps = {
   setDisableDefaultAgents: (disabled: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setFleetViewEnabled: (enabled: boolean) => void;
-  setWidgetMode: (mode: any) => void;
   getDefaultJoinMode: () => JoinMode;
   trackBatchAgent: (id: string, joinMode: JoinMode) => void;
 };
@@ -81,7 +77,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
   const {
     manager,
     agentActivity,
-    widget,
     fleet,
     scheduler,
     reloadCustomAgents,
@@ -94,7 +89,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     setDisableDefaultAgents,
     setToolDescriptionMode,
     setFleetViewEnabled,
-    setWidgetMode,
     getDefaultJoinMode,
     trackBatchAgent,
   } = deps;
@@ -148,7 +142,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
       setDisableDefaultAgents: setDisableDefaultAgents,
       setToolDescriptionMode: setToolDescriptionMode,
       setFleetView: setFleetViewEnabled,
-      setWidgetMode: setWidgetMode,
     },
     (event, payload) => pi.events.emit(event, payload),
   );
@@ -541,9 +534,6 @@ Terse command-style prompts produce shallow, generic work.
       // ---- Execute ----
 
       execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-        // Ensure we have UI context for widget rendering
-        widget.setUICtx(ctx.ui as UICtx);
-
         // Reload custom agents so new .pi/agents/*.md files are picked up without restart
         reloadCustomAgents();
 
@@ -773,8 +763,6 @@ Terse command-style prompts produce shallow, generic work.
           }
 
           agentActivity.set(id, bgState);
-          widget.ensureTimer();
-          widget.update();
           fleet.ensureTimer();
           fleet.update();
 
@@ -840,7 +828,7 @@ Terse command-style prompts produce shallow, generic work.
           streamUpdate,
         );
 
-        // Wire session creation: register in widget + stream to output file.
+        // Wire session creation: register in FleetView + stream to output file.
         // The output file path is set synchronously after spawn (below),
         // before onSessionCreated fires — same pattern as background agents.
         const origOnSession = fgCallbacks.onSessionCreated;
@@ -850,7 +838,6 @@ Terse command-style prompts produce shallow, generic work.
             if (a.session === session) {
               fgId = a.id;
               agentActivity.set(a.id, fgState);
-              widget.ensureTimer();
               fleet.ensureTimer();
               fleet.update();
               break;
@@ -914,10 +901,9 @@ Terse command-style prompts produce shallow, generic work.
 
         clearInterval(spinnerInterval);
 
-        // Clean up foreground agent from widget
+        // Clean up foreground agent from FleetView
         if (fgId) {
           agentActivity.delete(fgId);
-          widget.markFinished(fgId);
           fleet.onAgentFinished(fgId);
         }
 

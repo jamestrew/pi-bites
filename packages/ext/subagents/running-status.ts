@@ -1,5 +1,5 @@
 import { Container, Text } from "@earendil-works/pi-tui";
-import { type Theme } from "./ui/agent-widget.js";
+import { type Theme } from "./ui/agent-format.js";
 
 export function renderRunningAgentStatus(
   frame: string,

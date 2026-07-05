@@ -1,5 +1,5 @@
 import { buildDoneStats, type Usage } from "../explore/format/index.js";
-import { type AgentDetails, formatTokens } from "./ui/agent-widget.js";
+import { type AgentDetails, formatTokens } from "./ui/agent-format.js";
 import { getLifetimeTotal, type LifetimeUsage } from "./usage.js";
 
 /** Tool execute return value for a text response. */

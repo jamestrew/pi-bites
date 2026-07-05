@@ -67,15 +67,6 @@ export interface AgentConfig {
 
 export type JoinMode = "async" | "group" | "smart";
 
-/**
- * Display mode for the persistent above-editor agent widget.
- * - `all`: show every agent (foreground + background).
- * - `background`: hide foreground agents (they already render inline as the
- *   Agent tool result, #118); show background/queued/scheduled/RPC.
- * - `off`: hide the widget entirely.
- */
-export type WidgetMode = "all" | "background" | "off";
-
 export interface AgentRecord {
   id: string;
   type: SubagentType;
@@ -118,10 +109,7 @@ export interface AgentRecord {
    * spawn from `SpawnOptions.isBackground`: `true` = background, `false` =
    * foreground (has an inline Agent tool-result surface), `undefined` = the
    * caller never declared it (e.g. a cross-extension RPC spawn, which is detached
-   * and has no inline surface). The widget's background-only filter keys off this
-   * — and excludes only explicit `false`, so `undefined` agents stay visible.
-   * Reliable across ALL spawn paths, unlike the UI-only `invocation` snapshot,
-   * which only the Agent-tool path populates.
+   * and has no inline surface).
    */
   isBackground?: boolean;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */

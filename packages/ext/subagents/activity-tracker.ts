@@ -1,6 +1,6 @@
 import { formatToolCall } from "../explore/index.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
-import { type AgentActivity } from "./ui/agent-widget.js";
+import { type AgentActivity } from "./ui/agent-format.js";
 
 /**
  * Create an AgentActivity state and spawn callbacks for tracking tool usage.

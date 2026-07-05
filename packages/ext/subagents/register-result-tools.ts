@@ -4,7 +4,7 @@ import { getAgentConversation, SUBAGENT_TOOL_NAMES, steerAgent } from "./agent-r
 import { getStatusNote } from "./status-note.js";
 import { textResult, formatLifetimeTokens } from "./tool-result.js";
 import { type AgentManager } from "./agent-manager.js";
-import { formatDuration } from "./ui/agent-widget.js";
+import { formatDuration } from "./ui/agent-format.js";
 import { getSessionContextPercent } from "./usage.js";
 
 export function registerResultTools(

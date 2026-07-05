@@ -35,8 +35,8 @@ import {
   saveAndEmitChanged,
   type ToolDescriptionMode,
 } from "./settings.js";
-import { type AgentConfig, type AgentRecord, type JoinMode, type WidgetMode } from "./types.js";
-import { type AgentActivity, formatDuration, getDisplayName } from "./ui/agent-widget.js";
+import { type AgentConfig, type AgentRecord, type JoinMode } from "./types.js";
+import { type AgentActivity, formatDuration, getDisplayName } from "./ui/agent-format.js";
 import { showSchedulesMenu } from "./ui/schedule-menu.js";
 
 type AgentsCommandDeps = {
@@ -56,8 +56,6 @@ type AgentsCommandDeps = {
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   isFleetViewEnabled: () => boolean;
   setFleetViewEnabled: (enabled: boolean) => void;
-  getWidgetMode: () => WidgetMode;
-  setWidgetMode: (mode: WidgetMode) => void;
 };
 
 export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps) {
@@ -78,8 +76,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     setToolDescriptionMode,
     isFleetViewEnabled,
     setFleetViewEnabled,
-    getWidgetMode,
-    setWidgetMode,
   } = deps;
   // ---- /agents interactive menu ----
 
@@ -709,7 +705,6 @@ ${systemPrompt}
       disableDefaultAgents: isDefaultsDisabled(),
       toolDescriptionMode: getToolDescriptionMode(),
       fleetView: isFleetViewEnabled(),
-      widgetMode: getWidgetMode(),
     };
   }
 
@@ -777,17 +772,9 @@ ${systemPrompt}
           id: "fleetView",
           label: "Fleet view",
           description:
-            "Claude Code-style main+subagents list below the editor (↓/← to navigate, Enter to view)",
+            "Claude Code-style main+subagents list above the editor (Ctrl+↑ to focus, Enter to view)",
           currentValue: isFleetViewEnabled() ? "on" : "off",
           values: ["on", "off"],
-        },
-        {
-          id: "widgetMode",
-          label: "Widget",
-          description:
-            "Above-editor agent widget: all = every agent; background = hide foreground (they already render inline); off = hide the widget.",
-          currentValue: getWidgetMode(),
-          values: ["all", "background", "off"],
         },
         {
           id: "toolDescriptionMode",
@@ -855,8 +842,6 @@ ${systemPrompt}
         const enabled = value === "on";
         setFleetViewEnabled(enabled);
         notifyApplied(ctx, `Fleet view ${enabled ? "enabled" : "disabled"}`);
-      } else if (id === "widgetMode") {
-        setWidgetMode(value as WidgetMode);
         notifyApplied(ctx, `Widget set to ${value}`);
       }
     }

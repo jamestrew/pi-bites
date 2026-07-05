@@ -1,14 +1,14 @@
 /**
- * fleet-list.ts — Claude Code-style "FleetView" list rendered below the editor.
+ * fleet-list.ts — Claude Code-style "FleetView" list rendered above the editor.
  *
  * Shows `main` + each running/queued subagent as a navigable list. Pressing ↓ (or
- * ←) at an empty prompt activates the list; ↑/↓ move the selection (filled ⏺ marker),
+ * Ctrl+↑ activates the list; ↑/↓ move the selection (filled ⏺ marker),
  * Enter opens the selected agent's live conversation overlay, Esc returns to the prompt.
  * A viewer stays open when its agent finishes; finished agents linger briefly in the list.
  *
- * Mechanics (see plan): the list is a `belowEditor` widget (render-only), and ALL key
+ * Mechanics (see plan): the list is an `aboveEditor` widget (render-only), and ALL key
  * handling goes through `onTerminalInput` — which fires before the focused editor and
- * can `consume` keys — gated on `getEditorText() === ""` so normal typing is untouched.
+ * can `consume` keys. Activation uses Ctrl+↑ so normal typing is untouched.
  */
 
 import {
@@ -21,10 +21,10 @@ import {
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal } from "../usage.js";
-import { type AgentActivity, getDisplayName, type Theme } from "./agent-widget.js";
+import { type AgentActivity, getDisplayName, type Theme } from "./agent-format.js";
 import { ConversationViewer, VIEWPORT_HEIGHT_PCT } from "./conversation-viewer.js";
 
-/** Widget key for the below-editor fleet list. */
+/** Widget key for the FleetView list. */
 const FLEET_KEY = "fleet";
 /** Max agent rows shown at once; extras collapse into a "↓ N more" indicator. */
 const MAX_AGENT_ROWS = 5;
@@ -165,7 +165,7 @@ export class FleetList {
     this.ui = undefined;
   }
 
-  /** Re-register/refresh the below-editor widget; clears it when no agents remain. */
+  /** Re-register/refresh the above-editor widget; clears it when no agents remain. */
   update(): void {
     if (!this.ui) return;
     const hasAgents = this.enabled && this.agentRecords().length > 0;
@@ -201,7 +201,7 @@ export class FleetList {
             },
           };
         },
-        { placement: "belowEditor" },
+        { placement: "aboveEditor" },
       );
       this.widgetRegistered = true;
     } else {
@@ -260,11 +260,11 @@ export class FleetList {
     if (this.viewerClose) return undefined;
 
     if (!this.active) {
-      // Activate: ↓ or ← at an empty prompt moves focus into the list.
-      const isActivator = matchesKey(data, "down") || matchesKey(data, "left");
-      if (isActivator && this.agentRecords().length > 0 && this.ui.getEditorText() === "") {
+      // Activate: Ctrl+↑ moves focus into the list.
+      const isActivator = matchesKey(data, "ctrl+up");
+      if (isActivator && this.agentRecords().length > 0) {
         this.active = true;
-        this.selectedIndex = 0;
+        this.selectedIndex = this.roster().length - 1;
         this.update();
         return { consume: true };
       }
@@ -272,13 +272,17 @@ export class FleetList {
     }
 
     // Active — arrows navigate, Enter opens, Esc / Up-past-top exits.
-    if (matchesKey(data, "down")) {
+    if (matchesKey(data, "down") || matchesKey(data, "ctrl+down")) {
       const max = this.roster().length - 1;
+      if (this.selectedIndex === max) {
+        this.deactivate();
+        return { consume: true };
+      }
       this.selectedIndex = Math.min(max, this.selectedIndex + 1);
       this.update();
       return { consume: true };
     }
-    if (matchesKey(data, "up")) {
+    if (matchesKey(data, "up") || matchesKey(data, "ctrl+up")) {
       if (this.selectedIndex === 0) {
         this.deactivate();
         return { consume: true };
@@ -382,7 +386,7 @@ export class FleetList {
 
     const hint = this.active
       ? "↑↓ select · enter view · esc back"
-      : "esc to interrupt · ← for agents · ↓ to manage";
+      : "esc to interrupt · ctrl+↑ for agents";
     const lines: string[] = [];
     lines.push(truncateToWidth("  " + theme.fg("dim", hint), width));
     lines.push("");

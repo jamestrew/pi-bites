@@ -5,7 +5,7 @@
  * The unit tests in fleet-list.test.ts drive FleetList with a fake ui/manager.
  * These prove the bits only the extension can: that `tool_execution_start`
  * hands the fleet the live UI (so it captures input), that spawning a background
- * agent actually registers the `belowEditor` widget once the agent has a session,
+ * agent actually registers the `aboveEditor` widget once the agent has a session,
  * and that `session_shutdown` tears it down. runAgent is mocked (no LLM); the
  * manager, settings load, completion routing, and lifecycle handlers are real.
  */
@@ -111,7 +111,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(ui.onTerminalInput).toHaveBeenCalled();
   });
 
-  it("registers the belowEditor widget once a spawned agent has a session, then clears it on shutdown", async () => {
+  it("registers the aboveEditor widget once a spawned agent has a session, then clears it on shutdown", async () => {
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done",
       session: { dispose: vi.fn() } as any,
@@ -146,6 +146,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(fleetRegs.length, "fleet widget should register with a render factory").toBeGreaterThan(
       0,
     );
+    expect(fleetRegs.at(-1)?.[2]).toEqual({ placement: "aboveEditor" });
 
     await lifecycle.get("session_shutdown")?.({}, ctxWith(uiCtx()));
     expect(ui.setWidget).toHaveBeenCalledWith("fleet", undefined); // dispose cleared it

@@ -28,13 +28,8 @@ import { registerResultTools } from "./register-result-tools.js";
 import { SubagentScheduler } from "./schedule.js";
 import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { type ToolDescriptionMode } from "./settings.js";
-import {
-  type AgentRecord,
-  type JoinMode,
-  type NotificationDetails,
-  type WidgetMode,
-} from "./types.js";
-import { type AgentActivity, AgentWidget, type UICtx } from "./ui/agent-widget.js";
+import { type AgentRecord, type JoinMode, type NotificationDetails } from "./types.js";
+import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
 
 export { renderRunningAgentStatus } from "./running-status.js";
@@ -54,7 +49,7 @@ export default function (pi: ExtensionAPI) {
   // Initial load
   reloadCustomAgents();
 
-  // ---- Agent activity tracking + widget ----
+  // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
 
   // ---- Cancellable pending notifications ----
@@ -106,17 +101,14 @@ export default function (pi: ExtensionAPI) {
 
   function sendIndividualNudge(record: AgentRecord) {
     agentActivity.delete(record.id);
-    widget.markFinished(record.id);
     fleet.onAgentFinished(record.id);
     scheduleNudge(record.id, () => emitIndividualNudge(record));
-    widget.update();
   }
 
   // ---- Group join manager ----
   const groupJoin = new GroupJoinManager((records, partial) => {
     for (const r of records) {
       agentActivity.delete(r.id);
-      widget.markFinished(r.id);
       fleet.onAgentFinished(r.id);
     }
 
@@ -125,7 +117,6 @@ export default function (pi: ExtensionAPI) {
       // Re-check at send time
       const unconsumed = records.filter((r) => !r.resultConsumed);
       if (unconsumed.length === 0) {
-        widget.update();
         return;
       }
 
@@ -150,7 +141,6 @@ export default function (pi: ExtensionAPI) {
         { deliverAs: "followUp", triggerTurn: true },
       );
     });
-    widget.update();
   }, 30_000);
 
   // Background completion: route through group join or send individual nudge
@@ -181,16 +171,13 @@ export default function (pi: ExtensionAPI) {
       // Skip notification if result was already consumed via get_subagent_result
       if (record.resultConsumed) {
         agentActivity.delete(record.id);
-        widget.markFinished(record.id);
         fleet.onAgentFinished(record.id);
-        widget.update();
         return;
       }
 
       // If this agent is pending batch finalization (debounce window still open),
       // don't send an individual nudge — finalizeBatch will pick it up retroactively.
       if (currentBatchAgents.some((a) => a.id === record.id)) {
-        widget.update();
         return;
       }
 
@@ -200,7 +187,6 @@ export default function (pi: ExtensionAPI) {
       }
       // 'held' → do nothing, group will fire later
       // 'delivered' → group callback already fired
-      widget.update();
     },
     undefined,
     (record) => {
@@ -301,22 +287,7 @@ export default function (pi: ExtensionAPI) {
     manager.dispose();
   });
 
-  // Live widget: show running agents above editor.
-  // widgetMode (default "background") selects what the widget shows: "all" =
-  // every agent; "background" = hide foreground (they already render inline as
-  // the Agent tool result, so showing them here too is a duplicate, #118), keep
-  // everything else; "off" = hide the widget entirely. Read live at render time.
-  let widgetMode: WidgetMode = "background";
-  function getWidgetMode(): WidgetMode {
-    return widgetMode;
-  }
-  const widget = new AgentWidget(manager, agentActivity, getWidgetMode);
-  function setWidgetMode(m: WidgetMode): void {
-    widgetMode = m;
-    widget.update();
-  }
-
-  // Claude Code-style FleetView: navigable list of main + subagents below the editor.
+  // Claude Code-style FleetView: navigable list of main + subagents above the editor.
   const fleet = new FleetList(manager, agentActivity);
   let fleetViewEnabled = true;
   function isFleetViewEnabled(): boolean {
@@ -438,18 +409,15 @@ export default function (pi: ExtensionAPI) {
     batchFinalizeTimer = setTimeout(finalizeBatch, 100);
   }
 
-  // Grab UI context from first tool execution + clear lingering widget on new turn
+  // Grab UI context from first tool execution.
   pi.on("tool_execution_start", async (_event, ctx) => {
-    widget.setUICtx(ctx.ui as UICtx);
     fleet.setUICtx(ctx.ui as unknown as FleetUICtx);
-    widget.onTurnStart();
   });
 
   // ---- Agent tool ----
   registerAgentTool(pi, {
     manager,
     agentActivity,
-    widget,
     fleet,
     scheduler,
     reloadCustomAgents,
@@ -462,7 +430,6 @@ export default function (pi: ExtensionAPI) {
     setDisableDefaultAgents,
     setToolDescriptionMode,
     setFleetViewEnabled,
-    setWidgetMode,
     getDefaultJoinMode,
     trackBatchAgent,
   });
@@ -488,7 +455,5 @@ export default function (pi: ExtensionAPI) {
     setToolDescriptionMode,
     isFleetViewEnabled,
     setFleetViewEnabled,
-    getWidgetMode,
-    setWidgetMode,
   });
 }

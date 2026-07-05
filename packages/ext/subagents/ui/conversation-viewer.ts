@@ -18,7 +18,7 @@ import {
 import { extractText } from "../context.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal, getSessionContextPercent } from "../usage.js";
-import type { Theme } from "./agent-widget.js";
+import type { Theme } from "./agent-format.js";
 import {
   type AgentActivity,
   buildInvocationTags,
@@ -27,7 +27,7 @@ import {
   formatSessionTokens,
   getDisplayName,
   getPromptModeLabel,
-} from "./agent-widget.js";
+} from "./agent-format.js";
 import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./viewer-keys.js";
 
 /** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */

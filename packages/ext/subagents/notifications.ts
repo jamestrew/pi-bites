@@ -2,7 +2,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSessionContextPercent, getLifetimeTotal } from "./usage.js";
 import { getStatusNote } from "./status-note.js";
-import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-widget.js";
+import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
 import { type AgentRecord, type NotificationDetails } from "./types.js";
 
 /** Human-readable status label for agent completion. */
