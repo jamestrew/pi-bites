@@ -23,6 +23,11 @@ Topic map:
 
 When working on pi topics, read the relevant docs and examples before implementing. Follow cross-references in the markdown files when they point to related docs.
 
+## Git
+
+I'm using `jj` backed by `git`. Inside `jj` workspaces, there's no git access.
+When using `gh` CLI, will need to pass the repo name `jamestrew/pi-bites`.
+
 ## Validation
 
 Run `bun check` before finalizing code changes.
