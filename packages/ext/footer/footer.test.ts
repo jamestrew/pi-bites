@@ -127,6 +127,43 @@ test("ExploreUsageReader reset starts counting from current file end", () => {
   }
 });
 
+test("ExploreUsageReader counts non-explore subagent files", () => {
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-bites-footer-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+
+  try {
+    const usageDir = join(agentDir, "pi-bites", "usage");
+    mkdirSync(usageDir, { recursive: true });
+    writeFileSync(
+      join(usageDir, "subagents.jsonl"),
+      JSON.stringify({
+        type: "subagent_usage",
+        subagent: "general-purpose",
+        usage: { input: 7, output: 8, cacheRead: 9, cacheWrite: 10, cost: { total: 0.02 } },
+      }) + "\n",
+    );
+
+    const reader = new ExploreUsageReader();
+
+    expect(reader.readNewUsage()).toEqual({
+      input: 7,
+      output: 8,
+      cacheRead: 9,
+      cacheWrite: 10,
+      cost: 0.02,
+    });
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+
+    if (previousAgentDir === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    }
+  }
+});
+
 test("buildFooterLine truncates on narrow terminals", () => {
   const ctx: any = {
     cwd: "/very/long/path/to/project",

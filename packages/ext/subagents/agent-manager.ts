@@ -19,7 +19,7 @@ import type {
   SubagentType,
   ThinkingLevel,
 } from "./types.js";
-import { addUsage, type LifetimeUsage } from "./usage.js";
+import { addUsage, appendSubagentUsageRecord, type AssistantUsage } from "./usage.js";
 import { cleanupWorktree, createWorktree, pruneWorktrees } from "./worktree.js";
 
 export type OnAgentComplete = (record: AgentRecord) => void;
@@ -98,7 +98,7 @@ interface SpawnOptions {
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /** Called once per assistant message_end with that message's usage delta. */
-  onAssistantUsage?: (usage: LifetimeUsage) => void;
+  onAssistantUsage?: (usage: AssistantUsage) => void;
   /** Called when the session successfully compacts. */
   onCompaction?: (info: CompactionInfo) => void;
 }
@@ -283,6 +283,22 @@ export class AgentManager {
       onTextDelta: options.onTextDelta,
       onAssistantUsage: (usage) => {
         addUsage(record.lifetimeUsage, usage);
+        const model = options.model as any;
+        appendSubagentUsageRecord({
+          type: "subagent_usage",
+          subagent: type,
+          sessionId: id,
+          timestamp: usage.timestamp ?? Date.now(),
+          provider: usage.provider ?? model?.provider ?? "unknown",
+          model: usage.model ?? model?.id ?? "unknown",
+          usage: {
+            input: usage.input,
+            output: usage.output,
+            cacheRead: usage.cacheRead ?? 0,
+            cacheWrite: usage.cacheWrite,
+            cost: { total: usage.cost ?? 0 },
+          },
+        }).catch(() => undefined);
         options.onAssistantUsage?.(usage);
       },
       onCompaction: (info) => {

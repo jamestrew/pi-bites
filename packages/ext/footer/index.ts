@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -25,8 +25,26 @@ function getAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
 }
 
-function getExploreUsageFile(): string {
-  return path.join(getAgentDir(), "pi-bites", "usage", "explore.jsonl");
+function getUsageDir(): string {
+  return path.join(getAgentDir(), "pi-bites", "usage");
+}
+
+function getUsageFiles(): string[] {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const entryPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(entryPath);
+        else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(entryPath);
+      }
+    } catch {
+      // Missing/unreadable usage dirs are fine.
+    }
+  };
+  walk(getUsageDir());
+  files.sort();
+  return files;
 }
 
 export function formatTokens(count: number): string {
@@ -66,51 +84,48 @@ export function getMainSessionUsage(ctx: ExtensionContext): UsageTotals {
 }
 
 export class ExploreUsageReader {
-  private offset = 0;
-  private inode: number | undefined;
+  private files = new Map<string, { offset: number; inode: number }>();
   private totals: UsageTotals = { ...EMPTY_USAGE };
 
   reset(): void {
     this.totals = { ...EMPTY_USAGE };
-    const file = getExploreUsageFile();
-    try {
-      const stat = statSync(file);
-      this.inode = stat.ino;
-      this.offset = stat.size;
-    } catch {
-      this.inode = undefined;
-      this.offset = 0;
+    this.files.clear();
+    for (const file of getUsageFiles()) {
+      try {
+        const stat = statSync(file);
+        this.files.set(file, { inode: stat.ino, offset: stat.size });
+      } catch {
+        // Ignore files that disappear while scanning.
+      }
     }
   }
 
   readNewUsage(): UsageTotals {
-    const file = getExploreUsageFile();
-    let stat;
-    try {
-      stat = statSync(file);
-    } catch {
-      return { ...this.totals };
-    }
-
-    if (this.inode !== undefined && (stat.ino !== this.inode || stat.size < this.offset)) {
-      this.offset = 0;
-      this.totals = { ...EMPTY_USAGE };
-    }
-    this.inode = stat.ino;
-
-    if (stat.size === this.offset) return { ...this.totals };
-
-    const chunk = readFileSync(file, "utf8").slice(this.offset);
-    this.offset = stat.size;
-    for (const line of chunk.split("\n")) {
-      if (!line.trim()) continue;
+    for (const file of getUsageFiles()) {
+      let stat;
       try {
-        const record = JSON.parse(line);
-        if (record?.type === "subagent_usage" && record?.subagent === "explore") {
-          addUsage(this.totals, record.usage);
-        }
+        stat = statSync(file);
       } catch {
-        // Ignore partially written or malformed records.
+        continue;
+      }
+
+      let state = this.files.get(file);
+      if (!state || state.inode !== stat.ino || stat.size < state.offset) {
+        state = { inode: stat.ino, offset: 0 };
+        this.files.set(file, state);
+      }
+      if (stat.size === state.offset) continue;
+
+      const chunk = readFileSync(file, "utf8").slice(state.offset);
+      state.offset = stat.size;
+      for (const line of chunk.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const record = JSON.parse(line);
+          if (record?.type === "subagent_usage") addUsage(this.totals, record.usage);
+        } catch {
+          // Ignore partially written or malformed records.
+        }
       }
     }
 

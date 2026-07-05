@@ -31,6 +31,7 @@ import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { preloadSkills } from "./skill-loader.js";
 import type { SubagentType, ThinkingLevel } from "./types.js";
+import type { AssistantUsage } from "./usage.js";
 
 /**
  * Tool names registered by THIS extension. Single source of truth so the
@@ -252,13 +253,7 @@ export interface RunOptions {
    * Lets callers maintain a lifetime accumulator that survives compaction
    * (which replaces session.state.messages and resets stats-derived sums).
    */
-  onAssistantUsage?: (usage: {
-    input: number;
-    output: number;
-    cacheWrite: number;
-    cacheRead?: number;
-    cost?: number;
-  }) => void;
+  onAssistantUsage?: (usage: AssistantUsage) => void;
   /**
    * Called when the session successfully compacts. `tokensBefore` is upstream's
    * pre-compaction context size estimate. Aborted compactions don't fire.
@@ -718,6 +713,11 @@ export async function runAgent(
           cacheWrite: u.cacheWrite ?? 0,
           ...(u.cacheRead ? { cacheRead: u.cacheRead } : {}),
           ...(u.cost?.total || u.cost ? { cost: u.cost?.total ?? u.cost } : {}),
+          ...((event.message as any).provider ? { provider: (event.message as any).provider } : {}),
+          ...((event.message as any).model ? { model: (event.message as any).model } : {}),
+          ...((event.message as any).timestamp
+            ? { timestamp: (event.message as any).timestamp }
+            : {}),
         };
         options.onAssistantUsage?.(usage);
       }
@@ -759,7 +759,7 @@ export async function resumeAgent(
   prompt: string,
   options: {
     onToolActivity?: (activity: ToolActivity) => void;
-    onAssistantUsage?: (usage: { input: number; output: number; cacheWrite: number }) => void;
+    onAssistantUsage?: (usage: AssistantUsage) => void;
     onCompaction?: (info: {
       reason: "manual" | "threshold" | "overflow";
       tokensBefore: number;
@@ -784,6 +784,15 @@ export async function resumeAgent(
                 input: u.input ?? 0,
                 output: u.output ?? 0,
                 cacheWrite: u.cacheWrite ?? 0,
+                ...(u.cacheRead ? { cacheRead: u.cacheRead } : {}),
+                ...(u.cost?.total || u.cost ? { cost: u.cost?.total ?? u.cost } : {}),
+                ...((event.message as any).provider
+                  ? { provider: (event.message as any).provider }
+                  : {}),
+                ...((event.message as any).model ? { model: (event.message as any).model } : {}),
+                ...((event.message as any).timestamp
+                  ? { timestamp: (event.message as any).timestamp }
+                  : {}),
               });
           }
           if (event.type === "compaction_end" && !event.aborted && event.result) {

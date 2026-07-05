@@ -1,5 +1,9 @@
 /** usage.ts — Token usage: shapes, accumulator operators, session-stats readers. */
 
+import { appendFile, mkdir } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+
 /**
  * Lifetime usage components, accumulated via `message_end` events. Survives
  * compaction (which replaces session.state.messages and would reset any
@@ -14,6 +18,42 @@ export type LifetimeUsage = {
   cacheRead?: number;
   cost?: number;
 };
+
+export type AssistantUsage = LifetimeUsage & {
+  provider?: string;
+  model?: string;
+  timestamp?: number;
+};
+
+export type SubagentUsageRecord = {
+  type: "subagent_usage";
+  subagent: string;
+  sessionId: string;
+  timestamp: number;
+  provider: string;
+  model: string;
+  usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: { total: number };
+  };
+};
+
+function getAgentDir(): string {
+  return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+}
+
+function getSubagentUsageFile(): string {
+  return join(getAgentDir(), "pi-bites", "usage", "subagents.jsonl");
+}
+
+export async function appendSubagentUsageRecord(record: SubagentUsageRecord): Promise<void> {
+  const file = getSubagentUsageFile();
+  await mkdir(dirname(file), { recursive: true });
+  await appendFile(file, JSON.stringify(record) + "\n", "utf8");
+}
 
 /** Sum of lifetime usage components, or 0 if undefined. */
 export function getLifetimeTotal(u?: LifetimeUsage): number {
