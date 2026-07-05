@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines */
 /**
  * /usage - Usage statistics dashboard
  *

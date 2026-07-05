@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines */
 import { homedir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
