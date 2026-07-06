@@ -20,6 +20,8 @@ export type MemoryScope = "user" | "project" | "local";
 /** Isolation mode for agent execution. */
 export type IsolationMode = "worktree";
 
+export type BashGatePolicy = "deny" | "prompt";
+
 /** Unified agent configuration — used for both default and user-defined agents. */
 export interface AgentConfig {
   name: string;
@@ -53,6 +55,8 @@ export interface AgentConfig {
   runInBackground?: boolean;
   /** Default for spawn: no extension tools. undefined = caller decides. */
   isolated?: boolean;
+  /** Gated bash policy for this subagent. */
+  bashGatePolicy?: BashGatePolicy;
   /** Persistent memory scope — agents with memory get a persistent directory and MEMORY.md */
   memory?: MemoryScope;
   /** Isolation mode — "worktree" runs the agent in a temporary git worktree */

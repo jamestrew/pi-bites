@@ -29,7 +29,7 @@
  * ```
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { CustomEntry, ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
 import type {
   BashGateConfig,
@@ -38,6 +38,20 @@ import type {
   OneOrMany,
   SnacksConfig,
 } from "../config.js";
+
+const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
+type BashGatePolicy = "deny" | "prompt";
+
+function isSubagentMetadataEntry(entry: SessionEntry): entry is CustomEntry {
+  return entry.type === "custom" && entry.customType === SUBAGENT_METADATA_ENTRY;
+}
+
+export function subagentBashGatePolicy(entries: SessionEntry[]): BashGatePolicy | undefined {
+  const entry = [...entries].reverse().find(isSubagentMetadataEntry);
+  if (!entry) return undefined;
+  const policy = (entry.data as { bashGatePolicy?: unknown } | undefined)?.bashGatePolicy;
+  return policy === "deny" || policy === "prompt" ? policy : "deny";
+}
 
 export const DEFAULT_BASH_GATE_RULES: BashGateRule[] = [
   { cmd: ["rm", "rmdir"] },
@@ -282,13 +296,14 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     // Pattern was already approved for this session — run silently.
     if (sessionAllowed.has(sessionAllowKey)) return undefined;
 
+    const subagentPolicy = subagentBashGatePolicy(ctx.sessionManager.getEntries());
+    if (subagentPolicy === "deny") {
+      return { block: true, reason: "Bash gate: gated command not allowed for this subagent." };
+    }
+
     if (!ctx.hasUI) {
       // Non-interactive mode (e.g. `pi -p`) — block by default.
-      const reason =
-        process.env.PI_BITES_SUBAGENT === "explore"
-          ? "Bash gate: destructive command not allowed during exploration."
-          : "Bash gate: no UI available for confirmation.";
-      return { block: true, reason };
+      return { block: true, reason: "Bash gate: no UI available for confirmation." };
     }
 
     // Snapshot the time before showing the prompt. The TUI's elapsed timer

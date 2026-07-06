@@ -1,6 +1,7 @@
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test } from "vitest";
 import { extractBashFacts } from "./bash-command-facts.js";
-import { findMatchedPattern, findMatchedPatterns } from "./index.js";
+import { findMatchedPattern, findMatchedPatterns, subagentBashGatePolicy } from "./index.js";
 
 describe("extractBashFacts", () => {
   test("extracts commands, redirects, path-ish args, pipe presence, and flags", async () => {
@@ -14,6 +15,23 @@ describe("extractBashFacts", () => {
     expect(facts.commands[0]?.flags).toEqual([]);
     expect(facts.redirects).toContainEqual({ operator: ">", target: "out.txt" });
     expect(facts.pathCandidates).toContain("./log.txt");
+  });
+});
+
+describe("subagentBashGatePolicy", () => {
+  test("reads prompt policy and fails invalid or missing policy closed", () => {
+    const entry = (data: unknown): SessionEntry => ({
+      type: "custom",
+      id: "id",
+      parentId: null,
+      timestamp: "now",
+      customType: "pi-bites:subagent",
+      data,
+    });
+
+    expect(subagentBashGatePolicy([entry({ bashGatePolicy: "prompt" })])).toBe("prompt");
+    expect(subagentBashGatePolicy([entry({ bashGatePolicy: "wat" })])).toBe("deny");
+    expect(subagentBashGatePolicy([entry({})])).toBe("deny");
   });
 });
 

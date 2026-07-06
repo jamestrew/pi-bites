@@ -30,7 +30,7 @@ import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { preloadSkills } from "./skill-loader.js";
-import type { SubagentType, ThinkingLevel } from "./types.js";
+import type { BashGatePolicy, SubagentType, ThinkingLevel } from "./types.js";
 import type { AssistantUsage } from "./usage.js";
 
 /**
@@ -212,6 +212,15 @@ export interface ToolActivity {
   type: "start" | "end" | "call";
   toolName: string;
   arguments?: Record<string, unknown>;
+}
+
+export const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
+
+export interface SubagentMetadata {
+  agentId?: string;
+  type: string;
+  title: string;
+  bashGatePolicy?: BashGatePolicy;
 }
 
 export interface RunOptions {
@@ -483,16 +492,12 @@ export async function runAgent(
   });
 
   const previousSubagentEnv = process.env.PI_BITES_SUBAGENT;
-  const restoreSubagentEnv = () => {
-    if (type !== "explore") return;
-    if (previousSubagentEnv === undefined) delete process.env.PI_BITES_SUBAGENT;
-    else process.env.PI_BITES_SUBAGENT = previousSubagentEnv;
-  };
-  if (type === "explore") process.env.PI_BITES_SUBAGENT = "explore";
+  process.env.PI_BITES_SUBAGENT = type;
   try {
     await loader.reload();
   } finally {
-    restoreSubagentEnv();
+    if (previousSubagentEnv === undefined) delete process.env.PI_BITES_SUBAGENT;
+    else process.env.PI_BITES_SUBAGENT = previousSubagentEnv;
   }
 
   // Plain entries in `tools:` are expected to be built-in names (extension tools
@@ -634,6 +639,13 @@ export async function runAgent(
   }
 
   const { session } = await createAgentSession(sessionOpts);
+
+  sessionManager.appendCustomEntry?.(SUBAGENT_METADATA_ENTRY, {
+    agentId: options.agentId,
+    type,
+    title: agentConfig?.displayName ?? agentConfig?.name ?? type,
+    bashGatePolicy: agentConfig?.bashGatePolicy,
+  } satisfies SubagentMetadata);
 
   const baseSessionName = agentConfig?.name ?? type;
   session.setSessionName(

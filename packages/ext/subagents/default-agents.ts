@@ -59,6 +59,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       model: DEFAULT_EXPLORE_MODEL,
       systemPrompt: EXPLORE_SYSTEM_PROMPT,
       promptMode: "replace",
+      bashGatePolicy: "deny",
       isDefault: true,
     },
   ],

@@ -23,7 +23,7 @@ import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.j
 
 export default function (pi: ExtensionAPI) {
   const configRef: { current: SnacksConfig } = { current: {} };
-  const isExploreSubagent = process.env.PI_BITES_SUBAGENT === "explore";
+  const isSubagent = process.env.PI_BITES_SUBAGENT != null;
   const isNonInteractive = process.argv.some((arg) => arg === "--print" || arg === "-p");
 
   // Load config eagerly at startup to resolve the disable list.
@@ -40,7 +40,7 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("bashGate")) registerBashGate(pi, configRef);
   if (!disabled.has("rtk")) registerRtk(pi);
 
-  if (isExploreSubagent) return;
+  if (isSubagent) return;
 
   if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi);
   if (!isNonInteractive && !disabled.has("subagents")) registerSubagents(pi);
