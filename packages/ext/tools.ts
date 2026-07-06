@@ -1,6 +1,7 @@
 import {
   type ExtensionAPI,
   createReadTool,
+  createReadToolDefinition,
   createBashTool,
   createBashToolDefinition,
   createEditTool,
@@ -11,6 +12,13 @@ const readDescriptionSuffix = [
   "Avoid tiny repeated slices (30 line chunks).",
   "If you need more context, read a larger window.",
 ].join(" ");
+
+function stripReadExpandHint<T extends { render(width: number): string[] }>(component: T): T {
+  const originalRender = component.render.bind(component);
+  component.render = (width: number) =>
+    originalRender(width).map((line) => line.replace(/,\s+\S*ctrl\+o\S*\s+to expand\)/i, ")"));
+  return component;
+}
 
 const editDescription = [
   "Edit a single existing file using exact-first text replacement.",
@@ -39,6 +47,7 @@ const editPromptGuidelines = [
 export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const originalRead = createReadTool(cwd);
+  const originalReadDef = createReadToolDefinition(cwd);
   const originalBash = createBashTool(cwd);
   const originalBashDef = createBashToolDefinition(cwd);
   const originalEdit = createEditTool(cwd);
@@ -46,6 +55,12 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     ...originalRead,
     description: `${originalRead.description} ${readDescriptionSuffix}`,
+
+    renderResult(result, options, theme, context) {
+      return stripReadExpandHint(
+        originalReadDef.renderResult!(result, { ...options, expanded: false }, theme, context),
+      );
+    },
   });
 
   pi.registerTool({
