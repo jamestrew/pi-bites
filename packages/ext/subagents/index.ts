@@ -257,6 +257,54 @@ export default function (pi: ExtensionAPI) {
     scheduler.stop();
   });
 
+  const unsubBashGateApproval = pi.events.on(
+    "subagents:bash_gate:approval",
+    async (raw: unknown) => {
+      const request = raw as {
+        requestId?: string;
+        title?: string;
+        command?: string;
+        labels?: string[];
+        reasons?: string[];
+        sessionAllowKey?: string;
+      };
+      if (!request.requestId) return;
+
+      const ackChannel = `subagents:bash_gate:approval:ack:${request.requestId}`;
+      const replyChannel = `subagents:bash_gate:approval:reply:${request.requestId}`;
+      pi.events.emit(ackChannel, {});
+
+      const ui = currentCtx?.ui;
+      if (!currentCtx?.hasUI || !ui) {
+        pi.events.emit(replyChannel, { decision: "deny" });
+        return;
+      }
+
+      try {
+        const labels = request.labels?.join(", ") || "unknown rule";
+        const reasons = request.reasons?.filter(Boolean).join("; ");
+        const prompt = reasons
+          ? `🔒 ${request.title ?? "Subagent"} requests bash approval: ${request.command ?? ""}\n${reasons} (${labels})`
+          : `🔒 ${request.title ?? "Subagent"} requests bash approval: ${request.command ?? ""}\n${labels}`;
+        const choice = await ui.select(prompt, [
+          "Allow",
+          `Allow for session ("${request.sessionAllowKey ?? labels}")`,
+          "Deny",
+        ]);
+
+        pi.events.emit(replyChannel, {
+          decision: choice?.startsWith("Allow for session")
+            ? "allow-session"
+            : choice === "Allow"
+              ? "allow"
+              : "deny",
+        });
+      } catch {
+        pi.events.emit(replyChannel, { decision: "deny" });
+      }
+    },
+  );
+
   const {
     unsubPing: unsubPingRpc,
     unsubSpawn: unsubSpawnRpc,
@@ -277,6 +325,7 @@ export default function (pi: ExtensionAPI) {
     unsubSpawnRpc();
     unsubStopRpc();
     unsubPingRpc();
+    unsubBashGateApproval();
     currentCtx = undefined;
     delete (globalThis as any)[MANAGER_KEY];
     scheduler.stop();

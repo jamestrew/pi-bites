@@ -52,13 +52,23 @@ function subagentEntry(data: unknown): SessionEntry {
 
 function createBashGateHarness(entries: SessionEntry[] = []) {
   const handlers = new Map<string, (event: any, ctx: any) => unknown>();
+  const eventHandlers = new Map<string, (data: unknown) => void>();
+  const emit = vi.fn((event: string, data: any) => {
+    eventHandlers.get(event)?.(data);
+  });
   const pi = {
     registerFlag: vi.fn(),
     getFlag: vi.fn(() => false),
     on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) => {
       handlers.set(event, handler);
     }),
-    events: { emit: vi.fn() },
+    events: {
+      emit,
+      on: vi.fn((event: string, handler: (data: unknown) => void) => {
+        eventHandlers.set(event, handler);
+        return () => eventHandlers.delete(event);
+      }),
+    },
   };
   const ui = { select: vi.fn(async () => "Deny") };
   const ctx = {
@@ -71,7 +81,7 @@ function createBashGateHarness(entries: SessionEntry[] = []) {
   registerBashGate(pi as any, { current: {} });
   handlers.get("session_start")?.({}, ctx);
 
-  return { pi, ctx, ui, toolCall: handlers.get("tool_call")! };
+  return { pi, ctx, ui, eventHandlers, toolCall: handlers.get("tool_call")! };
 }
 
 describe("bash gate tool_call", () => {
@@ -116,6 +126,68 @@ describe("bash gate tool_call", () => {
     expect(result).toBeUndefined();
     expect(ui.select).not.toHaveBeenCalled();
     expect(pi.events.emit).not.toHaveBeenCalled();
+  });
+
+  test("prompt-policy subagents use parent broker and allow once only", async () => {
+    const { pi, toolCall, ctx, eventHandlers } = createBashGateHarness([
+      subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
+    ]);
+    let approvals = 0;
+    eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+      approvals++;
+      eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+      eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+        decision: "allow",
+      });
+    });
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toBeUndefined();
+
+    expect(approvals).toBe(2);
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "subagents:bash_gate:approval",
+      expect.objectContaining({ title: "Explore", command: "rm -rf tmp", labels: ["rm"] }),
+    );
+  });
+
+  test("prompt-policy allow for session is scoped to one subagent session", async () => {
+    const entries = [
+      subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
+    ];
+    const { toolCall, ctx, eventHandlers } = createBashGateHarness(entries);
+    let approvals = 0;
+    eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+      approvals++;
+      eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+      eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+        decision: "allow-session",
+      });
+    });
+
+    await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+    await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+    entries[0] = subagentEntry({ agentId: "agent-2", title: "Explore", bashGatePolicy: "prompt" });
+    await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+
+    expect(approvals).toBe(2);
+  });
+
+  test("prompt-policy subagents deny when no broker answers", async () => {
+    const { toolCall, ctx } = createBashGateHarness([
+      subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
+    ]);
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: command was denied by parent approval.",
+    });
   });
 });
 
