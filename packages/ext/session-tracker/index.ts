@@ -501,7 +501,7 @@ export default function registerSessionTracker(pi: ExtensionAPI): void {
       }
     },
   });
-  pi.registerShortcut("ctrl+alt+s", {
+  pi.registerShortcut("alt+s", {
     description: "Focus next tracked Pi tmux pane",
     handler: async (ctx) => runPiSessionsNext(ctx, { ...defaultCallOptions, paneId }),
   });
