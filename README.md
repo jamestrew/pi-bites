@@ -9,7 +9,7 @@ A small collection of personal extensions for the pi coding agent.
 - Tweaked `read` tool description/output to keep file reads less noisy
 - Configurable bash command gate
 - RTK command rewriting for assistant `bash` tool calls and user `!` shell commands
-- Better fuzzy finding for `@` file mentions powered by `fd` and Snacks/fzf-inspired scoring
+- Better fuzzy finding for `@` file mentions powered by `fff`
 - Script-driven statusline
 - Token-count/status helpers
 - `/usage` dashboard for session cost/token statistics

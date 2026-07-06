@@ -131,7 +131,7 @@ export const EXTENSION_NAMES = [
 
 export type ExtensionName = (typeof EXTENSION_NAMES)[number];
 
-export interface SnacksConfig {
+export interface BitesConfig {
   explore?: ExploreConfig;
   statusline?: StatuslineConfig;
   bashGate?: BashGateConfig;
@@ -146,10 +146,10 @@ export interface SnacksConfig {
   disable?: ExtensionName[];
 }
 
-function tryReadJson(filePath: string, label: string): SnacksConfig {
+function tryReadJson(filePath: string, label: string): BitesConfig {
   if (!existsSync(filePath)) return {};
   try {
-    return JSON.parse(readFileSync(filePath, "utf-8")) as SnacksConfig;
+    return JSON.parse(readFileSync(filePath, "utf-8")) as BitesConfig;
   } catch (err) {
     console.error(`pi-bites: failed to parse ${label} config at ${filePath}: ${err}`);
     return {};
@@ -160,7 +160,7 @@ function tryReadJson(filePath: string, label: string): SnacksConfig {
  * Load and merge config from global and project-local files.
  * Project-local values override global values within each section.
  */
-export function loadConfig(cwd: string): SnacksConfig {
+export function loadConfig(cwd: string): BitesConfig {
   const globalPath = join(getAgentDir(), "pi-bites.json");
   const projectPath = join(cwd, ".pi", "pi-bites.json");
 
@@ -196,11 +196,11 @@ function resolveWritePath(cwd: string): string {
   return join(getAgentDir(), "pi-bites.json");
 }
 
-function readConfigFile(filePath: string): SnacksConfig {
+function readConfigFile(filePath: string): BitesConfig {
   return tryReadJson(filePath, filePath);
 }
 
-function writeConfigFile(filePath: string, config: SnacksConfig): void {
+function writeConfigFile(filePath: string, config: BitesConfig): void {
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }

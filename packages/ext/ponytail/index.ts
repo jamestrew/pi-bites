@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { loadConfig, writePonytailDefaultMode, type SnacksConfig } from "../config.js";
+import { loadConfig, writePonytailDefaultMode, type BitesConfig } from "../config.js";
 
 const DEFAULT_MODE = "full" as const;
 const VALID_MODES = ["off", "lite", "full", "ultra", "review"] as const;
@@ -24,7 +24,7 @@ function normalizePersistedMode(mode: unknown): ConfigMode | RuntimeMode | null 
   return normalizeMode(mode) ?? normalizeConfigMode(mode);
 }
 
-function getDefaultMode(config: SnacksConfig): ConfigMode {
+function getDefaultMode(config: BitesConfig): ConfigMode {
   return normalizeConfigMode(config.ponytail?.defaultMode) ?? DEFAULT_MODE;
 }
 
@@ -133,7 +133,7 @@ function dimStatus(ctx: ExtensionContext, text: string): string {
 
 export default function registerPonytail(
   pi: ExtensionAPI,
-  configRef: { current: SnacksConfig } = { current: {} },
+  configRef: { current: BitesConfig } = { current: {} },
 ): void {
   let currentMode: ConfigMode = DEFAULT_MODE;
   let configuredDefaultMode = getDefaultMode(configRef.current);

@@ -36,7 +36,7 @@ import type {
   BashGateRedirectRule,
   BashGateRule,
   OneOrMany,
-  SnacksConfig,
+  BitesConfig,
 } from "../config.js";
 
 const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
@@ -139,11 +139,11 @@ function asArray<T>(value?: OneOrMany<T>): T[] {
   return Array.isArray(value) ? value : [value];
 }
 
-function resolveConfiguredRules(config: SnacksConfig): BashGateRule[] {
+function resolveConfiguredRules(config: BitesConfig): BashGateRule[] {
   return config.bashGate?.rules ?? [];
 }
 
-function resolveEffectiveRules(config: BashGateConfig | SnacksConfig = {}): BashGateRule[] {
+function resolveEffectiveRules(config: BashGateConfig | BitesConfig = {}): BashGateRule[] {
   const configuredRules =
     "bashGate" in config
       ? resolveConfiguredRules(config)
@@ -246,7 +246,7 @@ function pushMatches(
 
 export async function findMatchedPatterns(
   command: string,
-  rulesOrConfig: BashGateRule[] | BashGateConfig | SnacksConfig = {},
+  rulesOrConfig: BashGateRule[] | BashGateConfig | BitesConfig = {},
 ): Promise<BashGateMatch[]> {
   const facts = await extractBashFacts(command);
 
@@ -272,7 +272,7 @@ export async function findMatchedPatterns(
 
 export async function findMatchedPattern(
   command: string,
-  rulesOrConfig: BashGateRule[] | BashGateConfig | SnacksConfig = {},
+  rulesOrConfig: BashGateRule[] | BashGateConfig | BitesConfig = {},
 ): Promise<BashGateMatch | undefined> {
   return (await findMatchedPatterns(command, rulesOrConfig))[0];
 }
@@ -323,7 +323,7 @@ async function requestSubagentApproval(
   });
 }
 
-export default function registerBashGate(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
+export default function registerBashGate(pi: ExtensionAPI, configRef: { current: BitesConfig }) {
   pi.registerFlag("yolo", {
     description: "Bypass all bash-gate confirmations (useful for non-interactive / scripted runs)",
     type: "boolean",

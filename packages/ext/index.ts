@@ -19,10 +19,10 @@ import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
 import registerSubagents from "./subagents/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, registerBitesCommands, type SnacksConfig } from "./config.js";
+import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
 
 export default function (pi: ExtensionAPI) {
-  const configRef: { current: SnacksConfig } = { current: {} };
+  const configRef: { current: BitesConfig } = { current: {} };
   const isSubagent = process.env.PI_BITES_SUBAGENT != null;
   const isNonInteractive = process.argv.some((arg) => arg === "--print" || arg === "-p");
 

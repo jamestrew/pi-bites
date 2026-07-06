@@ -6,7 +6,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { spawn } from "node:child_process";
-import type { SnacksConfig } from "./config.js";
+import type { BitesConfig } from "./config.js";
 
 type FileState = { exists: false } | { exists: true; blob: string; bytes: number };
 
@@ -406,7 +406,7 @@ async function prepareCheckpoint(args: PrepareCheckpointArgs): Promise<Checkpoin
 
 export default function registerCheckpoints(
   pi: ExtensionAPI,
-  configRef: { current: SnacksConfig },
+  configRef: { current: BitesConfig },
 ): void {
   const pending = new Map<string, Pending>();
 

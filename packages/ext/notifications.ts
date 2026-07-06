@@ -27,7 +27,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import type { AgentEndEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { SnacksConfig } from "./config.js";
+import type { BitesConfig } from "./config.js";
 
 export interface BitesNotifyPayload {
   cwd: string;
@@ -81,7 +81,7 @@ function runCommand(command: string, payload: BitesNotifyPayload): void {
 
 export default function registerNotifications(
   pi: ExtensionAPI,
-  configRef: { current: SnacksConfig },
+  configRef: { current: BitesConfig },
 ): void {
   function notify(payload: BitesNotifyPayload): void {
     const command = configRef.current.notifications?.command;

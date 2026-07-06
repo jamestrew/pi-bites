@@ -22,7 +22,7 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { SnacksConfig } from "./config.js";
+import type { BitesConfig } from "./config.js";
 
 const execAsync = promisify(exec);
 
@@ -42,7 +42,7 @@ async function updateStatus(
   }
 }
 
-export default function registerStatusline(pi: ExtensionAPI, configRef: { current: SnacksConfig }) {
+export default function registerStatusline(pi: ExtensionAPI, configRef: { current: BitesConfig }) {
   const run = (ctx: any) => {
     const command = configRef.current.statusline?.command;
     if (!command) return;

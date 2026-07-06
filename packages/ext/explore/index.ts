@@ -8,7 +8,7 @@ import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { buildDoneStats, type Usage } from "./format/index.js";
-import type { SnacksConfig } from "../config.js";
+import type { BitesConfig } from "../config.js";
 
 export const DEFAULT_EXPLORE_MODEL = "github-copilot/gpt-5.4-mini";
 export const DEFAULT_EXPLORE_TOOLS = ["read", "ls", "bash"] as const;
@@ -258,7 +258,7 @@ async function writeSystemPromptFile(prompt: string): Promise<{ dir: string; fil
   return { dir, file };
 }
 
-export default function (pi: ExtensionAPI, configRef: { current: SnacksConfig } = { current: {} }) {
+export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } = { current: {} }) {
   pi.registerTool({
     name: "explore",
     label: "Explore",
