@@ -1,7 +1,11 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { extractBashFacts } from "./bash-command-facts.js";
-import { findMatchedPattern, findMatchedPatterns, subagentBashGatePolicy } from "./index.js";
+import registerBashGate, {
+  findMatchedPattern,
+  findMatchedPatterns,
+  subagentBashGatePolicy,
+} from "./index.js";
 
 describe("extractBashFacts", () => {
   test("extracts commands, redirects, path-ish args, pipe presence, and flags", async () => {
@@ -32,6 +36,86 @@ describe("subagentBashGatePolicy", () => {
     expect(subagentBashGatePolicy([entry({ bashGatePolicy: "prompt" })])).toBe("prompt");
     expect(subagentBashGatePolicy([entry({ bashGatePolicy: "wat" })])).toBe("deny");
     expect(subagentBashGatePolicy([entry({})])).toBe("deny");
+  });
+});
+
+function subagentEntry(data: unknown): SessionEntry {
+  return {
+    type: "custom",
+    id: "id",
+    parentId: null,
+    timestamp: "now",
+    customType: "pi-bites:subagent",
+    data,
+  };
+}
+
+function createBashGateHarness(entries: SessionEntry[] = []) {
+  const handlers = new Map<string, (event: any, ctx: any) => unknown>();
+  const pi = {
+    registerFlag: vi.fn(),
+    getFlag: vi.fn(() => false),
+    on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) => {
+      handlers.set(event, handler);
+    }),
+    events: { emit: vi.fn() },
+  };
+  const ui = { select: vi.fn(async () => "Deny") };
+  const ctx = {
+    cwd: "/repo",
+    hasUI: true,
+    ui,
+    sessionManager: { getEntries: () => entries },
+  };
+
+  registerBashGate(pi as any, { current: {} });
+  handlers.get("session_start")?.({}, ctx);
+
+  return { pi, ctx, ui, toolCall: handlers.get("tool_call")! };
+}
+
+describe("bash gate tool_call", () => {
+  test("auto-denies gated bash for deny-policy subagents without prompting parent UI", async () => {
+    const { pi, ui, toolCall, ctx } = createBashGateHarness([
+      subagentEntry({ bashGatePolicy: "deny" }),
+    ]);
+
+    const result = await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+
+    expect(result).toEqual({
+      block: true,
+      reason: "Bash gate: gated command not allowed for this subagent.",
+    });
+    expect(ui.select).not.toHaveBeenCalled();
+    expect(pi.events.emit).not.toHaveBeenCalledWith("bites:bash_gate", expect.anything());
+  });
+
+  test("keeps main-agent gated bash on the approval path", async () => {
+    const { pi, ui, toolCall, ctx } = createBashGateHarness();
+
+    await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+
+    expect(ui.select).toHaveBeenCalled();
+    expect(pi.events.emit).toHaveBeenCalledWith("bites:bash_gate", {
+      cwd: "/repo",
+      command: "rm -rf tmp",
+    });
+    expect(pi.events.emit).toHaveBeenCalledWith("bites:bash_gate_resolved", {
+      cwd: "/repo",
+      command: "rm -rf tmp",
+    });
+  });
+
+  test("does not gate safe bash for deny-policy subagents", async () => {
+    const { pi, ui, toolCall, ctx } = createBashGateHarness([
+      subagentEntry({ bashGatePolicy: "deny" }),
+    ]);
+
+    const result = await toolCall({ toolName: "bash", input: { command: "rg foo ." } }, ctx);
+
+    expect(result).toBeUndefined();
+    expect(ui.select).not.toHaveBeenCalled();
+    expect(pi.events.emit).not.toHaveBeenCalled();
   });
 });
 
