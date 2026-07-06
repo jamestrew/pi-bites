@@ -37,6 +37,7 @@ import {
   type AgentDetails,
   buildInvocationTags,
   describeActivity,
+  formatMaxTurnsAbort,
   formatMs,
   formatTurns,
   getDisplayName,
@@ -454,7 +455,7 @@ Terse command-style prompts produce shallow, generic work.
               } else if (details.status === "stopped") {
                 lines.push(theme.fg("muted", "Stopped"));
               } else if (details.status === "aborted") {
-                lines.push(theme.fg("warning", "Aborted (max turns exceeded)"));
+                lines.push(theme.fg("warning", formatMaxTurnsAbort(details.turnCount)));
               }
 
               const toolCalls = details.toolCalls ?? [];
@@ -510,7 +511,7 @@ Terse command-style prompts produce shallow, generic work.
             } else if (details.status === "stopped") {
               lines.push(theme.fg("muted", "Stopped"));
             } else if (details.status === "aborted") {
-              lines.push(theme.fg("warning", "Aborted (max turns exceeded)"));
+              lines.push(theme.fg("warning", formatMaxTurnsAbort(details.turnCount)));
             } else {
               const isDone = details.status === "completed" || details.status === "steered";
               lines.push(

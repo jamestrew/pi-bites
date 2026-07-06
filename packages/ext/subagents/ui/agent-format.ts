@@ -121,6 +121,13 @@ export function formatTurns(turnCount: number, maxTurns?: number | null): string
   return maxTurns != null ? `↻${turnCount}≤${maxTurns}` : `↻${turnCount}`;
 }
 
+/** Format the max-turn abort label, including observed turns when known. */
+export function formatMaxTurnsAbort(turnCount?: number | null): string {
+  return turnCount != null && turnCount > 0
+    ? `Aborted (max turns exceeded: ${turnCount})`
+    : "Aborted (max turns exceeded)";
+}
+
 /** Format milliseconds as human-readable duration. */
 export function formatMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;

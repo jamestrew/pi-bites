@@ -2,16 +2,22 @@ import { Text } from "@earendil-works/pi-tui";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSessionContextPercent, getLifetimeTotal } from "./usage.js";
 import { getStatusNote } from "./status-note.js";
-import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
+import {
+  type AgentActivity,
+  formatMaxTurnsAbort,
+  formatMs,
+  formatTokens,
+  formatTurns,
+} from "./ui/agent-format.js";
 import { type AgentRecord, type NotificationDetails } from "./types.js";
 
 /** Human-readable status label for agent completion. */
-function getStatusLabel(status: string, error?: string): string {
+function getStatusLabel(status: string, error?: string, turnCount?: number): string {
   switch (status) {
     case "error":
       return `Error: ${error ?? "unknown"}`;
     case "aborted":
-      return "Aborted (max turns exceeded)";
+      return formatMaxTurnsAbort(turnCount);
     case "steered":
       return "Wrapped up (turn limit)";
     case "stopped":
@@ -99,11 +105,14 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
       function renderOne(d: NotificationDetails): string {
         const isError = d.status === "error" || d.status === "stopped" || d.status === "aborted";
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-        const statusText = isError
-          ? d.status
-          : d.status === "steered"
-            ? "completed (steered)"
-            : "completed";
+        const statusText =
+          d.status === "aborted"
+            ? formatMaxTurnsAbort(d.turnCount)
+            : isError
+              ? d.status
+              : d.status === "steered"
+                ? "completed (steered)"
+                : "completed";
 
         let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
