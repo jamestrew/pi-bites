@@ -21,6 +21,9 @@
  *       { "cmd": "npm", "subcommands": ["test"] },
  *       { "cmd": "pytest" }
  *     ]
+ *   },
+ *   "subagents": {
+ *     "explore": { "model": "anthropic/claude-sonnet-4-5" }
  *   }
  * }
  * ```
@@ -65,6 +68,11 @@ export interface CheckpointsConfig {
 export interface PonytailConfig {
   /** Default Ponytail mode for new sessions. Default: "full". */
   defaultMode?: "off" | "lite" | "full" | "ultra" | "review";
+}
+
+export interface SubagentsConfig {
+  /** Per-agent overrides keyed by agent type, e.g. { "explore": { "model": "..." } }. */
+  [agentType: string]: { model?: string } | undefined;
 }
 
 export interface NotificationsConfig {
@@ -138,6 +146,7 @@ export interface BitesConfig {
   notifications?: NotificationsConfig;
   checkpoints?: CheckpointsConfig;
   ponytail?: PonytailConfig;
+  subagents?: SubagentsConfig;
   /**
    * List of extension names to disable entirely.
    * Global and project-local arrays are unioned.
@@ -178,6 +187,7 @@ export function loadConfig(cwd: string): BitesConfig {
     notifications: { ...global.notifications, ...project.notifications },
     checkpoints: { ...global.checkpoints, ...project.checkpoints },
     ponytail: { ...global.ponytail, ...project.ponytail },
+    subagents: { ...global.subagents, ...project.subagents },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
 }

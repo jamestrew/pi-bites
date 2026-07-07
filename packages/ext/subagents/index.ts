@@ -11,8 +11,9 @@
  */
 
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type BitesConfig } from "../config.js";
 import { AgentManager } from "./agent-manager.js";
-import { registerAgents, setDefaultsDisabled } from "./agent-types.js";
+import { getAgentConfig, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
 import { buildEventData } from "./event-data.js";
@@ -36,7 +37,7 @@ export { renderRunningAgentStatus } from "./running-status.js";
 
 // ---- Shared helpers ----
 
-export default function (pi: ExtensionAPI) {
+export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } = { current: {} }) {
   // ---- Register custom notification renderer ----
   registerNotificationRenderer(pi);
 
@@ -44,6 +45,12 @@ export default function (pi: ExtensionAPI) {
   const reloadCustomAgents = () => {
     const userAgents = loadCustomAgents(process.cwd());
     registerAgents(userAgents);
+    for (const [type, cfg] of Object.entries(configRef.current.subagents ?? {})) {
+      if (cfg?.model) {
+        const agent = getAgentConfig(type);
+        if (agent) agent.model = cfg.model;
+      }
+    }
   };
 
   // Initial load

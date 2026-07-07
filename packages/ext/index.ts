@@ -31,6 +31,7 @@ export default function (pi: ExtensionAPI) {
   // the session_start handler fires. process.cwd() matches the session cwd
   // in the vast majority of cases.
   const startupConfig = loadConfig(process.cwd());
+  configRef.current = startupConfig;
   const disabled = new Set(startupConfig.disable ?? []);
 
   pi.on("session_start", async (_event, ctx) => {
@@ -43,7 +44,7 @@ export default function (pi: ExtensionAPI) {
   if (isSubagent) return;
 
   if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi);
-  if (!isNonInteractive && !disabled.has("subagents")) registerSubagents(pi);
+  if (!isNonInteractive && !disabled.has("subagents")) registerSubagents(pi, configRef);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
