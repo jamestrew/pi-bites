@@ -491,10 +491,7 @@ Terse command-style prompts produce shallow, generic work.
               }
               if (toolCalls.length === 0) {
                 const frame = SPINNER[details.spinnerFrame ?? 0];
-                lines.push(
-                  theme.fg("accent", frame) +
-                    (statusStats ? theme.fg("dim", ` ${statusStats}`) : ""),
-                );
+                lines.push(theme.fg("accent", frame));
                 lines.push(
                   truncateToWidth(theme.fg("dim", details.activity ?? "thinking…"), lineWidth, "…"),
                 );
