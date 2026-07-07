@@ -13,6 +13,7 @@
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type BitesConfig } from "../config.js";
 import { AgentManager } from "./agent-manager.js";
+import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { getAgentConfig, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
@@ -150,6 +151,26 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     });
   }, 30_000);
 
+  function hasActionableBackgroundAgent(): boolean {
+    return manager
+      .listAgents()
+      .some(
+        (r) =>
+          r.isBackground === true &&
+          (r.status === "running" || r.status === "queued" || !r.resultConsumed),
+      );
+  }
+
+  function updateHelperToolsActive(): void {
+    if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
+    const helperTools = [SUBAGENT_TOOL_NAMES.GET_RESULT, SUBAGENT_TOOL_NAMES.STEER];
+    const current = pi.getActiveTools();
+    const next = hasActionableBackgroundAgent()
+      ? [...new Set([...current, ...helperTools])]
+      : current.filter((name) => !helperTools.includes(name as (typeof helperTools)[number]));
+    pi.setActiveTools(next);
+  }
+
   // Background completion: route through group join or send individual nudge
   const manager = new AgentManager(
     (record) => {
@@ -179,6 +200,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
       if (record.resultConsumed) {
         agentActivity.delete(record.id);
         fleet.onAgentFinished(record.id);
+        updateHelperToolsActive();
         return;
       }
 
@@ -192,6 +214,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
       if (result === "pass") {
         sendIndividualNudge(record);
       }
+      updateHelperToolsActive();
       // 'held' → do nothing, group will fire later
       // 'delivered' → group callback already fired
     },
@@ -256,11 +279,13 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
     manager.clearCompleted(true);
+    updateHelperToolsActive();
     if (isSchedulingEnabled() && !scheduler.isActive()) startScheduler(ctx);
   });
 
   pi.on("session_before_switch", () => {
     manager.clearCompleted(true);
+    updateHelperToolsActive();
     scheduler.stop();
   });
 
@@ -337,6 +362,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     delete (globalThis as any)[MANAGER_KEY];
     scheduler.stop();
     manager.abortAll();
+    updateHelperToolsActive();
     for (const timer of pendingNudges.values()) clearTimeout(timer);
     pendingNudges.clear();
     fleet.dispose();
@@ -488,10 +514,11 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     setFleetViewEnabled,
     getDefaultJoinMode,
     trackBatchAgent,
+    updateHelperToolsActive,
   });
 
   // ---- get_subagent_result + steer_subagent tools ----
-  registerResultTools(pi, manager, cancelNudge);
+  registerResultTools(pi, manager, cancelNudge, updateHelperToolsActive);
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {

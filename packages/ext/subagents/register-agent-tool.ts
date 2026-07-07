@@ -64,6 +64,7 @@ type RegisterAgentToolDeps = {
   setFleetViewEnabled: (enabled: boolean) => void;
   getDefaultJoinMode: () => JoinMode;
   trackBatchAgent: (id: string, joinMode: JoinMode) => void;
+  updateHelperToolsActive?: () => void;
 };
 
 /** Derive a short model label from a model string. */
@@ -92,6 +93,7 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     setFleetViewEnabled,
     getDefaultJoinMode,
     trackBatchAgent,
+    updateHelperToolsActive,
   } = deps;
   /** Format an agent's tool scope: "*" when it has all built-ins, else a comma-separated list. */
   const formatToolsSuffix = (cfg: { builtinToolNames?: string[] } | undefined): string => {
@@ -767,6 +769,7 @@ Terse command-style prompts produce shallow, generic work.
             description: params.description,
             isBackground: true,
           });
+          updateHelperToolsActive?.();
 
           const isQueued = record?.status === "queued";
           return textResult(

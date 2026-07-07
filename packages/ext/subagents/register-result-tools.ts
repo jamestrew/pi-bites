@@ -1,4 +1,5 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { getAgentConversation, SUBAGENT_TOOL_NAMES, steerAgent } from "./agent-runner.js";
 import { getStatusNote } from "./status-note.js";
@@ -7,10 +8,49 @@ import { type AgentManager } from "./agent-manager.js";
 import { formatDuration } from "./ui/agent-format.js";
 import { getSessionContextPercent } from "./usage.js";
 
+type HelperToolDetails = {
+  kind: "get_result" | "steer";
+  agentId?: string;
+  type?: string;
+  status?: string;
+  description?: string;
+  stats?: string;
+  preview?: string;
+  state?: string;
+};
+
+function renderCompactHelperResult(result: any, options: { expanded?: boolean }, theme: any) {
+  const details = result.details as HelperToolDetails | undefined;
+  const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+  if (!details || options.expanded) return new Text(text, 0, 0);
+
+  return {
+    render(width: number): string[] {
+      const lineWidth = Math.max(1, width - 3);
+      const lines: string[] = [];
+      if (details.kind === "get_result") {
+        lines.push(
+          `${theme.fg("muted", "⎿  ")}${details.agentId ?? "agent"}: ${details.type ?? "?"} | ${details.status ?? "?"}${details.stats ? theme.fg("muted", ` | ${details.stats}`) : ""}`,
+        );
+        if (details.description)
+          lines.push(`   ${truncateToWidth(details.description, lineWidth, "…")}`);
+        if (details.preview) lines.push(`   ${truncateToWidth(details.preview, lineWidth, "…")}`);
+      } else {
+        lines.push(`${theme.fg("muted", "⎿  ")}${details.preview ?? "Steering message sent"}`);
+        if (details.state) lines.push(`   ${truncateToWidth(details.state, lineWidth, "…")}`);
+      }
+      lines.push(`   ${theme.fg("muted", "(ctrl+o to expand)")}`);
+      return lines;
+    },
+    invalidate() {},
+  };
+}
+
 export function registerResultTools(
   pi: ExtensionAPI,
   manager: AgentManager,
   cancelNudge: (key: string) => void,
+  updateHelperToolsActive?: () => void,
 ) {
   pi.registerTool(
     defineTool({
@@ -34,6 +74,7 @@ export function registerResultTools(
           }),
         ),
       }),
+      renderResult: renderCompactHelperResult,
       execute: async (_toolCallId, params) => {
         const record = manager.getRecord(params.agent_id);
         if (!record) {
@@ -71,6 +112,7 @@ export function registerResultTools(
         if (record.status !== "running" && record.status !== "queued") {
           record.resultConsumed = true;
           cancelNudge(params.agent_id);
+          updateHelperToolsActive?.();
         }
 
         if (params.verbose && record.session) {
@@ -78,7 +120,21 @@ export function registerResultTools(
           if (conversation) output += `\n\n--- Agent Conversation ---\n${conversation}`;
         }
 
-        return textResult(output);
+        return textResult(output, {
+          kind: "get_result",
+          agentId: record.id,
+          type: record.type,
+          status: record.status,
+          description: record.description,
+          stats: statsParts.join(" | "),
+          preview:
+            record.status === "running"
+              ? "Agent is still running."
+              : (record.result || record.error || "No output.")
+                  .trim()
+                  .replace(/\s+/g, " ")
+                  .slice(0, 160),
+        } as any);
       },
     }),
   );
@@ -100,6 +156,7 @@ export function registerResultTools(
             "The steering message to send. This will appear as a user message in its conversation.",
         }),
       }),
+      renderResult: renderCompactHelperResult,
       execute: async (_toolCallId, params) => {
         const record = manager.getRecord(params.agent_id);
         if (!record) {
@@ -116,6 +173,13 @@ export function registerResultTools(
           pi.events.emit("subagents:steered", { id: record.id, message: params.message });
           return textResult(
             `Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`,
+            {
+              kind: "steer",
+              agentId: record.id,
+              status: record.status,
+              preview: "Steering message queued",
+              state: `Current agent state: ${record.status}`,
+            } as any,
           );
         }
 
@@ -136,6 +200,13 @@ export function registerResultTools(
           return textResult(
             `Steering message sent to agent ${record.id}. The agent will process it after its current tool execution.\n` +
               `Current state: ${stateParts.join(" · ")}`,
+            {
+              kind: "steer",
+              agentId: record.id,
+              status: record.status,
+              preview: "Steering message sent",
+              state: `Current state: ${stateParts.join(" · ")}`,
+            } as any,
           );
         } catch (err) {
           return textResult(
