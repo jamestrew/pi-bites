@@ -1,1 +1,2 @@
-run `bun check` for final validations
+- run `bun check` for final validations
+- using `jj` with `git` backend

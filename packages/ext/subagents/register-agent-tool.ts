@@ -156,19 +156,19 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
   // the schema to update). Defining the shape once and spreading it via Partial
   // preserves Type.Object's inference when present and produces a
   // `schedule`-free schema when absent — zero LLM-context cost in disabled mode.
-  const scheduleParamShape = {
-    schedule: Type.Optional(
-      Type.String({
-        description:
-          "Opt-in only — fire later instead of now. Omit to run immediately (the default, almost always correct). " +
-          'Formats: 6-field cron ("0 0 9 * * 1" = 9am Mon), interval ("5m"/"1h"), one-shot ("+10m" or ISO). ' +
-          "Forces run_in_background; incompatible with inherit_context and resume. Returns job ID.",
-      }),
-    ),
-  };
-  const scheduleParam: Partial<typeof scheduleParamShape> = isSchedulingEnabled()
-    ? scheduleParamShape
-    : {};
+  // const scheduleParamShape = {
+  //   schedule: Type.Optional(
+  //     Type.String({
+  //       description:
+  //         "Opt-in only — fire later instead of now. Omit to run immediately (the default, almost always correct). " +
+  //         'Formats: 6-field cron ("0 0 9 * * 1" = 9am Mon), interval ("5m"/"1h"), one-shot ("+10m" or ISO). ' +
+  //         "Forces run_in_background; incompatible with inherit_context and resume. Returns job ID.",
+  //     }),
+  //   ),
+  // };
+  // const scheduleParam: Partial<typeof scheduleParamShape> = isSchedulingEnabled()
+  //   ? scheduleParamShape
+  //   : {};
 
   const scheduleGuideline = isSchedulingEnabled()
     ? `\n- Use \`schedule\` only when the user explicitly asked for scheduled / recurring / delayed execution (e.g. "every Monday", "in an hour"). Don't auto-schedule from vague intent like "monitor X" — run once now or ask.`
@@ -323,59 +323,59 @@ Terse command-style prompts produce shallow, generic work.
         prompt: Type.String({
           description: "The task for the agent to perform.",
         }),
-        model: Type.Optional(
-          Type.String({
-            description:
-              'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
-          }),
-        ),
-        thinking: Type.Optional(
-          Type.String({
-            description:
-              "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
-          }),
-        ),
         max_turns: Type.Optional(
           Type.Number({
             description:
-              "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
+            "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
             minimum: 1,
           }),
         ),
-        run_in_background: Type.Optional(
-          Type.Boolean({
-            description:
-              "Set to true to run in background. Returns agent ID immediately. You will be notified on completion.",
-          }),
-        ),
-        resume: Type.Optional(
-          Type.String({
-            description: "Optional agent ID to resume from. Continues from previous context.",
-          }),
-        ),
-        isolated: Type.Optional(
-          Type.Boolean({
-            description: "If true, agent gets no extension/MCP tools — only built-in tools.",
-          }),
-        ),
-        inherit_context: Type.Optional(
-          Type.Boolean({
-            description:
-              "If true, fork parent conversation into the agent. Default: false (fresh context).",
-          }),
-        ),
-        isolation: Type.Optional(
-          Type.Literal("worktree", {
-            description:
-              'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
-          }),
-        ),
-        ...scheduleParam,
+        // model: Type.Optional(
+        //   Type.String({
+        //     description:
+        //       'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+        //   }),
+        // ),
+        // thinking: Type.Optional(
+        //   Type.String({
+        //     description:
+        //       "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
+        //   }),
+        // ),
+        // run_in_background: Type.Optional(
+        //   Type.Boolean({
+        //     description:
+        //       "Set to true to run in background. Returns agent ID immediately. You will be notified on completion.",
+        //   }),
+        // ),
+        // resume: Type.Optional(
+        //   Type.String({
+        //     description: "Optional agent ID to resume from. Continues from previous context.",
+        //   }),
+        // ),
+        // isolated: Type.Optional(
+        //   Type.Boolean({
+        //     description: "If true, agent gets no extension/MCP tools — only built-in tools.",
+        //   }),
+        // ),
+        // inherit_context: Type.Optional(
+        //   Type.Boolean({
+        //     description:
+        //       "If true, fork parent conversation into the agent. Default: false (fresh context).",
+        //   }),
+        // ),
+        // isolation: Type.Optional(
+        //   Type.Literal("worktree", {
+        //     description:
+        //       'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
+        //   }),
+        // ),
+        // ...scheduleParam,
       }),
 
       // ---- Custom rendering: Claude Code style ----
 
-      renderCall(args, theme) {
+      renderCall(args: any, theme) {
         const displayName = args.subagent_type ? getDisplayName(args.subagent_type) : "Agent";
         const preview =
           args.description ||
@@ -531,7 +531,7 @@ Terse command-style prompts produce shallow, generic work.
 
       // ---- Execute ----
 
-      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+      execute: async (toolCallId, params: any, signal, onUpdate, ctx) => {
         // Reload custom agents so new .pi/agents/*.md files are picked up without restart
         reloadCustomAgents();
 
