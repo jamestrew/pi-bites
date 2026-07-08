@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 
-const defaults = {
+export const defaults = {
   repo: "jamestrew/pi-bites",
   limit: 0,
   jobs: 1,
@@ -46,7 +46,7 @@ Options:
 Requires: gh, jj, pi, bun`);
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const opts = structuredClone(defaults);
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -114,7 +114,7 @@ function parseArgs(argv) {
   return opts;
 }
 
-async function commandExists(cmd) {
+export async function commandExists(cmd) {
   try {
     await $`which ${cmd}`.quiet();
     return true;
@@ -155,7 +155,7 @@ async function fetchCandidates(opts, label) {
   }
 }
 
-async function reconcileStaleWorkspaces() {
+export async function reconcileStaleWorkspaces() {
   // Cleanup-on-exit (the finally in processIssue) can't run if the process is
   // killed mid-flight, leaving orphaned `issue-<n>-<pid>` workspaces behind.
   // Sweep them at startup; abandon their working-copy commit only if it is
@@ -200,7 +200,7 @@ async function existingAgentIssueNumbers() {
   return nums;
 }
 
-async function prepareExtensionRuntime(opts) {
+export async function prepareExtensionRuntime(opts) {
   if (!opts.extensionSnapshot) return opts.piArgs;
 
   const runtime = opts.extensionRuntime;
@@ -344,7 +344,7 @@ Instructions:
   );
 }
 
-async function processIssue(issue, opts, piArgs) {
+export async function processIssue(issue, opts, piArgs) {
   const number = issue.number;
   const title = issue.title;
   const branch = `agent/issue-${number}-${slugify(title)}`;
@@ -490,7 +490,9 @@ async function main() {
   if (totalFailures > 0) process.exit(1);
 }
 
-main().catch((error) => {
-  console.error(error.message ?? error);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error(error.message ?? error);
+    process.exit(1);
+  });
+}
