@@ -312,14 +312,16 @@ Terse command-style prompts produce shallow, generic work.
         ].join(" "),
       ],
       parameters: Type.Object({
-        prompt: Type.String({
-          description: "The task for the agent to perform.",
+        // Put render-critical fields first so streamed tool calls don't briefly
+        // display as a generic `Agent(...)` before the subagent type arrives.
+        subagent_type: Type.String({
+          description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
         }),
         description: Type.String({
           description: "A short (3-5 word) description of the task (shown in UI).",
         }),
-        subagent_type: Type.String({
-          description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
+        prompt: Type.String({
+          description: "The task for the agent to perform.",
         }),
         model: Type.Optional(
           Type.String({
