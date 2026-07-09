@@ -3,6 +3,29 @@ import { createLocalBashOperations } from "@earendil-works/pi-coding-agent";
 
 const RTK_COMMAND = process.env.RTK_PATH || "rtk";
 const REWRITE_TIMEOUT_MS = 2_000;
+const RTK_NO_HOOK_WARNING =
+  "[rtk] /!\\ No hook installed — run `rtk init -g` for automatic token savings";
+
+export function createRtkNoHookWarningDataFilter(
+  onData: (data: Buffer) => void,
+): (data: Buffer) => void {
+  let pending = "";
+
+  return (data) => {
+    pending += data.toString();
+    const lines = pending.split(/(?<=\n)/);
+    pending = pending.endsWith("\n") ? "" : (lines.pop() ?? "");
+
+    for (const line of lines) {
+      if (line.replace(/\r?\n$/, "") !== RTK_NO_HOOK_WARNING) onData(Buffer.from(line));
+    }
+
+    if (pending.length > RTK_NO_HOOK_WARNING.length + 2) {
+      onData(Buffer.from(pending));
+      pending = "";
+    }
+  };
+}
 
 function trimMessage(raw: string, maxLength: number): string {
   const clean = raw.replace(/\s+/g, " ").trim();
@@ -81,7 +104,10 @@ export default function registerRtk(pi: ExtensionAPI): void {
             }
           }
 
-          return localBash.exec(commandToRun, cwd, options);
+          return localBash.exec(commandToRun, cwd, {
+            ...options,
+            onData: createRtkNoHookWarningDataFilter(options.onData),
+          });
         },
       },
     };
