@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 
-import {
+import registerSessionTracker, {
   colorizeSessionTrackerFooter,
   createSessionTrackerFooterRuntime,
   createSessionTrackerRuntime,
@@ -611,6 +611,22 @@ test("pi-sessions shows focus errors", async () => {
   );
 
   expect(notices).toEqual([["Failed to focus tmux pane: tmux failed", "error"]]);
+});
+
+test("extension keeps working until agent_end", () => {
+  const handlers = new Map<string, unknown>();
+
+  registerSessionTracker({
+    on: (event: string, handler: unknown) => {
+      handlers.set(event, handler);
+    },
+    events: { on() {} },
+    registerCommand() {},
+    registerShortcut() {},
+  } as never);
+
+  expect(handlers.has("agent_end")).toBe(true);
+  expect(handlers.has("turn_end")).toBe(false);
 });
 
 test("extension tracking failures are best-effort and shutdown does not respawn", async () => {

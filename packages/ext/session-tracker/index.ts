@@ -476,7 +476,6 @@ export default function registerSessionTracker(pi: ExtensionAPI): void {
   pi.events?.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
   pi.events?.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
   pi.on("agent_end", async () => runtime.setState("idle"));
-  pi.on("turn_end", async () => runtime.setState("idle"));
   pi.on("session_shutdown", async (event) => {
     footerRuntime.stop(currentCtx);
     currentCtx = undefined;
