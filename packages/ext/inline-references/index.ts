@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
+  CONFIG_DIR_NAME,
   getAgentDir,
   stripFrontmatter,
   type ExtensionAPI,
@@ -91,7 +92,7 @@ function findDollarPrefix(textBeforeCursor: string): string | null {
 }
 
 function loadDefaultPromptTemplates(cwd: string): LoadedPromptTemplate[] {
-  const dirs = [join(getAgentDir(), "prompts"), join(cwd, ".pi", "prompts")];
+  const dirs = [join(getAgentDir(), "prompts"), join(cwd, CONFIG_DIR_NAME, "prompts")];
   const templates: LoadedPromptTemplate[] = [];
 
   for (const dir of dirs) {

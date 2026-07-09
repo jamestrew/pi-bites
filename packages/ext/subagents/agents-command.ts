@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
+  CONFIG_DIR_NAME,
   type ExtensionAPI,
   type ExtensionCommandContext,
   getAgentDir,
@@ -79,7 +80,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
   } = deps;
   // ---- /agents interactive menu ----
 
-  const projectAgentsDir = () => join(process.cwd(), ".pi", "agents");
+  const projectAgentsDir = () => join(process.cwd(), CONFIG_DIR_NAME, "agents");
   const personalAgentsDir = () => join(getAgentDir(), "agents");
 
   /** Find the file path of a custom agent by name (project first, then global). */

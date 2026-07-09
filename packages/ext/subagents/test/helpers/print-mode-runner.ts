@@ -57,7 +57,7 @@ import {
   type Model,
   registerFauxProvider,
   type ToolCall,
-} from "@earendil-works/pi-ai";
+} from "@earendil-works/pi-ai/compat";
 import {
   type AgentSession,
   type AgentSessionEvent,

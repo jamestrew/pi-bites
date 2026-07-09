@@ -22,7 +22,7 @@ import type { Dirent } from "node:fs";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { isSymlink, isUnsafeName, safeReadFile } from "./memory.js";
 
 export interface PreloadedSkill {
@@ -39,7 +39,7 @@ function loadSkillContent(name: string, cwd: string): string {
     return `(Skill "${name}" skipped: name contains path traversal characters)`;
   }
   const roots = [
-    join(cwd, ".pi", "skills"), // project — Pi standard
+    join(cwd, CONFIG_DIR_NAME, "skills"), // project — Pi standard
     join(cwd, ".agents", "skills"), // project — Agent Skills spec
     join(getAgentDir(), "skills"), // user — Pi standard
     join(homedir(), ".agents", "skills"), // user — Agent Skills spec

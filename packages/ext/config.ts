@@ -42,7 +42,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export interface ExploreConfig {
   /** Model to use when the LLM doesn't specify one. Default: "github-copilot/claude-haiku-4.5" */
@@ -171,7 +171,7 @@ function tryReadJson(filePath: string, label: string): BitesConfig {
  */
 export function loadConfig(cwd: string): BitesConfig {
   const globalPath = join(getAgentDir(), "pi-bites.json");
-  const projectPath = join(cwd, ".pi", "pi-bites.json");
+  const projectPath = join(cwd, CONFIG_DIR_NAME, "pi-bites.json");
 
   const global = tryReadJson(globalPath, "global");
   const project = tryReadJson(projectPath, "project-local");
@@ -201,7 +201,7 @@ export function loadConfig(cwd: string): BitesConfig {
  * project-local (.pi/pi-bites.json) if it already exists, otherwise global.
  */
 function resolveWritePath(cwd: string): string {
-  const projectPath = join(cwd, ".pi", "pi-bites.json");
+  const projectPath = join(cwd, CONFIG_DIR_NAME, "pi-bites.json");
   if (existsSync(projectPath)) return projectPath;
   return join(getAgentDir(), "pi-bites.json");
 }
@@ -261,7 +261,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
       const effective = loadConfig(ctx.cwd);
       if (effective.disable?.includes(name)) {
         const globalCfg = readConfigFile(globalPath);
-        const projectPath = join(ctx.cwd, ".pi", "pi-bites.json");
+        const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "pi-bites.json");
         const projectCfg = readConfigFile(projectPath);
         const inGlobal = globalCfg.disable?.includes(name);
         const inProject = projectCfg.disable?.includes(name);
@@ -298,7 +298,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
       }
 
       // Since disable arrays are unioned, remove from BOTH files to truly enable.
-      const projectPath = join(ctx.cwd, ".pi", "pi-bites.json");
+      const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "pi-bites.json");
       for (const filePath of [globalPath, projectPath]) {
         const config = readConfigFile(filePath);
         if (config.disable?.includes(name as ExtensionName)) {
@@ -316,7 +316,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
   pi.registerCommand("bites:list", {
     description: "List all extensions with their enabled/disabled status and config scope",
     handler: async (_args, ctx) => {
-      const projectPath = join(ctx.cwd, ".pi", "pi-bites.json");
+      const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "pi-bites.json");
       const globalCfg = readConfigFile(globalPath);
       const projectCfg = readConfigFile(projectPath);
       const globalDisabled = new Set(globalCfg.disable ?? []);

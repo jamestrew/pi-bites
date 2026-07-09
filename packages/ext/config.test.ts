@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 let agentDir = "";
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
+  CONFIG_DIR_NAME: ".pi",
   getAgentDir: () => agentDir,
 }));
 

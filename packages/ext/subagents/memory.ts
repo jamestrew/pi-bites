@@ -10,6 +10,7 @@
 import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import type { MemoryScope } from "./types.js";
 
 /** Maximum lines to read from MEMORY.md */
@@ -61,9 +62,9 @@ export function resolveMemoryDir(agentName: string, scope: MemoryScope, cwd: str
     case "user":
       return join(homedir(), ".pi", "agent-memory", agentName);
     case "project":
-      return join(cwd, ".pi", "agent-memory", agentName);
+      return join(cwd, CONFIG_DIR_NAME, "agent-memory", agentName);
     case "local":
-      return join(cwd, ".pi", "agent-memory-local", agentName);
+      return join(cwd, CONFIG_DIR_NAME, "agent-memory-local", agentName);
   }
 }
 

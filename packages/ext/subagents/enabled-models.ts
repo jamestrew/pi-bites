@@ -28,7 +28,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ModelEntry } from "./model-resolver.js";
 
 /** Minimal registry shape — only the methods resolveEnabledModels actually calls. */
@@ -39,7 +39,7 @@ export interface ModelRegistryRef {
 
 /** Paths to pi's settings.json files: [project, global] (project takes precedence). */
 function settingsPaths(cwd: string): [project: string, global: string] {
-  return [join(cwd, ".pi", "settings.json"), join(getAgentDir(), "settings.json")];
+  return [join(cwd, CONFIG_DIR_NAME, "settings.json"), join(getAgentDir(), "settings.json")];
 }
 
 /** Read `enabledModels` from a single settings.json file. Undefined when missing or absent. */

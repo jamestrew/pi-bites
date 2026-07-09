@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { defineTool, type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+  CONFIG_DIR_NAME,
+  defineTool,
+  type ExtensionAPI,
+  getAgentDir,
+} from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { summarizeToolArg, wrapMultilineText } from "../explore/index.js";
@@ -256,7 +261,7 @@ Terse command-style prompts produce shallow, generic work.
 
   const loadCustomToolDescription = (): string | undefined => {
     for (const path of [
-      join(process.cwd(), ".pi", "agent-tool-description.md"),
+      join(process.cwd(), CONFIG_DIR_NAME, "agent-tool-description.md"),
       join(getAgentDir(), "agent-tool-description.md"),
     ]) {
       try {
@@ -326,7 +331,7 @@ Terse command-style prompts produce shallow, generic work.
         max_turns: Type.Optional(
           Type.Number({
             description:
-            "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
+              "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
             minimum: 1,
           }),
         ),
