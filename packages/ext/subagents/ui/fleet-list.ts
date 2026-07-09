@@ -345,6 +345,10 @@ export class FleetList {
             },
             keybindings,
             (message: string) => this.manager.steer(record.id, message),
+            (message: string) => {
+              if (this.manager.cancelAndSteer(record.id, message))
+                this.ui?.notify(`Canceled current operation for "${record.description}".`, "info");
+            },
           );
         },
         {

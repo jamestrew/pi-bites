@@ -16,6 +16,7 @@ import {
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { extractText } from "../context.js";
+import { formatToolCall as formatExploreToolCall } from "../../explore/index.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal, getSessionContextPercent } from "../usage.js";
 import type { Theme } from "./agent-format.js";
@@ -47,6 +48,7 @@ export class ConversationViewer implements Component {
   private keys: ViewerKeys;
   /** Steering composer — present while the user is typing a message to the agent. */
   private composer: Input | undefined;
+  private composerMode: "steer" | "cancel" = "steer";
 
   constructor(
     private tui: TUI,
@@ -61,6 +63,8 @@ export class ConversationViewer implements Component {
     keybindings?: ViewerKeybindings,
     /** Send a steering message to the agent. Omitted → no compose affordance. */
     private onSteer?: (message: string) => void,
+    /** Cancel the current operation, then resume with this steering message. */
+    private onCancelSteer?: (message: string) => void,
   ) {
     this.keys = createViewerKeys(keybindings);
     this.unsubscribe = session.subscribe(() => {
@@ -89,7 +93,16 @@ export class ConversationViewer implements Component {
     // not steerable, fall through so the key still disarms a pending stop.
     if (matchesKey(data, "enter") && this.canSteer()) {
       this.stopArmed = false;
-      this.openComposer();
+      this.openComposer("steer");
+      return;
+    }
+
+    // Cancel the current operation (e.g. a long bash command), then resume with
+    // the typed steering message. Keeping it one action prevents the parent
+    // agent from resuming between cancel and steer.
+    if (matchesKey(data, "c") && this.canCancel()) {
+      this.stopArmed = false;
+      this.openComposer("cancel");
       return;
     }
 
@@ -210,7 +223,10 @@ export class ConversationViewer implements Component {
       // Composer row: the Input renders its own `> ` prompt and cursor.
       lines.push(row(this.composer.render(innerW)[0] ?? ""));
       const composeHint = th.fg("dim", "Enter send · Esc cancel");
-      const composeLeft = th.fg("accent", "✎ steer");
+      const composeLeft = th.fg(
+        "accent",
+        this.composerMode === "cancel" ? "✎ cancel + steer" : "✎ steer",
+      );
       const composeGap = Math.max(
         1,
         innerW - visibleWidth(composeLeft) - visibleWidth(composeHint),
@@ -223,6 +239,7 @@ export class ConversationViewer implements Component {
       const sep = th.fg("dim", " · ");
       const actions: string[] = [];
       if (this.canSteer()) actions.push(th.fg("dim", "Enter steer"));
+      if (this.canCancel()) actions.push(th.fg("dim", "c cancel"));
       if (this.isStoppable()) {
         actions.push(this.stopArmed ? th.fg("error", "x again to STOP") : th.fg("dim", "x stop"));
       }
@@ -254,19 +271,29 @@ export class ConversationViewer implements Component {
     return !!this.onStop && (this.record.status === "running" || this.record.status === "queued");
   }
 
-  /** Steerable only when a steer handler exists and the agent is still active. */
+  /** Steerable whenever a live session can accept a queued or follow-up prompt. */
   private canSteer(): boolean {
-    return !!this.onSteer && (this.record.status === "running" || this.record.status === "queued");
+    return !!this.onSteer && this.record.status !== "stopped" && this.record.status !== "error";
+  }
+
+  /** Cancelable only while a live session is active. */
+  private canCancel(): boolean {
+    return !!this.onCancelSteer && this.record.status === "running";
   }
 
   /** Open the inline steering composer and route subsequent input to it. */
-  private openComposer(): void {
+  private openComposer(mode: "steer" | "cancel"): void {
+    this.composerMode = mode;
     const input = new Input();
     input.focused = true;
     input.onSubmit = (value: string) => {
       const message = value.trim();
+      const mode = this.composerMode;
       this.composer = undefined;
-      if (message) this.onSteer?.(message);
+      if (message) {
+        if (mode === "cancel") this.onCancelSteer?.(message);
+        else this.onSteer?.(message);
+      }
       this.tui.requestRender();
     };
     input.onEscape = () => {
@@ -310,6 +337,16 @@ export class ConversationViewer implements Component {
     return this.theme.fg("dim", `  ↳ ${parts.join(" · ")}`);
   }
 
+  private formatToolCall(call: {
+    name?: string;
+    toolName?: string;
+    input?: any;
+    arguments?: any;
+  }): string {
+    const args = call.input ?? call.arguments ?? {};
+    return `  ${formatExploreToolCall(call.name ?? call.toolName ?? "unknown", typeof args === "object" && args !== null ? args : {})}`;
+  }
+
   private buildContentLines(width: number): string[] {
     if (width <= 0) return [];
 
@@ -338,7 +375,7 @@ export class ConversationViewer implements Component {
         for (const c of msg.content) {
           if (c.type === "text" && c.text) textParts.push(c.text);
           else if (c.type === "toolCall") {
-            toolCalls.push((c as any).name ?? (c as any).toolName ?? "unknown");
+            toolCalls.push(this.formatToolCall(c as any));
           }
         }
         if (needsSeparator) lines.push(th.fg("dim", "───"));
@@ -348,8 +385,10 @@ export class ConversationViewer implements Component {
             lines.push(line);
           }
         }
-        for (const name of toolCalls) {
-          lines.push(truncateToWidth(th.fg("muted", `  [Tool: ${name}]`), width));
+        for (const call of toolCalls) {
+          for (const line of wrapTextWithAnsi(call, width)) {
+            lines.push(th.fg("muted", line));
+          }
         }
       } else if (msg.role === "toolResult") {
         const text = extractText(msg.content);

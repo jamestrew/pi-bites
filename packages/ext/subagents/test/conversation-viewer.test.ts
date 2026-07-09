@@ -274,6 +274,43 @@ describe("ConversationViewer", () => {
       }
     });
 
+    it("shows bash tool call commands", () => {
+      const viewer = new ConversationViewer(
+        mockTui(30, 80),
+        mockSession([
+          {
+            role: "assistant",
+            content: [{ type: "toolCall", name: "bash", input: { command: "git status --short" } }],
+          },
+        ]),
+        mockRecord(),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+      );
+
+      expect(viewer.render(80).join("\n")).toContain("Bash(git status --short)");
+    });
+
+    it("wraps bash tool call commands instead of truncating them", () => {
+      const command = `echo ${"chunk ".repeat(20)}tail-sentinel`;
+      const viewer = new ConversationViewer(
+        mockTui(40, 40),
+        mockSession([
+          {
+            role: "assistant",
+            content: [{ type: "toolCall", name: "bash", input: { command } }],
+          },
+        ]),
+        mockRecord(),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+      );
+
+      expect(viewer.render(40).join("\n")).toContain("tail-sentinel");
+    });
+
     it("no line exceeds width at narrow terminal", () => {
       const messages = [
         { role: "user", content: "Hello world, this is a normal sentence." },
@@ -509,6 +546,31 @@ describe("ConversationViewer", () => {
         viewer.handleInput("x");
       }).not.toThrow();
     });
+
+    it("c opens cancel+steer composer and submits without stopping the agent", () => {
+      const onStop = vi.fn();
+      const onCancel = vi.fn();
+      const viewer = new ConversationViewer(
+        mockTui(30, W),
+        mockSession(),
+        mockRecord({ status: "running" }),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+        onStop,
+        undefined,
+        undefined,
+        onCancel,
+      );
+
+      expect(viewer.render(W).join("\n")).toContain("c cancel");
+      viewer.handleInput("c");
+      expect(viewer.render(W).join("\n")).toContain("cancel + steer");
+      for (const ch of "stop sleeping") viewer.handleInput(ch);
+      viewer.handleInput("\r");
+      expect(onCancel).toHaveBeenCalledWith("stop sleeping");
+      expect(onStop).not.toHaveBeenCalled();
+    });
   });
 
   describe("steer composer", () => {
@@ -580,12 +642,11 @@ describe("ConversationViewer", () => {
       expect(viewer.render(W).join("\n")).toContain("Enter send · Esc cancel");
     });
 
-    it("no steer affordance once the agent is no longer running", () => {
-      const { viewer, onSteer } = makeViewer({ status: "completed" });
-      expect(viewer.render(W).join("\n")).not.toContain("Enter steer");
+    it("still offers steering for a completed session follow-up", () => {
+      const { viewer } = makeViewer({ status: "completed" });
+      expect(viewer.render(W).join("\n")).toContain("Enter steer");
       viewer.handleInput("\r");
-      expect(viewer.render(W).join("\n")).not.toContain("Enter send");
-      expect(onSteer).not.toHaveBeenCalled();
+      expect(viewer.render(W).join("\n")).toContain("Enter send");
     });
 
     it("no steer affordance when no onSteer handler is provided", () => {

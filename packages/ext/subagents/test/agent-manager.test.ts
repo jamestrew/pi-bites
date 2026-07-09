@@ -14,7 +14,7 @@ vi.mock("../worktree.js", () => ({
   pruneWorktrees: vi.fn(),
 }));
 
-import { runAgent } from "../agent-runner.js";
+import { resumeAgent, runAgent } from "../agent-runner.js";
 
 const mockPi = {} as any;
 const mockCtx = { cwd: "/tmp" } as any;
@@ -810,7 +810,7 @@ describe("AgentManager — steer()", () => {
     });
     const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r", isBackground: true });
     // Simulate the session becoming ready.
-    captured?.({ steer, dispose: vi.fn() });
+    captured?.({ steer, dispose: vi.fn(), isStreaming: true });
 
     expect(manager.steer(id, "go left")).toBe(true);
     expect(steer).toHaveBeenCalledWith("go left");
@@ -828,13 +828,15 @@ describe("AgentManager — steer()", () => {
     expect(record.pendingSteers).toEqual(["first", "second"]);
   });
 
-  it("refuses to steer an agent that is no longer running", async () => {
+  it("resumes a completed session with a follow-up prompt", async () => {
     manager = new AgentManager();
     resolvedRun();
+    vi.mocked(resumeAgent).mockResolvedValue("again");
     const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "x", isBackground: false });
     await manager.getRecord(id)?.promise;
     expect(manager.getRecord(id)?.status).toBe("completed");
-    expect(manager.steer(id, "too late")).toBe(false);
+    expect(manager.steer(id, "keep going")).toBe(true);
+    expect(resumeAgent).toHaveBeenCalledWith(expect.anything(), "keep going", expect.anything());
   });
 });
 

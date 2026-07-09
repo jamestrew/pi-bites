@@ -318,7 +318,28 @@ export class AgentManager {
         options.onSessionCreated?.(session);
       },
     })
-      .then(({ responseText, session, aborted, steered }) => {
+      .then(async ({ responseText, session, aborted, steered }) => {
+        if (record.pendingCancelSteer && record.status !== "stopped") {
+          const message = record.pendingCancelSteer;
+          record.pendingCancelSteer = undefined;
+          record.status = "running";
+          responseText = await resumeAgent(session, message, {
+            onToolActivity: (activity) => {
+              if (activity.type === "end") record.toolUses++;
+              options.onToolActivity?.(activity);
+            },
+            onAssistantUsage: (usage) => {
+              addUsage(record.lifetimeUsage, usage);
+              options.onAssistantUsage?.(usage);
+            },
+            onCompaction: (info) => {
+              record.compactionCount++;
+              this.onCompact?.(record, info);
+              options.onCompaction?.(info);
+            },
+          });
+        }
+
         // Don't overwrite status if externally stopped via abort()
         if (record.status !== "stopped") {
           record.status = aborted ? "aborted" : steered ? "steered" : "completed";
@@ -529,13 +550,54 @@ export class AgentManager {
   steer(id: string, message: string): boolean {
     const record = this.agents.get(id);
     if (!record) return false;
-    if (record.status !== "running" && record.status !== "queued") return false;
+    if (record.status === "stopped" || record.status === "error") return false;
     if (record.session) {
-      record.session.steer(message).catch(() => {});
-    } else {
+      if (record.status === "running" && record.session.isStreaming !== false) {
+        record.session.steer(message).catch(() => {});
+      } else {
+        record.status = "running";
+        record.completedAt = undefined;
+        record.error = undefined;
+        resumeAgent(record.session, message, {
+          onToolActivity: (activity) => {
+            if (activity.type === "end") record.toolUses++;
+          },
+          onAssistantUsage: (usage) => addUsage(record.lifetimeUsage, usage),
+          onCompaction: (info) => {
+            record.compactionCount++;
+            this.onCompact?.(record, info);
+          },
+        })
+          .then((responseText) => {
+            if (record.status !== "stopped") {
+              record.status = "completed";
+              record.result = responseText;
+              record.completedAt = Date.now();
+              this.onComplete?.(record);
+            }
+          })
+          .catch((err) => {
+            if (record.status !== "stopped") {
+              record.status = "error";
+              record.error = err instanceof Error ? err.message : String(err);
+              record.completedAt = Date.now();
+            }
+          });
+      }
+    } else if (record.status === "running" || record.status === "queued") {
       if (!record.pendingSteers) record.pendingSteers = [];
       record.pendingSteers.push(message);
+    } else {
+      return false;
     }
+    return true;
+  }
+
+  cancelAndSteer(id: string, message: string): boolean {
+    const record = this.agents.get(id);
+    if (!record?.session || record.status !== "running") return false;
+    record.pendingCancelSteer = message;
+    record.session.abort().catch(() => {});
     return true;
   }
 

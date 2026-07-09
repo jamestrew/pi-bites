@@ -304,6 +304,11 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           },
           keybindings,
           (message: string) => manager.steer(record.id, message),
+          (message: string) => {
+            if (manager.cancelAndSteer(record.id, message)) {
+              ctx.ui.notify(`Canceled current operation for "${record.description}".`, "info");
+            }
+          },
         );
       },
       {

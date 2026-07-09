@@ -90,6 +90,8 @@ export interface AgentRecord {
   resultConsumed?: boolean;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: string[];
+  /** Message to resume with after cancelling the current operation. */
+  pendingCancelSteer?: string;
   /** Worktree info if the agent is running in an isolated worktree. */
   worktree?: { path: string; branch: string; baseSha: string; workPath: string };
   /** Worktree cleanup result after agent completion. */
