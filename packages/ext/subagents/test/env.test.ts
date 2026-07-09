@@ -7,22 +7,22 @@ import { describe, expect, it } from "vitest";
 import { detectEnv } from "../env.js";
 
 /** Minimal mock of pi.exec() that shells out via child_process. */
-function mockPi(): ExtensionAPI {
-  return {
-    exec: async (command: string, args: string[], options?: { cwd?: string; timeout?: number }) => {
-      try {
-        const stdout = execSync(`${command} ${args.join(" ")}`, {
-          cwd: options?.cwd,
-          encoding: "utf-8",
-          stdio: ["pipe", "pipe", "pipe"],
-          timeout: options?.timeout,
-        });
-        return { stdout, stderr: "", code: 0, killed: false };
-      } catch (err: any) {
-        return { stdout: "", stderr: err.stderr ?? "", code: err.status ?? 1, killed: false };
-      }
-    },
-  } as unknown as ExtensionAPI;
+function mockPi(
+  exec = async (command: string, args: string[], options?: { cwd?: string; timeout?: number }) => {
+    try {
+      const stdout = execSync(`${command} ${args.join(" ")}`, {
+        cwd: options?.cwd,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: options?.timeout,
+      });
+      return { stdout, stderr: "", code: 0, killed: false };
+    } catch (err: any) {
+      return { stdout: "", stderr: err.stderr ?? "", code: err.status ?? 1, killed: false };
+    }
+  },
+): ExtensionAPI {
+  return { exec } as unknown as ExtensionAPI;
 }
 
 describe("detectEnv", () => {
@@ -30,6 +30,20 @@ describe("detectEnv", () => {
     const env = await detectEnv(mockPi(), process.cwd());
     expect(env.isGitRepo).toBe(true);
     expect(env.platform).toBe(process.platform);
+  });
+
+  it("detects jj workspace without git metadata", async () => {
+    const env = await detectEnv(
+      mockPi(async (command: string) => ({
+        stdout: command === "jj" ? "/repo\n" : "",
+        stderr: "",
+        code: command === "jj" ? 0 : 1,
+        killed: false,
+      })),
+      process.cwd(),
+    );
+
+    expect(env.isGitRepo).toBe(true);
   });
 
   it("returns branch name when on a branch", async () => {
