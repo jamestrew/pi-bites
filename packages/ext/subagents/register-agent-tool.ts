@@ -64,7 +64,7 @@ type RegisterAgentToolDeps = {
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setFleetViewEnabled: (enabled: boolean) => void;
   getDefaultJoinMode: () => JoinMode;
-  trackBatchAgent: (id: string, joinMode: JoinMode) => void;
+  trackSpawned: (id: string, joinMode: JoinMode) => void;
   updateHelperToolsActive?: () => void;
 };
 
@@ -90,7 +90,7 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     setToolDescriptionMode,
     setFleetViewEnabled,
     getDefaultJoinMode,
-    trackBatchAgent,
+    trackSpawned,
     updateHelperToolsActive,
   } = deps;
   /** Format an agent's tool scope: "*" when it has all built-ins, else a comma-separated list. */
@@ -667,12 +667,7 @@ Terse command-style prompts produce shallow, generic work.
             writeInitialEntry(record.outputFile, id, params.prompt, ctx.cwd);
           }
 
-          if (joinMode == null || joinMode === "async") {
-            // Foreground/no join mode or explicit async — not part of any batch
-          } else {
-            // smart or group — add to current batch
-            trackBatchAgent(id, joinMode);
-          }
+          if (joinMode != null) trackSpawned(id, joinMode);
 
           agentActivity.set(id, bgState);
           fleet.ensureTimer();

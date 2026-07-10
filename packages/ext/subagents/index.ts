@@ -12,23 +12,18 @@
 
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type BitesConfig } from "../config.js";
+import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
 import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { getAgentConfig, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
-import { buildEventData } from "./event-data.js";
-import { GroupJoinManager } from "./group-join.js";
-import {
-  buildNotificationDetails,
-  formatTaskNotification,
-  registerNotificationRenderer,
-} from "./notifications.js";
+import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig, registerAgentTool } from "./register-agent-tool.js";
 import { registerResultTools } from "./register-result-tools.js";
 import { type ToolDescriptionMode } from "./settings.js";
-import { type AgentRecord, type JoinMode, type NotificationDetails } from "./types.js";
+import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
 
@@ -56,97 +51,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
 
-  // ---- Cancellable pending notifications ----
-  // Holds notifications briefly so get_subagent_result can cancel them
-  // before they reach pi.sendMessage (fire-and-forget).
-  const pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
-  const NUDGE_HOLD_MS = 200;
-
-  function scheduleNudge(key: string, send: () => void, delay = NUDGE_HOLD_MS) {
-    cancelNudge(key);
-    pendingNudges.set(
-      key,
-      setTimeout(() => {
-        pendingNudges.delete(key);
-        try {
-          send();
-        } catch {
-          /* ignore stale completion side-effect errors */
-        }
-      }, delay),
-    );
-  }
-
-  function cancelNudge(key: string) {
-    const timer = pendingNudges.get(key);
-    if (timer != null) {
-      clearTimeout(timer);
-      pendingNudges.delete(key);
-    }
-  }
-
-  // ---- Individual nudge helper (async join mode) ----
-  function emitIndividualNudge(record: AgentRecord) {
-    if (record.resultConsumed) return; // re-check at send time
-
-    const notification = formatTaskNotification(record, 500);
-    const footer = record.outputFile ? `\nFull transcript available at: ${record.outputFile}` : "";
-
-    pi.sendMessage<NotificationDetails>(
-      {
-        customType: "subagent-notification",
-        content: notification + footer,
-        display: true,
-        details: buildNotificationDetails(record, 500, agentActivity.get(record.id)),
-      },
-      { deliverAs: "followUp", triggerTurn: true },
-    );
-  }
-
-  function sendIndividualNudge(record: AgentRecord) {
-    agentActivity.delete(record.id);
-    fleet.onAgentFinished(record.id);
-    scheduleNudge(record.id, () => emitIndividualNudge(record));
-  }
-
-  // ---- Group join manager ----
-  const groupJoin = new GroupJoinManager((records, partial) => {
-    for (const r of records) {
-      agentActivity.delete(r.id);
-      fleet.onAgentFinished(r.id);
-    }
-
-    const groupKey = `group:${records.map((r) => r.id).join(",")}`;
-    scheduleNudge(groupKey, () => {
-      // Re-check at send time
-      const unconsumed = records.filter((r) => !r.resultConsumed);
-      if (unconsumed.length === 0) {
-        return;
-      }
-
-      const notifications = unconsumed.map((r) => formatTaskNotification(r, 300)).join("\n\n");
-      const label = partial
-        ? `${unconsumed.length} agent(s) finished (partial — others still running)`
-        : `${unconsumed.length} agent(s) finished`;
-
-      const [first, ...rest] = unconsumed;
-      const details = buildNotificationDetails(first, 300, agentActivity.get(first.id));
-      if (rest.length > 0) {
-        details.others = rest.map((r) => buildNotificationDetails(r, 300, agentActivity.get(r.id)));
-      }
-
-      pi.sendMessage<NotificationDetails>(
-        {
-          customType: "subagent-notification",
-          content: `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`,
-          display: true,
-          details,
-        },
-        { deliverAs: "followUp", triggerTurn: true },
-      );
-    });
-  }, 30_000);
-
   function hasActionableBackgroundAgent(): boolean {
     return manager
       .listAgents()
@@ -167,53 +71,20 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     pi.setActiveTools(next);
   }
 
-  // Background completion: route through group join or send individual nudge
-  const manager = new AgentManager(
-    (record) => {
-      // Emit lifecycle event based on terminal status
-      const isError =
-        record.status === "error" || record.status === "stopped" || record.status === "aborted";
-      const eventData = buildEventData(record);
-      if (isError) {
-        pi.events.emit("subagents:failed", eventData);
-      } else {
-        pi.events.emit("subagents:completed", eventData);
-      }
-
-      // Persist final record for cross-extension history reconstruction
-      pi.appendEntry("subagents:record", {
-        id: record.id,
-        type: record.type,
-        description: record.description,
-        status: record.status,
-        result: record.result,
-        error: record.error,
-        startedAt: record.startedAt,
-        completedAt: record.completedAt,
-      });
-
-      // Skip notification if result was already consumed via get_subagent_result
-      if (record.resultConsumed) {
-        agentActivity.delete(record.id);
-        fleet.onAgentFinished(record.id);
-        updateHelperToolsActive();
-        return;
-      }
-
-      // If this agent is pending batch finalization (debounce window still open),
-      // don't send an individual nudge — finalizeBatch will pick it up retroactively.
-      if (currentBatchAgents.some((a) => a.id === record.id)) {
-        return;
-      }
-
-      const result = groupJoin.onAgentComplete(record);
-      if (result === "pass") {
-        sendIndividualNudge(record);
-      }
-      updateHelperToolsActive();
-      // 'held' → do nothing, group will fire later
-      // 'delivered' → group callback already fired
+  let manager: AgentManager;
+  let fleet: FleetList;
+  const completion = createAgentCompletionHandler({
+    pi,
+    getRecord: (id) => manager.getRecord(id),
+    onAgentFinishedUI: (id) => {
+      agentActivity.delete(id);
+      fleet.onAgentFinished(id);
     },
+    onActionableAgentsChanged: updateHelperToolsActive,
+  });
+
+  manager = new AgentManager(
+    completion.onAgentComplete,
     undefined,
     (record) => {
       // Emit started event when agent transitions to running (including from queue)
@@ -335,14 +206,13 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     delete (globalThis as any)[MANAGER_KEY];
     manager.abortAll();
     updateHelperToolsActive();
-    for (const timer of pendingNudges.values()) clearTimeout(timer);
-    pendingNudges.clear();
+    completion.dispose();
     fleet.dispose();
     manager.dispose();
   });
 
   // Claude Code-style FleetView: navigable list of main + subagents above the editor.
-  const fleet = new FleetList(manager, agentActivity);
+  fleet = new FleetList(manager, agentActivity);
   let fleetViewEnabled = true;
   function isFleetViewEnabled(): boolean {
     return fleetViewEnabled;
@@ -400,55 +270,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     toolDescriptionMode = mode;
   }
 
-  // ---- Batch tracking for smart join mode ----
-  // Collects background agent IDs spawned in the current turn for smart grouping.
-  // Uses a debounced timer: each new agent resets the 100ms window so that all
-  // parallel tool calls (which may be dispatched across multiple microtasks by the
-  // framework) are captured in the same batch.
-  let currentBatchAgents: { id: string; joinMode: JoinMode }[] = [];
-  let batchFinalizeTimer: ReturnType<typeof setTimeout> | undefined;
-  let batchCounter = 0;
-
-  /** Finalize the current batch: if 2+ smart-mode agents, register as a group. */
-  function finalizeBatch() {
-    batchFinalizeTimer = undefined;
-    const batchAgents = [...currentBatchAgents];
-    currentBatchAgents = [];
-
-    const smartAgents = batchAgents.filter((a) => a.joinMode === "smart" || a.joinMode === "group");
-    if (smartAgents.length >= 2) {
-      const groupId = `batch-${++batchCounter}`;
-      const ids = smartAgents.map((a) => a.id);
-      groupJoin.registerGroup(groupId, ids);
-      // Retroactively process agents that already completed during the debounce window.
-      // Their onComplete fired but was deferred (agent was in currentBatchAgents),
-      // so we feed them into the group now.
-      for (const id of ids) {
-        const record = manager.getRecord(id);
-        if (!record) continue;
-        record.groupId = groupId;
-        if (record.completedAt != null && !record.resultConsumed) {
-          groupJoin.onAgentComplete(record);
-        }
-      }
-    } else {
-      // No group formed — send individual nudges for any agents that completed
-      // during the debounce window and had their notification deferred.
-      for (const { id } of batchAgents) {
-        const record = manager.getRecord(id);
-        if (record?.completedAt != null && !record.resultConsumed) {
-          sendIndividualNudge(record);
-        }
-      }
-    }
-  }
-
-  function trackBatchAgent(id: string, joinMode: JoinMode) {
-    currentBatchAgents.push({ id, joinMode });
-    if (batchFinalizeTimer) clearTimeout(batchFinalizeTimer);
-    batchFinalizeTimer = setTimeout(finalizeBatch, 100);
-  }
-
   // Grab UI context from first tool execution.
   pi.on("tool_execution_start", async (_event, ctx) => {
     fleet.setUICtx(ctx.ui as unknown as FleetUICtx);
@@ -468,12 +289,12 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     setToolDescriptionMode,
     setFleetViewEnabled,
     getDefaultJoinMode,
-    trackBatchAgent,
+    trackSpawned: completion.trackSpawned,
     updateHelperToolsActive,
   });
 
   // ---- get_subagent_result + steer_subagent tools ----
-  registerResultTools(pi, manager, cancelNudge, updateHelperToolsActive);
+  registerResultTools(pi, manager, completion.cancelNudge, updateHelperToolsActive);
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {
