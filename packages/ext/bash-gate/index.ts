@@ -21,15 +21,21 @@
  * }
  * ```
  *
- * Pass `--yolo` on the CLI to bypass all gates entirely — useful for
- * non-interactive / scripted runs where no UI is available:
+ * Press Ctrl+Shift+Y to toggle the gate for the main agent. Pass `--yolo` on
+ * the CLI to bypass all gates entirely — useful for non-interactive / scripted
+ * runs where no UI is available:
  *
  * ```bash
  * pi --yolo -p "run the tests"
  * ```
  */
 
-import type { CustomEntry, ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type {
+  CustomEntry,
+  ExtensionAPI,
+  ExtensionContext,
+  SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
 import type {
   BashGateConfig,
@@ -331,9 +337,25 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
   });
 
   let rules: BashGateRule[] = [];
+  let mainAgentYolo = false;
 
-  pi.on("session_start", (_event, _ctx) => {
+  function syncYoloStatus(ctx: ExtensionContext): void {
+    ctx.ui.setStatus("bash-gate-yolo", mainAgentYolo ? "🔥 YOLO" : undefined);
+  }
+
+  pi.on("session_start", (_event, ctx) => {
     rules = resolveEffectiveRules(configRef.current);
+    mainAgentYolo = false;
+    syncYoloStatus(ctx);
+  });
+
+  pi.registerShortcut("ctrl+shift+y", {
+    description: "Toggle bash-gate yolo mode for the main agent",
+    handler: async (ctx) => {
+      mainAgentYolo = !mainAgentYolo;
+      syncYoloStatus(ctx);
+      ctx.ui.notify(`Bash gate ${mainAgentYolo ? "disabled" : "enabled"}.`, "info");
+    },
   });
 
   const sessionAllowed = new Set<string>();
@@ -355,8 +377,8 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       ? `subagent:${metadata.agentId}:${sessionAllowKey}`
       : sessionAllowKey;
 
-    // --yolo flag: skip all gates.
-    if (pi.getFlag("yolo")) return undefined;
+    // --yolo bypasses every gate; the shortcut only bypasses the main agent.
+    if (pi.getFlag("yolo") || (mainAgentYolo && !metadata)) return undefined;
 
     // Pattern was already approved for this session — run silently.
     if (sessionAllowed.has(effectiveSessionAllowKey)) return undefined;

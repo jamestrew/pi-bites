@@ -56,8 +56,12 @@ function createBashGateHarness(entries: SessionEntry[] = []) {
   const emit = vi.fn((event: string, data: any) => {
     eventHandlers.get(event)?.(data);
   });
+  let shortcutHandler: ((ctx: any) => unknown) | undefined;
   const pi = {
     registerFlag: vi.fn(),
+    registerShortcut: vi.fn((_key: string, options: { handler: (ctx: any) => unknown }) => {
+      shortcutHandler = options.handler;
+    }),
     getFlag: vi.fn(() => false),
     on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) => {
       handlers.set(event, handler);
@@ -70,7 +74,11 @@ function createBashGateHarness(entries: SessionEntry[] = []) {
       }),
     },
   };
-  const ui = { select: vi.fn(async () => "Deny") };
+  const ui = {
+    notify: vi.fn(),
+    select: vi.fn(async () => "Deny"),
+    setStatus: vi.fn(),
+  };
   const ctx = {
     cwd: "/repo",
     hasUI: true,
@@ -81,7 +89,14 @@ function createBashGateHarness(entries: SessionEntry[] = []) {
   registerBashGate(pi as any, { current: {} });
   handlers.get("session_start")?.({}, ctx);
 
-  return { pi, ctx, ui, eventHandlers, toolCall: handlers.get("tool_call")! };
+  return {
+    pi,
+    ctx,
+    ui,
+    eventHandlers,
+    toggleYolo: () => shortcutHandler?.(ctx),
+    toolCall: handlers.get("tool_call")!,
+  };
 }
 
 describe("bash gate tool_call", () => {
@@ -113,6 +128,43 @@ describe("bash gate tool_call", () => {
     expect(pi.events.emit).toHaveBeenCalledWith("bites:bash_gate_resolved", {
       cwd: "/repo",
       command: "rm -rf tmp",
+    });
+  });
+
+  test("shortcut toggles the main-agent gate and footer status", async () => {
+    const { pi, ui, toggleYolo, toolCall, ctx } = createBashGateHarness();
+
+    await toggleYolo();
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toBeUndefined();
+
+    expect(pi.registerShortcut).toHaveBeenCalledWith(
+      "ctrl+shift+y",
+      expect.objectContaining({ description: expect.any(String) }),
+    );
+    expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
+    expect(ui.select).not.toHaveBeenCalled();
+
+    await toggleYolo();
+    await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+
+    expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", undefined);
+    expect(ui.select).toHaveBeenCalled();
+  });
+
+  test("main-agent yolo mode does not bypass subagent gates", async () => {
+    const { toggleYolo, toolCall, ctx } = createBashGateHarness([
+      subagentEntry({ bashGatePolicy: "deny" }),
+    ]);
+
+    await toggleYolo();
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: gated command not allowed for this subagent.",
     });
   });
 
