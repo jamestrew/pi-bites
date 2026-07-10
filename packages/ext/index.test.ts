@@ -8,7 +8,6 @@ const registerModules = [
   "./token-count/index.js",
   "./usage-dashboard.js",
   "./tools.js",
-  "./explore/index.js",
   "./file-search/index.js",
   "./at-mention-context/index.js",
   "./todo/index.js",
@@ -86,17 +85,15 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./session-tracker/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./explore/index.js")).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();
     }
   });
 
-  test("can disable subagents without disabling standalone explore", async () => {
+  test("can disable subagents without disabling unrelated extensions", async () => {
     const loaded = await loadExtension({ disable: ["subagents"] });
     try {
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
-      expect(loaded.registerSpies.get("./explore/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();

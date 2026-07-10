@@ -1,4 +1,4 @@
-import { formatToolCall } from "../explore/index.js";
+import { formatToolCall } from "./ui/tool-call-format.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 

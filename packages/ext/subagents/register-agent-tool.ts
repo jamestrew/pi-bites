@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { summarizeToolArg, wrapMultilineText } from "../explore/index.js";
+import { summarizeToolArg, wrapMultilineText } from "./ui/tool-call-format.js";
 import { createActivityTracker } from "./activity-tracker.js";
 import { type AgentManager } from "./agent-manager.js";
 import {
@@ -463,13 +463,6 @@ Terse command-style prompts produce shallow, generic work.
               for (const call of toolCalls.slice(-3)) {
                 lines.push(
                   truncateToWidth(theme.fg("dim", summarizeToolArg(call)), lineWidth, "…"),
-                );
-              }
-              if (toolCalls.length === 0) {
-                const frame = SPINNER[details.spinnerFrame ?? 0];
-                lines.push(theme.fg("accent", frame));
-                lines.push(
-                  truncateToWidth(theme.fg("dim", details.activity ?? "thinking…"), lineWidth, "…"),
                 );
               }
               lines.push(theme.fg("muted", "Running… (ctrl+o to expand)"));

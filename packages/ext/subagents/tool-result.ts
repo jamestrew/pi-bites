@@ -1,4 +1,4 @@
-import { buildDoneStats, type Usage } from "../explore/format/index.js";
+import { buildDoneStats } from "./ui/tool-call-format.js";
 import { type AgentDetails, formatTokens } from "./ui/agent-format.js";
 import { getLifetimeTotal, type LifetimeUsage } from "./usage.js";
 
@@ -11,17 +11,6 @@ export function textResult(msg: string, details?: AgentDetails) {
 export function formatLifetimeTokens(o: { lifetimeUsage: LifetimeUsage }): string {
   const t = getLifetimeTotal(o.lifetimeUsage);
   return t > 0 ? formatTokens(t) : "";
-}
-
-export function toDoneUsage(usage: LifetimeUsage): Usage {
-  return {
-    input: usage.input,
-    output: usage.output,
-    cacheRead: usage.cacheRead ?? 0,
-    cacheWrite: usage.cacheWrite,
-    cost: usage.cost ?? 0,
-    turns: 0,
-  };
 }
 
 /** Build AgentDetails from a base + record-specific fields. */
@@ -57,5 +46,5 @@ export function buildDetails(
 }
 
 export function doneStats(toolCalls: number, usage: LifetimeUsage, durationMs?: number): string {
-  return buildDoneStats(toolCalls, toDoneUsage(usage), durationMs);
+  return buildDoneStats(toolCalls, usage, durationMs);
 }

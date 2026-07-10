@@ -1,5 +1,13 @@
 import { expect, test } from "vitest";
-import { buildDoneStats } from "./index.js";
+import { buildDoneStats, formatToolCall, summarizeToolArg } from "./tool-call-format.js";
+
+test("formats tool calls and summaries", () => {
+  expect(formatToolCall("read", { path: "src/index.ts", offset: 4, limit: 3 })).toBe(
+    "Read(src/index.ts:4-6)",
+  );
+  expect(formatToolCall("grep", { pattern: "needle" })).toBe("Grep(/needle/ in .)");
+  expect(summarizeToolArg("  one\n  two  ")).toBe("one two");
+});
 
 test("buildDoneStats renders pi-style token usage", () => {
   expect(
@@ -11,7 +19,6 @@ test("buildDoneStats renders pi-style token usage", () => {
         cacheRead: 32_000,
         cacheWrite: 0,
         cost: 0.137,
-        turns: 2,
       },
       12_300,
     ),
@@ -26,7 +33,6 @@ test("buildDoneStats only renders optional cache write and cache hit when applic
       cacheRead: 0,
       cacheWrite: 5,
       cost: 0,
-      turns: 1,
     }),
   ).toBe("1 tool use · ↑42 ↓7 W5");
 });

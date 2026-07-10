@@ -16,7 +16,7 @@ import {
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { extractText } from "../context.js";
-import { formatToolCall as formatExploreToolCall } from "../../explore/index.js";
+import { formatToolCall } from "./tool-call-format.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal, getSessionContextPercent } from "../usage.js";
 import type { Theme } from "./agent-format.js";
@@ -344,7 +344,7 @@ export class ConversationViewer implements Component {
     arguments?: any;
   }): string {
     const args = call.input ?? call.arguments ?? {};
-    return `  ${formatExploreToolCall(call.name ?? call.toolName ?? "unknown", typeof args === "object" && args !== null ? args : {})}`;
+    return `  ${formatToolCall(call.name ?? call.toolName ?? "unknown", typeof args === "object" && args !== null ? args : {})}`;
   }
 
   private buildContentLines(width: number): string[] {

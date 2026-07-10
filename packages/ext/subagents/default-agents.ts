@@ -10,7 +10,7 @@ import {
   DEFAULT_EXPLORE_MODEL,
   DEFAULT_EXPLORE_TOOLS,
   EXPLORE_SYSTEM_PROMPT,
-} from "../explore/index.js";
+} from "./explore-defaults.js";
 import type { AgentConfig } from "./types.js";
 
 // const READ_ONLY_TOOLS = ["read", "bash", "grep", "find", "ls"];

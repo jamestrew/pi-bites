@@ -114,6 +114,26 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(rendered).not.toContain("Wrapped up");
   });
 
+  it("renders compact running state without an empty spinner or thinking line", () => {
+    const { pi, tools } = makePi();
+    subagentsExtension(pi);
+
+    const lines = tools
+      .get("Agent")
+      .renderResult(
+        {
+          content: [{ type: "text", text: "" }],
+          details: { status: "running", description: "d", toolUses: 0, toolCalls: [] },
+        },
+        { expanded: false, isPartial: true },
+        plainTheme,
+        { args: { prompt: "go" } },
+      )
+      .render(80);
+
+    expect(lines).toEqual(["⎿  Running… (ctrl+o to expand)"]);
+  });
+
   it("background user-stop → get_subagent_result flags STOPPED BY THE USER (not completed)", async () => {
     // A background agent that never settles on its own — only a stop ends it.
     vi.mocked(runAgent).mockReturnValue(new Promise(() => {}) as any);
