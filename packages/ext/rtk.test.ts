@@ -1,11 +1,15 @@
 import { describe, expect, test } from "vitest";
 
-import { createRtkNoHookWarningDataFilter } from "./rtk.js";
+import { createRtkNoHookWarningDataFilter, stripRtkNoHookWarning } from "./rtk.js";
 
 const noHookWarning =
   "[rtk] /!\\ No hook installed — run `rtk init -g` for automatic token savings";
 
 describe("RTK output filtering", () => {
+  test("strips no-hook warning from tool output", () => {
+    expect(stripRtkNoHookWarning(`stdout\n${noHookWarning}\nstderr\n`)).toBe("stdout\nstderr\n");
+  });
+
   test("strips no-hook warning from streamed bash output", () => {
     const chunks: string[] = [];
     const onData = createRtkNoHookWarningDataFilter((data) => chunks.push(data.toString()));

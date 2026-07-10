@@ -6,6 +6,13 @@ const REWRITE_TIMEOUT_MS = 2_000;
 const RTK_NO_HOOK_WARNING =
   "[rtk] /!\\ No hook installed — run `rtk init -g` for automatic token savings";
 
+export function stripRtkNoHookWarning(raw: string): string {
+  return raw
+    .split(/(?<=\n)/)
+    .filter((line) => line.replace(/\r?\n$/, "") !== RTK_NO_HOOK_WARNING)
+    .join("");
+}
+
 export function createRtkNoHookWarningDataFilter(
   onData: (data: Buffer) => void,
 ): (data: Buffer) => void {
@@ -111,6 +118,15 @@ export default function registerRtk(pi: ExtensionAPI): void {
         },
       },
     };
+  });
+
+  pi.on("tool_result", async (event) => {
+    if (event.toolName !== "bash") return undefined;
+
+    const content = event.content.map((item) =>
+      item.type === "text" ? { ...item, text: stripRtkNoHookWarning(item.text) } : item,
+    );
+    return { content };
   });
 
   pi.on("tool_call", async (event, ctx) => {
