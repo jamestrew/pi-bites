@@ -27,14 +27,10 @@ import {
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig, registerAgentTool } from "./register-agent-tool.js";
 import { registerResultTools } from "./register-result-tools.js";
-import { SubagentScheduler } from "./schedule.js";
-import { resolveStorePath, ScheduleStore } from "./schedule-store.js";
 import { type ToolDescriptionMode } from "./settings.js";
 import { type AgentRecord, type JoinMode, type NotificationDetails } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
-
-export { renderRunningAgentStatus } from "./running-status.js";
 
 // ---- Shared helpers ----
 
@@ -254,39 +250,16 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   // --- Cross-extension RPC via pi.events ---
   let currentCtx: ExtensionContext | undefined;
 
-  // ---- Subagent scheduler ----
-  // Session-scoped: store is constructed inside session_start once sessionId
-  // is available. Mirrors pi-chonky-tasks's session-scoped task store —
-  // schedules reset on /new, restore on /resume.
-  const scheduler = new SubagentScheduler();
-
-  function startScheduler(ctx: ExtensionContext) {
-    try {
-      const sessionId = ctx.sessionManager?.getSessionId?.();
-      if (!sessionId) return; // sessionId not yet available — try again on next event
-      const path = resolveStorePath(ctx.cwd, sessionId);
-      const store = new ScheduleStore(path);
-      scheduler.start(pi, ctx, manager, store);
-      pi.events.emit("subagents:scheduler_ready", { sessionId, jobCount: store.list().length });
-    } catch (err) {
-      // Scheduling is non-essential — log and move on so the rest of the
-      // extension keeps working if e.g. .pi/ is unwritable.
-      console.warn("[pi-subagents] Failed to start scheduler:", err);
-    }
-  }
-
-  // Capture ctx from session_start for RPC spawn handler + start the scheduler.
+  // Capture ctx from session_start for the RPC spawn handler.
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
     manager.clearCompleted(true);
     updateHelperToolsActive();
-    if (isSchedulingEnabled() && !scheduler.isActive()) startScheduler(ctx);
   });
 
   pi.on("session_before_switch", () => {
     manager.clearCompleted(true);
     updateHelperToolsActive();
-    scheduler.stop();
   });
 
   const unsubBashGateApproval = pi.events.on(
@@ -360,7 +333,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     unsubBashGateApproval();
     currentCtx = undefined;
     delete (globalThis as any)[MANAGER_KEY];
-    scheduler.stop();
     manager.abortAll();
     updateHelperToolsActive();
     for (const timer of pendingNudges.values()) clearTimeout(timer);
@@ -387,20 +359,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   }
   function setDefaultJoinMode(mode: JoinMode) {
     defaultJoinMode = mode;
-  }
-
-  // Master switch for the schedule subagent feature. Defaults to enabled.
-  // Read once at extension init (before tool registration) so the Agent tool's
-  // param schema reflects the persisted setting. Runtime toggles via /agents
-  // → Settings short-circuit the menu entry + the execute-time addJob path
-  // immediately, but the schema-level removal only takes effect on next
-  // extension load (next pi session). Documented in CHANGELOG/README.
-  let schedulingEnabled = true;
-  function isSchedulingEnabled(): boolean {
-    return schedulingEnabled;
-  }
-  function setSchedulingEnabled(b: boolean) {
-    schedulingEnabled = b;
   }
 
   // ---- Scope models configuration ----
@@ -501,13 +459,10 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     manager,
     agentActivity,
     fleet,
-    scheduler,
     reloadCustomAgents,
-    isSchedulingEnabled,
     isScopeModelsEnabled,
     getToolDescriptionMode,
     setDefaultJoinMode,
-    setSchedulingEnabled,
     setScopeModelsEnabled,
     setDisableDefaultAgents,
     setToolDescriptionMode,
@@ -524,13 +479,10 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   registerAgentsCommand(pi, {
     manager,
     agentActivity,
-    scheduler,
     reloadCustomAgents,
     getModelLabelFromConfig,
     getDefaultJoinMode,
     setDefaultJoinMode,
-    isSchedulingEnabled,
-    setSchedulingEnabled,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
     setDisableDefaultAgents,

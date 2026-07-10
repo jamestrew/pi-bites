@@ -101,8 +101,7 @@ describe("issue #108: unread completed background agents survive session events"
   let prevHome: string | undefined;
 
   beforeEach(() => {
-    // Hermetic cwd + global dir, scheduling off, so session_start doesn't spin a
-    // scheduler or touch the dev's filesystem — isolates the clearCompleted path.
+    // Hermetic cwd + global dir isolates the clearCompleted path.
     tmpDir = mkdtempSync(join(tmpdir(), "pi-108-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-108-agentdir-"));
     prevAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -111,10 +110,7 @@ describe("issue #108: unread completed background agents survive session events"
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
     mkdirSync(join(tmpDir, ".pi"), { recursive: true });
-    writeFileSync(
-      join(tmpDir, ".pi", "subagents.json"),
-      JSON.stringify({ schedulingEnabled: false }),
-    );
+    writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify({}));
     process.chdir(tmpDir);
   });
 

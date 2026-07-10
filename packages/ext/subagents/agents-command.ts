@@ -30,7 +30,6 @@ import {
   isDefaultsDisabled,
 } from "./agent-types.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
-import { type SubagentScheduler } from "./schedule.js";
 import {
   type SubagentsSettings,
   saveAndEmitChanged,
@@ -38,18 +37,14 @@ import {
 } from "./settings.js";
 import { type AgentConfig, type AgentRecord, type JoinMode } from "./types.js";
 import { type AgentActivity, formatDuration, getDisplayName } from "./ui/agent-format.js";
-import { showSchedulesMenu } from "./ui/schedule-menu.js";
 
 type AgentsCommandDeps = {
   manager: AgentManager;
   agentActivity: Map<string, AgentActivity>;
-  scheduler: SubagentScheduler;
   reloadCustomAgents: () => void;
   getModelLabelFromConfig: (model: string) => string;
   getDefaultJoinMode: () => JoinMode;
   setDefaultJoinMode: (mode: JoinMode) => void;
-  isSchedulingEnabled: () => boolean;
-  setSchedulingEnabled: (enabled: boolean) => void;
   isScopeModelsEnabled: () => boolean;
   setScopeModelsEnabled: (enabled: boolean) => void;
   setDisableDefaultAgents: (disabled: boolean) => void;
@@ -63,13 +58,10 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
   const {
     manager,
     agentActivity,
-    scheduler,
     reloadCustomAgents,
     getModelLabelFromConfig,
     getDefaultJoinMode,
     setDefaultJoinMode,
-    isSchedulingEnabled,
-    setSchedulingEnabled,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
     setDisableDefaultAgents,
@@ -136,12 +128,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
       options.push(`Agent types (${allNames.length})`);
     }
 
-    // Scheduled jobs entry (always present when scheduler is active)
-    if (scheduler.isActive()) {
-      const jobCount = scheduler.list().length;
-      options.push(`Scheduled jobs (${jobCount})`);
-    }
-
     // Actions
     options.push("Create new agent");
     options.push("Settings");
@@ -165,9 +151,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
       await showAgentsMenu(ctx);
     } else if (choice.startsWith("Agent types (")) {
       await showAllAgentsList(ctx);
-      await showAgentsMenu(ctx);
-    } else if (choice.startsWith("Scheduled jobs (")) {
-      await showSchedulesMenu(ctx, scheduler);
       await showAgentsMenu(ctx);
     } else if (choice === "Create new agent") {
       await showCreateWizard(ctx);
@@ -706,7 +689,6 @@ ${systemPrompt}
       defaultMaxTurns: getDefaultMaxTurns() ?? 0,
       graceTurns: getGraceTurns(),
       defaultJoinMode: getDefaultJoinMode(),
-      schedulingEnabled: isSchedulingEnabled(),
       scopeModels: isScopeModelsEnabled(),
       disableDefaultAgents: isDefaultsDisabled(),
       toolDescriptionMode: getToolDescriptionMode(),
@@ -750,14 +732,6 @@ ${systemPrompt}
           description: "Default join mode for background agents",
           currentValue: getDefaultJoinMode(),
           values: ["smart", "async", "group"],
-        },
-        {
-          id: "schedulingEnabled",
-          label: "Scheduling",
-          description:
-            "Schedule subagent feature (off removes `schedule` param from Agent tool spec on next pi session)",
-          currentValue: isSchedulingEnabled() ? "on" : "off",
-          values: ["on", "off"],
         },
         {
           id: "scopeModels",
@@ -818,18 +792,6 @@ ${systemPrompt}
       } else if (id === "joinMode") {
         setDefaultJoinMode(value as JoinMode);
         notifyApplied(ctx, `Default join mode set to ${value}`);
-      } else if (id === "schedulingEnabled") {
-        const enabled = value === "on";
-        if (enabled === isSchedulingEnabled()) {
-          ctx.ui.notify(`Scheduling already ${enabled ? "enabled" : "disabled"}.`, "info");
-        } else {
-          setSchedulingEnabled(enabled);
-          if (!enabled) scheduler.stop(); // immediate kill — outstanding fires stop ticking
-          notifyApplied(
-            ctx,
-            `Scheduling ${enabled ? "enabled" : "disabled"}. Tool spec change takes effect on next pi session.`,
-          );
-        }
       } else if (id === "scopeModels") {
         const enabled = value === "on";
         setScopeModelsEnabled(enabled);

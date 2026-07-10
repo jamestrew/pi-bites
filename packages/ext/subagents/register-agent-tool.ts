@@ -50,19 +50,15 @@ import {
   SPINNER,
 } from "./ui/agent-format.js";
 import { type FleetList } from "./ui/fleet-list.js";
-import { type SubagentScheduler } from "./schedule.js";
 
 type RegisterAgentToolDeps = {
   manager: AgentManager;
   agentActivity: Map<string, AgentActivity>;
   fleet: FleetList;
-  scheduler: SubagentScheduler;
   reloadCustomAgents: () => void;
-  isSchedulingEnabled: () => boolean;
   isScopeModelsEnabled: () => boolean;
   getToolDescriptionMode: () => ToolDescriptionMode;
   setDefaultJoinMode: (mode: JoinMode) => void;
-  setSchedulingEnabled: (enabled: boolean) => void;
   setScopeModelsEnabled: (enabled: boolean) => void;
   setDisableDefaultAgents: (disabled: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
@@ -85,13 +81,10 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     manager,
     agentActivity,
     fleet,
-    scheduler,
     reloadCustomAgents,
-    isSchedulingEnabled,
     isScopeModelsEnabled,
     getToolDescriptionMode,
     setDefaultJoinMode,
-    setSchedulingEnabled,
     setScopeModelsEnabled,
     setDisableDefaultAgents,
     setToolDescriptionMode,
@@ -145,7 +138,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
       setDefaultMaxTurns,
       setGraceTurns,
       setDefaultJoinMode,
-      setSchedulingEnabled,
       setScopeModels: setScopeModelsEnabled,
       setDisableDefaultAgents: setDisableDefaultAgents,
       setToolDescriptionMode: setToolDescriptionMode,
@@ -155,29 +147,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
   );
 
   // ---- Agent tool ----
-
-  // Schedule param + its guideline are gated on `schedulingEnabled` (read once
-  // at registration; flipping the setting later requires next pi session for
-  // the schema to update). Defining the shape once and spreading it via Partial
-  // preserves Type.Object's inference when present and produces a
-  // `schedule`-free schema when absent — zero LLM-context cost in disabled mode.
-  // const scheduleParamShape = {
-  //   schedule: Type.Optional(
-  //     Type.String({
-  //       description:
-  //         "Opt-in only — fire later instead of now. Omit to run immediately (the default, almost always correct). " +
-  //         'Formats: 6-field cron ("0 0 9 * * 1" = 9am Mon), interval ("5m"/"1h"), one-shot ("+10m" or ISO). ' +
-  //         "Forces run_in_background; incompatible with inherit_context and resume. Returns job ID.",
-  //     }),
-  //   ),
-  // };
-  // const scheduleParam: Partial<typeof scheduleParamShape> = isSchedulingEnabled()
-  //   ? scheduleParamShape
-  //   : {};
-
-  const scheduleGuideline = isSchedulingEnabled()
-    ? `\n- Use \`schedule\` only when the user explicitly asked for scheduled / recurring / delayed execution (e.g. "every Monday", "in an hour"). Don't auto-schedule from vague intent like "monitor X" — run once now or ask.`
-    : "";
 
   // Compact Agent tool description (#91, `toolDescriptionMode: "compact"`) —
   // the same load-bearing facts as the full version at ~75% fewer tokens, for
@@ -222,7 +191,7 @@ If the target is already known, use a direct tool — \`read\` for a known path,
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
-- Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications). The worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned in the result.${scheduleGuideline}
+- Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications). The worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned in the result.
 
 ## Writing the prompt
 
@@ -247,7 +216,6 @@ Terse command-style prompts produce shallow, generic work.
       typeList: buildTypeListText,
       compactTypeList: buildCompactTypeListText,
       agentDir: getAgentDir,
-      scheduleGuideline: () => scheduleGuideline,
     };
     // Replacement callback (not a string) — agent descriptions may contain `$&` etc.
     return template.replace(/\{\{(\w+)\}\}/g, (raw, name: string) => {
@@ -375,7 +343,6 @@ Terse command-style prompts produce shallow, generic work.
         //       'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
         //   }),
         // ),
-        // ...scheduleParam,
       }),
 
       // ---- Custom rendering: Claude Code style ----
@@ -637,57 +604,6 @@ Terse command-style prompts produce shallow, generic work.
           modelName,
           tags: agentTags.length > 0 ? agentTags : undefined,
         };
-
-        // ---- Schedule: register a job, don't spawn now ----
-        if (params.schedule) {
-          if (!isSchedulingEnabled()) {
-            return textResult(
-              "Scheduling is disabled in this project. Enable via /agents → Settings → Scheduling.",
-            );
-          }
-          if (params.resume) {
-            return textResult(
-              "Cannot combine `schedule` with `resume` — schedules create fresh agents.",
-            );
-          }
-          if (params.inherit_context) {
-            return textResult(
-              "Cannot combine `schedule` with `inherit_context` — there is no parent conversation at fire time.",
-            );
-          }
-          if (params.run_in_background === false) {
-            return textResult(
-              "Cannot combine `schedule` with `run_in_background: false` — scheduled jobs always run in background.",
-            );
-          }
-          if (!scheduler.isActive()) {
-            return textResult(
-              "Scheduler is not active in this session yet. Try again after the session has fully started.",
-            );
-          }
-          try {
-            const job = scheduler.addJob({
-              name: params.description as string,
-              description: params.description as string,
-              schedule: params.schedule as string,
-              subagent_type: subagentType,
-              prompt: params.prompt as string,
-              model: params.model as string | undefined,
-              thinking: thinking,
-              max_turns: effectiveMaxTurns,
-              isolated: isolated,
-              isolation: isolation,
-            });
-            const next = scheduler.getNextRun(job.id);
-            return textResult(
-              `Scheduled "${job.name}" (id: ${job.id}, type: ${job.scheduleType}). ` +
-                `Next run: ${next ?? "(unknown)"}. ` +
-                `Manage via /agents → Scheduled jobs.`,
-            );
-          } catch (err) {
-            return textResult(err instanceof Error ? err.message : String(err));
-          }
-        }
 
         // Resume existing agent
         if (params.resume) {
