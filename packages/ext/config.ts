@@ -8,9 +8,9 @@
  * Example pi-bites.json:
  * ```json
  * {
- *   "explore": {
- *     "defaultModel": "anthropic/claude-sonnet-4-5",
- *     "defaultTools": "read,ls,bash"
+ *   "smallModel": {
+ *     "model": "github-copilot/claude-haiku-4.5",
+ *     "thinking": "low"
  *   },
  *   "statusline": {
  *     "command": "python get_usage_limits.py"
@@ -41,14 +41,15 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
-export interface ExploreConfig {
-  /** Model to use when the LLM doesn't specify one. Default: "github-copilot/claude-haiku-4.5" */
-  defaultModel?: string;
-  /** Comma-separated list of tools available to the subagent. Default: "read,ls,bash" */
-  defaultTools?: string;
+export interface SmallModelConfig {
+  /** Cheap model for lightweight internal tasks. Default: "github-copilot/claude-haiku-4.5" */
+  model?: string;
+  /** Thinking level for lightweight internal tasks. Default: "low" */
+  thinking?: ThinkingLevel;
 }
 
 export interface StatuslineConfig {
@@ -140,7 +141,7 @@ export const EXTENSION_NAMES = [
 export type ExtensionName = (typeof EXTENSION_NAMES)[number];
 
 export interface BitesConfig {
-  explore?: ExploreConfig;
+  smallModel?: SmallModelConfig;
   statusline?: StatuslineConfig;
   bashGate?: BashGateConfig;
   notifications?: NotificationsConfig;
@@ -181,7 +182,7 @@ export function loadConfig(cwd: string): BitesConfig {
   ] as ExtensionName[];
 
   return {
-    explore: { ...global.explore, ...project.explore },
+    smallModel: { ...global.smallModel, ...project.smallModel },
     statusline: { ...global.statusline, ...project.statusline },
     bashGate: { ...global.bashGate, ...project.bashGate },
     notifications: { ...global.notifications, ...project.notifications },

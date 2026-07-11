@@ -32,15 +32,15 @@ pi install git:github.com/jamestrew/pi-bites
 - Global: `~/.pi/agent/pi-bites.json`
 - Project-local: `<project>/.pi/pi-bites.json`
 
-Project-local settings override global settings for each config section. `disable` lists are unioned, so a globally disabled extension is disabled in every project.
+Project-local settings override global settings for each config section. `disable` lists are unioned, so a globally disabled extension is disabled in every project. `smallModel` provides a shared cheap model selection for lightweight tasks and defaults to GitHub Copilot's Claude Haiku 4.5 with low thinking.
 
 Example:
 
 ```json
 {
-  "explore": {
-    "defaultModel": "anthropic/claude-sonnet-4-5",
-    "defaultTools": "read,ls,bash"
+  "smallModel": {
+    "model": "github-copilot/claude-haiku-4.5",
+    "thinking": "low"
   },
   "statusline": {
     "command": "python get_usage_limits.py"
