@@ -10,10 +10,11 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { createAgentToolExecute } from "./agent-tool-execute.js";
 import { type AgentManager } from "./agent-manager.js";
+import { buildDetails } from "./tool-result.js";
 import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { applyAndEmitLoaded, type ToolDescriptionMode } from "./settings.js";
-import { type JoinMode } from "./types.js";
+import { type AgentRecord, type JoinMode } from "./types.js";
 import { type AgentActivity, getDisplayName } from "./ui/agent-format.js";
 import { type FleetList } from "./ui/fleet-list.js";
 import { renderAgentToolResult } from "./ui/agent-tool-render.js";
@@ -60,6 +61,16 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     trackSpawned,
     updateHelperToolsActive,
   } = deps;
+  const terminalRecords = new Map<string, AgentRecord>();
+  const rememberTerminalRecord = (event: unknown) => {
+    const id = (event as { id?: string }).id;
+    if (!id) return;
+    const record = manager.getRecord(id);
+    if (record) terminalRecords.set(id, record);
+  };
+  pi.events.on("subagents:completed", rememberTerminalRecord);
+  pi.events.on("subagents:failed", rememberTerminalRecord);
+
   /** Format an agent's tool scope: "*" when it has all built-ins, else a comma-separated list. */
   const formatToolsSuffix = (cfg: { builtinToolNames?: string[] } | undefined): string => {
     const tools = cfg?.builtinToolNames;
@@ -342,7 +353,20 @@ Terse command-style prompts produce shallow, generic work.
         );
       },
 
-      renderResult: renderAgentToolResult,
+      renderResult(result, options, theme, context) {
+        const details = result.details;
+        const record = details?.agentId
+          ? (terminalRecords.get(details.agentId) ?? manager.getRecord(details.agentId))
+          : undefined;
+        const currentResult =
+          details && record && ["completed", "error", "stopped"].includes(record.status)
+            ? {
+                ...result,
+                details: buildDetails(details, record, agentActivity.get(record.id)),
+              }
+            : result;
+        return renderAgentToolResult(currentResult, options, theme, context);
+      },
       execute: createAgentToolExecute({
         pi,
         manager,

@@ -51,12 +51,12 @@ type ToolRenderContext = Omit<
 > & { args: { prompt?: unknown } };
 
 export function renderAgentToolResult(
-  result: AgentToolResult<AgentDetails>,
+  result: AgentToolResult<AgentDetails | undefined>,
   options: ToolRenderResultOptions,
   theme: Theme,
   context: ToolRenderContext,
 ): Component {
-  const details = result.details as AgentDetails | undefined;
+  const details = result.details;
   const resultText = result.content[0]?.type === "text" ? result.content[0].text : "";
   if (!details) return new Text(resultText, 0, 0);
 

@@ -1,10 +1,11 @@
 import { buildDoneStats } from "./ui/tool-call-format.js";
 import { type AgentDetails, formatTokens } from "./ui/agent-format.js";
 import { getLifetimeTotal, type LifetimeUsage } from "./usage.js";
+import type { AgentRecord } from "./types.ts";
 
 /** Tool execute return value for a text response. */
 export function textResult(msg: string, details?: AgentDetails) {
-  return { content: [{ type: "text" as const, text: msg }], details: details as any };
+  return { content: [{ type: "text" as const, text: msg }], details };
 }
 
 /** Format an agent's lifetime token total, or "" when zero. */
@@ -16,16 +17,7 @@ export function formatLifetimeTokens(o: { lifetimeUsage: LifetimeUsage }): strin
 /** Build AgentDetails from a base + record-specific fields. */
 export function buildDetails(
   base: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "tags">,
-  record: {
-    toolUses: number;
-    startedAt: number;
-    completedAt?: number;
-    status: string;
-    error?: string;
-    id?: string;
-    session?: any;
-    lifetimeUsage: LifetimeUsage;
-  },
+  record: AgentRecord,
   activity?: { turnCount?: number; toolCalls?: string[] },
   overrides?: Partial<AgentDetails>,
 ): AgentDetails {

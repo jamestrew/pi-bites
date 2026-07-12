@@ -10,18 +10,26 @@ import subagentsExtension from "../index.js";
 
 function makePi(active = ["Agent", "read"]) {
   const tools = new Map<string, any>();
+  const handlers = new Map<string, () => void>();
+  const eventHandlers = new Map<string, (data: unknown) => void>();
   const pi = {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((t: any) => tools.set(t.name, t)),
     registerCommand: vi.fn(),
-    on: vi.fn(),
-    events: { emit: vi.fn(), on: vi.fn(() => vi.fn()) },
+    on: vi.fn((event: string, handler: () => void) => handlers.set(event, handler)),
+    events: {
+      emit: vi.fn((event: string, data: unknown) => eventHandlers.get(event)?.(data)),
+      on: vi.fn((event: string, handler: (data: unknown) => void) => {
+        eventHandlers.set(event, handler);
+        return vi.fn();
+      }),
+    },
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getActiveTools: vi.fn(() => active),
     setActiveTools: vi.fn((next: string[]) => (active = next)),
   } as any;
-  return { pi, tools, active: () => active };
+  return { pi, tools, active: () => active, handlers };
 }
 
 function ctx() {
@@ -47,7 +55,7 @@ describe("background helper tools", () => {
       responseText: "done result",
       session: { dispose: vi.fn() } as any,
     });
-    const { pi, tools, active } = makePi();
+    const { pi, tools, active, handlers } = makePi();
     subagentsExtension(pi);
 
     expect(active()).toEqual(["Agent", "read"]);
@@ -90,6 +98,18 @@ describe("background helper tools", () => {
     }
     expect(out).toContain("done result");
     expect(active()).toEqual(["Agent", "read"]);
+
+    handlers.get("session_before_switch")?.();
+    const rendered = tools
+      .get("Agent")
+      .renderResult(spawn, { expanded: false, isPartial: false }, theme, {
+        args: {},
+        toolCallId: "bg",
+      })
+      .render(80)
+      .join("\n");
+    expect(rendered).toContain("Done");
+    expect(rendered).not.toContain("Running in background");
   });
 
   it("renders helper tool results compactly until expanded", () => {
