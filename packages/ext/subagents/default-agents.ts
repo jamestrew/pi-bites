@@ -21,7 +21,12 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
     {
       name: "general",
       displayName: "general",
-      description: "General-purpose, write-capable agent for complex multi-step tasks.",
+      description: [
+        "General-purpose, write-capable agent for delegated implementation work.",
+        "Use when the user explicitly requests a subagent, independent work can run in parallel, or delegation has another concrete stated benefit.",
+        "Do not use for ordinary implementation requests merely because they are complex or multi-step; handle those directly in the primary agent.",
+        "Avoid blocking foreground delegation when the primary agent can do the work itself.",
+      ].join(" "),
       builtinToolNames: ["read", "bash", "edit", "write"],
       extensions: [SELF_EXTENSION],
       skills: true,

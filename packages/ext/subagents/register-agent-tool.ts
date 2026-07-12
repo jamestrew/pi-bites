@@ -116,20 +116,21 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
   // Compact Agent tool description (#91, `toolDescriptionMode: "compact"`) —
   // the same load-bearing facts as the full version at ~75% fewer tokens, for
   // small/local models. Per-option details live in the param descriptions.
-  const compactAgentToolDescription = `Launch an autonomous agent for complex, multi-step tasks. Agent types:
+  const compactAgentToolDescription = `Launch an autonomous agent when delegation has a concrete benefit. Agent types:
 ${buildCompactTypeListText()}
 
 Custom agents: .pi/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.md (global).
 
 Notes:
 - description: 3-5 words (shown in UI). Prompts must be self-contained — the agent has not seen this conversation.
+- Handle ordinary implementation requests directly. Use general when the user requests it, independent work can run in parallel, or delegation has another concrete stated benefit; do not spawn it foreground just because work is complex or multi-step.
 - Start bounded investigations with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader searching is needed; include what was already checked. Delegate immediately only for obviously broad or high-fanout work.
 - Parallel work: one message, multiple Agent calls, run_in_background: true on each. You are notified when background agents finish — never poll or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
 - resume continues a previous agent by ID; steer_subagent messages a running one.
 - isolation: "worktree" runs the agent in an isolated git worktree; changes land on a branch.`;
 
-  const fullAgentToolDescription = `Launch a new agent to handle complex, multi-step tasks autonomously. Each agent type has specific capabilities and tools available to it.
+  const fullAgentToolDescription = `Launch a new agent when delegation has a concrete benefit. Each agent type has specific capabilities and tools available to it.
 
 Available agent types and the tools they have access to:
 ${buildTypeListText()}
@@ -139,6 +140,8 @@ Custom agents can be defined in .pi/agents/<name>.md (project) or ${getAgentDir(
 When using the Agent tool, specify a subagent_type parameter to select which agent type to use.
 
 ## When not to use
+
+Handle ordinary implementation requests directly in the primary agent. Use a general subagent when the user explicitly requests one, independent work can run in parallel, or delegation has another concrete, stated benefit. Do not spawn a blocking foreground general subagent merely because a task is complex or multi-step. Continue to use specialized agents when their specialization provides a clear benefit.
 
 Start bounded investigations with direct tools — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or string. If 2-4 targeted tool calls do not locate the answer and the next step requires broader searching, delegate to Explore and include what was already checked. Delegate immediately only when the task is obviously broad, high-fanout, or likely to produce enough output to bloat the main context. Afterward, read only the files needed to act on or verify the findings.
 
@@ -230,10 +233,12 @@ Terse command-style prompts produce shallow, generic work.
       name: SUBAGENT_TOOL_NAMES.AGENT,
       label: "Agent",
       description: agentToolDescription,
-      promptSnippet: "Launch autonomous sub-agents for complex multi-step tasks",
+      promptSnippet: "Launch autonomous sub-agents when delegation has a concrete benefit",
       promptGuidelines: [
         [
           "Use Agent with specialized agents when the task matches an agent type's description.",
+          "Use general only when the user explicitly requests it, independent work can run in parallel, or delegation has another concrete stated benefit.",
+          "Handle ordinary implementation requests directly; complexity alone is not a reason to spawn a blocking foreground general subagent.",
           "Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but should not be used excessively when not needed.",
           "Importantly, avoid duplicating work that subagents are already doing — if you delegate research to a subagent, do not also perform the same searches yourself.",
         ].join(" "),

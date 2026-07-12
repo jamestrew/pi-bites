@@ -183,7 +183,7 @@ export function getConfig(type: string): {
   // Absolute fallback (should never happen)
   return {
     displayName: "Agent",
-    description: "General-purpose agent for complex, multi-step tasks",
+    description: "General-purpose agent for delegated implementation work with a concrete benefit",
     builtinToolNames: BUILTIN_TOOL_NAMES,
     extensions: true,
     skills: true,
