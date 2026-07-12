@@ -88,6 +88,7 @@ type AgentToolExecuteDeps = {
   getDefaultJoinMode: () => JoinMode;
   trackSpawned: (id: string, joinMode: JoinMode) => void;
   updateHelperToolsActive?: () => void;
+  setRenderMetadata?: (toolCallId: string, model: string, thinking: ThinkingLevel) => void;
 };
 
 async function resumeAgent(
@@ -425,18 +426,18 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       }
     }
 
-    const thinking = resolvedConfig.thinking;
+    const thinking = (
+      model?.reasoning === false
+        ? "off"
+        : (resolvedConfig.thinking ?? deps.pi.getThinkingLevel?.() ?? "off")
+    ) as ThinkingLevel;
+    if (model) deps.setRenderMetadata?.(toolCallId, `${model.provider}/${model.id}`, thinking);
     const inheritContext = resolvedConfig.inheritContext;
     const runInBackground = resolvedConfig.runInBackground;
     const isolated = resolvedConfig.isolated;
     const isolation = resolvedConfig.isolation;
 
-    const parentModelId = ctx.model?.id;
-    const effectiveModelId = model?.id;
-    const modelName =
-      effectiveModelId && effectiveModelId !== parentModelId
-        ? (model?.name ?? effectiveModelId).replace(/^Claude\s+/i, "").toLowerCase()
-        : undefined;
+    const modelName = model ? `${model.provider}/${model.id}` : undefined;
     const agentInvocation: AgentInvocation = {
       modelName,
       thinking,

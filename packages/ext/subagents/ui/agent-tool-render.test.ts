@@ -51,3 +51,38 @@ test("partial results render as running instead of a conflicting terminal status
   expect(lines.join("\n")).toContain("Running…");
   expect(lines.join("\n")).not.toContain("Error: failed");
 });
+
+test("collapsed completion includes full execution statistics", () => {
+  const details: AgentDetails = {
+    displayName: "General",
+    description: "Implement fix",
+    subagentType: "general",
+    modelName: "github-copilot/gpt-5.4",
+    tags: ["thinking: off"],
+    toolUses: 42,
+    tokens: "",
+    durationMs: 70_400,
+    status: "completed",
+    toolCalls: Array(42).fill("Read(file.ts)"),
+    lifetimeUsage: {
+      input: 59_000,
+      output: 4_900,
+      cacheRead: 619_500,
+      cacheWrite: 0,
+      cost: 0.113,
+    },
+  };
+  const result = {
+    content: [{ type: "text", text: "done" }],
+    details,
+  } as AgentToolResult<AgentDetails>;
+
+  const lines = renderAgentToolResult(
+    result,
+    { expanded: false, isPartial: false },
+    theme,
+    context,
+  ).render(120);
+
+  expect(lines[0]).toBe("⎿  Done (+42 more tool uses · ↑59k ↓4.9k R619.5k CH91.3% $0.113 · 70.4s)");
+});

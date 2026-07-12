@@ -228,6 +228,8 @@ Terse command-style prompts produce shallow, generic work.
     return fullAgentToolDescription;
   })();
 
+  const renderMetadata = new Map<string, { model: string; thinking: string }>();
+
   pi.registerTool(
     defineTool({
       name: SUBAGENT_TOOL_NAMES.AGENT,
@@ -308,7 +310,7 @@ Terse command-style prompts produce shallow, generic work.
 
       // ---- Custom rendering: Claude Code style ----
 
-      renderCall(args: any, theme) {
+      renderCall(args, theme, context) {
         const displayName = args.subagent_type ? getDisplayName(args.subagent_type) : "Agent";
         const preview =
           args.description ||
@@ -318,9 +320,12 @@ Terse command-style prompts produce shallow, generic work.
             .slice(0, 80) ||
           "no prompt";
         const config = args.subagent_type ? getAgentConfig(args.subagent_type) : undefined;
-        const model = config?.model ?? args.model;
-        const thinking = config?.thinking ?? args.thinking;
-        const modelSuffix = [model, thinking].filter(Boolean).join(" ");
+        const effective = renderMetadata.get(context.toolCallId);
+        const model = effective?.model ?? args.model ?? config?.model;
+        const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
+        const modelSuffix = [model, thinking && `thinking: ${thinking}`]
+          .filter(Boolean)
+          .join(" · ");
         const suffixes = [
           modelSuffix || undefined,
           args.run_in_background ? "background" : undefined,
@@ -348,6 +353,8 @@ Terse command-style prompts produce shallow, generic work.
         getDefaultJoinMode,
         trackSpawned,
         updateHelperToolsActive,
+        setRenderMetadata: (toolCallId, model, thinking) =>
+          renderMetadata.set(toolCallId, { model, thinking }),
       }),
     }),
   );

@@ -115,9 +115,10 @@ export function renderAgentToolResult(
         lines.push(...renderStatus(details, theme, stats));
         if (lines.length === 0) {
           const isDone = details.status === "completed";
+          const summary = stats.replace(/^(\d+) tool uses?/, "+$1 more tool uses");
           lines.push(
             theme.fg(isDone ? "success" : "warning", "Done") +
-              (stats ? theme.fg("muted", ` (${stats})`) : ""),
+              (summary ? theme.fg("muted", ` (${summary})`) : ""),
           );
           if ((details.toolCalls?.length ?? 0) > 0)
             lines.push(theme.fg("muted", "(ctrl+o to expand)"));
