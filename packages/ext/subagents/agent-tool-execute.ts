@@ -351,10 +351,10 @@ async function runForegroundAgent(
     tokens: tokenText,
   });
 
-  // "general-purpose" may itself be unregistered (defaults disabled, no
+  // "general" may itself be unregistered (defaults disabled, no
   // user override) — getConfig then uses the hardcoded fallback config.
   const fallbackNote = fellBack
-    ? `Note: Unknown agent type "${rawType}" — using ${resolveType("general-purpose") ? "general-purpose" : "the fallback agent config"}.\n\n`
+    ? `Note: Unknown agent type "${rawType}" — using ${resolveType("general") ? "general" : "the fallback agent config"}.\n\n`
     : "";
 
   if (record.status === "error") {
@@ -385,7 +385,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
 
     const rawType = params.subagent_type as SubagentType;
     const resolved = resolveType(rawType);
-    const subagentType = resolved ?? "general-purpose";
+    const subagentType = resolved ?? "general";
     const fellBack = resolved === undefined;
 
     const displayName = getDisplayName(subagentType);

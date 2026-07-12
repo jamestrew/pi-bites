@@ -24,14 +24,14 @@ export function resolveAgentInvocationConfig(
   isolation?: IsolationMode;
 } {
   return {
-    modelInput: agentConfig?.model ?? params.model,
-    modelFromParams: agentConfig?.model == null && params.model != null,
-    thinking: (agentConfig?.thinking ?? params.thinking) as ThinkingLevel | undefined,
-    maxTurns: agentConfig?.maxTurns ?? params.max_turns,
-    inheritContext: agentConfig?.inheritContext ?? params.inherit_context ?? false,
-    runInBackground: agentConfig?.runInBackground ?? params.run_in_background ?? false,
+    modelInput: params.model ?? agentConfig?.model,
+    modelFromParams: params.model != null,
+    thinking: (params.thinking ?? agentConfig?.thinking) as ThinkingLevel | undefined,
+    maxTurns: params.max_turns ?? agentConfig?.maxTurns,
+    inheritContext: params.inherit_context ?? agentConfig?.inheritContext ?? false,
+    runInBackground: params.run_in_background ?? agentConfig?.runInBackground ?? false,
     isolated: agentConfig?.isolated ?? params.isolated ?? false,
-    isolation: agentConfig?.isolation ?? params.isolation,
+    isolation: params.isolation ?? agentConfig?.isolation,
   };
 }
 

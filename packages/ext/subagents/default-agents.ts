@@ -21,25 +21,21 @@ const SELF_EXTENSION = path.join(
 );
 
 export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
-  // [
-  //   "general-purpose",
-  //   {
-  //     name: "general-purpose",
-  //     displayName: "Agent",
-  //     description: [
-  //       "General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks.",
-  //       "When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you.",
-  //     ].join(" "),
-  //     // builtinToolNames omitted — means "all available tools" (resolved at lookup time)
-  //     // inheritContext / runInBackground / isolated omitted — strategy fields, callers decide per-call.
-  //     // Setting them to false would lock callsite intent (see resolveAgentInvocationConfig in invocation-config.ts).
-  //     extensions: true,
-  //     skills: true,
-  //     systemPrompt: "",
-  //     promptMode: "append",
-  //     isDefault: true,
-  //   },
-  // ],
+  [
+    "general",
+    {
+      name: "general",
+      displayName: "general",
+      description: "General-purpose, write-capable agent for complex multi-step tasks.",
+      builtinToolNames: ["read", "bash", "edit", "write"],
+      extensions: [SELF_EXTENSION],
+      skills: true,
+      systemPrompt: "",
+      promptMode: "append",
+      bashGatePolicy: "prompt",
+      isDefault: true,
+    },
+  ],
   [
     "explore",
     {

@@ -37,6 +37,15 @@ describe("agent type registry", () => {
     expect(isValidType("")).toBe(false);
   });
 
+  it("configures the built-in general agent", () => {
+    const config = getConfig("general");
+
+    expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
+    expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
+    expect(config.skills).toBe(true);
+    expect(config.promptMode).toBe("append");
+  });
+
   it("scopes default explore to the bundled extension", () => {
     const config = getConfig("explore");
 

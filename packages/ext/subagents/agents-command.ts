@@ -560,7 +560,7 @@ Guidelines for choosing settings:
 
 Write the file using the write tool. Only write the file, nothing else.`;
 
-    const { record } = await manager.spawnAndWait(pi, ctx, "general-purpose", generatePrompt, {
+    const { record } = await manager.spawnAndWait(pi, ctx, "general", generatePrompt, {
       description: `Generate ${name} agent`,
       maxTurns: 5,
     });
@@ -744,7 +744,7 @@ ${systemPrompt}
           id: "disableDefaultAgents",
           label: "Disable defaults",
           description:
-            "Hide built-in agents (general-purpose, explore, Plan) — custom agents are unaffected",
+            "Hide built-in agents (general, explore, Plan) — custom agents are unaffected",
           currentValue: isDefaultsDisabled() ? "on" : "off",
           values: ["on", "off"],
         },

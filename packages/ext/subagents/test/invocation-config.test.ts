@@ -19,7 +19,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe("resolveAgentInvocationConfig", () => {
-  it("prefers agent config over tool-call params for locked fields", () => {
+  it("prefers public tool-call params over agent defaults", () => {
     const resolved = resolveAgentInvocationConfig(
       makeConfig({
         model: "provider/config-model",
@@ -41,12 +41,12 @@ describe("resolveAgentInvocationConfig", () => {
       },
     );
 
-    expect(resolved.modelInput).toBe("provider/config-model");
-    expect(resolved.modelFromParams).toBe(false);
-    expect(resolved.thinking).toBe("high");
-    expect(resolved.maxTurns).toBe(42);
-    expect(resolved.inheritContext).toBe(false);
-    expect(resolved.runInBackground).toBe(false);
+    expect(resolved.modelInput).toBe("provider/param-model");
+    expect(resolved.modelFromParams).toBe(true);
+    expect(resolved.thinking).toBe("minimal");
+    expect(resolved.maxTurns).toBe(1);
+    expect(resolved.inheritContext).toBe(true);
+    expect(resolved.runInBackground).toBe(true);
     expect(resolved.isolated).toBe(false);
     expect(resolved.isolation).toBe("worktree");
   });

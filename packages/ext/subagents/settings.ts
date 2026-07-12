@@ -40,7 +40,7 @@ export interface SubagentsSettings {
    */
   scopeModels?: boolean;
   /**
-   * When true, the three built-in default agents (general-purpose, Explore, Plan)
+   * When true, the three built-in default agents (general, Explore, Plan)
    * are not registered at startup. User-defined agents from .pi/agents/*.md are
    * completely unaffected — only the hardcoded DEFAULT_AGENTS are suppressed.
    * Defaults to false.

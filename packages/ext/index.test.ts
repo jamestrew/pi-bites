@@ -24,7 +24,9 @@ const registerModules = [
 
 type RegisterModule = (typeof registerModules)[number];
 
-async function loadExtension(options: { disable?: string[]; argv?: string[] } = {}) {
+async function loadExtension(
+  options: { disable?: string[]; argv?: string[]; subagent?: string } = {},
+) {
   vi.resetModules();
 
   const registerSpies = new Map<RegisterModule, ReturnType<typeof vi.fn>>();
@@ -46,6 +48,10 @@ async function loadExtension(options: { disable?: string[]; argv?: string[] } = 
   const originalArgv = process.argv;
   process.argv = [originalArgv[0] ?? "bun", originalArgv[1] ?? "pi", ...(options.argv ?? [])];
 
+  const originalSubagent = process.env.PI_BITES_SUBAGENT;
+  if (options.subagent) process.env.PI_BITES_SUBAGENT = options.subagent;
+  else delete process.env.PI_BITES_SUBAGENT;
+
   const { default: registerExtension } = await import("./index.js");
   const pi = { on: vi.fn() };
   registerExtension(pi as never);
@@ -55,7 +61,11 @@ async function loadExtension(options: { disable?: string[]; argv?: string[] } = 
     registerSpies,
     loadConfig,
     registerBitesCommands,
-    restoreArgv: () => (process.argv = originalArgv),
+    restoreArgv: () => {
+      process.argv = originalArgv;
+      if (originalSubagent === undefined) delete process.env.PI_BITES_SUBAGENT;
+      else process.env.PI_BITES_SUBAGENT = originalSubagent;
+    },
   };
 }
 
@@ -74,6 +84,18 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
+  test("subagents load shared tools and behavior without recursive features", async () => {
+    const loaded = await loadExtension({ subagent: "general" });
+    try {
+      expect(loaded.registerSpies.get("./bash-gate/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./rtk.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
     } finally {
       loaded.restoreArgv();
     }

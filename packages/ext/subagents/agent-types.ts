@@ -142,7 +142,7 @@ export function getToolNamesForType(type: string): string[] {
   return config?.builtinToolNames ?? [...BUILTIN_TOOL_NAMES];
 }
 
-/** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object). Falls back to general-purpose. */
+/** Get config for a type (case-insensitive, returns a SubagentTypeConfig-compatible object). Falls back to general. */
 export function getConfig(type: string): {
   displayName: string;
   description: string;
@@ -166,8 +166,8 @@ export function getConfig(type: string): {
     };
   }
 
-  // Fallback for unknown/disabled types — general-purpose config
-  const gp = agents.get("general-purpose");
+  // Fallback for unknown/disabled types — general config
+  const gp = agents.get("general");
   if (gp && gp.enabled !== false) {
     return {
       displayName: gp.displayName ?? gp.name,

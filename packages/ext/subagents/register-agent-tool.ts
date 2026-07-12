@@ -270,46 +270,41 @@ Terse command-style prompts produce shallow, generic work.
             minimum: 1,
           }),
         ),
-        // model: Type.Optional(
-        //   Type.String({
-        //     description:
-        //       'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
-        //   }),
-        // ),
-        // thinking: Type.Optional(
-        //   Type.String({
-        //     description:
-        //       "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
-        //   }),
-        // ),
-        // run_in_background: Type.Optional(
-        //   Type.Boolean({
-        //     description:
-        //       "Set to true to run in background. Returns agent ID immediately. You will be notified on completion.",
-        //   }),
-        // ),
-        // resume: Type.Optional(
-        //   Type.String({
-        //     description: "Optional agent ID to resume from. Continues from previous context.",
-        //   }),
-        // ),
-        // isolated: Type.Optional(
-        //   Type.Boolean({
-        //     description: "If true, agent gets no extension/MCP tools — only built-in tools.",
-        //   }),
-        // ),
-        // inherit_context: Type.Optional(
-        //   Type.Boolean({
-        //     description:
-        //       "If true, fork parent conversation into the agent. Default: false (fresh context).",
-        //   }),
-        // ),
-        // isolation: Type.Optional(
-        //   Type.Literal("worktree", {
-        //     description:
-        //       'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
-        //   }),
-        // ),
+        model: Type.Optional(
+          Type.String({
+            description:
+              'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+          }),
+        ),
+        thinking: Type.Optional(
+          Type.String({
+            description:
+              "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
+          }),
+        ),
+        run_in_background: Type.Optional(
+          Type.Boolean({
+            description:
+              "Set to true to run in background. Returns agent ID immediately. You will be notified on completion.",
+          }),
+        ),
+        resume: Type.Optional(
+          Type.String({
+            description: "Optional agent ID to resume from. Continues from previous context.",
+          }),
+        ),
+        inherit_context: Type.Optional(
+          Type.Boolean({
+            description:
+              "If true, fork parent conversation into the agent. Default: false (fresh context).",
+          }),
+        ),
+        isolation: Type.Optional(
+          Type.Literal("worktree", {
+            description:
+              'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
+          }),
+        ),
       }),
 
       // ---- Custom rendering: Claude Code style ----

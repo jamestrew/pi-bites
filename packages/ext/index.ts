@@ -39,6 +39,7 @@ export default function (pi: ExtensionAPI) {
 
   if (!disabled.has("bashGate")) registerBashGate(pi, configRef);
   if (!disabled.has("rtk")) registerRtk(pi);
+  if (!disabled.has("tools")) registerCustomTools(pi);
 
   if (isSubagent) return;
 
@@ -49,7 +50,6 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!isNonInteractive && !disabled.has("tokenCount")) registerTokenCount(pi);
   if (!isNonInteractive && !disabled.has("usageDashboard")) registerUsageDashboard(pi);
-  if (!disabled.has("tools")) registerCustomTools(pi);
   if (!isNonInteractive && !disabled.has("fzf")) registerFzfFileSearch(pi);
   if (!disabled.has("promptNormalization")) registerPromptNormalization(pi);
   if (!disabled.has("atMentionContext")) registerAtMentionContext(pi);

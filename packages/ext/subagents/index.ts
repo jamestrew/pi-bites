@@ -247,7 +247,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   }
 
   // ---- Disable default agents configuration ----
-  // When enabled, the three hardcoded default agents (general-purpose, explore,
+  // When enabled, the three hardcoded default agents (general, explore,
   // Plan) are not registered. User-defined agents from .pi/agents/*.md are
   // completely unaffected — only DEFAULT_AGENTS are suppressed.
   // Defaults to false; opt-in via `/agents → Settings` or subagents.json.
