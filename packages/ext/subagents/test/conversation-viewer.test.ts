@@ -274,6 +274,25 @@ describe("ConversationViewer", () => {
       }
     });
 
+    it("shows full effective model and thinking level without internal prompt mode", () => {
+      const viewer = new ConversationViewer(
+        mockTui(30, 100),
+        mockSession(),
+        mockRecord({
+          type: "general",
+          invocation: { modelName: "github-copilot/gpt-5.4", thinking: "off" },
+        }),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+      );
+
+      const output = viewer.render(100).join("\n");
+      expect(output).toContain("github-copilot/gpt-5.4 · thinking: off");
+      expect(output).not.toContain("twin");
+      expect(output).not.toContain("│");
+    });
+
     it("shows bash tool call commands", () => {
       const viewer = new ConversationViewer(
         mockTui(30, 80),

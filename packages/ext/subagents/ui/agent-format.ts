@@ -54,7 +54,7 @@ export interface AgentDetails {
   activity?: string;
   /** Current spinner frame index (for animated running indicator). */
   spinnerFrame?: number;
-  /** Short model name if different from parent (e.g. "haiku", "sonnet"). */
+  /** Full effective provider/model identifier. */
   modelName?: string;
   /** Notable config tags (e.g. ["thinking: high", "isolated"]). */
   tags?: string[];
@@ -125,13 +125,7 @@ export function getDisplayName(type: SubagentType): string {
   return getConfig(type).displayName;
 }
 
-/** Short label for prompt mode: "twin" for append, nothing for replace (the default). */
-export function getPromptModeLabel(type: SubagentType): string | undefined {
-  const config = getConfig(type);
-  return config.promptMode === "append" ? "twin" : undefined;
-}
-
-/** Mode label is not included — callers add it where they want it. */
+/** Format effective invocation metadata for user-facing displays. */
 export function buildInvocationTags(invocation: AgentInvocation | undefined): {
   modelName?: string;
   tags: string[];

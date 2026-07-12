@@ -1,5 +1,5 @@
 /**
- * conversation-viewer.ts — Live conversation overlay for viewing agent sessions.
+ * conversation-viewer.ts — Live split-pane view of agent sessions.
  *
  * Displays a scrollable, live-updating view of an agent's conversation.
  * Subscribes to session events for real-time streaming updates.
@@ -27,15 +27,14 @@ import {
   formatDuration,
   formatSessionTokens,
   getDisplayName,
-  getPromptModeLabel,
 } from "./agent-format.js";
 import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./viewer-keys.js";
 
 /** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES_BASE = 6;
 const MIN_VIEWPORT = 3;
-/** Height ceiling shared by the overlay's `maxHeight` and the viewer's internal viewport cap. */
-export const VIEWPORT_HEIGHT_PCT = 70;
+/** Give the lower subagent pane 70% of the terminal, leaving 30% for the main agent. */
+const VIEWPORT_HEIGHT_PCT = 70;
 
 export class ConversationViewer implements Component {
   private scrollOffset = 0;
@@ -148,9 +147,9 @@ export class ConversationViewer implements Component {
   }
 
   render(width: number): string[] {
-    if (width < 6) return []; // too narrow for any meaningful rendering
+    if (width < 4) return []; // too narrow for any meaningful rendering
     const th = this.theme;
-    const innerW = width - 4; // border + padding
+    const innerW = width - 2; // horizontal padding
     this.lastInnerW = innerW;
     const lines: string[] = [];
 
@@ -158,21 +157,14 @@ export class ConversationViewer implements Component {
       const vis = visibleWidth(s);
       return s + " ".repeat(Math.max(0, len - vis));
     };
-    const row = (content: string) =>
-      th.fg("border", "│") +
-      " " +
-      truncateToWidth(pad(content, innerW), innerW) +
-      " " +
-      th.fg("border", "│");
-    const hrTop = th.fg("border", `╭${"─".repeat(width - 2)}╮`);
-    const hrBot = th.fg("border", `╰${"─".repeat(width - 2)}╯`);
+    const row = (content: string) => " " + truncateToWidth(pad(content, innerW), innerW) + " ";
+    const hrTop = th.fg("border", "─".repeat(width));
+    const hrBot = th.fg("border", "─".repeat(width));
     const hrMid = row(th.fg("dim", "─".repeat(innerW)));
 
     // Header
     lines.push(hrTop);
     const name = getDisplayName(this.record.type);
-    const modeLabel = getPromptModeLabel(this.record.type);
-    const modeTag = modeLabel ? ` ${th.fg("dim", `(${modeLabel})`)}` : "";
     const statusIcon =
       this.record.status === "running"
         ? th.fg("accent", "●")
@@ -194,7 +186,7 @@ export class ConversationViewer implements Component {
 
     lines.push(
       row(
-        `${statusIcon} ${th.bold(name)}${modeTag}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${th.fg("dim", headerParts.join(" · "))}`,
+        `${statusIcon} ${th.bold(name)}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${th.fg("dim", headerParts.join(" · "))}`,
       ),
     );
     const invocationLine = this.invocationLine();
@@ -319,8 +311,7 @@ export class ConversationViewer implements Component {
   // ---- Private ----
 
   private viewportHeight(): number {
-    // Cap mirrors the overlay's maxHeight — otherwise the viewer would render
-    // more lines than the overlay shows and clip the footer.
+    // Keep the lower pane to 70% so the main-agent transcript remains visible.
     const maxRows = Math.floor((this.tui.terminal.rows * VIEWPORT_HEIGHT_PCT) / 100);
     return Math.max(MIN_VIEWPORT, maxRows - this.chromeLines());
   }

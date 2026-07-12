@@ -248,38 +248,32 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
       return;
     }
 
-    const { ConversationViewer, VIEWPORT_HEIGHT_PCT } = await import("./ui/conversation-viewer.js");
+    const { ConversationViewer } = await import("./ui/conversation-viewer.js");
     const session = record.session;
     const activity = agentActivity.get(record.id);
 
-    await ctx.ui.custom<undefined>(
-      (tui, theme, keybindings, done) => {
-        return new ConversationViewer(
-          tui,
-          session,
-          record,
-          activity,
-          theme,
-          done,
-          () => {
-            if (manager.abort(record.id)) {
-              ctx.ui.notify(`Stopped "${record.description}".`, "info");
-            }
-          },
-          keybindings,
-          (message: string) => manager.steer(record.id, message),
-          (message: string) => {
-            if (manager.cancelAndSteer(record.id, message)) {
-              ctx.ui.notify(`Canceled current operation for "${record.description}".`, "info");
-            }
-          },
-        );
-      },
-      {
-        overlay: true,
-        overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
-      },
-    );
+    await ctx.ui.custom<undefined>((tui, theme, keybindings, done) => {
+      return new ConversationViewer(
+        tui,
+        session,
+        record,
+        activity,
+        theme,
+        done,
+        () => {
+          if (manager.abort(record.id)) {
+            ctx.ui.notify(`Stopped "${record.description}".`, "info");
+          }
+        },
+        keybindings,
+        (message: string) => manager.steer(record.id, message),
+        (message: string) => {
+          if (manager.cancelAndSteer(record.id, message)) {
+            ctx.ui.notify(`Canceled current operation for "${record.description}".`, "info");
+          }
+        },
+      );
+    });
   }
 
   async function showAgentDetail(ctx: ExtensionCommandContext, name: string) {

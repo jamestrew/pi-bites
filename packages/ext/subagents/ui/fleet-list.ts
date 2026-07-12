@@ -22,7 +22,7 @@ import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal } from "../usage.js";
 import { type AgentActivity, getDisplayName, type Theme } from "./agent-format.js";
-import { ConversationViewer, VIEWPORT_HEIGHT_PCT } from "./conversation-viewer.js";
+import { ConversationViewer } from "./conversation-viewer.js";
 
 /** Widget key for the FleetView list. */
 const FLEET_KEY = "fleet";
@@ -329,33 +329,27 @@ export class FleetList {
     this.viewingAgentId = record.id;
 
     void this.ui
-      .custom<undefined>(
-        (tui, theme, keybindings, done) => {
-          this.viewerClose = () => done(undefined);
-          return new ConversationViewer(
-            tui,
-            session,
-            record,
-            activity,
-            theme,
-            done,
-            () => {
-              if (this.manager.abort(record.id))
-                this.ui?.notify(`Stopped "${record.description}".`, "info");
-            },
-            keybindings,
-            (message: string) => this.manager.steer(record.id, message),
-            (message: string) => {
-              if (this.manager.cancelAndSteer(record.id, message))
-                this.ui?.notify(`Canceled current operation for "${record.description}".`, "info");
-            },
-          );
-        },
-        {
-          overlay: true,
-          overlayOptions: { anchor: "center", width: "90%", maxHeight: `${VIEWPORT_HEIGHT_PCT}%` },
-        },
-      )
+      .custom<undefined>((tui, theme, keybindings, done) => {
+        this.viewerClose = () => done(undefined);
+        return new ConversationViewer(
+          tui,
+          session,
+          record,
+          activity,
+          theme,
+          done,
+          () => {
+            if (this.manager.abort(record.id))
+              this.ui?.notify(`Stopped "${record.description}".`, "info");
+          },
+          keybindings,
+          (message: string) => this.manager.steer(record.id, message),
+          (message: string) => {
+            if (this.manager.cancelAndSteer(record.id, message))
+              this.ui?.notify(`Canceled current operation for "${record.description}".`, "info");
+          },
+        );
+      })
       .then(
         () => this.clearViewer(),
         () => this.clearViewer(),

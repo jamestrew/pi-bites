@@ -27,7 +27,6 @@ import {
   describeActivity,
   formatMs,
   getDisplayName,
-  getPromptModeLabel,
   SPINNER,
 } from "./ui/agent-format.js";
 import { type FleetList } from "./ui/fleet-list.js";
@@ -426,11 +425,10 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       }
     }
 
-    const thinking = (
+    const thinking: ThinkingLevel =
       model?.reasoning === false
         ? "off"
-        : (resolvedConfig.thinking ?? deps.pi.getThinkingLevel?.() ?? "off")
-    ) as ThinkingLevel;
+        : (resolvedConfig.thinking ?? deps.pi.getThinkingLevel?.() ?? "off");
     if (model) deps.setRenderMetadata?.(toolCallId, `${model.provider}/${model.id}`, thinking);
     const inheritContext = resolvedConfig.inheritContext;
     const runInBackground = resolvedConfig.runInBackground;
@@ -446,10 +444,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       runInBackground,
       isolation,
     };
-    // Tool-result render shows the mode label too; viewer's header already does.
-    const modeLabel = getPromptModeLabel(subagentType);
-    const { tags: invocationTags } = buildInvocationTags(agentInvocation);
-    const agentTags = modeLabel ? [modeLabel, ...invocationTags] : invocationTags;
+    const { tags: agentTags } = buildInvocationTags(agentInvocation);
     const detailBase = {
       displayName,
       description: params.description,

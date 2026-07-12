@@ -26,7 +26,7 @@ import { type ToolDescriptionMode } from "./settings.js";
 import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
-import { ConversationViewer, VIEWPORT_HEIGHT_PCT } from "./ui/conversation-viewer.js";
+import { ConversationViewer } from "./ui/conversation-viewer.js";
 import type { ApprovalRequest } from "../bash-gate/index.ts";
 
 // ---- Shared helpers ----
@@ -179,14 +179,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
                   undefined,
                   keybindings,
                 ),
-              {
-                overlay: true,
-                overlayOptions: {
-                  anchor: "center",
-                  width: "90%",
-                  maxHeight: `${VIEWPORT_HEIGHT_PCT}%`,
-                },
-              },
             );
             continue;
           }
