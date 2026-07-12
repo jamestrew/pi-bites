@@ -115,8 +115,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done",
       session: { dispose: vi.fn() } as any,
-      aborted: false,
-      steered: false,
     });
 
     const { pi, tools, lifecycle } = makePi();

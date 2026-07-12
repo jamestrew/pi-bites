@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatSessionTokens } from "../ui/agent-format.js";
+import { formatSessionTokens, formatTurns } from "../ui/agent-format.js";
+
+describe("formatTurns", () => {
+  it("displays the raw turn count", () => {
+    expect(formatTurns(5)).toBe("↻5");
+  });
+});
 
 describe("formatSessionTokens", () => {
   const theme = { fg: (color: string, text: string) => `<${color}>${text}</${color}>` } as any;

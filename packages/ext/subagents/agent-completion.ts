@@ -129,8 +129,7 @@ export function createAgentCompletionHandler({
   }
 
   function onAgentComplete(record: AgentRecord): void {
-    const failed =
-      record.status === "error" || record.status === "stopped" || record.status === "aborted";
+    const failed = record.status === "error" || record.status === "stopped";
     pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
     pi.appendEntry("subagents:record", {
       id: record.id,

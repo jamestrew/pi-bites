@@ -2,7 +2,7 @@
  * status-note-wiring.test.ts — proves the status note actually reaches the
  * PARENT through the real tool handlers, not just that getStatusNote() returns
  * a string. Drives the registered `Agent` / `get_subagent_result` tools and
- * inspects the text delivered back, for a turn-limit abort and a user stop.
+ * inspects the text delivered back for a user stop.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -55,64 +55,6 @@ const plainTheme = {
 
 describe("status note reaches the parent through the real handlers", () => {
   afterEach(() => vi.restoreAllMocks());
-
-  it("foreground turn-limit abort → the Agent result flags an incomplete outcome", async () => {
-    vi.mocked(runAgent).mockResolvedValue({
-      responseText: "partial work so far",
-      session: { dispose: vi.fn() } as any,
-      aborted: true, // hard turn-limit abort
-      steered: false,
-    });
-    const { pi, tools } = makePi();
-    subagentsExtension(pi);
-
-    const res = await tools
-      .get("Agent")
-      .execute(
-        "tc1",
-        { prompt: "go", description: "d", subagent_type: "general-purpose" },
-        undefined,
-        undefined,
-        ctx(),
-      );
-
-    const out = textOf(res);
-    expect(out).toContain("hit the turn limit"); // getStatusNote("aborted") is wired in
-    expect(out).toContain("partial work so far"); // partial result still delivered
-    expect(out).not.toContain("STOPPED BY THE USER"); // not mislabelled as a user stop
-  });
-
-  it("renders steered foreground completion as green Done", () => {
-    const { pi, tools } = makePi();
-    subagentsExtension(pi);
-
-    const rendered = tools
-      .get("Agent")
-      .renderResult(
-        {
-          content: [{ type: "text", text: "done" }],
-          details: {
-            status: "steered",
-            description: "d",
-            toolUses: 1,
-            toolCalls: ["Read(a.ts)"],
-            lifetimeUsage: { input: 1, output: 1, cacheWrite: 0 },
-          },
-        },
-        { expanded: false, isPartial: false },
-        {
-          ...plainTheme,
-          fg: (color: string, s: string) => (color === "success" ? `[success]${s}` : s),
-        },
-        { args: { prompt: "go" } },
-      )
-      .render(80)
-      .join("\n");
-
-    expect(rendered).toContain("[success]Done");
-    expect(rendered).toContain("(ctrl+o to expand)");
-    expect(rendered).not.toContain("Wrapped up");
-  });
 
   it("renders compact running state without an empty spinner or thinking line", () => {
     const { pi, tools } = makePi();

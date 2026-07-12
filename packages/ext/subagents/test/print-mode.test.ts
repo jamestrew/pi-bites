@@ -74,8 +74,6 @@ describe("print mode background notifications", () => {
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done",
       session: { dispose: vi.fn() } as any,
-      aborted: false,
-      steered: false,
     });
 
     const { pi, tools, handlers } = makePi();

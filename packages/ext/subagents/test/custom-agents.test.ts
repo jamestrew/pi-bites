@@ -40,7 +40,6 @@ description: Security Auditor
 tools: read, grep, find
 model: anthropic/claude-opus-4-6
 thinking: high
-max_turns: 30
 persist_session: true
 session_dir: .seams/pi-sessions/seam-plan-reviewer
 prompt_mode: replace
@@ -62,7 +61,6 @@ You are a security auditor.`,
     expect(agent.builtinToolNames).toEqual(["read", "grep", "find"]);
     expect(agent.model).toBe("anthropic/claude-opus-4-6");
     expect(agent.thinking).toBe("high");
-    expect(agent.maxTurns).toBe(30);
     expect(agent.persistSession).toBe(true);
     expect(agent.sessionDir).toBe(".seams/pi-sessions/seam-plan-reviewer");
     expect(agent.promptMode).toBe("replace");
@@ -92,7 +90,6 @@ Just a prompt.`,
     expect(agent.skills).toBe(true); // inherit all
     expect(agent.model).toBeUndefined();
     expect(agent.thinking).toBeUndefined();
-    expect(agent.maxTurns).toBeUndefined();
     expect(agent.persistSession).toBeUndefined();
     expect(agent.sessionDir).toBeUndefined();
     expect(agent.promptMode).toBe("replace");
@@ -340,34 +337,6 @@ Any thinking.`,
     const result = loadCustomAgents(tmpDir);
     // Pi validates at session creation — we just pass through
     expect(result.get("anythink")!.thinking).toBe("turbo");
-  });
-
-  it("accepts max_turns: 0 as unlimited", () => {
-    writeAgent(
-      "unlimited",
-      `---
-max_turns: 0
----
-
-Unlimited turns.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("unlimited")!.maxTurns).toBe(0);
-  });
-
-  it("rejects negative max_turns", () => {
-    writeAgent(
-      "negturns",
-      `---
-max_turns: -5
----
-
-Negative turns.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("negturns")!.maxTurns).toBeUndefined();
   });
 
   it("handles prompt_mode: append", () => {

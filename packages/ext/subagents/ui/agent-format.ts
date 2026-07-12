@@ -35,8 +35,6 @@ export interface AgentActivity {
   session?: SessionLike;
   /** Current turn count. */
   turnCount: number;
-  /** Effective max turns for this agent (undefined = unlimited). */
-  maxTurns?: number;
   /** Lifetime usage breakdown — see LifetimeUsage docs. */
   lifetimeUsage: LifetimeUsage;
   /** Completed tool call names, in order. */
@@ -51,15 +49,7 @@ export interface AgentDetails {
   toolUses: number;
   tokens: string;
   durationMs: number;
-  status:
-    | "queued"
-    | "running"
-    | "completed"
-    | "steered"
-    | "aborted"
-    | "stopped"
-    | "error"
-    | "background";
+  status: "queued" | "running" | "completed" | "stopped" | "error" | "background";
   /** Human-readable description of what the agent is currently doing. */
   activity?: string;
   /** Current spinner frame index (for animated running indicator). */
@@ -70,8 +60,6 @@ export interface AgentDetails {
   tags?: string[];
   /** Current turn count. */
   turnCount?: number;
-  /** Effective max turns (undefined = unlimited). */
-  maxTurns?: number;
   agentId?: string;
   error?: string;
   toolCalls?: string[];
@@ -116,16 +104,9 @@ export function formatSessionTokens(
   return `${tokenStr} (${annot.join(" · ")})`;
 }
 
-/** Format turn count with optional max limit: "↻5≤30" or "↻5". */
-export function formatTurns(turnCount: number, maxTurns?: number | null): string {
-  return maxTurns != null ? `↻${turnCount}≤${maxTurns}` : `↻${turnCount}`;
-}
-
-/** Format the max-turn abort label, including observed turns when known. */
-export function formatMaxTurnsAbort(turnCount?: number | null): string {
-  return turnCount != null && turnCount > 0
-    ? `Aborted (max turns exceeded: ${turnCount})`
-    : "Aborted (max turns exceeded)";
+/** Format turn count. */
+export function formatTurns(turnCount: number): string {
+  return `↻${turnCount}`;
 }
 
 /** Format milliseconds as human-readable duration. */
@@ -162,7 +143,6 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): {
   if (invocation.isolation === "worktree") tags.push("worktree");
   if (invocation.inheritContext) tags.push("inherit context");
   if (invocation.runInBackground) tags.push("background");
-  if (invocation.maxTurns != null) tags.push(`max turns: ${invocation.maxTurns}`);
   return { modelName: invocation.modelName, tags };
 }
 

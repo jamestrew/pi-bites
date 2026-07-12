@@ -25,8 +25,6 @@ const resolvedRun = () =>
   vi.mocked(runAgent).mockResolvedValue({
     responseText: "done",
     session: mockSession(),
-    aborted: false,
-    steered: false,
   });
 
 describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)", () => {
@@ -136,7 +134,7 @@ describe("AgentManager — spawnAndWait onSpawned + foreground output file wirin
       outputFileSeenAtSessionCreated = capturedId
         ? manager.getRecord(capturedId)?.outputFile
         : undefined;
-      return { responseText: "done", session, aborted: false, steered: false };
+      return { responseText: "done", session };
     });
 
     await manager.spawnAndWait(
@@ -296,8 +294,6 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done",
       session: sess as any,
-      aborted: false,
-      steered: false,
     });
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
@@ -414,7 +410,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
       // Two assistant messages with usage
       opts.onAssistantUsage?.({ input: 100, output: 50, cacheWrite: 10 });
       opts.onAssistantUsage?.({ input: 200, output: 80, cacheWrite: 20 });
-      return { responseText: "done", session: mockSession(), aborted: false, steered: false };
+      return { responseText: "done", session: mockSession() };
     });
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
@@ -440,7 +436,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
       // onCompact should reflect the just-incremented count.
       opts.onCompaction?.({ reason: "threshold", tokensBefore: 12345 });
       opts.onCompaction?.({ reason: "manual", tokensBefore: 22222 });
-      return { responseText: "done", session: mockSession(), aborted: false, steered: false };
+      return { responseText: "done", session: mockSession() };
     });
 
     manager = new AgentManager(undefined, undefined, undefined, (record, info) => {
@@ -468,8 +464,6 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "first",
       session: session as any,
-      aborted: false,
-      steered: false,
     });
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
@@ -755,7 +749,7 @@ describe("AgentManager — abort() state machine", () => {
   it("a user abort survives the agent settling — stays 'stopped', never 'completed'", async () => {
     // Guards the `if (record.status !== "stopped")` check in the completion
     // handler: after a user abort, runAgent's promise still settles (here with
-    // aborted:false, as a non-cooperative mock would), and must NOT flip the
+    // as a non-cooperative mock would), and must NOT flip the
     // user-stopped status back to "completed" — otherwise the parent agent
     // would read the partial output as a finished result.
     manager = new AgentManager();
@@ -778,8 +772,6 @@ describe("AgentManager — abort() state machine", () => {
     resolveRun({
       responseText: "partial output",
       session: mockSession(),
-      aborted: false,
-      steered: false,
     });
     await record.promise;
 

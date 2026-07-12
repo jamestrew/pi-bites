@@ -2,24 +2,14 @@ import { Text } from "@earendil-works/pi-tui";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSessionContextPercent, getLifetimeTotal } from "./usage.js";
 import { getStatusNote } from "./status-note.js";
-import {
-  type AgentActivity,
-  formatMaxTurnsAbort,
-  formatMs,
-  formatTokens,
-  formatTurns,
-} from "./ui/agent-format.js";
+import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
 import { type AgentRecord, type NotificationDetails } from "./types.js";
 
 /** Human-readable status label for agent completion. */
-function getStatusLabel(status: string, error?: string, turnCount?: number): string {
+function getStatusLabel(status: string, error?: string): string {
   switch (status) {
     case "error":
       return `Error: ${error ?? "unknown"}`;
-    case "aborted":
-      return formatMaxTurnsAbort(turnCount);
-    case "steered":
-      return "Wrapped up (turn limit)";
     case "stopped":
       return "Stopped";
     default:
@@ -82,7 +72,6 @@ export function buildNotificationDetails(
     status: record.status,
     toolUses: record.toolUses,
     turnCount: activity?.turnCount ?? 0,
-    maxTurns: activity?.maxTurns,
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
     outputFile: record.outputFile,
@@ -103,21 +92,14 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
       if (!d) return undefined;
 
       function renderOne(d: NotificationDetails): string {
-        const isError = d.status === "error" || d.status === "stopped" || d.status === "aborted";
+        const isError = d.status === "error" || d.status === "stopped";
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-        const statusText =
-          d.status === "aborted"
-            ? formatMaxTurnsAbort(d.turnCount)
-            : isError
-              ? d.status
-              : d.status === "steered"
-                ? "completed (steered)"
-                : "completed";
+        const statusText = isError ? d.status : "completed";
 
         let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
         const parts: string[] = [];
-        if (d.turnCount > 0) parts.push(formatTurns(d.turnCount, d.maxTurns));
+        if (d.turnCount > 0) parts.push(formatTurns(d.turnCount));
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
         if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));

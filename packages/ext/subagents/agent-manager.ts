@@ -63,7 +63,6 @@ interface SpawnArgs {
 interface SpawnOptions {
   description: string;
   model?: Model<any>;
-  maxTurns?: number;
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
@@ -253,7 +252,6 @@ export class AgentManager {
       pi,
       agentId: id,
       model: options.model,
-      maxTurns: options.maxTurns,
       isolated: options.isolated,
       inheritContext: options.inheritContext,
       thinkingLevel: options.thinkingLevel,
@@ -308,7 +306,7 @@ export class AgentManager {
         options.onSessionCreated?.(session);
       },
     })
-      .then(async ({ responseText, session, aborted, steered }) => {
+      .then(async ({ responseText, session }) => {
         if (record.pendingCancelSteer && record.status !== "stopped") {
           const message = record.pendingCancelSteer;
           record.pendingCancelSteer = undefined;
@@ -331,9 +329,7 @@ export class AgentManager {
         }
 
         // Don't overwrite status if externally stopped via abort()
-        if (record.status !== "stopped") {
-          record.status = aborted ? "aborted" : steered ? "steered" : "completed";
-        }
+        if (record.status !== "stopped") record.status = "completed";
         record.result = responseText;
         record.session = session;
         record.completedAt ??= Date.now();

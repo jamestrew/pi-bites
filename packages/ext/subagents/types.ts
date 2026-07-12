@@ -39,7 +39,6 @@ export interface AgentConfig {
   skills: true | string[] | false;
   model?: string;
   thinking?: ThinkingLevel;
-  maxTurns?: number;
   /** Persist this subagent as a normal pi session instead of keeping it in memory only. */
   persistSession?: boolean;
   /** Optional session directory used when persistSession is true. Omitted = pi's normal session location. */
@@ -72,7 +71,7 @@ export interface AgentRecord {
   id: string;
   type: SubagentType;
   description: string;
-  status: "queued" | "running" | "completed" | "steered" | "aborted" | "stopped" | "error";
+  status: "queued" | "running" | "completed" | "stopped" | "error";
   result?: string;
   error?: string;
   toolUses: number;
@@ -123,7 +122,6 @@ export interface AgentInvocation {
   /** Short display name, e.g. "haiku" — only set when different from parent. */
   modelName?: string;
   thinking?: ThinkingLevel;
-  maxTurns?: number;
   isolated?: boolean;
   inheritContext?: boolean;
   runInBackground?: boolean;
@@ -137,7 +135,6 @@ export interface NotificationDetails {
   status: string;
   toolUses: number;
   turnCount: number;
-  maxTurns?: number;
   totalTokens: number;
   durationMs: number;
   outputFile?: string;

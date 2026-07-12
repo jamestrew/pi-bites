@@ -6,12 +6,11 @@ import { type AgentActivity } from "./ui/agent-format.js";
  * Create an AgentActivity state and spawn callbacks for tracking tool usage.
  * Used by both foreground and background paths to avoid duplication.
  */
-export function createActivityTracker(maxTurns?: number, onStreamUpdate?: () => void) {
+export function createActivityTracker(onStreamUpdate?: () => void) {
   const state: AgentActivity = {
     activeTools: new Map(),
     toolUses: 0,
     turnCount: 1,
-    maxTurns,
     responseText: "",
     session: undefined,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },

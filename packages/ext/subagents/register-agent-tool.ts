@@ -10,7 +10,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { createAgentToolExecute } from "./agent-tool-execute.js";
 import { type AgentManager } from "./agent-manager.js";
-import { setDefaultMaxTurns, setGraceTurns, SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
+import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { applyAndEmitLoaded, type ToolDescriptionMode } from "./settings.js";
 import { type JoinMode } from "./types.js";
@@ -102,8 +102,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
   applyAndEmitLoaded(
     {
       setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
-      setDefaultMaxTurns,
-      setGraceTurns,
       setDefaultJoinMode,
       setScopeModels: setScopeModelsEnabled,
       setDisableDefaultAgents: setDisableDefaultAgents,
@@ -266,13 +264,6 @@ Terse command-style prompts produce shallow, generic work.
         prompt: Type.String({
           description: "The task for the agent to perform.",
         }),
-        max_turns: Type.Optional(
-          Type.Number({
-            description:
-              "Maximum number of agentic turns before stopping. Omit for unlimited (default).",
-            minimum: 1,
-          }),
-        ),
         model: Type.Optional(
           Type.String({
             description:

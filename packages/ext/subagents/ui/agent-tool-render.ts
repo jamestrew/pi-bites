@@ -5,13 +5,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Component, Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { doneStats } from "../tool-result.js";
-import {
-  type AgentDetails,
-  formatMaxTurnsAbort,
-  formatTurns,
-  SPINNER,
-  type Theme,
-} from "./agent-format.js";
+import { type AgentDetails, formatTurns, SPINNER, type Theme } from "./agent-format.js";
 import { summarizeToolArg, wrapMultilineText } from "./tool-call-format.js";
 
 function formatStats(details: AgentDetails): string {
@@ -19,7 +13,7 @@ function formatStats(details: AgentDetails): string {
   if (details.modelName) parts.push(details.modelName);
   if (details.tags) parts.push(...details.tags);
   if (details.turnCount != null && details.turnCount > 0)
-    parts.push(formatTurns(details.turnCount, details.maxTurns));
+    parts.push(formatTurns(details.turnCount));
   if (details.status === "running") {
     if (details.toolUses > 0)
       parts.push(`${details.toolUses} tool use${details.toolUses === 1 ? "" : "s"}`);
@@ -48,8 +42,6 @@ function renderStatus(details: AgentDetails, theme: Theme, stats: string): strin
   if (details.status === "error")
     return [theme.fg("error", `Error: ${details.error ?? "unknown"}`)];
   if (details.status === "stopped") return [theme.fg("muted", "Stopped")];
-  if (details.status === "aborted")
-    return [theme.fg("warning", formatMaxTurnsAbort(details.turnCount))];
   return [];
 }
 
@@ -106,7 +98,7 @@ export function renderAgentToolResult(
         } else if (details.status === "background") {
           lines.push(theme.fg("muted", "Background agent running…"));
         } else {
-          const isDone = details.status === "completed" || details.status === "steered";
+          const isDone = details.status === "completed";
           lines.push(
             theme.fg(isDone ? "success" : "muted", isDone ? "Done" : "Finished") +
               (stats ? theme.fg("muted", ` (${stats})`) : ""),
@@ -122,7 +114,7 @@ export function renderAgentToolResult(
       } else {
         lines.push(...renderStatus(details, theme, stats));
         if (lines.length === 0) {
-          const isDone = details.status === "completed" || details.status === "steered";
+          const isDone = details.status === "completed";
           lines.push(
             theme.fg(isDone ? "success" : "warning", "Done") +
               (stats ? theme.fg("muted", ` (${stats})`) : ""),

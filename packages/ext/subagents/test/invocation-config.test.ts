@@ -24,7 +24,6 @@ describe("resolveAgentInvocationConfig", () => {
       makeConfig({
         model: "provider/config-model",
         thinking: "high",
-        maxTurns: 42,
         inheritContext: false,
         runInBackground: false,
         isolated: false,
@@ -33,7 +32,6 @@ describe("resolveAgentInvocationConfig", () => {
       {
         model: "provider/param-model",
         thinking: "minimal",
-        max_turns: 1,
         inherit_context: true,
         run_in_background: true,
         isolated: true,
@@ -44,7 +42,6 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.modelInput).toBe("provider/param-model");
     expect(resolved.modelFromParams).toBe(true);
     expect(resolved.thinking).toBe("minimal");
-    expect(resolved.maxTurns).toBe(1);
     expect(resolved.inheritContext).toBe(true);
     expect(resolved.runInBackground).toBe(true);
     expect(resolved.isolated).toBe(false);
@@ -55,7 +52,6 @@ describe("resolveAgentInvocationConfig", () => {
     const resolved = resolveAgentInvocationConfig(undefined, {
       model: "provider/param-model",
       thinking: "minimal",
-      max_turns: 3,
       inherit_context: true,
       run_in_background: true,
       isolated: true,
@@ -65,7 +61,6 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.modelInput).toBe("provider/param-model");
     expect(resolved.modelFromParams).toBe(true);
     expect(resolved.thinking).toBe("minimal");
-    expect(resolved.maxTurns).toBe(3);
     expect(resolved.inheritContext).toBe(true);
     expect(resolved.runInBackground).toBe(true);
     expect(resolved.isolated).toBe(true);

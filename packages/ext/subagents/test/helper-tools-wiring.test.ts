@@ -46,8 +46,6 @@ describe("background helper tools", () => {
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done result",
       session: { dispose: vi.fn() } as any,
-      aborted: false,
-      steered: false,
     });
     const { pi, tools, active } = makePi();
     subagentsExtension(pi);

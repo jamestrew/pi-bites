@@ -72,8 +72,6 @@ async function spawnCompletedBackgroundAgent(tools: Map<string, any>): Promise<s
   vi.mocked(runAgent).mockResolvedValue({
     responseText: "THE-RESULT-PAYLOAD",
     session: { dispose: vi.fn() } as any,
-    aborted: false,
-    steered: false,
   });
   const spawn = await tools.get("Agent").execute(
     "tc-spawn",

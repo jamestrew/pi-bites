@@ -5,7 +5,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createActivityTracker } from "./activity-tracker.js";
 import { type AgentManager } from "./agent-manager.js";
-import { getDefaultMaxTurns, normalizeMaxTurns } from "./agent-runner.js";
 import { getAgentConfig, resolveType } from "./agent-types.js";
 import { isModelInScope, readEnabledModels, resolveEnabledModels } from "./enabled-models.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
@@ -40,7 +39,6 @@ type AgentToolParams = {
   resume?: string;
   model?: string;
   thinking?: string;
-  max_turns?: number;
   run_in_background?: boolean;
   inherit_context?: boolean;
   isolated?: boolean;
@@ -71,7 +69,6 @@ type PreparedInvocation = {
   fellBack: boolean;
   displayName: string;
   model: ExtensionContext["model"];
-  effectiveMaxTurns: number | undefined;
   isolated: boolean;
   inheritContext: boolean;
   thinking?: ThinkingLevel;
@@ -129,7 +126,6 @@ async function runBackgroundAgent(
     subagentType,
     displayName,
     model,
-    effectiveMaxTurns,
     isolated,
     inheritContext,
     thinking,
@@ -137,7 +133,7 @@ async function runBackgroundAgent(
     agentInvocation,
     detailBase,
   } = invocation;
-  const { state: bgState, callbacks: bgCallbacks } = createActivityTracker(effectiveMaxTurns);
+  const { state: bgState, callbacks: bgCallbacks } = createActivityTracker();
 
   // Wrap onSessionCreated to wire output file streaming.
   // The callback lazily reads record.outputFile (set right after spawn)
@@ -156,7 +152,6 @@ async function runBackgroundAgent(
     id = manager.spawn(pi, ctx, subagentType, params.prompt, {
       description: params.description,
       model,
-      maxTurns: effectiveMaxTurns,
       isolated,
       inheritContext,
       thinkingLevel: thinking,
@@ -229,7 +224,6 @@ async function runForegroundAgent(
     rawType,
     fellBack,
     model,
-    effectiveMaxTurns,
     isolated,
     inheritContext,
     thinking,
@@ -248,7 +242,6 @@ async function runForegroundAgent(
       toolUses: fgState.toolUses,
       tokens: formatLifetimeTokens(fgState),
       turnCount: fgState.turnCount,
-      maxTurns: fgState.maxTurns,
       durationMs: Date.now() - startedAt,
       status: "running",
       activity: describeActivity(fgState.activeTools, fgState.responseText),
@@ -262,10 +255,7 @@ async function runForegroundAgent(
     });
   };
 
-  const { state: fgState, callbacks: fgCallbacks } = createActivityTracker(
-    effectiveMaxTurns,
-    streamUpdate,
-  );
+  const { state: fgState, callbacks: fgCallbacks } = createActivityTracker(streamUpdate);
 
   // Wire session creation: register in FleetView + stream to output file.
   // The output file path is set synchronously after spawn (below),
@@ -307,7 +297,6 @@ async function runForegroundAgent(
       {
         description: params.description,
         model,
-        maxTurns: effectiveMaxTurns,
         isolated,
         inheritContext,
         thinkingLevel: thinking,
@@ -448,13 +437,9 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       effectiveModelId && effectiveModelId !== parentModelId
         ? (model?.name ?? effectiveModelId).replace(/^Claude\s+/i, "").toLowerCase()
         : undefined;
-    const effectiveMaxTurns = normalizeMaxTurns(resolvedConfig.maxTurns ?? getDefaultMaxTurns());
     const agentInvocation: AgentInvocation = {
       modelName,
       thinking,
-      // Explicit value only — the default fallback would just add noise.
-      // Normalize so `0` (unlimited) doesn't surface as a misleading "max turns: 0".
-      maxTurns: normalizeMaxTurns(resolvedConfig.maxTurns),
       isolated,
       inheritContext,
       runInBackground,
@@ -485,7 +470,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       fellBack,
       displayName,
       model,
-      effectiveMaxTurns,
       isolated,
       inheritContext,
       thinking,

@@ -26,7 +26,7 @@ export function buildDetails(
     session?: any;
     lifetimeUsage: LifetimeUsage;
   },
-  activity?: { turnCount?: number; maxTurns?: number; toolCalls?: string[] },
+  activity?: { turnCount?: number; toolCalls?: string[] },
   overrides?: Partial<AgentDetails>,
 ): AgentDetails {
   return {
@@ -34,7 +34,6 @@ export function buildDetails(
     toolUses: record.toolUses,
     tokens: formatLifetimeTokens(record),
     turnCount: activity?.turnCount,
-    maxTurns: activity?.maxTurns,
     durationMs: (record.completedAt ?? Date.now()) - record.startedAt,
     status: record.status as AgentDetails["status"],
     agentId: record.id,
