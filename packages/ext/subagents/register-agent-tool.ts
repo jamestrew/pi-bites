@@ -125,6 +125,7 @@ Custom agents: .pi/agents/<name>.md (project) or ${getAgentDir()}/agents/<name>.
 
 Notes:
 - description: 3-5 words (shown in UI). Prompts must be self-contained — the agent has not seen this conversation.
+- Start bounded investigations with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader searching is needed; include what was already checked. Delegate immediately only for obviously broad or high-fanout work.
 - Parallel work: one message, multiple Agent calls, run_in_background: true on each. You are notified when background agents finish — never poll or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
 - resume continues a previous agent by ID; steer_subagent messages a running one.
@@ -141,7 +142,7 @@ When using the Agent tool, specify a subagent_type parameter to select which age
 
 ## When not to use
 
-If the target is already known, use a direct tool — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or string. Reserve this tool for open-ended questions that span the codebase, or tasks that match an available agent type.
+Start bounded investigations with direct tools — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or string. If 2-4 targeted tool calls do not locate the answer and the next step requires broader searching, delegate to Explore and include what was already checked. Delegate immediately only when the task is obviously broad, high-fanout, or likely to produce enough output to bloat the main context. Afterward, read only the files needed to act on or verify the findings.
 
 ## Usage notes
 
@@ -154,7 +155,7 @@ If the target is already known, use a direct tool — \`read\` for a known path,
 - Use resume with an agent ID to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use steer_subagent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
-- If an agent's description says it should be used proactively, try to use it without the user having to ask for it first.
+- Do not duplicate delegated exploration. Pass prior findings into the prompt, then use the result to narrow any source files you need to read yourself.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
 - Use thinking to control extended thinking level.
 - Use inherit_context if the agent needs the parent conversation history.
@@ -239,8 +240,10 @@ Terse command-style prompts produce shallow, generic work.
           "Importantly, avoid duplicating work that subagents are already doing — if you delegate research to a subagent, do not also perform the same searches yourself.",
         ].join(" "),
         [
-          "For broad codebase exploration or research, spawn Agent with an appropriate subagent_type (e.g. explore).",
-          "Otherwise use direct tools (read, grep, find) when the target is already known.",
+          "Start bounded investigations with direct tools (read, grep, find).",
+          "If 2-4 targeted tool calls do not locate the answer and broader searching is needed, delegate to Explore and pass along what was already checked.",
+          "Delegate immediately only for obviously broad, high-fanout, or context-heavy exploration.",
+          "Afterward, read only the files needed to act on or verify the findings.",
         ].join(" "),
         [
           "When an agent runs in the background, you will be notified on completion — do not poll or sleep waiting for it.",

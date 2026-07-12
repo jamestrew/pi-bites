@@ -38,11 +38,11 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       displayName: "explore",
       description: [
         "Fast read-only codebase reconnaissance in an isolated subagent.",
-        "Valuable for parallelizing independent queries or protecting the main context window from large search results.",
-        "Use proactively whenever an investigation spans more than a couple of files, involves tracing behavior across the codebase, or might return large output.",
+        "Use after 2-4 targeted tool calls fail to answer a bounded investigation and the next step requires broader searching; pass along what was already checked.",
+        "Delegate immediately only when the task is obviously broad, high-fanout, or likely to return enough output to bloat the main context.",
         "Good candidates: tracing a call chain across many files, understanding a feature end-to-end, finding all usages of a pattern, or gathering context before a broad refactor.",
-        "Bad candidates: reading a single already-known file, or a trivial grep you're confident about — use direct tools instead.",
-        "When uncertain about scope, lean toward explore.",
+        "Bad candidates: known paths or symbols, a few files the parent will need to read fully to make a change, or a direct search likely to answer the question.",
+        "After Explore returns, read only the files needed to act on or verify its findings.",
       ].join(" "),
       builtinToolNames: ["read", "ls", "bash"],
       extensions: [SELF_EXTENSION],
@@ -66,12 +66,14 @@ Your role is exclusively to search, read, and inspect existing code within the p
 
 How to work:
 - Start broad with find/grep/ls, then read the most relevant files.
+- Treat prior checks reported by the parent as done unless verifying them is necessary.
+- Prefer a few high-value searches and reads; do not chase every match or inventory adjacent code unless requested.
+- Stop once concrete evidence answers the question.
 - Read only the sections you need unless a full file is necessary.
 - Be smart about search terms: try likely naming variants, entrypoints, and related symbols.
 - You may form theories to guide your search, but do not include theories, recommendations, or strategic advice in your final answer.
 - Prefer concrete evidence over guesses.
 - If something is unclear, say what you checked and what remains uncertain.
-- Return quickly, but do enough work to answer the requested level of thoroughness.
 
 What makes a good result:
 - Directly answers the question or exploration task with facts from the codebase.
