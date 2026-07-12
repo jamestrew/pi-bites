@@ -120,6 +120,16 @@ interface BashRuleCommandMatch {
   label: string;
 }
 
+export type ApprovalRequest = {
+  requestId: string;
+  agentId?: string;
+  title: string;
+  command: string;
+  labels: string[];
+  reasons: string[];
+  sessionAllowKey: string;
+};
+
 /**
  * When a command is approved, add the time spent waiting in the gate to the
  * timeout (if one was set by the model). This is necessary because the TUI
@@ -285,14 +295,7 @@ export async function findMatchedPattern(
 
 async function requestSubagentApproval(
   pi: ExtensionAPI,
-  request: {
-    agentId?: string;
-    title: string;
-    command: string;
-    labels: string[];
-    reasons: string[];
-    sessionAllowKey: string;
-  },
+  request: Omit<ApprovalRequest, "requestId">,
 ): Promise<BashGateDecision> {
   const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const channel = "subagents:bash_gate:approval";

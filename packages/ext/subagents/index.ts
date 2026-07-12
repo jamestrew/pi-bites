@@ -26,6 +26,8 @@ import { type ToolDescriptionMode } from "./settings.js";
 import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
+import { ConversationViewer, VIEWPORT_HEIGHT_PCT } from "./ui/conversation-viewer.js";
+import type { ApprovalRequest } from "../bash-gate/index.ts";
 
 // ---- Shared helpers ----
 
@@ -136,16 +138,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   const unsubBashGateApproval = pi.events.on(
     "subagents:bash_gate:approval",
     async (raw: unknown) => {
-      const request = raw as {
-        requestId?: string;
-        title?: string;
-        command?: string;
-        labels?: string[];
-        reasons?: string[];
-        sessionAllowKey?: string;
-      };
-      if (!request.requestId) return;
-
+      const request = raw as ApprovalRequest;
       const ackChannel = `subagents:bash_gate:approval:ack:${request.requestId}`;
       const replyChannel = `subagents:bash_gate:approval:reply:${request.requestId}`;
       pi.events.emit(ackChannel, {});
@@ -162,19 +155,48 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
         const prompt = reasons
           ? `🔒 ${request.title ?? "Subagent"} requests bash approval: ${request.command ?? ""}\n${reasons} (${labels})`
           : `🔒 ${request.title ?? "Subagent"} requests bash approval: ${request.command ?? ""}\n${labels}`;
-        const choice = await ui.select(prompt, [
-          "Allow",
-          `Allow for session ("${request.sessionAllowKey ?? labels}")`,
-          "Deny",
-        ]);
+        const allowSession = `Allow for session ("${request.sessionAllowKey ?? labels}")`;
+        while (true) {
+          const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
+          const viewConversation = record?.session ? "View conversation" : undefined;
+          const choice = await ui.select(prompt, [
+            "Allow",
+            allowSession,
+            ...(viewConversation ? [viewConversation] : []),
+            "Deny",
+          ]);
 
-        pi.events.emit(replyChannel, {
-          decision: choice?.startsWith("Allow for session")
-            ? "allow-session"
-            : choice === "Allow"
-              ? "allow"
-              : "deny",
-        });
+          if (choice === viewConversation && record?.session) {
+            await ui.custom<undefined>(
+              (tui, theme, keybindings, done) =>
+                new ConversationViewer(
+                  tui,
+                  record.session!,
+                  record,
+                  agentActivity.get(record.id),
+                  theme,
+                  done,
+                  undefined,
+                  keybindings,
+                ),
+              {
+                overlay: true,
+                overlayOptions: {
+                  anchor: "center",
+                  width: "90%",
+                  maxHeight: `${VIEWPORT_HEIGHT_PCT}%`,
+                },
+              },
+            );
+            continue;
+          }
+
+          pi.events.emit(replyChannel, {
+            decision:
+              choice === allowSession ? "allow-session" : choice === "Allow" ? "allow" : "deny",
+          });
+          break;
+        }
       } catch {
         pi.events.emit(replyChannel, { decision: "deny" });
       }
