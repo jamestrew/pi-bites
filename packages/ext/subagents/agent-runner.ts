@@ -584,7 +584,7 @@ export async function runAgent(
   const settingsManager = SettingsManager.create(configCwd, agentDir);
   const configuredSessionDir = resolveConfiguredSessionDir(agentConfig?.sessionDir, effectiveCwd);
   const defaultSessionDir =
-    process.env.PI_CODING_AGENT_SESSION_DIR ?? settingsManager.getSessionDir?.();
+    process.env.PI_CODING_AGENT_SESSION_DIR ?? settingsManager.getSessionDir();
   const sessionManager = agentConfig?.persistSession
     ? SessionManager.create(effectiveCwd, configuredSessionDir ?? defaultSessionDir)
     : SessionManager.inMemory(effectiveCwd);
@@ -605,7 +605,7 @@ export async function runAgent(
 
   const { session } = await createAgentSession(sessionOpts);
 
-  sessionManager.appendCustomEntry?.(SUBAGENT_METADATA_ENTRY, {
+  sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
     agentId: options.agentId,
     type,
     title: agentConfig?.displayName ?? agentConfig?.name ?? type,

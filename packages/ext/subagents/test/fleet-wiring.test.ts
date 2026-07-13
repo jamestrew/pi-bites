@@ -33,6 +33,7 @@ function makePi() {
     events: { emit: vi.fn(), on: vi.fn(() => vi.fn()) },
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
+    getThinkingLevel: vi.fn(() => "off"),
   } as any;
   return { pi, tools, lifecycle };
 }

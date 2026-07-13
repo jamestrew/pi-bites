@@ -619,7 +619,7 @@ export class AgentManager {
 
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
-    record.session?.dispose?.();
+    record.session?.dispose();
     record.session = undefined;
     this.agents.delete(id);
   }
@@ -681,7 +681,7 @@ export class AgentManager {
   async waitForAll(): Promise<void> {
     // Loop because drainQueue respects the concurrency limit — as running
     // agents finish they start queued ones, which need awaiting too.
-    while (true) {
+    for (;;) {
       this.drainQueue();
       const pending = [...this.agents.values()]
         .filter((r) => r.status === "running" || r.status === "queued")

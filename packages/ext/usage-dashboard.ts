@@ -45,6 +45,7 @@ import {
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import type { SubagentUsageRecord } from "./subagents/usage.js";
 
 // =============================================================================
 // Types
@@ -289,19 +290,25 @@ interface SessionMessage {
   timestamp: number;
 }
 
-interface SubagentUsageRecord {
-  type: "subagent_usage";
-  sessionId: string;
-  timestamp: number;
-  provider: string;
-  model: string;
-  usage: {
-    input?: number;
-    output?: number;
-    cacheRead?: number;
-    cacheWrite?: number;
-    cost?: { total?: number };
-  };
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isSubagentUsageRecord(value: unknown): value is SubagentUsageRecord {
+  if (!isObject(value) || !isObject(value.usage) || !isObject(value.usage.cost)) return false;
+  return (
+    value.type === "subagent_usage" &&
+    typeof value.subagent === "string" &&
+    typeof value.sessionId === "string" &&
+    typeof value.timestamp === "number" &&
+    typeof value.provider === "string" &&
+    typeof value.model === "string" &&
+    typeof value.usage.input === "number" &&
+    typeof value.usage.output === "number" &&
+    typeof value.usage.cacheRead === "number" &&
+    typeof value.usage.cacheWrite === "number" &&
+    typeof value.usage.cost.total === "number"
+  );
 }
 
 interface ParsedSessionFile {
@@ -391,22 +398,16 @@ async function parseSubagentUsageFile(
       const line = lines[i]!;
       if (!line.trim()) continue;
       try {
-        const entry = JSON.parse(line) as SubagentUsageRecord;
-        if (
-          entry.type !== "subagent_usage" ||
-          !entry.sessionId ||
-          !entry.provider ||
-          !entry.model
-        ) {
+        const entry: unknown = JSON.parse(line);
+        if (!isSubagentUsageRecord(entry) || !entry.sessionId || !entry.provider || !entry.model)
           continue;
-        }
 
-        const usage = entry.usage ?? {};
+        const usage = entry.usage;
         const messages = bySession.get(entry.sessionId) ?? [];
         messages.push({
           provider: entry.provider,
           model: entry.model,
-          cost: usage.cost?.total || 0,
+          cost: usage.cost.total || 0,
           input: usage.input || 0,
           output: usage.output || 0,
           cacheRead: usage.cacheRead || 0,

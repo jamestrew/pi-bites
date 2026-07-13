@@ -331,7 +331,7 @@ export class FleetList {
 
   private openSelected(): void {
     const entry = this.roster()[this.selectedIndex];
-    if (!entry || entry.kind === "main") {
+    if (entry.kind === "main") {
       // `main` = return to the prompt; the native transcript is already shown.
       this.deactivate();
       return;

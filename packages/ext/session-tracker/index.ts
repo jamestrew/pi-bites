@@ -366,9 +366,9 @@ export async function runPiSessionsPicker(
 
   const labels = records.map(formatPaneRecordLabel);
   const selected = await ctx.ui.select("Pi sessions", labels);
-  const record = records[labels.indexOf(selected ?? "")];
+  if (selected === undefined) return;
+  const record = records.find((candidate) => formatPaneRecordLabel(candidate) === selected);
   if (!record) return;
-
   let response: TrackerResponse;
   try {
     response = await requestSessionTracker(
@@ -425,7 +425,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
       };
       void update();
       timer = options.setInterval(() => void update(), options.intervalMs);
-      timer.unref?.();
+      timer.unref();
     },
     stop(ctx?: { ui?: { setStatus(id: string, text: string | undefined): void } }) {
       if (timer) options.clearInterval(timer);
@@ -503,7 +503,7 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
       // flight; creating the interval now would leak it with a stale ctx.
       if (ctx !== startCtx) return;
       timer = options.setInterval(() => void report("heartbeat"), options.heartbeatIntervalMs);
-      timer.unref?.();
+      timer.unref();
     },
     async setState(next: TrackerState) {
       state = next;
@@ -589,8 +589,8 @@ export default function registerSessionTracker(
     (error) => logTrackerFailure(defaultCallOptions, "needs-input inference", error),
   );
   pi.on("agent_start", () => needsInputLifecycle.agentStart());
-  pi.events?.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
-  pi.events?.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
+  pi.events.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
+  pi.events.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
   pi.on("agent_end", (event) => needsInputLifecycle.agentEnd(event));
   pi.on("agent_settled", (_event, ctx) => needsInputLifecycle.agentSettled(ctx));
   pi.on("session_shutdown", async (event) => {

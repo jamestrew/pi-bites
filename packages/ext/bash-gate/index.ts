@@ -414,8 +414,8 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       try {
         const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean) as string[];
         const decision = await requestSubagentApproval(pi, {
-          agentId: metadata?.agentId,
-          title: metadata?.title ?? metadata?.type ?? "Subagent",
+          agentId: metadata.agentId,
+          title: metadata.title ?? metadata.type ?? "Subagent",
           command,
           labels: matchedPatternLabels,
           reasons,

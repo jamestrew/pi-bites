@@ -71,7 +71,7 @@ You are operating as a sub-agent invoked to handle a specific task.
 - Be concise but complete
 </sub_agent_context>`;
 
-    const customSection = config.systemPrompt?.trim()
+    const customSection = config.systemPrompt.trim()
       ? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
       : "";
 

@@ -203,7 +203,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
       return {
         render: (w: number) => container.render(w),
         invalidate: () => container.invalidate(),
-        handleInput: (data: string) => list.handleInput?.(data),
+        handleInput: (data: string) => list.handleInput(data),
       };
     });
 
@@ -591,7 +591,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
             done(items[currentIndex].id);
             return;
           }
-          list.handleInput?.(data);
+          list.handleInput(data);
         },
       };
     });

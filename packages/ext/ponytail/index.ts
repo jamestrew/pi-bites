@@ -45,7 +45,7 @@ export function resolveSessionMode(
 
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i] as { type?: string; customType?: string; data?: { mode?: unknown } };
-    if (entry?.type !== "custom" || entry?.customType !== "ponytail-mode") continue;
+    if (entry.type !== "custom" || entry.customType !== "ponytail-mode") continue;
     const mode = normalizePersistedMode(entry.data?.mode);
     if (mode) return mode;
   }
@@ -210,7 +210,7 @@ export default function registerPonytail(
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    const entries = ctx.sessionManager.getBranch?.() ?? ctx.sessionManager.getEntries?.() ?? [];
+    const entries = ctx.sessionManager.getBranch();
     configuredDefaultMode = getDefaultMode(configRef.current);
     currentMode = resolveSessionMode(entries, configuredDefaultMode);
     syncStatus(ctx);
@@ -228,7 +228,7 @@ export default function registerPonytail(
   });
 
   pi.on("before_agent_start", async (event) => {
-    if (!currentMode || currentMode === "off") return;
+    if (currentMode === "off") return;
     return { systemPrompt: `${event.systemPrompt}\n\n${getPonytailInstructions(currentMode)}` };
   });
 }

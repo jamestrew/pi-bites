@@ -152,13 +152,13 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
       if (request.agentId)
         fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
       try {
-        const labels = request.labels?.join(", ") || "unknown rule";
-        const reasons = request.reasons?.filter(Boolean).join("; ");
+        const labels = request.labels.join(", ") || "unknown rule";
+        const reasons = request.reasons.filter(Boolean).join("; ");
         const prompt = reasons
-          ? `🔒 ${request.title ?? "Subagent"} requests bash approval: ${request.command ?? ""}\n${reasons} (${labels})`
-          : `🔒 ${request.title ?? "Subagent"} requests bash approval: ${request.command ?? ""}\n${labels}`;
-        const allowSession = `Allow for session ("${request.sessionAllowKey ?? labels}")`;
-        while (true) {
+          ? `🔒 ${request.title} requests bash approval: ${request.command}\n${reasons} (${labels})`
+          : `🔒 ${request.title} requests bash approval: ${request.command}\n${labels}`;
+        const allowSession = `Allow for session ("${request.sessionAllowKey}")`;
+        for (;;) {
           const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
           const viewConversation = record?.session ? "View conversation" : undefined;
           const choice = await ui.select(prompt, [

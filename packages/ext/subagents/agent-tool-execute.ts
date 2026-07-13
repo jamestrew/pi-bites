@@ -430,9 +430,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     }
 
     const thinking: ThinkingLevel =
-      model?.reasoning === false
-        ? "off"
-        : (resolvedConfig.thinking ?? deps.pi.getThinkingLevel?.() ?? "off");
+      model?.reasoning === false ? "off" : (resolvedConfig.thinking ?? deps.pi.getThinkingLevel());
     if (model) deps.setRenderMetadata?.(toolCallId, `${model.provider}/${model.id}`, thinking);
     const inheritContext = resolvedConfig.inheritContext;
     const runInBackground = resolvedConfig.runInBackground;

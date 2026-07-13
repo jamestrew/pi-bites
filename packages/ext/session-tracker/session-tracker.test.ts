@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEndEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { expect, test } from "vitest";
-
 import registerSessionTracker, {
   colorizeSessionTrackerFooter,
   createNeedsInputLifecycle,
@@ -22,7 +21,6 @@ import registerSessionTracker, {
   runPiSessionsPicker,
   sortPaneRecordsForPicker,
 } from "./index.js";
-
 test("sorts and labels pi-sessions picker records", () => {
   const records = sortPaneRecordsForPicker([
     { paneId: "%3", cwd: "/work/idle", runtimeId: "r", seq: 1, state: "idle", heartbeatAt: 1 },
@@ -628,10 +626,46 @@ test("pi-sessions focuses the selected pane", async () => {
       },
     },
   );
-
   expect(requests).toEqual([{ type: "snapshot" }, { type: "focus_pane", paneId: "%2" }]);
 });
-
+test("pi-sessions picker cancellation does not focus a pane", async () => {
+  const requests: unknown[] = [];
+  const notices: unknown[] = [];
+  await runPiSessionsPicker(
+    {
+      ui: {
+        notify: (message, level) => notices.push([message, level]),
+        select: async () => undefined,
+      },
+    },
+    {
+      socketPath: "sock",
+      spawnDaemon: () => {},
+      awaitDaemonReady: async () => {},
+      log: () => {},
+      send: async (_socketPath, request) => {
+        requests.push(request);
+        return request.type === "snapshot"
+          ? {
+              ok: true,
+              records: [
+                {
+                  paneId: "%2",
+                  cwd: "/work/repo",
+                  runtimeId: "r",
+                  seq: 1,
+                  state: "working",
+                  heartbeatAt: 1,
+                },
+              ],
+            }
+          : { ok: true };
+      },
+    },
+  );
+  expect(requests).toEqual([{ type: "snapshot" }]);
+  expect(notices).toEqual([]);
+});
 test("pi-sessions shows a small warning for stale panes", async () => {
   const notices: unknown[] = [];
   await runPiSessionsPicker(
@@ -667,7 +701,6 @@ test("pi-sessions shows a small warning for stale panes", async () => {
 
   expect(notices).toEqual([["That tmux pane disappeared. Refresh and try again.", "warning"]]);
 });
-
 test("pi-sessions shows unavailable when snapshot fails", async () => {
   const notices: unknown[] = [];
   await runPiSessionsPicker(
@@ -690,7 +723,6 @@ test("pi-sessions shows unavailable when snapshot fails", async () => {
 
   expect(notices).toEqual([["Pi sessions are unavailable.", "warning"]]);
 });
-
 test("restarts the pi-sessions daemon", async () => {
   const requests: unknown[] = [];
   const spawned: string[] = [];
@@ -706,7 +738,6 @@ test("restarts the pi-sessions daemon", async () => {
   expect(requests).toEqual([{ type: "shutdown" }]);
   expect(spawned).toEqual(["spawn"]);
 });
-
 test("pi-sessions shortcut focuses the next pane", async () => {
   const requests: unknown[] = [];
   await runPiSessionsNext(
@@ -726,7 +757,6 @@ test("pi-sessions shortcut focuses the next pane", async () => {
 
   expect(requests).toEqual([{ type: "focus_next", currentPaneId: "%2" }]);
 });
-
 test("pi-sessions shows focus errors", async () => {
   const notices: unknown[] = [];
   await runPiSessionsPicker(
@@ -762,7 +792,6 @@ test("pi-sessions shows focus errors", async () => {
 
   expect(notices).toEqual([["Failed to focus tmux pane: tmux failed", "error"]]);
 });
-
 test("extension waits for agent_settled before classifying", () => {
   const handlers = new Map<string, unknown>();
 
