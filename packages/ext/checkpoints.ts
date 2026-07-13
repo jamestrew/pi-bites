@@ -1,4 +1,4 @@
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { getAgentDir, isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { existsSync } from "node:fs";
@@ -65,8 +65,8 @@ async function git(gitDir: string, args: string[], stdin?: Buffer): Promise<stri
     });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
-    child.stdout.on("data", (chunk) => out.push(chunk));
-    child.stderr.on("data", (chunk) => err.push(chunk));
+    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
     child.on("error", reject);
     child.on("close", (code) => {
       if (code === 0) resolve(Buffer.concat(out).toString("utf8").trim());
@@ -121,24 +121,25 @@ function copyFiles(files: Record<string, FileState>): Record<string, FileState> 
   return Object.fromEntries(Object.entries(files).map(([k, v]) => [k, { ...v }]));
 }
 
-function textFromMessage(message: unknown): string | null {
-  const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return null;
-  return content
-    .map((part) => (part?.type === "text" && typeof part.text === "string" ? part.text : ""))
+type SessionEntry = ReturnType<ExtensionContext["sessionManager"]["getBranch"]>[number];
+type UserMessage = Extract<Extract<SessionEntry, { type: "message" }>["message"], { role: "user" }>;
+
+function textFromMessage(message: UserMessage): string {
+  if (typeof message.content === "string") return message.content;
+  return message.content
+    .map((part) => (part.type === "text" ? part.text : ""))
     .join("\n")
     .trim();
 }
 
-function latestUser(ctx: { sessionManager?: { getBranch?: () => unknown[] } }) {
-  const branch = ctx.sessionManager?.getBranch?.() ?? [];
+function latestUser(ctx: Pick<ExtensionContext, "sessionManager">) {
+  const branch = ctx.sessionManager.getBranch();
   for (let i = branch.length - 1; i >= 0; i--) {
-    const entry = branch[i] as { id?: string; type?: string; message?: { role?: string } };
-    if (entry.type === "message" && entry.message?.role === "user" && entry.id) {
+    const entry = branch[i]!;
+    if (entry.type === "message" && entry.message.role === "user") {
       return {
         userEntryId: entry.id,
-        userPrompt: textFromMessage(entry.message) ?? "user message",
+        userPrompt: textFromMessage(entry.message) || "user message",
       };
     }
   }
@@ -363,7 +364,7 @@ type PrepareCheckpointArgs = {
   toolName: string;
   store: Store;
   pendingChange: Pending | undefined;
-  ctx: { sessionManager?: { getBranch?: () => unknown[] } };
+  ctx: Pick<ExtensionContext, "sessionManager">;
 };
 
 async function prepareCheckpoint(args: PrepareCheckpointArgs): Promise<Checkpoint | null> {
