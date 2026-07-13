@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "options": {
+    "typeAware": true,
+    "typeCheck": true,
+  },
+  "ignorePatterns": ["scripts/"],
+  "categories": {
+    "correctness": "error",
+  },
+  "rules": {
+    "max-lines": [
+      "error",
+      {
+        "max": 1000,
+      },
+    ],
+    "typescript/no-unnecessary-condition": "error",
+    "typescript/no-explicit-any": "error",
+    // "typescript/no-unsafe-assignment": "error",
+    // "typescript/no-unsafe-member-access": "error",
+    // "typescript/no-unsafe-argument": "error",
+    // "typescript/no-unsafe-call": "error",
+    // "typescript/no-unsafe-return": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts", "**/test/**"],
+      "rules": {
+        "typescript/unbound-method": "off",
+        "typescript/no-explicit-any": "off",
+        "typescript/no-unsafe-assignment": "off",
+        "typescript/no-unsafe-member-access": "off",
+        "typescript/no-unsafe-argument": "off",
+        "typescript/no-unsafe-call": "off",
+        "typescript/no-unsafe-return": "off",
+      },
+    },
+  ],
+  "env": {
+    "builtin": true,
+  },
+}
