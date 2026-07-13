@@ -242,9 +242,11 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
       });
       const calls = agentToolCalls(run.parentSession);
       // The non-default type was actually selected (case-insensitive per README).
-      expect(calls.some((c) => String(c.subagent_type ?? "").toLowerCase() === "explore")).toBe(
-        true,
-      );
+      expect(
+        calls.some(
+          (c) => typeof c.subagent_type === "string" && c.subagent_type.toLowerCase() === "explore",
+        ),
+      ).toBe(true);
       expect(run.responseText.length).toBeGreaterThan(0);
     },
     LIVE_TIMEOUT,
@@ -283,9 +285,11 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
       // — the result-retrieval tool was called
       expect(tools).toContain("get_subagent_result");
       // — the Explore type was dispatched
-      expect(calls.some((c) => String(c.subagent_type ?? "").toLowerCase() === "explore")).toBe(
-        true,
-      );
+      expect(
+        calls.some(
+          (c) => typeof c.subagent_type === "string" && c.subagent_type.toLowerCase() === "explore",
+        ),
+      ).toBe(true);
       // — and the real child outputs materialized in the conversation (the
       //   foreground tool result + the get_subagent_result result). We check the
       //   whole transcript, not the final message: the agent's closing report

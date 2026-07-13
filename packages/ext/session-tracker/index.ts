@@ -584,11 +584,11 @@ export default function registerSessionTracker(
     footerRuntime.start(ctx);
   });
   const needsInputLifecycle = createNeedsInputLifecycle(
-    runtime.setState,
+    (state) => runtime.setState(state),
     (text, ctx) => inferNeedsInputFromAssistantText(text, ctx, configRef.current),
     (error) => logTrackerFailure(defaultCallOptions, "needs-input inference", error),
   );
-  pi.on("agent_start", needsInputLifecycle.agentStart);
+  pi.on("agent_start", () => needsInputLifecycle.agentStart());
   pi.events?.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
   pi.events?.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
   pi.on("agent_end", (event) => needsInputLifecycle.agentEnd(event));

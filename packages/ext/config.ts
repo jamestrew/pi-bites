@@ -161,7 +161,8 @@ function tryReadJson(filePath: string, label: string): BitesConfig {
   try {
     return JSON.parse(readFileSync(filePath, "utf-8")) as BitesConfig;
   } catch (err) {
-    console.error(`pi-bites: failed to parse ${label} config at ${filePath}: ${err}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`pi-bites: failed to parse ${label} config at ${filePath}: ${message}`);
     return {};
   }
 }

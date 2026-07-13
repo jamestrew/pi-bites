@@ -2,7 +2,9 @@ import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { LifetimeUsage } from "../usage.js";
 
 export function normalizeToolArg(value: unknown): string {
-  return String(value ?? "").trim();
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "";
 }
 
 export function summarizeToolArg(value: unknown, maxLength = 120): string {

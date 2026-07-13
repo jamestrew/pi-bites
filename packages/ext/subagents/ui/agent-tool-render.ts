@@ -73,7 +73,7 @@ export function renderAgentToolResult(
       const stats = formatStats(details);
 
       if (options.expanded) {
-        const prompt = String(context.args.prompt ?? "").trim();
+        const prompt = typeof context.args.prompt === "string" ? context.args.prompt.trim() : "";
         if (prompt) {
           lines.push(theme.fg("muted", "Prompt:"));
           for (const line of wrapTextWithAnsi(prompt, lineWidth)) lines.push(theme.fg("dim", line));

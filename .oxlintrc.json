@@ -1,12 +1,20 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["typescript", "unicorn", "oxc"],
+  "options": { "typeAware": true },
+  "ignorePatterns": ["scripts/"],
   "categories": {
     "correctness": "error"
   },
   "rules": {
     "max-lines": ["error", { "max": 1000 }]
   },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts"],
+      "rules": { "typescript/unbound-method": "off" }
+    }
+  ],
   "env": {
     "builtin": true
   }

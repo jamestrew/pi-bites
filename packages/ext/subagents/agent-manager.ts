@@ -38,8 +38,11 @@ const DEFAULT_MAX_CONCURRENT = 4;
  */
 function assertValidSpawnCwd(cwd: unknown): asserts cwd is string | undefined | null {
   if (cwd == null) return;
-  if (typeof cwd !== "string" || !isAbsolute(cwd)) {
-    throw new Error(`SpawnOptions.cwd must be an absolute path: "${String(cwd)}"`);
+  if (typeof cwd !== "string") {
+    throw new Error(`SpawnOptions.cwd must be an absolute path`);
+  }
+  if (!isAbsolute(cwd)) {
+    throw new Error(`SpawnOptions.cwd must be an absolute path: "${cwd}"`);
   }
   let isDirectory = false;
   try {
@@ -683,7 +686,7 @@ export class AgentManager {
       const pending = [...this.agents.values()]
         .filter((r) => r.status === "running" || r.status === "queued")
         .map((r) => r.promise)
-        .filter(Boolean);
+        .filter((promise): promise is Promise<string> => promise !== undefined);
       if (pending.length === 0) break;
       await Promise.allSettled(pending);
     }

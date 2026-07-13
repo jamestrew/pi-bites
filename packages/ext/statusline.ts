@@ -66,11 +66,11 @@ export default function registerStatusline(pi: ExtensionAPI, configRef: { curren
     );
   };
 
-  pi.on("session_start", (_event, ctx) => {
-    run(ctx);
+  pi.on("session_start", async (_event, ctx) => {
+    await run(ctx);
   });
 
-  pi.on("agent_end", (_event, ctx) => {
-    run(ctx);
+  pi.on("agent_end", async (_event, ctx) => {
+    await run(ctx);
   });
 }
