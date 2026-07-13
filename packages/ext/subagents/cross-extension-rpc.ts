@@ -32,7 +32,7 @@ export interface SpawnCapable {
 export interface RpcDeps {
   events: EventBus;
   pi: unknown; // passed through to manager.spawn
-  getCtx: () => unknown | undefined; // returns current ExtensionContext
+  getCtx: () => unknown; // returns current ExtensionContext
   manager: SpawnCapable;
 }
 
@@ -49,7 +49,7 @@ export interface RpcHandle {
 function handleRpc<P extends { requestId: string }>(
   events: EventBus,
   channel: string,
-  fn: (params: P) => unknown | Promise<unknown>,
+  fn: (params: P) => unknown,
 ): () => void {
   return events.on(channel, async (raw: unknown) => {
     const params = raw as P;

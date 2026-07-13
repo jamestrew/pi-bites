@@ -45,9 +45,9 @@ export type FleetUICtx = {
     content:
       | undefined
       | ((
-        tui: any,
-        theme: Theme,
-      ) => { render(width: number): string[]; invalidate(): void; dispose?(): void }),
+          tui: any,
+          theme: Theme,
+        ) => { render(width: number): string[]; invalidate(): void; dispose?(): void }),
     options?: { placement?: "aboveEditor" | "belowEditor" },
   ): void;
   onTerminalInput(
@@ -99,7 +99,7 @@ function rightAlign(left: string, right: string, width: number): string {
 
 export class FleetList {
   private ui: FleetUICtx | undefined;
-  private tui: any | undefined;
+  private tui: any;
   private inputUnsub: (() => void) | undefined;
   private widgetRegistered = false;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -116,7 +116,7 @@ export class FleetList {
   constructor(
     private manager: AgentManager,
     private agentActivity: Map<string, AgentActivity>,
-  ) { }
+  ) {}
 
   // ---- Lifecycle ----
 

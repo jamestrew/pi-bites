@@ -143,14 +143,14 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 
 export default function registerTokenCount(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
-    updateTokenStatus(ctx);
+    await updateTokenStatus(ctx);
   });
 
   pi.on("turn_end", async (_event, ctx) => {
-    updateTokenStatus(ctx);
+    await updateTokenStatus(ctx);
   });
 
   pi.on("session_compact", async (_event, ctx) => {
-    updateTokenStatus(ctx);
+    await updateTokenStatus(ctx);
   });
 }

@@ -525,7 +525,7 @@ test("session tracker footer periodically reads snapshots and fails quietly", as
   runtime.start({ cwd: "/work/repo", ui: { setStatus: (...args) => statuses.push(args) } });
   await Promise.resolve();
   fail = true;
-  await timer?.();
+  await Promise.resolve(timer?.());
 
   expect(intervalMs).toBe(1_000);
   expect(statuses).toEqual([
@@ -832,7 +832,7 @@ test("extension sends full-state heartbeats and releases on shutdown", async () 
 
   await runtime.start({ cwd: "/repo", sessionManager: { getSessionId: () => "session-1" } });
   await runtime.setState("working");
-  await timer?.();
+  await Promise.resolve(timer?.());
   await runtime.stop(true);
 
   expect(requests).toEqual([

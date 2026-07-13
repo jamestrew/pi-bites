@@ -29,7 +29,7 @@ function getDefaultMode(config: BitesConfig): ConfigMode {
 }
 
 function isDeactivationCommand(text: unknown): boolean {
-  const trimmed = String(text || "")
+  const trimmed = (typeof text === "string" ? text : "")
     .trim()
     .toLowerCase()
     .replace(/[.!?\s]+$/, "");

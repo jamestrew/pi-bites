@@ -97,7 +97,14 @@ function str(val: unknown): string | undefined {
  */
 function parseCsvField(val: unknown): string[] | undefined {
   if (val === undefined || val === null) return undefined;
-  const s = String(val).trim();
+  if (
+    typeof val !== "string" &&
+    typeof val !== "number" &&
+    typeof val !== "boolean" &&
+    !Array.isArray(val)
+  )
+    return undefined;
+  const s = Array.isArray(val) ? val.join(",") : String(val).trim();
   if (!s || s === "none") return undefined;
   const items = s
     .split(",")
