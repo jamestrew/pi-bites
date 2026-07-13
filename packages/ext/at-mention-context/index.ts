@@ -74,7 +74,7 @@ function parseLineSuffix(path: string): ParsedLineSuffix | null {
 
   const suffixPath = suffixMatch[1]!;
   const start = Number(suffixMatch[2]);
-  const end = suffixMatch[3] === undefined ? undefined : Number(suffixMatch[3]);
+  const end = suffixMatch[3] ? Number(suffixMatch[3]) : undefined;
 
   if (start < 1 || (end !== undefined && end < start)) return { path: suffixPath };
 

@@ -31,7 +31,7 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
   let manager: AgentManager;
 
   afterEach(() => {
-    manager?.dispose();
+    manager.dispose();
   });
 
   it("reproduces bug: onComplete fires with resultConsumed=false when set after await", async () => {
@@ -113,7 +113,7 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
 
 describe("AgentManager — spawnAndWait onSpawned + foreground output file wiring (#105)", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("fields set on the record in onSpawned are visible when onSessionCreated fires", async () => {
     // The load-bearing ordering guarantee: onSpawned fires synchronously inside
@@ -199,7 +199,7 @@ describe("AgentManager — completion callbacks", () => {
   let manager: AgentManager;
 
   afterEach(() => {
-    manager?.dispose();
+    manager.dispose();
   });
 
   it("does not let onComplete errors turn a completed agent into a failed run", async () => {
@@ -222,7 +222,7 @@ describe("AgentManager — cleanup timer", () => {
   let manager: AgentManager;
 
   afterEach(() => {
-    manager?.dispose();
+    manager.dispose();
   });
 
   it("does not keep the process alive on its own", () => {
@@ -236,7 +236,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
   let manager: AgentManager;
 
   afterEach(() => {
-    manager?.dispose();
+    manager.dispose();
   });
 
   it("clearCompleted removes completed records", async () => {
@@ -380,7 +380,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
   let manager: AgentManager;
 
   afterEach(() => {
-    manager?.dispose();
+    manager.dispose();
   });
 
   it("spawn initializes lifetimeUsage to zeros and compactionCount to 0", () => {
@@ -498,7 +498,7 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
   let manager: AgentManager;
 
   afterEach(() => {
-    manager?.dispose();
+    manager.dispose();
   });
 
   it("spawn() throws when createWorktree returns undefined; no orphan record left behind", async () => {
@@ -523,7 +523,7 @@ describe("AgentManager — isolation: worktree fails loud, no silent fallback", 
 
 describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("passes cwd to runAgent as the working dir, parent cwd as configCwd", async () => {
     resolvedRun();
@@ -683,7 +683,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
 
 describe("AgentManager — abort() state machine", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("returns false for an unknown id (no record, no side-effects)", () => {
     manager = new AgentManager();
@@ -714,7 +714,7 @@ describe("AgentManager — abort() state machine", () => {
     manager = new AgentManager();
     let receivedSignal: AbortSignal | undefined;
     vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, opts) => {
-      receivedSignal = (opts as { signal?: AbortSignal })?.signal;
+      receivedSignal = (opts as { signal?: AbortSignal }).signal;
       return new Promise(() => {});
     });
 
@@ -785,7 +785,7 @@ describe("AgentManager — abort() state machine", () => {
 // signal's "abort" event to this.abort(id).
 describe("AgentManager — steer()", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("returns false for an unknown id", () => {
     manager = new AgentManager();
@@ -834,7 +834,7 @@ describe("AgentManager — steer()", () => {
 
 describe("AgentManager — parent abort signal forwarding (#44)", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("aborts the child when the parent signal aborts", () => {
     manager = new AgentManager();
@@ -857,7 +857,7 @@ describe("AgentManager — parent abort signal forwarding (#44)", () => {
 
 describe("AgentManager — listAgents() ordering", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("returns records sorted by startedAt descending (most recent first)", () => {
     manager = new AgentManager();
@@ -878,7 +878,7 @@ describe("AgentManager — listAgents() ordering", () => {
 
 describe("AgentManager — abortAll", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("stops both queued and running agents and returns the total count", () => {
     manager = new AgentManager(undefined, 1);
@@ -909,7 +909,7 @@ describe("AgentManager — abortAll", () => {
 
 describe("AgentManager — hasRunning", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("is true while a background agent is running, false after it completes", async () => {
     manager = new AgentManager();
@@ -938,7 +938,7 @@ describe("AgentManager — hasRunning", () => {
 
 describe("AgentManager — runAgent rejection leaves the record visible with error status", () => {
   let manager: AgentManager;
-  afterEach(() => manager?.dispose());
+  afterEach(() => manager.dispose());
 
   it("sets status='error', captures the error message, and stamps completedAt", async () => {
     manager = new AgentManager();

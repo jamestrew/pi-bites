@@ -7,7 +7,8 @@
     "correctness": "error"
   },
   "rules": {
-    "max-lines": ["error", { "max": 1000 }]
+    "max-lines": ["error", { "max": 1000 }],
+    "typescript/no-unnecessary-condition": "error"
   },
   "overrides": [
     {

@@ -19,7 +19,7 @@ export function extractText(content: unknown[]): string {
  */
 export function buildParentContext(ctx: ExtensionContext): string {
   const entries = ctx.sessionManager.getBranch();
-  if (!entries || entries.length === 0) return "";
+  if (entries.length === 0) return "";
 
   const parts: string[] = [];
 

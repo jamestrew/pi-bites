@@ -199,7 +199,7 @@ Terse command-style prompts produce shallow, generic work.
     };
     // Replacement callback (not a string) — agent descriptions may contain `$&` etc.
     return template.replace(/\{\{(\w+)\}\}/g, (raw, name: string) => {
-      if (vars[name]) return vars[name]();
+      if (name in vars) return vars[name]!();
       console.warn(
         `[pi-subagents] agent-tool-description.md: unknown placeholder ${raw} left as-is`,
       );
@@ -325,10 +325,7 @@ Terse command-style prompts produce shallow, generic work.
         const displayName = args.subagent_type ? getDisplayName(args.subagent_type) : "Agent";
         const preview =
           args.description ||
-          String(args.prompt ?? "")
-            .replace(/\s+/g, " ")
-            .trim()
-            .slice(0, 80) ||
+          String(args.prompt).replace(/\s+/g, " ").trim().slice(0, 80) ||
           "no prompt";
         const config = args.subagent_type ? getAgentConfig(args.subagent_type) : undefined;
         const effective = renderMetadata.get(context.toolCallId);

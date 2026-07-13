@@ -86,7 +86,7 @@ export default function (pi: ExtensionAPI) {
       }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      engineCwd = ctx.cwd ?? process.cwd();
+      engineCwd = ctx.cwd;
       const result = await engine.recordExercise(
         params.unit,
         params.filePath,
@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("spotme:on", {
     description: "Enable SpotMe gym mode [lite|medium|hard] [--every N]",
     handler: async (args, ctx) => {
-      engine.activateFromArgs(args ?? "");
+      engine.activateFromArgs(args);
       setSpotmeToolsActive(true);
       ctx.ui.notify(
         `🏋️ SpotMe is on. Difficulty: ${engine.state.difficulty}. Triggering every ${engine.state.every} code write(s).`,

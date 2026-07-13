@@ -43,6 +43,7 @@ function makePi() {
     },
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
+    getThinkingLevel: vi.fn(() => "off"),
   } as any;
   return { pi, tools, lifecycle, events };
 }

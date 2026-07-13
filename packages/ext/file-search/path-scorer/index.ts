@@ -151,9 +151,9 @@ export function scorePath(
   let best: ScoreResult | null = null;
 
   for (
-    let start = searchableCandidate.indexOf(searchableQuery[0] ?? "");
+    let start = searchableCandidate.indexOf(searchableQuery[0]!);
     start !== -1;
-    start = searchableCandidate.indexOf(searchableQuery[0] ?? "", start + 1)
+    start = searchableCandidate.indexOf(searchableQuery[0]!, start + 1)
   ) {
     const result = scoreAlignment(candidatePath, searchableCandidate, searchableQuery, start);
     if (result && (!best || result.score > best.score)) best = result;

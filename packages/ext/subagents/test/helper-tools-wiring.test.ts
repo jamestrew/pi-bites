@@ -26,6 +26,7 @@ function makePi(active = ["Agent", "read"]) {
     },
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
+    getThinkingLevel: vi.fn(() => "off"),
     getActiveTools: vi.fn(() => active),
     setActiveTools: vi.fn((next: string[]) => (active = next)),
   } as any;

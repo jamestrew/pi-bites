@@ -131,8 +131,7 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
 
           const query = atPrefix.startsWith('@"') ? atPrefix.slice(2) : atPrefix.slice(1);
           const f = await ensureFinder(cwd);
-
-          if (options.signal.aborted) return null;
+          options.signal.throwIfAborted();
 
           const searchResult = f.mixedSearch(query, { pageSize: MENTION_MAX_RESULTS });
           if (!searchResult.ok) {

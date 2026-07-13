@@ -122,7 +122,7 @@ function copyFiles(files: Record<string, FileState>): Record<string, FileState> 
 }
 
 function textFromMessage(message: unknown): string | null {
-  const content = (message as { content?: unknown })?.content;
+  const content = (message as { content?: unknown }).content;
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return null;
   return content

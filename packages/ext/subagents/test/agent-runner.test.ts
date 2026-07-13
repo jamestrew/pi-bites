@@ -22,8 +22,14 @@ const {
     },
   },
   getAgentDir: vi.fn(() => "/mock/agent-dir"),
-  sessionManagerInMemory: vi.fn(() => ({ kind: "memory-session-manager" })),
-  sessionManagerCreate: vi.fn(() => ({ kind: "persistent-session-manager" })),
+  sessionManagerInMemory: vi.fn(() => ({
+    kind: "memory-session-manager",
+    appendCustomEntry: vi.fn(),
+  })),
+  sessionManagerCreate: vi.fn(() => ({
+    kind: "persistent-session-manager",
+    appendCustomEntry: vi.fn(),
+  })),
   settingsManagerGetSessionDir: vi.fn(() => undefined as string | undefined),
   settingsManagerCreate: vi.fn(() => ({
     kind: "settings-manager",
@@ -526,7 +532,7 @@ describe("agent-runner session persistence", () => {
     expect(sessionManagerCreate).not.toHaveBeenCalled();
     expect(createAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionManager: { kind: "memory-session-manager" },
+        sessionManager: expect.objectContaining({ kind: "memory-session-manager" }),
       }),
     );
   });
@@ -543,7 +549,7 @@ describe("agent-runner session persistence", () => {
     expect(sessionManagerCreate).toHaveBeenCalledWith("/tmp", "/normal/pi/sessions");
     expect(createAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        sessionManager: { kind: "persistent-session-manager" },
+        sessionManager: expect.objectContaining({ kind: "persistent-session-manager" }),
       }),
     );
   });

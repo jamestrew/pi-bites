@@ -386,7 +386,7 @@ export async function startSessionTrackerDaemon(
     () => void tracker.prune().then(closeIfIdle),
     options.pruneIntervalMs,
   );
-  pruneTimer.unref?.();
+  pruneTimer.unref();
   server.on("close", () => {
     clearTimer(pruneTimer);
     writeSessionTrackerLog(socketPath, "daemon closed");

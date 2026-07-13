@@ -442,12 +442,12 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     // as unhandled "stale ctx" rejections. dispose() itself does the invalidation,
     // so shutdown has to happen before it.
     try {
-      await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
+      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     } catch {
       /* ignore */
     }
     try {
-      session.dispose?.();
+      session.dispose();
     } catch {
       /* ignore */
     }
