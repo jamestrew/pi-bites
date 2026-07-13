@@ -1,5 +1,7 @@
 import {
+  type AgentToolResult,
   type ExtensionAPI,
+  type ReadToolDetails,
   createReadTool,
   createReadToolDefinition,
   createBashTool,
@@ -56,7 +58,7 @@ export default function (pi: ExtensionAPI) {
     ...originalRead,
     description: `${originalRead.description} ${readDescriptionSuffix}`,
 
-    renderResult(result, options, theme, context) {
+    renderResult(result: AgentToolResult<ReadToolDetails | undefined>, options, theme, context) {
       return stripReadExpandHint(
         originalReadDef.renderResult!(result, { ...options, expanded: false }, theme, context),
       );
