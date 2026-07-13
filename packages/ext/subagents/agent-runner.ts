@@ -163,12 +163,8 @@ function resolveDefaultModel(
       const modelId = configModel.slice(slashIdx + 1);
 
       // Build a set of available model keys for fast lookup
-      const available = registry.getAvailable?.();
-      const availableKeys = available
-        ? new Set(available.map((m) => `${m.provider}/${m.id}`))
-        : undefined;
-      const isAvailable = (p: string, id: string) =>
-        !availableKeys || availableKeys.has(`${p}/${id}`);
+      const availableKeys = new Set(registry.getAvailable().map((m) => `${m.provider}/${m.id}`));
+      const isAvailable = (p: string, id: string) => availableKeys.has(`${p}/${id}`);
 
       const found = registry.find(provider, modelId);
       if (found && isAvailable(provider, modelId)) return found;

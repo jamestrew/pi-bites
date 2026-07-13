@@ -4,6 +4,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { decodeSubagentUsageRecord, finiteNumberOrZero } from "../subagents/usage.js";
 
 type ReadonlyFooterDataProvider = {
   getGitBranch(): string | null;
@@ -69,17 +70,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function numericValue(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
 function addUsage(target: UsageTotals, usage: unknown): void {
   if (!isRecord(usage)) return;
-  target.input += numericValue(usage.input);
-  target.output += numericValue(usage.output);
-  target.cacheRead += numericValue(usage.cacheRead);
-  target.cacheWrite += numericValue(usage.cacheWrite);
-  target.cost += numericValue(isRecord(usage.cost) ? usage.cost.total : usage.cost);
+  target.input += finiteNumberOrZero(usage.input);
+  target.output += finiteNumberOrZero(usage.output);
+  target.cacheRead += finiteNumberOrZero(usage.cacheRead);
+  target.cacheWrite += finiteNumberOrZero(usage.cacheWrite);
+  target.cost += finiteNumberOrZero(isRecord(usage.cost) ? usage.cost.total : usage.cost);
 }
 
 export function getMainSessionUsage(ctx: ExtensionContext): UsageTotals {
@@ -130,10 +127,8 @@ export class ExploreUsageReader {
       for (const line of chunk.split("\n")) {
         if (!line.trim()) continue;
         try {
-          const record: unknown = JSON.parse(line);
-          if (isRecord(record) && record.type === "subagent_usage") {
-            addUsage(this.totals, record.usage);
-          }
+          const record = decodeSubagentUsageRecord(JSON.parse(line));
+          if (record) addUsage(this.totals, record.usage);
         } catch {
           // Ignore partially written or malformed records.
         }

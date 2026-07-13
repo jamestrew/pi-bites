@@ -118,6 +118,11 @@ describe("readEnabledModels", () => {
     // Project's non-array enabledModels is invalid → falls back to global; global empty → undefined
     expect(readEnabledModels(projectDir)).toBeUndefined();
   });
+
+  it("rejects mixed-type enabledModels arrays", () => {
+    writeProject({ enabledModels: ["anthropic/claude-haiku-4-5", 42] });
+    expect(readEnabledModels(projectDir)).toBeUndefined();
+  });
 });
 
 describe("resolveEnabledModels", () => {

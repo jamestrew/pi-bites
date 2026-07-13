@@ -41,6 +41,52 @@ export type SubagentUsageRecord = {
   };
 };
 
+export type DecodedSubagentUsageRecord = Pick<SubagentUsageRecord, "type" | "subagent" | "usage"> &
+  Partial<Pick<SubagentUsageRecord, "sessionId" | "timestamp" | "provider" | "model">>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function finiteNumberOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/** Decode persisted usage, including legacy records without model/session metadata. */
+export function decodeSubagentUsageRecord(value: unknown): DecodedSubagentUsageRecord | undefined {
+  if (
+    !isRecord(value) ||
+    value.type !== "subagent_usage" ||
+    typeof value.subagent !== "string" ||
+    !isRecord(value.usage) ||
+    (value.sessionId !== undefined && typeof value.sessionId !== "string") ||
+    (value.timestamp !== undefined && typeof value.timestamp !== "number") ||
+    (value.provider !== undefined && typeof value.provider !== "string") ||
+    (value.model !== undefined && typeof value.model !== "string")
+  ) {
+    return undefined;
+  }
+
+  const usage = value.usage;
+  return {
+    type: "subagent_usage",
+    subagent: value.subagent,
+    ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }),
+    ...(value.timestamp === undefined ? {} : { timestamp: finiteNumberOrZero(value.timestamp) }),
+    ...(value.provider === undefined ? {} : { provider: value.provider }),
+    ...(value.model === undefined ? {} : { model: value.model }),
+    usage: {
+      input: finiteNumberOrZero(usage.input),
+      output: finiteNumberOrZero(usage.output),
+      cacheRead: finiteNumberOrZero(usage.cacheRead),
+      cacheWrite: finiteNumberOrZero(usage.cacheWrite),
+      cost: {
+        total: finiteNumberOrZero(isRecord(usage.cost) ? usage.cost.total : usage.cost),
+      },
+    },
+  };
+}
+
 function getAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 }

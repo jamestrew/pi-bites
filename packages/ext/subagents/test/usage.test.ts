@@ -1,8 +1,96 @@
 import { describe, expect, it } from "vitest";
-import { getLifetimeTotal, getSessionContextPercent, getSessionTokens } from "../usage.js";
+import {
+  decodeSubagentUsageRecord,
+  getLifetimeTotal,
+  getSessionContextPercent,
+  getSessionTokens,
+} from "../usage.js";
 
 // Regression for issue #38 — token semantics + context indicator
 describe("usage", () => {
+  it("decodes the persisted subagent usage contract", () => {
+    expect(
+      decodeSubagentUsageRecord({
+        type: "subagent_usage",
+        subagent: "explore",
+        sessionId: "session-1",
+        timestamp: 123,
+        provider: "anthropic",
+        model: "claude",
+        usage: {
+          input: 10,
+          output: 20,
+          cacheRead: 30,
+          cacheWrite: 40,
+          cost: { total: 0.5 },
+        },
+      }),
+    ).toEqual({
+      type: "subagent_usage",
+      subagent: "explore",
+      sessionId: "session-1",
+      timestamp: 123,
+      provider: "anthropic",
+      model: "claude",
+      usage: {
+        input: 10,
+        output: 20,
+        cacheRead: 30,
+        cacheWrite: 40,
+        cost: { total: 0.5 },
+      },
+    });
+  });
+
+  it("rejects malformed records and defaults legacy partial usage", () => {
+    const base = {
+      type: "subagent_usage",
+      subagent: "explore",
+      sessionId: "session-1",
+      timestamp: 123,
+      provider: "anthropic",
+      model: "claude",
+    };
+
+    expect(decodeSubagentUsageRecord({ ...base, usage: {} })?.usage).toEqual({
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: { total: 0 },
+    });
+    expect(decodeSubagentUsageRecord({ ...base, subagent: undefined, usage: {} })).toBeUndefined();
+    expect(decodeSubagentUsageRecord({ ...base })).toBeUndefined();
+    expect(decodeSubagentUsageRecord("bad")).toBeUndefined();
+  });
+
+  it("normalizes non-finite persisted numbers", () => {
+    const decoded = decodeSubagentUsageRecord({
+      type: "subagent_usage",
+      subagent: "explore",
+      sessionId: "session-1",
+      timestamp: JSON.parse("1e400"),
+      provider: "anthropic",
+      model: "claude",
+      usage: {
+        input: JSON.parse("1e400"),
+        output: 2,
+        cacheRead: 3,
+        cacheWrite: 4,
+        cost: { total: JSON.parse("1e400") },
+      },
+    });
+
+    expect(decoded?.timestamp).toBe(0);
+    expect(decoded?.usage).toEqual({
+      input: 0,
+      output: 2,
+      cacheRead: 3,
+      cacheWrite: 4,
+      cost: { total: 0 },
+    });
+  });
+
   describe("getSessionTokens", () => {
     it("uses billed-token semantics (input + output + cacheWrite), not inflated total", () => {
       const session = {

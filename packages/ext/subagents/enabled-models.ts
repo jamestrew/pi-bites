@@ -46,8 +46,15 @@ function settingsPaths(cwd: string): [project: string, global: string] {
 function readField(path: string): string[] | undefined {
   if (!existsSync(path)) return undefined;
   try {
-    const raw = JSON.parse(readFileSync(path, "utf-8"));
-    if (Array.isArray(raw?.enabledModels)) return raw.enabledModels as string[];
+    const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    if (typeof raw !== "object" || raw === null || !("enabledModels" in raw)) return undefined;
+    const enabledModels: unknown = raw.enabledModels;
+    if (
+      Array.isArray(enabledModels) &&
+      enabledModels.every((value: unknown): value is string => typeof value === "string")
+    ) {
+      return enabledModels;
+    }
   } catch {
     /* corrupt file — silent */
   }
