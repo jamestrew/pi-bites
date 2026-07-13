@@ -94,6 +94,10 @@ test("ExploreUsageReader reset starts counting from current file end", () => {
       JSON.stringify({
         type: "subagent_usage",
         subagent: "explore",
+        sessionId: "old",
+        timestamp: 1,
+        provider: "anthropic",
+        model: "claude",
         usage: { input: 100, output: 100, cacheRead: 100, cost: 1 },
       }) + "\n",
     );
@@ -140,6 +144,10 @@ test("ExploreUsageReader counts non-explore subagent files", () => {
       JSON.stringify({
         type: "subagent_usage",
         subagent: "general-purpose",
+        sessionId: "general-1",
+        timestamp: 1,
+        provider: "anthropic",
+        model: "claude",
         usage: { input: 7, output: 8, cacheRead: 9, cacheWrite: 10, cost: { total: 0.02 } },
       }) + "\n",
     );

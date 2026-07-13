@@ -45,7 +45,11 @@ import {
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import type { SubagentUsageRecord } from "./subagents/usage.js";
+import {
+  decodeSessionUsageEntry,
+  type DashboardSessionMessage as SessionMessage,
+} from "./usage-dashboard-data.js";
+import { decodeSubagentUsageRecord } from "./subagents/usage.js";
 
 // =============================================================================
 // Types
@@ -279,38 +283,6 @@ async function getAllSubagentUsageFiles(signal?: AbortSignal): Promise<string[]>
   return files;
 }
 
-interface SessionMessage {
-  provider: string;
-  model: string;
-  cost: number;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  timestamp: number;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isSubagentUsageRecord(value: unknown): value is SubagentUsageRecord {
-  if (!isObject(value) || !isObject(value.usage) || !isObject(value.usage.cost)) return false;
-  return (
-    value.type === "subagent_usage" &&
-    typeof value.subagent === "string" &&
-    typeof value.sessionId === "string" &&
-    typeof value.timestamp === "number" &&
-    typeof value.provider === "string" &&
-    typeof value.model === "string" &&
-    typeof value.usage.input === "number" &&
-    typeof value.usage.output === "number" &&
-    typeof value.usage.cacheRead === "number" &&
-    typeof value.usage.cacheWrite === "number" &&
-    typeof value.usage.cost.total === "number"
-  );
-}
-
 interface ParsedSessionFile {
   sessionId: string;
   messages: SessionMessage[];
@@ -336,38 +308,21 @@ async function parseSessionFile(
       const line = lines[i]!;
       if (!line.trim()) continue;
       try {
-        const entry = JSON.parse(line);
+        const entry = decodeSessionUsageEntry(JSON.parse(line));
+        if (entry?.type === "session") {
+          sessionId = entry.sessionId;
+        } else if (entry?.type === "message") {
+          const message = entry.message;
 
-        if (entry.type === "session") {
-          sessionId = entry.id;
-        } else if (entry.type === "message" && entry.message?.role === "assistant") {
-          const msg = entry.message;
-          if (msg.usage && msg.provider && msg.model) {
-            const input = msg.usage.input || 0;
-            const output = msg.usage.output || 0;
-            const cacheRead = msg.usage.cacheRead || 0;
-            const cacheWrite = msg.usage.cacheWrite || 0;
-            const fallbackTs = entry.timestamp ? new Date(entry.timestamp).getTime() : 0;
-            const timestamp = msg.timestamp || (Number.isNaN(fallbackTs) ? 0 : fallbackTs);
+          // Deduplicate copied history across branched session files.
+          // Keep the existing ccusage-style hash so current totals remain comparable.
+          const totalTokens =
+            message.input + message.output + message.cacheRead + message.cacheWrite;
+          const hash = `${message.timestamp}:${totalTokens}`;
+          if (seenHashes.has(hash)) continue;
+          seenHashes.add(hash);
 
-            // Deduplicate copied history across branched session files.
-            // Keep the existing ccusage-style hash so current totals remain comparable.
-            const totalTokens = input + output + cacheRead + cacheWrite;
-            const hash = `${timestamp}:${totalTokens}`;
-            if (seenHashes.has(hash)) continue;
-            seenHashes.add(hash);
-
-            messages.push({
-              provider: msg.provider,
-              model: msg.model,
-              cost: msg.usage.cost?.total || 0,
-              input,
-              output,
-              cacheRead,
-              cacheWrite,
-              timestamp,
-            });
-          }
+          messages.push(message);
         }
       } catch {
         // Skip malformed lines
@@ -398,21 +353,28 @@ async function parseSubagentUsageFile(
       const line = lines[i]!;
       if (!line.trim()) continue;
       try {
-        const entry: unknown = JSON.parse(line);
-        if (!isSubagentUsageRecord(entry) || !entry.sessionId || !entry.provider || !entry.model)
+        const entry = decodeSubagentUsageRecord(JSON.parse(line));
+        if (
+          !entry ||
+          !entry.sessionId ||
+          entry.timestamp === undefined ||
+          !entry.provider ||
+          !entry.model
+        ) {
           continue;
+        }
 
         const usage = entry.usage;
         const messages = bySession.get(entry.sessionId) ?? [];
         messages.push({
           provider: entry.provider,
           model: entry.model,
-          cost: usage.cost.total || 0,
-          input: usage.input || 0,
-          output: usage.output || 0,
-          cacheRead: usage.cacheRead || 0,
-          cacheWrite: usage.cacheWrite || 0,
-          timestamp: entry.timestamp || 0,
+          cost: usage.cost.total,
+          input: usage.input,
+          output: usage.output,
+          cacheRead: usage.cacheRead,
+          cacheWrite: usage.cacheWrite,
+          timestamp: entry.timestamp,
         });
         bySession.set(entry.sessionId, messages);
       } catch {
