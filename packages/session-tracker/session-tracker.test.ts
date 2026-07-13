@@ -396,7 +396,7 @@ test("focuses a tracked existing pane by tmux pane id", async () => {
   expect(calls).toEqual([["switch-client", "-t", "%7"]]);
 });
 
-test("focus next cycles blocked, idle, then working panes", async () => {
+test("focus next cycles blocked, needs-input, working, then idle panes", async () => {
   const calls: string[][] = [];
   const tracker = new SessionTracker({
     ...defaultSessionTrackerOptions,
@@ -417,7 +417,14 @@ test("focus next cycles blocked, idle, then working panes", async () => {
     type: "report",
     record: record({ paneId: "%2", cwd: "/repo/idle", state: "idle" }),
   });
+  await tracker.handle({
+    type: "report",
+    record: record({ paneId: "%4", cwd: "/repo/input", state: "needs-input" }),
+  });
 
+  await expect(tracker.handle({ type: "focus_next", currentPaneId: "%1" })).resolves.toEqual({
+    ok: true,
+  });
   await expect(tracker.handle({ type: "focus_next", currentPaneId: "%1" })).resolves.toEqual({
     ok: true,
   });
@@ -429,8 +436,9 @@ test("focus next cycles blocked, idle, then working panes", async () => {
   });
 
   expect(calls).toEqual([
-    ["switch-client", "-t", "%2"],
+    ["switch-client", "-t", "%4"],
     ["switch-client", "-t", "%3"],
+    ["switch-client", "-t", "%2"],
     ["switch-client", "-t", "%1"],
   ]);
 });

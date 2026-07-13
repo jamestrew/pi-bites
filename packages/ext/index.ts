@@ -43,7 +43,7 @@ export default function (pi: ExtensionAPI) {
 
   if (isSubagent) return;
 
-  if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi);
+  if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi, configRef);
   if (!isNonInteractive && !disabled.has("subagents")) registerSubagents(pi, configRef);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);

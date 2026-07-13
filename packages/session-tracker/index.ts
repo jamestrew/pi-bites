@@ -13,7 +13,18 @@ import { createServer, createConnection, type Server } from "node:net";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
 
-export type TrackerState = "idle" | "working" | "needs-permission";
+export type TrackerState = "idle" | "working" | "needs-input" | "needs-permission";
+
+export const TRACKER_STATE_PRIORITY: Record<TrackerState, number> = {
+  "needs-permission": 0,
+  "needs-input": 1,
+  working: 2,
+  idle: 3,
+};
+
+export function compareTrackerStates(a: TrackerState, b: TrackerState): number {
+  return TRACKER_STATE_PRIORITY[a] - TRACKER_STATE_PRIORITY[b];
+}
 
 export interface PaneRecord {
   paneId: string;
@@ -208,7 +219,7 @@ export class SessionTracker {
   async focusNextPane(currentPaneId?: string): Promise<TrackerResponse> {
     const records = [...this.records.values()].sort(
       (a, b) =>
-        nextPaneStateOrder(a.state) - nextPaneStateOrder(b.state) ||
+        compareTrackerStates(a.state, b.state) ||
         basename(a.cwd).localeCompare(basename(b.cwd)) ||
         a.paneId.localeCompare(b.paneId),
     );
@@ -253,12 +264,6 @@ export class SessionTracker {
       if (now - record.heartbeatAt > this.staleTimeoutMs) this.records.delete(paneId);
     }
   }
-}
-
-function nextPaneStateOrder(state: TrackerState): number {
-  if (state === "needs-permission") return 0;
-  if (state === "idle") return 1;
-  return 2;
 }
 
 export async function requestTracker(
