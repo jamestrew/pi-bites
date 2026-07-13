@@ -2,10 +2,12 @@ import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AgentEndEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { expect, test } from "vitest";
 
 import registerSessionTracker, {
   colorizeSessionTrackerFooter,
+  createNeedsInputLifecycle,
   createSessionTrackerFooterRuntime,
   createSessionTrackerRuntime,
   defaultTrackerFooterOptions,
@@ -13,6 +15,8 @@ import registerSessionTracker, {
   formatPaneRecordLabel,
   requestSessionTracker,
   formatSessionTrackerFooter,
+  inferNeedsInputFromAssistantText,
+  parseNeedsInputClassification,
   restartPiSessionsDaemon,
   runPiSessionsNext,
   runPiSessionsPicker,
@@ -31,11 +35,20 @@ test("sorts and labels pi-sessions picker records", () => {
       heartbeatAt: 1,
     },
     { paneId: "%2", cwd: "/work/app", runtimeId: "r", seq: 1, state: "working", heartbeatAt: 1 },
+    {
+      paneId: "%4",
+      cwd: "/work/input",
+      runtimeId: "r",
+      seq: 1,
+      state: "needs-input",
+      heartbeatAt: 1,
+    },
   ]);
 
-  expect(records.map((record) => record.paneId)).toEqual(["%1", "%2", "%3"]);
+  expect(records.map((record) => record.paneId)).toEqual(["%1", "%4", "%2", "%3"]);
   expect(records.map(formatPaneRecordLabel)).toEqual([
     "needs-permission · blocked · %1",
+    "needs-input · input · %4",
     "working · app · %2",
     "idle · idle · %3",
   ]);
@@ -292,6 +305,135 @@ test("formats session tracker footer with blocked panes first", () => {
   ).toBe("pi-sessions: 3 · blocked blocked · 1 working · 1 idle");
 });
 
+test("formats and suppresses needs-input footer attention", () => {
+  const records = [
+    {
+      paneId: "%1",
+      cwd: "/work/app",
+      runtimeId: "r",
+      seq: 1,
+      state: "needs-input" as const,
+      heartbeatAt: 1,
+    },
+    {
+      paneId: "%2",
+      cwd: "/work/api",
+      runtimeId: "r",
+      seq: 1,
+      state: "needs-input" as const,
+      heartbeatAt: 1,
+    },
+  ];
+  expect(formatSessionTrackerFooter(records)).toBe("pi-sessions: 2 · needs input api +1");
+  expect(formatSessionTrackerFooter(records, "%1")).toBe("pi-sessions: 2 · needs input api");
+});
+
+test("parses idle and rejects malformed classifier output", () => {
+  expect(parseNeedsInputClassification("IDLE")).toBe(false);
+  expect(parseNeedsInputClassification(" needs_input ")).toBe(true);
+  expect(() => parseNeedsInputClassification("maybe")).toThrow(
+    "unexpected needs-input classifier response: MAYBE",
+  );
+});
+
+test("asks the small model to classify rather than answer the assistant message", async () => {
+  const model = { provider: "test", id: "small" };
+  const ctx = {
+    model,
+    modelRegistry: {
+      getAll: () => [model],
+      getAvailable: () => [model],
+      find: () => model,
+      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
+    },
+  } as unknown as ExtensionContext;
+
+  await expect(
+    inferNeedsInputFromAssistantText(
+      "Which should take priority when both occur?",
+      ctx,
+      { smallModel: { model: "test/small" } },
+      async (_model, request) =>
+        ({
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: (
+                (request.messages[0]?.content ?? []) as { type: string; text: string }[]
+              )[0]?.text.startsWith("Classify the assistant message")
+                ? "NEEDS_INPUT"
+                : "Permission should take priority.",
+            },
+          ],
+          stopReason: "stop",
+        }) as never,
+    ),
+  ).resolves.toBe(true);
+});
+
+function agentEnd(text: string): AgentEndEvent {
+  return {
+    type: "agent_end",
+    messages: [
+      {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        api: "test",
+        provider: "test",
+        model: "test",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "stop",
+        timestamp: 1,
+      },
+    ],
+  };
+}
+
+test("does not classify intermediate agent_end and invalidates in-flight results", async () => {
+  const states: string[] = [];
+  let finishClassification: ((needsInput: boolean) => void) | undefined;
+  const lifecycle = createNeedsInputLifecycle(
+    async (state) => void states.push(state),
+    () => new Promise<boolean>((resolve) => (finishClassification = resolve)),
+    () => {},
+  );
+  const ctx = {} as ExtensionContext;
+
+  await lifecycle.agentStart();
+  lifecycle.agentEnd(agentEnd("Need a choice"));
+  expect(states).toEqual(["working"]);
+
+  const settled = lifecycle.agentSettled(ctx);
+  await lifecycle.agentStart();
+  finishClassification?.(true);
+  await settled;
+
+  expect(states).toEqual(["working", "working"]);
+});
+
+test("classifier failure falls back to idle after settling", async () => {
+  const states: string[] = [];
+  const lifecycle = createNeedsInputLifecycle(
+    async (state) => void states.push(state),
+    async () => {
+      throw new Error("malformed output");
+    },
+    () => {},
+  );
+
+  lifecycle.agentEnd(agentEnd("Done"));
+  await lifecycle.agentSettled({} as ExtensionContext);
+  expect(states).toEqual(["idle"]);
+});
+
 test("formats session tracker footer counts without blocked panes", () => {
   expect(
     formatSessionTrackerFooter([
@@ -335,6 +477,14 @@ test("colors pi-sessions footer dim with blocked warning", () => {
 
   expect(colorizeSessionTrackerFooter("pi-sessions: 2 · blocked repo · 1 idle", theme)).toBe(
     "<dim>pi-sessions: 2 · </dim><error>blocked repo</error><dim><dim> · 1 idle</dim>",
+  );
+  expect(
+    colorizeSessionTrackerFooter(
+      "pi-sessions: 3 · blocked repo · needs input other · 1 idle",
+      theme,
+    ),
+  ).toBe(
+    "<dim>pi-sessions: 3 · </dim><error>blocked repo</error><dim><dim> · </dim><error>needs input other</error><dim><dim> · 1 idle</dim>",
   );
 });
 
@@ -613,7 +763,7 @@ test("pi-sessions shows focus errors", async () => {
   expect(notices).toEqual([["Failed to focus tmux pane: tmux failed", "error"]]);
 });
 
-test("extension keeps working until agent_end", () => {
+test("extension waits for agent_settled before classifying", () => {
   const handlers = new Map<string, unknown>();
 
   registerSessionTracker({
@@ -626,6 +776,7 @@ test("extension keeps working until agent_end", () => {
   } as never);
 
   expect(handlers.has("agent_end")).toBe(true);
+  expect(handlers.has("agent_settled")).toBe(true);
   expect(handlers.has("turn_end")).toBe(false);
 });
 

@@ -26,7 +26,8 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import type { AgentEndEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { extractLastAssistantText } from "./utils.ts";
 import type { BitesConfig } from "./config.js";
 
 export interface BitesNotifyPayload {
@@ -37,20 +38,6 @@ export interface BitesNotifyPayload {
 export interface BitesBashGatePayload {
   cwd: string;
   command: string;
-}
-
-function extractLastAssistantText(messages: AgentEndEvent["messages"]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role !== "assistant") continue;
-    const text = (msg.content as { type: string; text?: string }[])
-      .filter((b) => b.type === "text" && b.text)
-      .map((b) => b.text!)
-      .join("")
-      .trim();
-    if (text) return text;
-  }
-  return "Agent finished";
 }
 
 function platformNotify(title: string, body?: string): void {
@@ -106,7 +93,7 @@ export default function registerNotifications(
   pi.on("agent_end", (event, ctx) => {
     notify({
       cwd: ctx.cwd,
-      message: extractLastAssistantText(event.messages),
+      message: extractLastAssistantText(event.messages) ?? "Agent finished",
     });
   });
 }
