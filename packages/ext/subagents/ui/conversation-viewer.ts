@@ -32,6 +32,10 @@ import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./vie
 
 /** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
 const CHROME_LINES_BASE = 6;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 const MIN_VIEWPORT = 3;
 /** Give the lower subagent pane 70% of the terminal, leaving 30% for the main agent. */
 const VIEWPORT_HEIGHT_PCT = 70;
@@ -328,14 +332,12 @@ export class ConversationViewer implements Component {
     return this.theme.fg("dim", `  ↳ ${parts.join(" · ")}`);
   }
 
-  private formatToolCall(call: {
-    name?: string;
-    toolName?: string;
-    input?: any;
-    arguments?: any;
-  }): string {
-    const args = call.input ?? call.arguments ?? {};
-    return `  ${formatToolCall(call.name ?? call.toolName ?? "unknown", typeof args === "object" && args !== null ? args : {})}`;
+  private formatToolCall(call: unknown): string {
+    if (!isRecord(call)) return `  ${formatToolCall("unknown", {})}`;
+
+    const name = typeof call.name === "string" ? call.name : "unknown";
+    const rawArgs = call.arguments ?? call.input;
+    return `  ${formatToolCall(name, isRecord(rawArgs) ? rawArgs : {})}`;
   }
 
   private buildContentLines(width: number): string[] {
@@ -366,7 +368,7 @@ export class ConversationViewer implements Component {
         for (const c of msg.content) {
           if (c.type === "text" && c.text) textParts.push(c.text);
           else if (c.type === "toolCall") {
-            toolCalls.push(this.formatToolCall(c as any));
+            toolCalls.push(this.formatToolCall(c));
           }
         }
         if (needsSeparator) lines.push(th.fg("dim", "───"));
@@ -390,13 +392,12 @@ export class ConversationViewer implements Component {
         for (const line of wrapTextWithAnsi(truncated.trim(), width)) {
           lines.push(th.fg("dim", line));
         }
-      } else if ((msg as any).role === "bashExecution") {
-        const bash = msg as any;
+      } else if (msg.role === "bashExecution") {
         if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(truncateToWidth(th.fg("muted", `  $ ${bash.command}`), width));
-        if (bash.output?.trim()) {
+        lines.push(truncateToWidth(th.fg("muted", `  $ ${msg.command}`), width));
+        if (msg.output.trim()) {
           const out =
-            bash.output.length > 500 ? bash.output.slice(0, 500) + "... (truncated)" : bash.output;
+            msg.output.length > 500 ? msg.output.slice(0, 500) + "... (truncated)" : msg.output;
           for (const line of wrapTextWithAnsi(out.trim(), width)) {
             lines.push(th.fg("dim", line));
           }

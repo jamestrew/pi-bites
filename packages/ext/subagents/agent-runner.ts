@@ -4,8 +4,12 @@
 
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
-import type { Model } from "@earendil-works/pi-ai";
-import type { ExtensionContext, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+import type {
+  ExtensionContext,
+  LoadExtensionsResult,
+  ModelRegistry,
+} from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -148,13 +152,10 @@ export function parseExtSelectors(entries: string[]): {
  * Priority: explicit option > config.model > parent model.
  */
 function resolveDefaultModel(
-  parentModel: Model<any> | undefined,
-  registry: {
-    find(provider: string, modelId: string): Model<any> | undefined;
-    getAvailable?(): Model<any>[];
-  },
+  parentModel: Model<Api> | undefined,
+  registry: Pick<ModelRegistry, "find" | "getAvailable">,
   configModel?: string,
-): Model<any> | undefined {
+): Model<Api> | undefined {
   if (configModel) {
     const slashIdx = configModel.indexOf("/");
     if (slashIdx !== -1) {
@@ -164,7 +165,7 @@ function resolveDefaultModel(
       // Build a set of available model keys for fast lookup
       const available = registry.getAvailable?.();
       const availableKeys = available
-        ? new Set(available.map((m: any) => `${m.provider}/${m.id}`))
+        ? new Set(available.map((m) => `${m.provider}/${m.id}`))
         : undefined;
       const isAvailable = (p: string, id: string) =>
         !availableKeys || availableKeys.has(`${p}/${id}`);
@@ -198,7 +199,7 @@ export interface RunOptions {
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
   agentId?: string;
-  model?: Model<any>;
+  model?: Model<Api>;
   signal?: AbortSignal;
   isolated?: boolean;
   inheritContext?: boolean;
@@ -245,6 +246,30 @@ export interface RunOptions {
 export interface RunResult {
   responseText: string;
   session: AgentSession;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getAssistantUsage(message: AssistantMessage): AssistantUsage {
+  const { usage } = message;
+  return {
+    input: usage.input,
+    output: usage.output,
+    cacheRead: usage.cacheRead,
+    cacheWrite: usage.cacheWrite,
+    cost: usage.cost.total,
+    provider: message.provider,
+    model: message.model,
+    timestamp: message.timestamp,
+  };
+}
+
+function getToolCallName(value: unknown): string {
+  if (!isRecord(value)) return "unknown";
+  if (typeof value.name === "string") return value.name;
+  return typeof value.toolName === "string" ? value.toolName : "unknown";
 }
 
 /**
@@ -654,35 +679,16 @@ export async function runAgent(
       options.onToolActivity?.({ type: "end", toolName: event.toolName });
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
-      const content = (event.message as any).content;
-      if (Array.isArray(content)) {
-        for (const part of content) {
-          if (part?.type === "toolCall" && typeof part.name === "string") {
-            options.onToolActivity?.({
-              type: "call",
-              toolName: part.name,
-              arguments: part.arguments ?? {},
-            });
-          }
+      for (const part of event.message.content) {
+        if (part.type === "toolCall") {
+          options.onToolActivity?.({
+            type: "call",
+            toolName: part.name,
+            arguments: part.arguments,
+          });
         }
       }
-
-      const u = (event.message as any).usage;
-      if (u) {
-        const usage = {
-          input: u.input ?? 0,
-          output: u.output ?? 0,
-          cacheWrite: u.cacheWrite ?? 0,
-          ...(u.cacheRead ? { cacheRead: u.cacheRead } : {}),
-          ...(u.cost?.total || u.cost ? { cost: u.cost?.total ?? u.cost } : {}),
-          ...((event.message as any).provider ? { provider: (event.message as any).provider } : {}),
-          ...((event.message as any).model ? { model: (event.message as any).model } : {}),
-          ...((event.message as any).timestamp
-            ? { timestamp: (event.message as any).timestamp }
-            : {}),
-        };
-        options.onAssistantUsage?.(usage);
-      }
+      options.onAssistantUsage?.(getAssistantUsage(event.message));
     }
     if (event.type === "compaction_end" && !event.aborted && event.result) {
       options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
@@ -740,22 +746,7 @@ export async function resumeAgent(
           if (event.type === "tool_execution_end")
             options.onToolActivity?.({ type: "end", toolName: event.toolName });
           if (event.type === "message_end" && event.message.role === "assistant") {
-            const u = (event.message as any).usage;
-            if (u)
-              options.onAssistantUsage?.({
-                input: u.input ?? 0,
-                output: u.output ?? 0,
-                cacheWrite: u.cacheWrite ?? 0,
-                ...(u.cacheRead ? { cacheRead: u.cacheRead } : {}),
-                ...(u.cost?.total || u.cost ? { cost: u.cost?.total ?? u.cost } : {}),
-                ...((event.message as any).provider
-                  ? { provider: (event.message as any).provider }
-                  : {}),
-                ...((event.message as any).model ? { model: (event.message as any).model } : {}),
-                ...((event.message as any).timestamp
-                  ? { timestamp: (event.message as any).timestamp }
-                  : {}),
-              });
+            options.onAssistantUsage?.(getAssistantUsage(event.message));
           }
           if (event.type === "compaction_end" && !event.aborted && event.result) {
             options.onCompaction?.({
@@ -800,8 +791,7 @@ export function getAgentConversation(session: AgentSession): string {
       const toolCalls: string[] = [];
       for (const c of msg.content) {
         if (c.type === "text" && c.text) textParts.push(c.text);
-        else if (c.type === "toolCall")
-          toolCalls.push(`  Tool: ${(c as any).name ?? (c as any).toolName ?? "unknown"}`);
+        else if (c.type === "toolCall") toolCalls.push(`  Tool: ${getToolCallName(c)}`);
       }
       if (textParts.length > 0) parts.push(`[Assistant]: ${textParts.join("\n")}`);
       if (toolCalls.length > 0) parts.push(`[Tool Calls]:\n${toolCalls.join("\n")}`);

@@ -25,7 +25,7 @@
  * Set `command` to `""` to disable notifications entirely.
  */
 
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { extractLastAssistantText } from "./utils.ts";
 import type { BitesConfig } from "./config.js";
@@ -46,10 +46,10 @@ function platformNotify(title: string, body?: string): void {
       const script = body
         ? `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`
         : `display notification "" with title ${JSON.stringify(title)}`;
-      execFile("osascript", ["-e", script], { stdio: "ignore" } as any);
+      spawn("osascript", ["-e", script], { stdio: "ignore" }).on("error", () => {});
     } else {
       const args = body ? [title, body] : [title];
-      execFile("notify-send", args, { stdio: "ignore" } as any);
+      spawn("notify-send", args, { stdio: "ignore" }).on("error", () => {});
     }
   } catch {
     /* fire-and-forget */
@@ -59,6 +59,7 @@ function platformNotify(title: string, body?: string): void {
 function runCommand(command: string, payload: BitesNotifyPayload): void {
   try {
     const child = spawn(command, { shell: true, stdio: ["pipe", "ignore", "ignore"] });
+    child.on("error", () => {});
     child.stdin.write(JSON.stringify(payload));
     child.stdin.end();
   } catch {

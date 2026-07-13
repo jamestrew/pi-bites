@@ -4,7 +4,7 @@ import { getLifetimeTotal, type LifetimeUsage } from "./usage.js";
 import type { AgentRecord } from "./types.ts";
 
 /** Tool execute return value for a text response. */
-export function textResult(msg: string, details?: AgentDetails) {
+export function textResult<const TDetails = AgentDetails>(msg: string, details?: TDetails) {
   return { content: [{ type: "text" as const, text: msg }], details };
 }
 

@@ -210,12 +210,14 @@ export function formatSessionTrackerFooter(
   return parts.join(" · ");
 }
 
+interface SessionTrackerTheme {
+  fg(color: "dim" | "warning" | "error", text: string): string;
+  getFgAnsi?(color: "dim"): string;
+}
+
 export function colorizeSessionTrackerFooter(
   text: string | undefined,
-  theme?: {
-    fg(color: "dim" | "warning" | "error", text: string): string;
-    getFgAnsi?(color: "dim"): string;
-  },
+  theme?: SessionTrackerTheme,
 ): string | undefined {
   if (!text || !theme) return text;
   const attention = [...text.matchAll(/(?:blocked|needs input) [^·]+/g)];
@@ -397,7 +399,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
   return {
     start(
       ctx: TrackerContext & {
-        ui: { setStatus(id: string, text: string | undefined): void; theme?: any };
+        ui: { setStatus(id: string, text: string | undefined): void; theme?: SessionTrackerTheme };
       },
     ) {
       if (timer) options.clearInterval(timer);

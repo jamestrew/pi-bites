@@ -9,7 +9,91 @@
  *   error   → { success: false, error: string }
  */
 
+import type { SpawnOptions } from "./agent-manager.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
+import type { ThinkingLevel } from "./types.js";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isModelRegistry(value: unknown): value is ModelRegistry {
+  return isRecord(value) && typeof value.find === "function" && typeof value.getAll === "function";
+}
+
+const RPC_SPAWN_OPTION_KEYS = new Set([
+  "description",
+  "model",
+  "isolated",
+  "inheritContext",
+  "thinkingLevel",
+  "isBackground",
+  "isolation",
+  "cwd",
+]);
+const THINKING_LEVELS = {
+  off: true,
+  minimal: true,
+  low: true,
+  medium: true,
+  high: true,
+  xhigh: true,
+  max: true,
+} satisfies Record<ThinkingLevel, true>;
+
+function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return typeof value === "string" && Object.hasOwn(THINKING_LEVELS, value);
+}
+
+export function decodeSpawnOptions(raw: unknown, registry?: ModelRegistry): SpawnOptions {
+  const input = raw ?? {};
+  if (!isRecord(input)) throw new Error("Spawn RPC options must be an object");
+
+  for (const key of Object.keys(input)) {
+    if (!RPC_SPAWN_OPTION_KEYS.has(key)) throw new Error(`Unknown Spawn RPC option: ${key}`);
+  }
+
+  const options: SpawnOptions = { description: "" };
+  if (input.description !== undefined) {
+    if (typeof input.description !== "string") {
+      throw new Error("Spawn RPC option description must be a string");
+    }
+    options.description = input.description;
+  }
+  if (input.model !== undefined) {
+    if (typeof input.model !== "string") throw new Error("Spawn RPC option model must be a string");
+    if (!registry) {
+      throw new Error(
+        `Model override "${input.model}" provided but ctx.modelRegistry is unavailable`,
+      );
+    }
+    const model = resolveModel(input.model, registry);
+    if (typeof model === "string") throw new Error(model);
+    options.model = model;
+  }
+  for (const key of ["isolated", "inheritContext", "isBackground"] as const) {
+    if (input[key] === undefined) continue;
+    if (typeof input[key] !== "boolean") {
+      throw new Error(`Spawn RPC option ${key} must be a boolean`);
+    }
+    options[key] = input[key];
+  }
+  if (input.thinkingLevel !== undefined) {
+    if (!isThinkingLevel(input.thinkingLevel)) {
+      throw new Error("Spawn RPC option thinkingLevel is invalid");
+    }
+    options.thinkingLevel = input.thinkingLevel;
+  }
+  if (input.isolation !== undefined) {
+    if (input.isolation !== "worktree") throw new Error("Spawn RPC option isolation is invalid");
+    options.isolation = input.isolation;
+  }
+  if (input.cwd !== undefined && input.cwd !== null) {
+    if (typeof input.cwd !== "string") throw new Error("Spawn RPC option cwd must be a string");
+    options.cwd = input.cwd;
+  }
+  return options;
+}
 
 /** Minimal event bus interface needed by the RPC handlers. */
 export interface EventBus {
@@ -25,7 +109,7 @@ export const PROTOCOL_VERSION = 2;
 
 /** Minimal AgentManager interface needed by the spawn/stop RPCs. */
 export interface SpawnCapable {
-  spawn(pi: unknown, ctx: unknown, type: string, prompt: string, options: any): string;
+  spawn(pi: unknown, ctx: unknown, type: string, prompt: string, options: SpawnOptions): string;
   abort(id: string): boolean;
 }
 
@@ -46,22 +130,24 @@ export interface RpcHandle {
  * Wire a single RPC handler: listen on `channel`, run `fn(params)`,
  * emit the reply envelope on `channel:reply:${requestId}`.
  */
-function handleRpc<P extends { requestId: string }>(
+function handleRpc(
   events: EventBus,
   channel: string,
-  fn: (params: P) => unknown,
+  fn: (params: Record<string, unknown>) => unknown,
 ): () => void {
   return events.on(channel, async (raw: unknown) => {
-    const params = raw as P;
+    if (typeof raw !== "object" || raw === null || !("requestId" in raw)) return;
+    const params = raw as Record<string, unknown>;
+    if (typeof params.requestId !== "string") return;
     try {
       const data = await fn(params);
       const reply: { success: true; data?: unknown } = { success: true };
       if (data !== undefined) reply.data = data;
       events.emit(`${channel}:reply:${params.requestId}`, reply);
-    } catch (err: any) {
+    } catch (err: unknown) {
       events.emit(`${channel}:reply:${params.requestId}`, {
         success: false,
-        error: err?.message ?? String(err),
+        error: err instanceof Error ? err.message : String(err),
       });
     }
   });
@@ -78,48 +164,23 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     return { version: PROTOCOL_VERSION };
   });
 
-  const unsubSpawn = handleRpc<{ requestId: string; type: string; prompt: string; options?: any }>(
-    events,
-    "subagents:rpc:spawn",
-    ({ type, prompt, options }) => {
-      const ctx = getCtx();
-      if (!ctx) throw new Error("No active session");
+  const unsubSpawn = handleRpc(events, "subagents:rpc:spawn", (params) => {
+    const { type, prompt, options } = params;
+    if (typeof type !== "string" || typeof prompt !== "string") {
+      throw new Error("Spawn RPC requires string type and prompt");
+    }
+    const ctx = getCtx();
+    if (!ctx) throw new Error("No active session");
 
-      // Cross-extension RPC callers (e.g. pi-tasks TaskExecute) naturally
-      // forward serializable values, so options.model can be a string like
-      // "openai-codex/gpt-5.5". Resolve it to a real Model instance here
-      // The spawned
-      // agent's auth lookup doesn't crash with "No API key found for
-      // undefined".
-      let normalizedOptions = options ?? {};
-      if (typeof normalizedOptions.model === "string") {
-        const registry = (ctx as { modelRegistry?: ModelRegistry }).modelRegistry;
-        if (!registry) {
-          throw new Error(
-            `Model override "${normalizedOptions.model}" provided but ctx.modelRegistry is unavailable`,
-          );
-        }
-        const resolved = resolveModel(normalizedOptions.model, registry);
-        if (typeof resolved === "string") {
-          // resolveModel returns a human-readable error string when the
-          // input doesn't match any available model. Surface it instead of
-          // silently falling back so the caller sees the auth/typo issue.
-          throw new Error(resolved);
-        }
-        normalizedOptions = { ...normalizedOptions, model: resolved };
-      }
+    const registry =
+      isRecord(ctx) && isModelRegistry(ctx.modelRegistry) ? ctx.modelRegistry : undefined;
+    return { id: manager.spawn(pi, ctx, type, prompt, decodeSpawnOptions(options, registry)) };
+  });
 
-      return { id: manager.spawn(pi, ctx, type, prompt, normalizedOptions) };
-    },
-  );
-
-  const unsubStop = handleRpc<{ requestId: string; agentId: string }>(
-    events,
-    "subagents:rpc:stop",
-    ({ agentId }) => {
-      if (!manager.abort(agentId)) throw new Error("Agent not found");
-    },
-  );
+  const unsubStop = handleRpc(events, "subagents:rpc:stop", ({ agentId }) => {
+    if (typeof agentId !== "string") throw new Error("Stop RPC requires string agentId");
+    if (!manager.abort(agentId)) throw new Error("Agent not found");
+  });
 
   return { unsubPing, unsubSpawn, unsubStop };
 }

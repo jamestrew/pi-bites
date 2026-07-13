@@ -10,7 +10,7 @@
  * templates/pi-permissions.jsonc:26.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Container, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -457,7 +457,7 @@ function isTaskDetails(value: unknown): value is TaskDetails {
   return Array.isArray(v.tasks) && typeof v.nextId === "number";
 }
 
-export function reconstructTodoState(ctx: any): void {
+export function reconstructTodoState(ctx: ExtensionContext): void {
   tasks = [];
   nextId = 1;
   for (const entry of ctx.sessionManager.getBranch()) {

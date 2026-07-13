@@ -88,7 +88,9 @@ describe("cross-extension RPC", () => {
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(reply).toHaveBeenCalledWith({ success: true, data: { id: "agent-42" } });
-      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "general-purpose", "do stuff", {});
+      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "general-purpose", "do stuff", {
+        description: "",
+      });
     });
 
     it("passes options through to manager.spawn", async () => {
@@ -99,14 +101,39 @@ describe("cross-extension RPC", () => {
         requestId: "req-s2",
         type: "Explore",
         prompt: "find it",
-        options: { description: "search", isBackground: true },
+        options: { description: "search", isBackground: true, thinkingLevel: "max" },
       });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "Explore", "find it", {
         description: "search",
         isBackground: true,
+        thinkingLevel: "max",
       });
+    });
+
+    it.each([
+      ["cwd", { cwd: 42 }],
+      ["isolation", { isolation: "container" }],
+      ["isolated", { isolated: "yes" }],
+      ["callbacks", { onTextDelta: () => {} }],
+      ["unknown fields", { futureOption: true }],
+    ])("rejects invalid or non-serializable %s options", async (_label, options) => {
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:spawn:reply:req-invalid", reply);
+      events.emit("subagents:rpc:spawn", {
+        requestId: "req-invalid",
+        type: "Explore",
+        prompt: "find it",
+        options,
+      });
+
+      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+      expect(reply).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, error: expect.any(String) }),
+      );
+      expect(manager.spawn).not.toHaveBeenCalled();
     });
 
     it("returns error when no active session", async () => {
@@ -283,11 +310,12 @@ describe("cross-extension RPC", () => {
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(reply).toHaveBeenCalledWith({ success: true, data: { id: "agent-42" } });
       expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "general-purpose", "x", {
+        description: "",
         model: fakeModel,
       });
     });
 
-    it("passes a Model object through unchanged", async () => {
+    it("rejects a non-serializable Model object", async () => {
       registerRpcHandlers(deps);
       const reply = vi.fn();
       events.on("subagents:rpc:spawn:reply:req-m2", reply);
@@ -299,9 +327,11 @@ describe("cross-extension RPC", () => {
       });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
-      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "general-purpose", "x", {
-        model: fakeModel,
+      expect(reply).toHaveBeenCalledWith({
+        success: false,
+        error: "Spawn RPC option model must be a string",
       });
+      expect(manager.spawn).not.toHaveBeenCalled();
     });
 
     it("surfaces a clear error when the model string can't be resolved", async () => {

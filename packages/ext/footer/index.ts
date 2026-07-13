@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 
 type ReadonlyFooterDataProvider = {
   getGitBranch(): string | null;
@@ -65,12 +65,21 @@ function shortenCwd(cwd: string): string {
   return cwd;
 }
 
-function addUsage(target: UsageTotals, usage: any): void {
-  target.input += Number(usage?.input) || 0;
-  target.output += Number(usage?.output) || 0;
-  target.cacheRead += Number(usage?.cacheRead) || 0;
-  target.cacheWrite += Number(usage?.cacheWrite) || 0;
-  target.cost += Number(usage?.cost?.total ?? usage?.cost) || 0;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function numericValue(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function addUsage(target: UsageTotals, usage: unknown): void {
+  if (!isRecord(usage)) return;
+  target.input += numericValue(usage.input);
+  target.output += numericValue(usage.output);
+  target.cacheRead += numericValue(usage.cacheRead);
+  target.cacheWrite += numericValue(usage.cacheWrite);
+  target.cost += numericValue(isRecord(usage.cost) ? usage.cost.total : usage.cost);
 }
 
 export function getMainSessionUsage(ctx: ExtensionContext): UsageTotals {
@@ -121,8 +130,10 @@ export class ExploreUsageReader {
       for (const line of chunk.split("\n")) {
         if (!line.trim()) continue;
         try {
-          const record = JSON.parse(line);
-          if (record?.type === "subagent_usage") addUsage(this.totals, record.usage);
+          const record: unknown = JSON.parse(line);
+          if (isRecord(record) && record.type === "subagent_usage") {
+            addUsage(this.totals, record.usage);
+          }
         } catch {
           // Ignore partially written or malformed records.
         }
@@ -255,7 +266,7 @@ class BitesFooter implements Component {
 
   constructor(
     private ctx: ExtensionContext,
-    private theme: any,
+    private theme: Theme,
     private footerData: ReadonlyFooterDataProvider,
     private exploreUsageReader: ExploreUsageReader,
     private requestRender: () => void,
@@ -298,7 +309,7 @@ export default function registerFooter(pi: ExtensionAPI): void {
 
     ctx.ui.setFooter((tui, theme, footerData) => {
       return new BitesFooter(ctx, theme, footerData, exploreUsageReader, () => {
-        (tui as any).requestRender();
+        tui.requestRender();
       });
     });
   });

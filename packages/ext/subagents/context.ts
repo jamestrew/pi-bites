@@ -4,11 +4,19 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+type TextContent = { type: "text"; text?: unknown };
+
+function isTextContent(content: unknown): content is TextContent {
+  return (
+    typeof content === "object" && content !== null && "type" in content && content.type === "text"
+  );
+}
+
 /** Extract text from a message content block array. */
 export function extractText(content: unknown[]): string {
   return content
-    .filter((c: any) => c.type === "text")
-    .map((c: any) => c.text ?? "")
+    .filter(isTextContent)
+    .map((item) => (typeof item.text === "string" ? item.text : ""))
     .join("\n");
 }
 

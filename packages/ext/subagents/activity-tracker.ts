@@ -1,3 +1,4 @@
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import { formatToolCall } from "./ui/tool-call-format.js";
 import { addUsage, type LifetimeUsage } from "./usage.js";
 import { type AgentActivity } from "./ui/agent-format.js";
@@ -46,7 +47,7 @@ export function createActivityTracker(onStreamUpdate?: () => void) {
       state.turnCount = turnCount;
       onStreamUpdate?.();
     },
-    onSessionCreated: (session: any) => {
+    onSessionCreated: (session: AgentSession) => {
       state.session = session;
     },
     onAssistantUsage: (usage: LifetimeUsage) => {
