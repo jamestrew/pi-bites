@@ -11,10 +11,12 @@
  * can `consume` keys. Activation uses Ctrl+↑ so normal typing is untouched.
  */
 
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import {
   isKeyRelease,
   Key,
   matchesKey,
+  type TUI,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -38,33 +40,11 @@ const TICK_MS = 200;
 /** How long a finished agent lingers in the list before it drops out. */
 const FINISHED_LINGER_MS = 500;
 
-/** Minimal UI surface the FleetView needs from `ctx.ui` (structural subset). */
-export type FleetUICtx = {
-  setWidget(
-    key: string,
-    content:
-      | undefined
-      | ((
-          tui: any,
-          theme: Theme,
-        ) => { render(width: number): string[]; invalidate(): void; dispose?(): void }),
-    options?: { placement?: "aboveEditor" | "belowEditor" },
-  ): void;
-  onTerminalInput(
-    handler: (data: string) => { consume?: boolean; data?: string } | undefined,
-  ): () => void;
-  getEditorText(): string;
-  notify(message: string, type?: "info" | "warning" | "error"): void;
-  custom<T>(
-    factory: (
-      tui: any,
-      theme: Theme,
-      keybindings: any,
-      done: (result: T) => void,
-    ) => { render(width: number): string[]; invalidate(): void; dispose?(): void },
-    options?: { overlay?: boolean; overlayOptions?: unknown; onHandle?: (handle: unknown) => void },
-  ): Promise<T>;
-};
+/** Minimal UI surface the FleetView needs from `ctx.ui`. */
+export type FleetUICtx = Pick<
+  ExtensionUIContext,
+  "setWidget" | "onTerminalInput" | "getEditorText" | "notify" | "custom"
+>;
 
 type MainEntry = { kind: "main" };
 type AgentEntry = { kind: "agent"; record: AgentRecord };
@@ -99,7 +79,7 @@ function rightAlign(left: string, right: string, width: number): string {
 
 export class FleetList {
   private ui: FleetUICtx | undefined;
-  private tui: any;
+  private tui: TUI | undefined;
   private inputUnsub: (() => void) | undefined;
   private widgetRegistered = false;
   private timer: ReturnType<typeof setInterval> | undefined;

@@ -31,6 +31,22 @@ import type { ApprovalRequest } from "../bash-gate/index.ts";
 
 // ---- Shared helpers ----
 
+function isApprovalRequest(raw: unknown): raw is ApprovalRequest {
+  if (typeof raw !== "object" || raw === null) return false;
+  const request = raw as Record<string, unknown>;
+  return (
+    typeof request.requestId === "string" &&
+    typeof request.title === "string" &&
+    typeof request.command === "string" &&
+    typeof request.sessionAllowKey === "string" &&
+    Array.isArray(request.labels) &&
+    request.labels.every((label) => typeof label === "string") &&
+    Array.isArray(request.reasons) &&
+    request.reasons.every((reason) => typeof reason === "string") &&
+    (request.agentId === undefined || typeof request.agentId === "string")
+  );
+}
+
 export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } = { current: {} }) {
   // ---- Register custom notification renderer ----
   registerNotificationRenderer(pi);
@@ -112,13 +128,18 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   // Expose manager via Symbol.for() global registry for cross-package access.
   // Standard Node.js pattern for cross-package singletons (used by OpenTelemetry, etc.).
   const MANAGER_KEY = Symbol.for("pi-subagents:manager");
-  (globalThis as any)[MANAGER_KEY] = {
+  Reflect.set(globalThis, MANAGER_KEY, {
     waitForAll: () => manager.waitForAll(),
     hasRunning: () => manager.hasRunning(),
-    spawn: (piRef: any, ctx: any, type: string, prompt: string, options: any) =>
-      manager.spawn(piRef, ctx, type, prompt, options),
+    spawn: (
+      piRef: ExtensionAPI,
+      ctx: ExtensionContext,
+      type: string,
+      prompt: string,
+      options: Parameters<AgentManager["spawn"]>[4],
+    ) => manager.spawn(piRef, ctx, type, prompt, options),
     getRecord: (id: string) => manager.getRecord(id),
-  };
+  });
 
   // --- Cross-extension RPC via pi.events ---
   let currentCtx: ExtensionContext | undefined;
@@ -138,7 +159,8 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   const unsubBashGateApproval = pi.events.on(
     "subagents:bash_gate:approval",
     async (raw: unknown) => {
-      const request = raw as ApprovalRequest;
+      if (!isApprovalRequest(raw)) return;
+      const request = raw;
       const ackChannel = `subagents:bash_gate:approval:ack:${request.requestId}`;
       const replyChannel = `subagents:bash_gate:approval:reply:${request.requestId}`;
       pi.events.emit(ackChannel, {});
@@ -221,7 +243,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     unsubPingRpc();
     unsubBashGateApproval();
     currentCtx = undefined;
-    delete (globalThis as any)[MANAGER_KEY];
+    Reflect.deleteProperty(globalThis, MANAGER_KEY);
     manager.abortAll();
     updateHelperToolsActive();
     completion.dispose();

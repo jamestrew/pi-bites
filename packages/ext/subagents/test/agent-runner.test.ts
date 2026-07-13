@@ -275,7 +275,23 @@ describe("agent-runner final output capture", () => {
 // is the source of truth for total tokens (survives compaction).
 describe("agent-runner usage callback wiring", () => {
   function emitMessageEnd(listeners: Array<(e: any) => void>, usage: any) {
-    const event = { type: "message_end", message: { role: "assistant", usage } };
+    const event = {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        usage: {
+          input: usage.input ?? 0,
+          output: usage.output ?? 0,
+          cacheRead: usage.cacheRead ?? 0,
+          cacheWrite: usage.cacheWrite ?? 0,
+          cost: usage.cost ?? { total: 0 },
+        },
+        provider: "",
+        model: "",
+        timestamp: 0,
+      },
+    };
     for (const l of listeners) l(event);
   }
 
@@ -297,18 +313,36 @@ describe("agent-runner usage callback wiring", () => {
     });
 
     expect(seen).toEqual([
-      { input: 100, output: 50, cacheWrite: 10 },
-      { input: 200, output: 80, cacheWrite: 20 },
+      {
+        input: 100,
+        output: 50,
+        cacheRead: 0,
+        cacheWrite: 10,
+        cost: 0,
+        provider: "",
+        model: "",
+        timestamp: 0,
+      },
+      {
+        input: 200,
+        output: 80,
+        cacheRead: 0,
+        cacheWrite: 20,
+        cost: 0,
+        provider: "",
+        model: "",
+        timestamp: 0,
+      },
     ]);
   });
 
-  it("runAgent normalizes partial usage objects to 0 for missing fields", async () => {
+  it("runAgent forwards zero-valued usage fields", async () => {
     const { session, listeners } = createSession("OK");
     createAgentSession.mockResolvedValue({ session });
 
     const seen: any[] = [];
     session.prompt = vi.fn(async () => {
-      emitMessageEnd(listeners, { input: 50 }); // output, cacheWrite missing
+      emitMessageEnd(listeners, { input: 50 });
       session.messages.push({ role: "assistant", content: [{ type: "text", text: "OK" }] });
     });
 
@@ -317,22 +351,18 @@ describe("agent-runner usage callback wiring", () => {
       onAssistantUsage: (u) => seen.push(u),
     });
 
-    expect(seen).toEqual([{ input: 50, output: 0, cacheWrite: 0 }]);
-  });
-
-  it("runAgent skips the callback when message_end has no usage field", async () => {
-    const { session, listeners } = createSession("OK");
-    createAgentSession.mockResolvedValue({ session });
-
-    const cb = vi.fn();
-    session.prompt = vi.fn(async () => {
-      emitMessageEnd(listeners, undefined);
-      session.messages.push({ role: "assistant", content: [{ type: "text", text: "OK" }] });
-    });
-
-    await runAgent(ctx, "Explore", "go", { pi, onAssistantUsage: cb });
-
-    expect(cb).not.toHaveBeenCalled();
+    expect(seen).toEqual([
+      {
+        input: 50,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: 0,
+        provider: "",
+        model: "",
+        timestamp: 0,
+      },
+    ]);
   });
 
   it("resumeAgent forwards usage on message_end the same way", async () => {
@@ -348,7 +378,18 @@ describe("agent-runner usage callback wiring", () => {
       onAssistantUsage: (u) => seen.push(u),
     });
 
-    expect(seen).toEqual([{ input: 10, output: 20, cacheWrite: 5 }]);
+    expect(seen).toEqual([
+      {
+        input: 10,
+        output: 20,
+        cacheRead: 0,
+        cacheWrite: 5,
+        cost: 0,
+        provider: "",
+        model: "",
+        timestamp: 0,
+      },
+    ]);
   });
 
   it("forwards compaction_end events to onCompaction (only when not aborted)", async () => {

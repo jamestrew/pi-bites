@@ -111,8 +111,13 @@ async function fetchWithTimeout(
   }
 }
 
-export function normalizeCodexUsage(payload: any): CodexUsage {
-  const rateLimit = payload?.rate_limit;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+export function normalizeCodexUsage(payload: unknown): CodexUsage {
+  const rateLimit =
+    isRecord(payload) && isRecord(payload.rate_limit) ? payload.rate_limit : undefined;
   const primary = rateLimit?.primary_window;
   const secondary = rateLimit?.secondary_window;
   const windows = [normalizeCodexWindow(primary), normalizeCodexWindow(secondary)].filter(
@@ -122,10 +127,11 @@ export function normalizeCodexUsage(payload: any): CodexUsage {
   return { capturedAt: Date.now(), windows };
 }
 
-function normalizeCodexWindow(value: any): CodexWindow | undefined {
-  const usedPercent = Number(value?.used_percent);
-  const limitWindowSeconds = Number(value?.limit_window_seconds);
-  const resetAfterSeconds = Number(value?.reset_after_seconds);
+function normalizeCodexWindow(value: unknown): CodexWindow | undefined {
+  if (!isRecord(value)) return undefined;
+  const usedPercent = Number(value.used_percent);
+  const limitWindowSeconds = Number(value.limit_window_seconds);
+  const resetAfterSeconds = Number(value.reset_after_seconds);
   if (
     !Number.isFinite(usedPercent) ||
     !Number.isFinite(limitWindowSeconds) ||

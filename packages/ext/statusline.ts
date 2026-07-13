@@ -21,7 +21,7 @@
 
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BitesConfig } from "./config.js";
 
 const execAsync = promisify(exec);
@@ -30,20 +30,20 @@ async function updateStatus(
   cwd: string,
   command: string,
   setStatus: (text: string | undefined) => void,
-  fg: (color: string, text: string) => string,
+  fg: (color: "dim" | "error", text: string) => string,
 ): Promise<void> {
   try {
     const { stdout } = await execAsync(command, { cwd });
     const output = stdout.trim();
     setStatus(output ? fg("dim", output) : undefined);
-  } catch (err: any) {
-    const msg = err?.message?.split("\n")[0] ?? "error";
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message.split("\n")[0] : "error";
     setStatus(fg("error", msg));
   }
 }
 
 export default function registerStatusline(pi: ExtensionAPI, configRef: { current: BitesConfig }) {
-  const run = (ctx: any) => {
+  const run = (ctx: ExtensionContext) => {
     const command = configRef.current.statusline?.command;
     if (!command) return;
     return updateStatus(
@@ -56,7 +56,7 @@ export default function registerStatusline(pi: ExtensionAPI, configRef: { curren
           /* stale ctx */
         }
       },
-      (color: string, text: string) => {
+      (color: "dim" | "error", text: string) => {
         try {
           return ctx.ui.theme.fg(color, text);
         } catch {

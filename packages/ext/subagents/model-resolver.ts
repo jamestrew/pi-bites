@@ -2,26 +2,21 @@
  * Model resolution: exact match ("provider/modelId") with fuzzy fallback.
  */
 
-export interface ModelEntry {
-  id: string;
-  name: string;
-  provider: string;
-}
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry as PiModelRegistry } from "@earendil-works/pi-coding-agent";
 
-export interface ModelRegistry {
-  find(provider: string, modelId: string): any;
-  getAll(): any[];
-  getAvailable?(): any[];
-}
+export type ModelEntry = Pick<Model<Api>, "id" | "name" | "provider">;
+export type ModelRegistry = Pick<PiModelRegistry, "find" | "getAll"> &
+  Partial<Pick<PiModelRegistry, "getAvailable">>;
 
 /**
  * Resolve a model string to a Model instance.
  * Tries exact match first ("provider/modelId"), then fuzzy match against all available models.
  * Returns the Model on success, or an error message string on failure.
  */
-export function resolveModel(input: string, registry: ModelRegistry): any {
+export function resolveModel(input: string, registry: ModelRegistry): Model<Api> | string {
   // Available models (those with auth configured)
-  const all = (registry.getAvailable?.() ?? registry.getAll()) as ModelEntry[];
+  const all = registry.getAvailable?.() ?? registry.getAll();
   const availableSet = new Set(all.map((m) => `${m.provider}/${m.id}`.toLowerCase()));
 
   // 1. Exact match: "provider/modelId" — only if available (has auth)

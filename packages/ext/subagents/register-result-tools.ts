@@ -1,11 +1,16 @@
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  type AgentToolResult,
+  type ExtensionAPI,
+  type ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { getAgentConversation, SUBAGENT_TOOL_NAMES, steerAgent } from "./agent-runner.js";
 import { getStatusNote } from "./status-note.js";
-import { textResult, formatLifetimeTokens } from "./tool-result.js";
+import { formatLifetimeTokens, textResult } from "./tool-result.js";
 import { type AgentManager } from "./agent-manager.js";
-import { formatDuration } from "./ui/agent-format.js";
+import { formatDuration, type Theme } from "./ui/agent-format.js";
 import { getSessionContextPercent } from "./usage.js";
 
 type HelperToolDetails = {
@@ -19,8 +24,12 @@ type HelperToolDetails = {
   state?: string;
 };
 
-function renderCompactHelperResult(result: any, options: { expanded?: boolean }, theme: any) {
-  const details = result.details as HelperToolDetails | undefined;
+function renderCompactHelperResult(
+  result: AgentToolResult<HelperToolDetails | undefined>,
+  options: ToolRenderResultOptions,
+  theme: Theme,
+) {
+  const details = result.details;
   const text = result.content[0]?.type === "text" ? result.content[0].text : "";
   if (!details || options.expanded) return new Text(text, 0, 0);
 
@@ -134,7 +143,7 @@ export function registerResultTools(
                   .trim()
                   .replace(/\s+/g, " ")
                   .slice(0, 160),
-        } as any);
+        });
       },
     }),
   );
@@ -179,7 +188,7 @@ export function registerResultTools(
               status: record.status,
               preview: "Steering message queued",
               state: `Current agent state: ${record.status}`,
-            } as any,
+            },
           );
         }
 
@@ -206,7 +215,7 @@ export function registerResultTools(
               status: record.status,
               preview: "Steering message sent",
               state: `Current state: ${stateParts.join(" · ")}`,
-            } as any,
+            },
           );
         } catch (err) {
           return textResult(
