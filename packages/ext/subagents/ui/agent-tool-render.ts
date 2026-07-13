@@ -5,7 +5,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Component, Text, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { doneStats } from "../tool-result.js";
-import { type AgentDetails, formatTurns, SPINNER, type Theme } from "./agent-format.js";
+import {
+  type AgentDetails,
+  formatBashApprovalActivity,
+  formatTurns,
+  SPINNER,
+  type Theme,
+} from "./agent-format.js";
 import { summarizeToolArg, wrapMultilineText } from "./tool-call-format.js";
 
 function formatStats(details: AgentDetails): string {
@@ -106,6 +112,18 @@ export function renderAgentToolResult(
         }
       } else if (details.status === "running" || options.isPartial) {
         const toolCalls = details.toolCalls ?? [];
+        if (details.bashApprovalCommand) {
+          const frame = SPINNER[details.spinnerFrame ?? 0];
+          lines.push(
+            theme.fg("accent", frame) + (stats ? theme.fg("dim", ` ${stats}`) : ""),
+            truncateToWidth(
+              theme.fg("dim", formatBashApprovalActivity(details.bashApprovalCommand)),
+              lineWidth,
+              "…",
+            ),
+            "",
+          );
+        }
         for (const call of toolCalls.slice(-3))
           lines.push(truncateToWidth(theme.fg("dim", summarizeToolArg(call)), lineWidth, "…"));
         lines.push(theme.fg("muted", "Running… (ctrl+o to expand)"));

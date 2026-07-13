@@ -2,7 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
-import { getDisplayName } from "../ui/agent-format.js";
+import { type AgentActivity, getDisplayName } from "../ui/agent-format.js";
 import {
   FleetList,
   type FleetUICtx,
@@ -41,6 +41,16 @@ function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
     isBackground: true,
     ...over,
   } as AgentRecord;
+}
+
+function makeActivity(record: AgentRecord): AgentActivity {
+  return {
+    activeTools: new Map(),
+    toolUses: 0,
+    responseText: "",
+    turnCount: 0,
+    lifetimeUsage: record.lifetimeUsage,
+  };
 }
 
 /** Fake manager exposing only what FleetList touches. */
@@ -110,7 +120,8 @@ function harness(agents: AgentRecord[]): Harness {
   };
 
   const manager = fakeManager(agents);
-  const fleet = new FleetList(manager, new Map());
+  const activity = new Map(agents.map((agent) => [agent.id, makeActivity(agent)]));
+  const fleet = new FleetList(manager, activity);
   fleet.setUICtx(ui);
   fleet.update();
 
@@ -276,6 +287,32 @@ describe("FleetList rendering", () => {
     expect(agentLine).toContain(getDisplayName("general-purpose"));
     expect(agentLine).toContain("↓ 13.1k tokens");
     expect(agentLine).toMatch(/\d+s · ↓/); // "<seconds>s · ↓ ..." (timing-agnostic)
+  });
+
+  it("shows and clears a pending bash approval with a command summary", () => {
+    const h = harness([makeRecord({ id: "waiting", description: "inspect files" })]);
+    h.fleet.setWaitingForBashApproval("waiting", "request-1", "git push\n  origin main");
+    expect(h.render(120).find((line) => line.includes("Waiting for bash approval"))).toContain(
+      "git push origin main",
+    );
+
+    h.fleet.setWaitingForBashApproval("waiting", "request-1");
+    expect(h.render(120).some((line) => line.includes("Waiting for bash approval"))).toBe(false);
+    expect(h.render(120).some((line) => line.includes("inspect files"))).toBe(true);
+  });
+
+  it("does not clear a newer overlapping bash approval", () => {
+    const h = harness([makeRecord({ id: "waiting" })]);
+    h.fleet.setWaitingForBashApproval("waiting", "request-1", "git fetch");
+    h.fleet.setWaitingForBashApproval("waiting", "request-2", "git push");
+
+    h.fleet.setWaitingForBashApproval("waiting", "request-1");
+    expect(h.render(120).find((line) => line.includes("Waiting for bash approval"))).toContain(
+      "git push",
+    );
+
+    h.fleet.setWaitingForBashApproval("waiting", "request-2");
+    expect(h.render(120).some((line) => line.includes("Waiting for bash approval"))).toBe(false);
   });
 
   it("orders agents earliest-launched first (top)", () => {

@@ -149,6 +149,8 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
         return;
       }
 
+      if (request.agentId)
+        fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
       try {
         const labels = request.labels?.join(", ") || "unknown rule";
         const reasons = request.reasons?.filter(Boolean).join("; ");
@@ -191,6 +193,8 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
         }
       } catch {
         pi.events.emit(replyChannel, { decision: "deny" });
+      } finally {
+        if (request.agentId) fleet.setWaitingForBashApproval(request.agentId, request.requestId);
       }
     },
   );

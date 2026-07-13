@@ -39,6 +39,8 @@ export interface AgentActivity {
   lifetimeUsage: LifetimeUsage;
   /** Completed tool call names, in order. */
   toolCalls?: string[];
+  /** Bash-gate request currently awaiting a parent decision. */
+  bashApproval?: { requestId: string; command: string };
 }
 
 /** Metadata attached to Agent tool results for custom rendering. */
@@ -52,6 +54,8 @@ export interface AgentDetails {
   status: "queued" | "running" | "completed" | "stopped" | "error" | "background";
   /** Human-readable description of what the agent is currently doing. */
   activity?: string;
+  /** Command blocked pending a parent bash-gate decision. */
+  bashApprovalCommand?: string;
   /** Current spinner frame index (for animated running indicator). */
   spinnerFrame?: number;
   /** Full effective provider/model identifier. */
@@ -149,6 +153,10 @@ function truncateLine(text: string, len = 60): string {
       ?.trim() ?? "";
   if (line.length <= len) return line;
   return line.slice(0, len) + "…";
+}
+
+export function formatBashApprovalActivity(command: string): string {
+  return `Waiting for bash approval · ${command}`;
 }
 
 /** Build a human-readable activity string from currently-running tools or response text. */

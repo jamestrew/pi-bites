@@ -25,6 +25,7 @@ import {
   type AgentDetails,
   buildInvocationTags,
   describeActivity,
+  formatBashApprovalActivity,
   formatMs,
   getDisplayName,
   SPINNER,
@@ -244,7 +245,10 @@ async function runForegroundAgent(
       turnCount: fgState.turnCount,
       durationMs: Date.now() - startedAt,
       status: "running",
-      activity: describeActivity(fgState.activeTools, fgState.responseText),
+      activity: fgState.bashApproval
+        ? formatBashApprovalActivity(fgState.bashApproval.command)
+        : describeActivity(fgState.activeTools, fgState.responseText),
+      bashApprovalCommand: fgState.bashApproval?.command,
       spinnerFrame: spinnerFrame % SPINNER.length,
       toolCalls: fgState.toolCalls,
       lifetimeUsage: fgState.lifetimeUsage,

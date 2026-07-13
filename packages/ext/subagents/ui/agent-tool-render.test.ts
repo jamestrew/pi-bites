@@ -52,6 +52,36 @@ test("partial results render as running instead of a conflicting terminal status
   expect(lines.join("\n")).not.toContain("Error: failed");
 });
 
+test("collapsed running result shows pending bash approval", () => {
+  const details: AgentDetails = {
+    displayName: "General",
+    description: "Deploy",
+    subagentType: "general",
+    toolUses: 1,
+    tokens: "",
+    durationMs: 10,
+    status: "running",
+    activity: "Waiting for bash approval · git push origin main",
+    bashApprovalCommand: "git push origin main",
+    toolCalls: ["Bash(git push origin main)"],
+  };
+  const result = {
+    content: [{ type: "text", text: "working" }],
+    details,
+  } as AgentToolResult<AgentDetails>;
+
+  const lines = renderAgentToolResult(
+    result,
+    { expanded: false, isPartial: true },
+    theme,
+    context,
+  ).render(80);
+
+  expect(lines.join("\n")).toContain("Waiting for bash approval · git push origin main");
+  expect(lines.join("\n")).toContain("Bash(git push origin main)");
+  expect(lines.join("\n")).toContain("Running… (ctrl+o to expand)");
+});
+
 test("collapsed completion includes full execution statistics", () => {
   const details: AgentDetails = {
     displayName: "General",

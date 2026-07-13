@@ -21,7 +21,12 @@ import {
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal } from "../usage.js";
-import { type AgentActivity, getDisplayName, type Theme } from "./agent-format.js";
+import {
+  type AgentActivity,
+  formatBashApprovalActivity,
+  getDisplayName,
+  type Theme,
+} from "./agent-format.js";
 import { ConversationViewer } from "./conversation-viewer.js";
 
 /** Widget key for the FleetView list. */
@@ -40,9 +45,9 @@ export type FleetUICtx = {
     content:
       | undefined
       | ((
-          tui: any,
-          theme: Theme,
-        ) => { render(width: number): string[]; invalidate(): void; dispose?(): void }),
+        tui: any,
+        theme: Theme,
+      ) => { render(width: number): string[]; invalidate(): void; dispose?(): void }),
     options?: { placement?: "aboveEditor" | "belowEditor" },
   ): void;
   onTerminalInput(
@@ -111,7 +116,7 @@ export class FleetList {
   constructor(
     private manager: AgentManager,
     private agentActivity: Map<string, AgentActivity>,
-  ) {}
+  ) { }
 
   // ---- Lifecycle ----
 
@@ -135,6 +140,19 @@ export class FleetList {
   /** Ensure the re-render timer is running (called when an agent spawns). */
   ensureTimer(): void {
     if (!this.timer) this.timer = setInterval(() => this.update(), TICK_MS);
+  }
+
+  setWaitingForBashApproval(agentId: string, requestId: string, command?: string): void {
+    const activity = this.agentActivity.get(agentId);
+    if (activity) {
+      if (command)
+        activity.bashApproval = {
+          requestId,
+          command: command.replace(/\s+/g, " ").trim(),
+        };
+      else if (activity.bashApproval?.requestId === requestId) activity.bashApproval = undefined;
+    }
+    this.update();
   }
 
   /**
@@ -416,7 +434,11 @@ export class FleetList {
     width: number,
     theme: Theme,
   ): string {
-    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}`;
+    const approvalCommand = this.agentActivity.get(record.id)?.bashApproval?.command;
+    const summary = approvalCommand
+      ? formatBashApprovalActivity(approvalCommand)
+      : record.description;
+    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${summary}`;
     const tokens = getLifetimeTotal(
       this.agentActivity.get(record.id)?.lifetimeUsage ?? record.lifetimeUsage,
     );
