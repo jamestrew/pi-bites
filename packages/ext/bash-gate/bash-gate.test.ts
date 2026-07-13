@@ -229,6 +229,57 @@ describe("bash gate tool_call", () => {
     expect(approvals).toBe(2);
   });
 
+  test.each(["subagents:completed", "subagents:failed"])(
+    "clears scoped allowances on %s",
+    async (lifecycleEvent) => {
+      const entries = [
+        subagentEntry({ agentId: "agent-1", title: "General", bashGatePolicy: "prompt" }),
+      ];
+      const { pi, toolCall, ctx, eventHandlers } = createBashGateHarness(entries);
+      let approvals = 0;
+      eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+        approvals++;
+        eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+        eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+          decision: "allow-session",
+        });
+      });
+
+      await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+      pi.events.emit(lifecycleEvent, { id: "agent-1" });
+      await expect(
+        toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+      ).resolves.toEqual({
+        block: true,
+        reason: "Bash gate: subagent identity is unavailable or finished.",
+      });
+
+      expect(approvals).toBe(1);
+    },
+  );
+
+  test.each(["allow", "allow-session"])(
+    "rejects %s resolved after subagent completion",
+    async (decision) => {
+      const entries = [
+        subagentEntry({ agentId: "agent-1", title: "General", bashGatePolicy: "prompt" }),
+      ];
+      const { pi, toolCall, ctx, eventHandlers } = createBashGateHarness(entries);
+      eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+        eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+        pi.events.emit("subagents:failed", { id: "agent-1", status: "stopped" });
+        eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({ decision });
+      });
+
+      await expect(
+        toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+      ).resolves.toEqual({
+        block: true,
+        reason: "Bash gate: subagent finished before approval.",
+      });
+    },
+  );
+
   test("prompt-policy subagents deny when no broker answers", async () => {
     const { toolCall, ctx } = createBashGateHarness([
       subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),

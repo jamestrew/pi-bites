@@ -44,6 +44,7 @@ import type {
   OneOrMany,
   BitesConfig,
 } from "../config.js";
+import type { AgentEventData } from "../subagents/event-data.ts";
 
 const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
 type BashGatePolicy = "deny" | "prompt";
@@ -362,6 +363,20 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
   });
 
   const sessionAllowed = new Set<string>();
+  const finishedSubagents = new Set<string>();
+
+  function clearSubagentAllowances(raw: unknown): void {
+    const eventData = raw as AgentEventData;
+    const agentId = eventData.id;
+    finishedSubagents.add(agentId);
+    const prefix = `subagent:${agentId}:`;
+    for (const key of sessionAllowed) {
+      if (key.startsWith(prefix)) sessionAllowed.delete(key);
+    }
+  }
+
+  pi.events.on("subagents:completed", clearSubagentAllowances);
+  pi.events.on("subagents:failed", clearSubagentAllowances);
 
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
@@ -390,6 +405,10 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     }
 
     if (subagentPolicy === "prompt") {
+      if (!metadata?.agentId || finishedSubagents.has(metadata.agentId)) {
+        return { block: true, reason: "Bash gate: subagent identity is unavailable or finished." };
+      }
+
       const gateStartMs = Date.now();
       pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
       try {
@@ -402,6 +421,10 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
           reasons,
           sessionAllowKey,
         });
+
+        if (finishedSubagents.has(metadata.agentId)) {
+          return { block: true, reason: "Bash gate: subagent finished before approval." };
+        }
 
         if (decision === "allow-session") {
           sessionAllowed.add(effectiveSessionAllowKey);

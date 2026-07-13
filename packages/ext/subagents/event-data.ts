@@ -1,8 +1,24 @@
 import { type AgentRecord } from "./types.js";
 import { getLifetimeTotal } from "./usage.js";
 
+export type AgentEventData = {
+  id: string;
+  type: string;
+  description: string;
+  result?: string;
+  error?: string;
+  status: string;
+  toolUses: number;
+  durationMs: number;
+  tokens?: {
+    input: number;
+    output: number;
+    total: number;
+  };
+};
+
 /** Helper: build event data for lifecycle events from an AgentRecord. */
-export function buildEventData(record: AgentRecord) {
+export function buildEventData(record: AgentRecord): AgentEventData {
   const durationMs = record.completedAt
     ? record.completedAt - record.startedAt
     : Date.now() - record.startedAt;
