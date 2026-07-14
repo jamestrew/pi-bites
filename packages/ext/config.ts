@@ -41,78 +41,64 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Type, type Static } from "typebox";
+import * as Value from "typebox/value";
 
-export interface SmallModelConfig {
-  /** Cheap model for lightweight internal tasks. Default: "github-copilot/claude-haiku-4.5" */
-  model?: string;
-  /** Thinking level for lightweight internal tasks. Default: "low" */
-  thinking?: ThinkingLevel;
-}
+const StringList = Type.Union([Type.String(), Type.Array(Type.String())]);
+const ThinkingLevelSchema = Type.Union([
+  Type.Literal("minimal"),
+  Type.Literal("low"),
+  Type.Literal("medium"),
+  Type.Literal("high"),
+  Type.Literal("xhigh"),
+  Type.Literal("max"),
+]);
+const BashGateRuleSchema = Type.Object({
+  cmd: Type.Optional(StringList),
+  subcommands: Type.Optional(StringList),
+  flagAny: Type.Optional(StringList),
+  redirects: Type.Optional(
+    Type.Union([Type.Literal("any-write"), Type.Literal("append"), Type.Literal("truncate")]),
+  ),
+  reason: Type.Optional(Type.String()),
+});
 
-export interface StatuslineConfig {
-  /**
-   * Shell command to run after each agent turn.
-   * Executed in ctx.cwd. Its trimmed stdout is shown verbatim in the statusline.
-   * If omitted, the statusline is not activated.
-   */
-  command?: string;
-}
-
-export interface CheckpointsConfig {
-  /** Set to false to disable checkpoint tracking and /rewind. Default: true. */
-  enabled?: boolean;
-}
-
-export interface PonytailConfig {
-  /** Default Ponytail mode for new sessions. Default: "full". */
-  defaultMode?: "off" | "lite" | "full" | "ultra" | "review";
-}
-
-export interface SubagentsConfig {
-  /** Per-agent overrides keyed by agent type, e.g. { "explore": { "model": "..." } }. */
-  [agentType: string]: { model?: string } | undefined;
-}
-
-export interface NotificationsConfig {
-  /**
-   * Shell command to run when the agent loop ends.
-   * Receives a JSON payload on stdin: { cwd, message }
-   * Compatible with Claude Code's Notification hook contract.
-   *
-   * Omit (or leave undefined) to use the built-in default:
-   *   notify-send on Linux, osascript on macOS.
-   * Set to "" to disable notifications entirely.
-   */
-  command?: string;
-}
-
+export type SmallModelConfig = Static<typeof SmallModelConfigSchema>;
+export type StatuslineConfig = Static<typeof StatuslineConfigSchema>;
+export type CheckpointsConfig = Static<typeof CheckpointsConfigSchema>;
+export type PonytailConfig = Static<typeof PonytailConfigSchema>;
+export type SubagentsConfig = Static<typeof SubagentsConfigSchema>;
+export type NotificationsConfig = Static<typeof NotificationsConfigSchema>;
 export type OneOrMany<T> = T | T[];
+export type BashGateRedirectRule = Static<typeof BashGateRuleSchema>["redirects"] & string;
+export type BashGateRule = Static<typeof BashGateRuleSchema>;
+export type BashGateConfig = Static<typeof BashGateConfigSchema>;
 
-export type BashGateRedirectRule = "any-write" | "append" | "truncate";
-
-export interface BashGateRule {
-  /** Command name to match, e.g. "git" or ["rm", "mv"]. */
-  cmd?: OneOrMany<string>;
-  /** Subcommand to match, e.g. "push" for `git push`. */
-  subcommands?: OneOrMany<string>;
-  /** Match when any listed flag is present on the matched command. */
-  flagAny?: OneOrMany<string>;
-  /** Match write redirects anywhere in the parsed command. */
-  redirects?: BashGateRedirectRule;
-  /** Optional explanation surfaced in the UI when this rule matches. */
-  reason?: string;
-}
-
-export interface BashGateConfig {
-  /**
-   * Structured rules matched against parsed bash command facts.
-   * Adds extra gated rules on top of the built-in destructive-command list.
-   */
-  rules?: BashGateRule[];
-}
+const SmallModelConfigSchema = Type.Object({
+  model: Type.Optional(Type.String()),
+  thinking: Type.Optional(ThinkingLevelSchema),
+});
+const StatuslineConfigSchema = Type.Object({ command: Type.Optional(Type.String()) });
+const CheckpointsConfigSchema = Type.Object({ enabled: Type.Optional(Type.Boolean()) });
+const PonytailConfigSchema = Type.Object({
+  defaultMode: Type.Optional(
+    Type.Union([
+      Type.Literal("off"),
+      Type.Literal("lite"),
+      Type.Literal("full"),
+      Type.Literal("ultra"),
+      Type.Literal("review"),
+    ]),
+  ),
+});
+const SubagentsConfigSchema = Type.Record(
+  Type.String(),
+  Type.Object({ model: Type.Optional(Type.String()) }),
+);
+const NotificationsConfigSchema = Type.Object({ command: Type.Optional(Type.String()) });
+const BashGateConfigSchema = Type.Object({ rules: Type.Optional(Type.Array(BashGateRuleSchema)) });
 
 export const EXTENSION_NAMES = [
   "bashGate",
@@ -140,26 +126,55 @@ export const EXTENSION_NAMES = [
 
 export type ExtensionName = (typeof EXTENSION_NAMES)[number];
 
-export interface BitesConfig {
-  smallModel?: SmallModelConfig;
-  statusline?: StatuslineConfig;
-  bashGate?: BashGateConfig;
-  notifications?: NotificationsConfig;
-  checkpoints?: CheckpointsConfig;
-  ponytail?: PonytailConfig;
-  subagents?: SubagentsConfig;
-  /**
-   * List of extension names to disable entirely.
-   * Global and project-local arrays are unioned.
-   * Example: ["tokenCount", "statusline"]
-   */
-  disable?: ExtensionName[];
+export const BitesConfigSchema = Type.Object({
+  smallModel: Type.Optional(SmallModelConfigSchema),
+  statusline: Type.Optional(StatuslineConfigSchema),
+  bashGate: Type.Optional(BashGateConfigSchema),
+  notifications: Type.Optional(NotificationsConfigSchema),
+  checkpoints: Type.Optional(CheckpointsConfigSchema),
+  ponytail: Type.Optional(PonytailConfigSchema),
+  subagents: Type.Optional(SubagentsConfigSchema),
+  disable: Type.Optional(
+    Type.Array(
+      Type.Union([
+        Type.Literal("bashGate"),
+        Type.Literal("rtk"),
+        Type.Literal("footer"),
+        Type.Literal("statusline"),
+        Type.Literal("tokenCount"),
+        Type.Literal("usageDashboard"),
+        Type.Literal("tools"),
+        Type.Literal("explore"),
+        Type.Literal("fzf"),
+        Type.Literal("todo"),
+        Type.Literal("question"),
+        Type.Literal("notifications"),
+        Type.Literal("checkpoints"),
+        Type.Literal("spotme"),
+        Type.Literal("inlineReferences"),
+        Type.Literal("slashSkillAutocomplete"),
+        Type.Literal("promptNormalization"),
+        Type.Literal("atMentionContext"),
+        Type.Literal("sessionTracker"),
+        Type.Literal("ponytail"),
+        Type.Literal("subagents"),
+      ]),
+    ),
+  ),
+});
+
+export type BitesConfig = Static<typeof BitesConfigSchema>;
+
+export function parseBitesConfig(value: unknown): BitesConfig | undefined {
+  return Value.Check(BitesConfigSchema, value) ? value : undefined;
 }
 
 function tryReadJson(filePath: string, label: string): BitesConfig {
   if (!existsSync(filePath)) return {};
   try {
-    return JSON.parse(readFileSync(filePath, "utf-8")) as BitesConfig;
+    const config = parseBitesConfig(JSON.parse(readFileSync(filePath, "utf-8")));
+    if (!config) throw new Error("config does not match the pi-bites schema");
+    return config;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`pi-bites: failed to parse ${label} config at ${filePath}: ${message}`);
@@ -178,9 +193,9 @@ export function loadConfig(cwd: string): BitesConfig {
   const global = tryReadJson(globalPath, "global");
   const project = tryReadJson(projectPath, "project-local");
 
-  const disableUnion = [
+  const disableUnion: ExtensionName[] = [
     ...new Set([...(global.disable ?? []), ...(project.disable ?? [])]),
-  ] as ExtensionName[];
+  ];
 
   return {
     smallModel: { ...global.smallModel, ...project.smallModel },
@@ -241,7 +256,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
     name: string,
     ctx: { ui: { notify: (msg: string, type?: "error" | "info" | "warning") => void } },
   ): name is ExtensionName {
-    if (!EXTENSION_NAMES.includes(name as ExtensionName)) {
+    if (!EXTENSION_NAMES.some((extensionName) => extensionName === name)) {
       ctx.ui.notify(
         `Unknown extension "${name}".\nValid names: ${EXTENSION_NAMES.join(", ")}`,
         "error",
@@ -274,7 +289,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
 
       const targetPath = resolveWritePath(ctx.cwd);
       const config = readConfigFile(targetPath);
-      config.disable = [...(config.disable ?? []), name as ExtensionName];
+      config.disable = [...(config.disable ?? []), name];
       writeConfigFile(targetPath, config);
 
       const isProject = targetPath !== globalPath;
@@ -303,7 +318,7 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
       const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "pi-bites.json");
       for (const filePath of [globalPath, projectPath]) {
         const config = readConfigFile(filePath);
-        if (config.disable?.includes(name as ExtensionName)) {
+        if (config.disable?.includes(name)) {
           config.disable = config.disable.filter((n) => n !== name);
           if (config.disable.length === 0) delete config.disable;
           writeConfigFile(filePath, config);

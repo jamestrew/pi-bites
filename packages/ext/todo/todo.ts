@@ -13,7 +13,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { Container, Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
+import * as Value from "typebox/value";
 
 // ---------------------------------------------------------------------------
 // Constants — tool/command identity and static user-facing strings
@@ -34,24 +35,40 @@ export type TaskStatus = "pending" | "in_progress" | "completed" | "deleted";
 
 export type TaskAction = "create" | "update" | "list" | "get" | "delete" | "clear";
 
-export interface Task {
-  id: number;
-  subject: string;
-  description?: string;
-  activeForm?: string;
-  status: TaskStatus;
-  blockedBy?: number[];
-  owner?: string;
-  metadata?: Record<string, unknown>;
-}
+export const TaskSchema = Type.Object({
+  id: Type.Number(),
+  subject: Type.String(),
+  description: Type.Optional(Type.String()),
+  activeForm: Type.Optional(Type.String()),
+  status: Type.Union([
+    Type.Literal("pending"),
+    Type.Literal("in_progress"),
+    Type.Literal("completed"),
+    Type.Literal("deleted"),
+  ]),
+  blockedBy: Type.Optional(Type.Array(Type.Number())),
+  owner: Type.Optional(Type.String()),
+  metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+});
+export const TaskDetailsSchema = Type.Object({
+  action: Type.Union([
+    Type.Literal("create"),
+    Type.Literal("update"),
+    Type.Literal("list"),
+    Type.Literal("get"),
+    Type.Literal("delete"),
+    Type.Literal("clear"),
+  ]),
+  params: Type.Record(Type.String(), Type.Unknown()),
+  tasks: Type.Array(TaskSchema),
+  nextId: Type.Number(),
+  error: Type.Optional(Type.String()),
+});
 
-export interface TaskDetails {
-  action: TaskAction;
-  params: Record<string, unknown>;
-  tasks: Task[];
-  nextId: number;
-  error?: string;
-}
+export type Task = Static<typeof TaskSchema>;
+export type TaskDetails = Static<typeof TaskDetailsSchema>;
+
+type TodoRenderState = { allDone?: boolean };
 
 // ---------------------------------------------------------------------------
 // State machine
@@ -452,9 +469,7 @@ export function applyTaskMutation(
 // ---------------------------------------------------------------------------
 
 function isTaskDetails(value: unknown): value is TaskDetails {
-  if (!value || typeof value !== "object") return false;
-  const v = value as Record<string, unknown>;
-  return Array.isArray(v.tasks) && typeof v.nextId === "number";
+  return Value.Check(TaskDetailsSchema, value);
 }
 
 export function reconstructTodoState(ctx: ExtensionContext): void {
@@ -547,7 +562,7 @@ const TodoParams = Type.Object({
 });
 
 export function registerTodoTool(pi: ExtensionAPI): void {
-  pi.registerTool({
+  pi.registerTool<typeof TodoParams, TaskDetails, TodoRenderState>({
     name: TOOL_NAME,
     label: TOOL_LABEL,
     description:
@@ -566,11 +581,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
     renderShell: "self",
 
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const result = applyTaskMutation(
-        { tasks, nextId },
-        params.action,
-        params as TaskMutationParams,
-      );
+      const result = applyTaskMutation({ tasks, nextId }, params.action, params);
       tasks = result.state.tasks;
       nextId = result.state.nextId;
       return {
@@ -580,7 +591,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
     },
 
     renderCall(_args, theme, context) {
-      if ((context.state as Record<string, unknown>).allDone) {
+      if (context.state.allDone) {
         const visible = tasks.filter((t) => t.status !== "deleted");
         const lines = [
           `${theme.fg("success", "●")} ${theme.fg("muted", `All ${visible.length} task${visible.length === 1 ? "" : "s"} completed`)}`,
@@ -592,15 +603,14 @@ export function registerTodoTool(pi: ExtensionAPI): void {
     },
 
     renderResult(result, { isPartial }, theme, context) {
-      const err = (result.details as TaskDetails).error;
-      if (err) {
-        return new Text(theme.fg("error", `todo ✗: ${err}`), 0, 0);
+      const details = isTaskDetails(result.details) ? result.details : undefined;
+      if (details?.error) {
+        return new Text(theme.fg("error", `todo ✗: ${details.error}`), 0, 0);
       }
-      if (!isPartial && !(context.state as Record<string, unknown>).allDone) {
-        const details = result.details as TaskDetails;
+      if (!isPartial && !context.state.allDone && details) {
         const visible = details.tasks.filter((t) => t.status !== "deleted");
         if (visible.length > 0 && visible.every((t) => t.status === "completed")) {
-          (context.state as Record<string, unknown>).allDone = true;
+          context.state.allDone = true;
           context.invalidate();
         }
       }

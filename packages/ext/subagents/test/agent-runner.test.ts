@@ -121,6 +121,7 @@ import {
   getAgentConversation,
   parseExtensionsSpec,
   parseExtSelectors,
+  parseSubagentMetadata,
   resumeAgent,
   runAgent,
 } from "../agent-runner.js";
@@ -158,6 +159,29 @@ const ctx = {
 } as any;
 
 const pi = {} as any;
+
+describe("subagent metadata parsing", () => {
+  it("accepts metadata written by the agent runner", () => {
+    expect(
+      parseSubagentMetadata({
+        agentId: "agent-1",
+        type: "Explore",
+        title: "Explore#agent-1",
+        bashGatePolicy: "prompt",
+      }),
+    ).toEqual({
+      agentId: "agent-1",
+      type: "Explore",
+      title: "Explore#agent-1",
+      bashGatePolicy: "prompt",
+    });
+  });
+
+  it("rejects metadata without required type or title fields", () => {
+    expect(parseSubagentMetadata({ title: "Explore#agent-1" })).toBeUndefined();
+    expect(parseSubagentMetadata({ type: "Explore" })).toBeUndefined();
+  });
+});
 
 beforeEach(() => {
   createAgentSession.mockReset();

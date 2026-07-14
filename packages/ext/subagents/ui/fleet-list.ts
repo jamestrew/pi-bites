@@ -374,7 +374,7 @@ export class FleetList {
   // ---- Rendering ----
 
   private renderBar(width: number, theme: Theme): string[] {
-    const agents = this.roster().slice(1) as AgentEntry[];
+    const agents = this.roster().filter((entry): entry is AgentEntry => entry.kind === "agent");
     if (agents.length === 0) return [];
     // Clamp locally so a render between a roster shrink and the next update()
     // (e.g. on terminal resize) never loses the selection marker.

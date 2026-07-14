@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { loadConfig, writePonytailDefaultMode, type BitesConfig } from "../config.js";
+import { Type, type Static } from "typebox";
+import * as Value from "typebox/value";
 
 const DEFAULT_MODE = "full" as const;
 const VALID_MODES = ["off", "lite", "full", "ultra", "review"] as const;
@@ -8,16 +10,31 @@ const RUNTIME_MODES = ["off", "lite", "full", "ultra"] as const;
 type ConfigMode = (typeof VALID_MODES)[number];
 type RuntimeMode = (typeof RUNTIME_MODES)[number];
 
+export const PonytailModeEntrySchema = Type.Object({
+  mode: Type.Union([
+    Type.Literal("off"),
+    Type.Literal("lite"),
+    Type.Literal("full"),
+    Type.Literal("ultra"),
+    Type.Literal("review"),
+  ]),
+});
+export type PonytailModeEntry = Static<typeof PonytailModeEntrySchema>;
+
+export function parsePonytailModeEntry(value: unknown): PonytailModeEntry | undefined {
+  return Value.Check(PonytailModeEntrySchema, value) ? value : undefined;
+}
+
 function normalizeConfigMode(mode: unknown): ConfigMode | null {
   if (typeof mode !== "string") return null;
-  const normalized = mode.trim().toLowerCase() as ConfigMode;
-  return (VALID_MODES as readonly string[]).includes(normalized) ? normalized : null;
+  const normalized = mode.trim().toLowerCase();
+  return VALID_MODES.find((candidate) => candidate === normalized) ?? null;
 }
 
 function normalizeMode(mode: unknown): RuntimeMode | null {
   if (typeof mode !== "string") return null;
-  const normalized = mode.trim().toLowerCase() as RuntimeMode;
-  return (RUNTIME_MODES as readonly string[]).includes(normalized) ? normalized : null;
+  const normalized = mode.trim().toLowerCase();
+  return RUNTIME_MODES.find((candidate) => candidate === normalized) ?? null;
 }
 
 function normalizePersistedMode(mode: unknown): ConfigMode | RuntimeMode | null {
@@ -36,17 +53,30 @@ function isDeactivationCommand(text: unknown): boolean {
   return trimmed === "stop ponytail" || trimmed === "normal mode";
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 export function resolveSessionMode(
   entries: unknown,
   fallbackMode: ConfigMode = DEFAULT_MODE,
 ): ConfigMode {
   const fallback = normalizePersistedMode(fallbackMode) ?? DEFAULT_MODE;
-  if (!Array.isArray(entries)) return fallback;
+  if (!isUnknownArray(entries)) return fallback;
 
   for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = entries[i] as { type?: string; customType?: string; data?: { mode?: unknown } };
-    if (entry.type !== "custom" || entry.customType !== "ponytail-mode") continue;
-    const mode = normalizePersistedMode(entry.data?.mode);
+    const entry = entries[i];
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      !("type" in entry) ||
+      !("customType" in entry) ||
+      !("data" in entry) ||
+      entry.type !== "custom" ||
+      entry.customType !== "ponytail-mode"
+    )
+      continue;
+    const mode = normalizePersistedMode(parsePonytailModeEntry(entry.data)?.mode);
     if (mode) return mode;
   }
 
@@ -159,7 +189,7 @@ export default function registerPonytail(
     const normalized = normalizePersistedMode(mode);
     if (!normalized) return;
     currentMode = normalized;
-    pi.appendEntry("ponytail-mode", { mode: normalized });
+    pi.appendEntry("ponytail-mode", { mode: normalized } satisfies PonytailModeEntry);
     syncStatus(ctx);
     ctx?.ui.notify(`Ponytail mode set to ${normalized}.`, "info");
   }

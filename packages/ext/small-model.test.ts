@@ -11,7 +11,7 @@ function context(models: unknown[], current: unknown = currentModel) {
       getAll: () => models,
       getAvailable: () => models,
       find: (provider: string, id: string) =>
-        models.find((model: any) => model.provider === provider && model.id === id),
+        [...models, current].find((model: any) => model.provider === provider && model.id === id),
     },
   } as any;
 }

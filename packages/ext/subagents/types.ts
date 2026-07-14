@@ -8,6 +8,20 @@ import type { LifetimeUsage } from "./usage.js";
 
 export type { ThinkingLevel };
 
+const THINKING_LEVELS: ReadonlySet<string> = new Set([
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+export function isThinkingLevel(value: unknown): value is ThinkingLevel {
+  return typeof value === "string" && THINKING_LEVELS.has(value);
+}
+
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
@@ -38,7 +52,7 @@ export interface AgentConfig {
   /** true = inherit all, string[] = only listed, false = none */
   skills: true | string[] | false;
   model?: string;
-  thinking?: ThinkingLevel;
+  thinking?: string;
   /** Persist this subagent as a normal pi session instead of keeping it in memory only. */
   persistSession?: boolean;
   /** Optional session directory used when persistSession is true. Omitted = pi's normal session location. */

@@ -82,14 +82,12 @@ function isOpenAICodex(ctx: ExtensionContext): boolean {
 async function queryCodexUsage(ctx: ExtensionContext): Promise<CodexUsage> {
   if (!ctx.model) throw new Error("Missing model");
 
-  // TODO(strict-types): ExtensionContext.model is exposed as Model<any> by the SDK.
-  const model = ctx.model as Parameters<
-    ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]
-  >[0];
+  const model = ctx.modelRegistry.find(ctx.model.provider, ctx.model.id);
+  if (!model) throw new Error("Current model is not registered");
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) throw new Error(auth.error);
 
-  const headers = { ...auth.headers } as Record<string, string>;
+  const headers: Record<string, string> = { ...auth.headers };
   if (!hasHeader(headers, "Authorization") && auth.apiKey) {
     headers.Authorization = `Bearer ${auth.apiKey}`;
   }

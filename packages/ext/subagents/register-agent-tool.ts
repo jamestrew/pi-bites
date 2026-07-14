@@ -18,6 +18,7 @@ import { type AgentRecord, type JoinMode } from "./types.js";
 import { type AgentActivity, getDisplayName } from "./ui/agent-format.js";
 import { type FleetList } from "./ui/fleet-list.js";
 import { renderAgentToolResult } from "./ui/agent-tool-render.js";
+import { emitSubagentEvent, onSubagentEvent } from "./events.js";
 
 type RegisterAgentToolDeps = {
   manager: AgentManager;
@@ -62,14 +63,14 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     updateHelperToolsActive,
   } = deps;
   const terminalRecords = new Map<string, AgentRecord>();
-  const rememberTerminalRecord = (event: unknown) => {
-    const id = (event as { id?: string }).id;
+  const rememberTerminalRecord = (event: { id: string }) => {
+    const { id } = event;
     if (!id) return;
     const record = manager.getRecord(id);
     if (record) terminalRecords.set(id, record);
   };
-  pi.events.on("subagents:completed", rememberTerminalRecord);
-  pi.events.on("subagents:failed", rememberTerminalRecord);
+  onSubagentEvent(pi, "subagents:completed", rememberTerminalRecord);
+  onSubagentEvent(pi, "subagents:failed", rememberTerminalRecord);
 
   /** Format an agent's tool scope: "*" when it has all built-ins, else a comma-separated list. */
   const formatToolsSuffix = (cfg: { builtinToolNames?: string[] } | undefined): string => {
@@ -119,7 +120,7 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
       setToolDescriptionMode: setToolDescriptionMode,
       setFleetView: setFleetViewEnabled,
     },
-    (event, payload) => pi.events.emit(event, payload),
+    (event, payload) => emitSubagentEvent(pi, event, payload),
   );
 
   // ---- Agent tool ----

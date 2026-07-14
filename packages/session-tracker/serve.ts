@@ -1,5 +1,6 @@
 import {
   defaultSessionTrackerDaemonOptions,
+  codeOf,
   defaultSessionTrackerOptions,
   getTrackerSocketPath,
   SessionTracker,
@@ -17,7 +18,7 @@ try {
     defaultSessionTrackerDaemonOptions,
   );
 } catch (error) {
-  if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+  if (codeOf(error) === "EADDRINUSE") {
     writeSessionTrackerLog(socketPath, "serve exiting: daemon already running");
   } else {
     writeSessionTrackerLog(socketPath, "serve failed", error);

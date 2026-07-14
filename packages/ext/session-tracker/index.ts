@@ -10,7 +10,9 @@ import { basename } from "node:path";
 import { extractLastAssistantText } from "../utils.ts";
 import type { BitesConfig } from "../config.js";
 import { getSmallModel } from "../small-model.js";
+import { onBashGateEvent } from "../bash-gate/events.js";
 import {
+  codeOf,
   compareTrackerStates,
   getTrackerSocketPath,
   requestTracker,
@@ -58,7 +60,7 @@ const DAEMON_READY_POLL_INTERVAL_MS = 50;
 const DAEMON_START_FAILURE_COOLDOWN_MS = 60_000;
 
 function isSocketUnavailableError(error: unknown): boolean {
-  const code = (error as NodeJS.ErrnoException).code;
+  const code = codeOf(error);
   return code === "ENOENT" || code === "ECONNREFUSED";
 }
 
@@ -241,10 +243,7 @@ const daemonStartFailures = new Map<string, { at: number; error: unknown }>();
 const lastLoggedFailures = new Map<string, string>();
 
 function failureLogCode(error: unknown): string {
-  return (
-    (error as NodeJS.ErrnoException).code ??
-    (error instanceof Error ? error.message : String(error))
-  );
+  return codeOf(error) ?? (error instanceof Error ? error.message : String(error));
 }
 
 function logTrackerFailure(
@@ -594,8 +593,8 @@ export default function registerSessionTracker(
     (error) => logTrackerFailure(defaultCallOptions, "needs-input inference", error),
   );
   pi.on("agent_start", () => needsInputLifecycle.agentStart());
-  pi.events.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
-  pi.events.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
+  onBashGateEvent(pi, "bites:bash_gate", async () => runtime.setState("needs-permission"));
+  onBashGateEvent(pi, "bites:bash_gate_resolved", async () => runtime.setState("working"));
   pi.on("agent_end", (event) => needsInputLifecycle.agentEnd(event));
   pi.on("agent_settled", (_event, ctx) => needsInputLifecycle.agentSettled(ctx));
   pi.on("session_shutdown", async (event) => {

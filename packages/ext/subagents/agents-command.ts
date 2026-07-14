@@ -26,6 +26,7 @@ import {
 } from "./settings.js";
 import { type AgentConfig, type AgentRecord, type JoinMode } from "./types.js";
 import { type AgentActivity, formatDuration, getDisplayName } from "./ui/agent-format.js";
+import { emitSubagentEvent } from "./events.js";
 
 type AgentsCommandDeps = {
   manager: AgentManager;
@@ -528,7 +529,8 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           notifyApplied(ctx, `Max concurrency set to ${n}`);
         }
       } else if (id === "joinMode") {
-        setDefaultJoinMode(value as JoinMode);
+        if (value !== "async" && value !== "group" && value !== "smart") return;
+        setDefaultJoinMode(value);
         notifyApplied(ctx, `Default join mode set to ${value}`);
       } else if (id === "scopeModels") {
         const enabled = value === "on";
@@ -542,7 +544,8 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           `Default agents ${enabled ? "disabled" : "enabled"}. Tool spec change takes effect on next pi session.`,
         );
       } else if (id === "toolDescriptionMode") {
-        setToolDescriptionMode(value as ToolDescriptionMode);
+        if (value !== "full" && value !== "compact" && value !== "custom") return;
+        setToolDescriptionMode(value);
         notifyApplied(ctx, `Tool description set to ${value}. Takes effect on next pi session.`);
       } else if (id === "fleetView") {
         const enabled = value === "on";
@@ -626,7 +629,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     const { message, level } = saveAndEmitChanged(
       snapshotSettings(),
       successMsg,
-      (event, payload) => pi.events.emit(event, payload),
+      (event, payload) => emitSubagentEvent(pi, event, payload),
     );
     ctx.ui.notify(message, level);
   }

@@ -22,9 +22,7 @@ export default function (pi: ExtensionAPI) {
     const current = pi.getActiveTools();
     const next = active
       ? [...new Set([...current, ...SPOTME_TOOL_NAMES])]
-      : current.filter(
-          (name) => !SPOTME_TOOL_NAMES.includes(name as (typeof SPOTME_TOOL_NAMES)[number]),
-        );
+      : current.filter((name) => !SPOTME_TOOL_NAMES.some((toolName) => toolName === name));
     pi.setActiveTools(next);
   }
 

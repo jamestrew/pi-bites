@@ -12,6 +12,8 @@ import {
 import { createServer, createConnection, type Server } from "node:net";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
+import { Type, type Static } from "typebox";
+import * as Value from "typebox/value";
 
 export type TrackerState = "idle" | "working" | "needs-input" | "needs-permission";
 
@@ -26,29 +28,51 @@ export function compareTrackerStates(a: TrackerState, b: TrackerState): number {
   return TRACKER_STATE_PRIORITY[a] - TRACKER_STATE_PRIORITY[b];
 }
 
-export interface PaneRecord {
-  paneId: string;
-  cwd: string;
-  runtimeId: string;
-  seq: number;
-  state: TrackerState;
-  heartbeatAt: number;
-  sessionId?: string;
+const PaneRecordSchema = Type.Object({
+  paneId: Type.String(),
+  cwd: Type.String(),
+  runtimeId: Type.String(),
+  seq: Type.Number(),
+  state: Type.Union([
+    Type.Literal("idle"),
+    Type.Literal("working"),
+    Type.Literal("needs-input"),
+    Type.Literal("needs-permission"),
+  ]),
+  heartbeatAt: Type.Number(),
+  sessionId: Type.Optional(Type.String()),
+});
+
+export const TrackerRequestSchema = Type.Union([
+  Type.Object({ type: Type.Literal("report"), record: PaneRecordSchema }),
+  Type.Object({ type: Type.Literal("heartbeat"), record: PaneRecordSchema }),
+  Type.Object({
+    type: Type.Literal("release"),
+    paneId: Type.String(),
+    runtimeId: Type.String(),
+  }),
+  Type.Object({ type: Type.Literal("snapshot") }),
+  Type.Object({ type: Type.Literal("focus_pane"), paneId: Type.String() }),
+  Type.Object({ type: Type.Literal("focus_next"), currentPaneId: Type.Optional(Type.String()) }),
+  Type.Object({ type: Type.Literal("shutdown") }),
+]);
+
+export const TrackerResponseSchema = Type.Object({
+  ok: Type.Boolean(),
+  records: Type.Optional(Type.Array(PaneRecordSchema)),
+  error: Type.Optional(Type.String()),
+});
+
+export type PaneRecord = Static<typeof PaneRecordSchema>;
+export type TrackerRequest = Static<typeof TrackerRequestSchema>;
+export type TrackerResponse = Static<typeof TrackerResponseSchema>;
+
+export function parseTrackerRequest(value: unknown): TrackerRequest | undefined {
+  return Value.Check(TrackerRequestSchema, value) ? value : undefined;
 }
 
-export type TrackerRequest =
-  | { type: "report"; record: PaneRecord }
-  | { type: "heartbeat"; record: PaneRecord }
-  | { type: "release"; paneId: string; runtimeId: string }
-  | { type: "snapshot" }
-  | { type: "focus_pane"; paneId: string }
-  | { type: "focus_next"; currentPaneId?: string }
-  | { type: "shutdown" };
-
-export interface TrackerResponse {
-  ok: boolean;
-  records?: PaneRecord[];
-  error?: string;
+export function parseTrackerResponse(value: unknown): TrackerResponse | undefined {
+  return Value.Check(TrackerResponseSchema, value) ? value : undefined;
 }
 
 export type TmuxRunner = (args: string[]) => void | Promise<void>;
@@ -101,8 +125,9 @@ export const defaultSessionTrackerDaemonOptions: SessionTrackerDaemonOptions = {
   clearInterval,
 };
 
-function codeOf(error: unknown): string | undefined {
-  return (error as NodeJS.ErrnoException).code;
+export function codeOf(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  return typeof error.code === "string" ? error.code : undefined;
 }
 
 function codedError(message: string, code: string): NodeJS.ErrnoException {
@@ -283,7 +308,9 @@ export async function requestTracker(
       if (!data.includes("\n")) return;
       socket.destroy();
       try {
-        resolve(JSON.parse(data.trim()) as TrackerResponse);
+        const response = parseTrackerResponse(JSON.parse(data.trim()));
+        if (!response) throw new Error("Invalid session tracker response");
+        resolve(response);
       } catch (error) {
         reject(error);
       }
@@ -334,7 +361,11 @@ export async function startSessionTrackerDaemon(
     const handleLine = () => {
       if (handled || !data.includes("\n")) return;
       handled = true;
-      const request = JSON.parse(data.trim()) as TrackerRequest;
+      const request = parseTrackerRequest(JSON.parse(data.trim()));
+      if (!request) {
+        writeResponse({ ok: false, error: "Invalid session tracker request" });
+        return;
+      }
       if (request.type === "shutdown") {
         writeResponse({ ok: true });
         closeServer();

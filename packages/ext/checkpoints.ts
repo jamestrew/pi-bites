@@ -7,20 +7,34 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { spawn } from "node:child_process";
 import type { BitesConfig } from "./config.js";
+import { Type, type Static } from "typebox";
+import * as Value from "typebox/value";
 
-type FileState = { exists: false } | { exists: true; blob: string; bytes: number };
+const FileStateSchema = Type.Union([
+  Type.Object({ exists: Type.Literal(false) }),
+  Type.Object({ exists: Type.Literal(true), blob: Type.String(), bytes: Type.Number() }),
+]);
+const CheckpointSchema = Type.Object({
+  id: Type.String(),
+  createdAt: Type.String(),
+  label: Type.String(),
+  files: Type.Record(Type.String(), FileStateSchema),
+  changedFiles: Type.Array(Type.String()),
+  userEntryId: Type.Optional(Type.String()),
+  userPrompt: Type.Optional(Type.String()),
+});
+export const CheckpointStoreSchema = Type.Object({
+  version: Type.Literal(1),
+  checkpoints: Type.Array(CheckpointSchema),
+});
 
-type Checkpoint = {
-  id: string;
-  createdAt: string;
-  label: string;
-  files: Record<string, FileState>;
-  changedFiles: string[];
-  userEntryId?: string;
-  userPrompt?: string;
-};
+type FileState = Static<typeof FileStateSchema>;
+type Checkpoint = Static<typeof CheckpointSchema>;
+type Store = Static<typeof CheckpointStoreSchema>;
 
-type Store = { version: 1; checkpoints: Checkpoint[] };
+export function parseCheckpointStore(value: unknown): Store | undefined {
+  return Value.Check(CheckpointStoreSchema, value) ? value : undefined;
+}
 
 type Pending = { path: string; before: FileState; userEntryId?: string; userPrompt?: string };
 type RewindPoint = { before: Checkpoint; after: Checkpoint; first: Checkpoint; stat: string };
@@ -91,7 +105,11 @@ async function ensureGit(gitDir: string): Promise<void> {
 
 async function loadStore(cwd: string, currentSessionId: string): Promise<Store> {
   try {
-    return JSON.parse(await readFile(paths(cwd, currentSessionId).meta, "utf8")) as Store;
+    return (
+      parseCheckpointStore(
+        JSON.parse(await readFile(paths(cwd, currentSessionId).meta, "utf8")),
+      ) ?? { ...EMPTY_STORE, checkpoints: [] }
+    );
   } catch {
     return { ...EMPTY_STORE, checkpoints: [] };
   }

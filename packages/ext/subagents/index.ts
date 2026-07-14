@@ -25,27 +25,12 @@ import { registerResultTools } from "./register-result-tools.js";
 import { type ToolDescriptionMode } from "./settings.js";
 import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
-import { FleetList, type FleetUICtx } from "./ui/fleet-list.js";
+import { emitSubagentEvent } from "./events.js";
+import { FleetList } from "./ui/fleet-list.js";
 import { ConversationViewer } from "./ui/conversation-viewer.js";
-import type { ApprovalRequest } from "../bash-gate/index.ts";
+import { onSubagentApprovalRequest } from "../bash-gate/events.js";
 
 // ---- Shared helpers ----
-
-function isApprovalRequest(raw: unknown): raw is ApprovalRequest {
-  if (typeof raw !== "object" || raw === null) return false;
-  const request = raw as Record<string, unknown>;
-  return (
-    typeof request.requestId === "string" &&
-    typeof request.title === "string" &&
-    typeof request.command === "string" &&
-    typeof request.sessionAllowKey === "string" &&
-    Array.isArray(request.labels) &&
-    request.labels.every((label) => typeof label === "string") &&
-    Array.isArray(request.reasons) &&
-    request.reasons.every((reason) => typeof reason === "string") &&
-    (request.agentId === undefined || typeof request.agentId === "string")
-  );
-}
 
 export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } = { current: {} }) {
   // ---- Register custom notification renderer ----
@@ -56,7 +41,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     const userAgents = loadCustomAgents(process.cwd());
     registerAgents(userAgents);
     for (const [type, cfg] of Object.entries(configRef.current.subagents ?? {})) {
-      if (cfg?.model) {
+      if (cfg.model) {
         const agent = getAgentConfig(type);
         if (agent) agent.model = cfg.model;
       }
@@ -85,7 +70,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     const current = pi.getActiveTools();
     const next = hasActionableBackgroundAgent()
       ? [...new Set([...current, ...helperTools])]
-      : current.filter((name) => !helperTools.includes(name as (typeof helperTools)[number]));
+      : current.filter((name) => !helperTools.some((toolName) => toolName === name));
     pi.setActiveTools(next);
   }
 
@@ -106,7 +91,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     undefined,
     (record) => {
       // Emit started event when agent transitions to running (including from queue)
-      pi.events.emit("subagents:started", {
+      emitSubagentEvent(pi, "subagents:started", {
         id: record.id,
         type: record.type,
         description: record.description,
@@ -114,7 +99,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     },
     (record, info) => {
       // Emit compacted event when agent's session compacts (preserves count on record).
-      pi.events.emit("subagents:compacted", {
+      emitSubagentEvent(pi, "subagents:compacted", {
         id: record.id,
         type: record.type,
         description: record.description,
@@ -156,70 +141,54 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     updateHelperToolsActive();
   });
 
-  const unsubBashGateApproval = pi.events.on(
-    "subagents:bash_gate:approval",
-    async (raw: unknown) => {
-      if (!isApprovalRequest(raw)) return;
-      const request = raw;
-      const ackChannel = `subagents:bash_gate:approval:ack:${request.requestId}`;
-      const replyChannel = `subagents:bash_gate:approval:reply:${request.requestId}`;
-      pi.events.emit(ackChannel, {});
+  const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
+    const ui = currentCtx?.ui;
+    if (!currentCtx?.hasUI || !ui) return "deny";
 
-      const ui = currentCtx?.ui;
-      if (!currentCtx?.hasUI || !ui) {
-        pi.events.emit(replyChannel, { decision: "deny" });
-        return;
-      }
+    if (request.agentId)
+      fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
+    try {
+      const labels = request.labels.join(", ") || "unknown rule";
+      const reasons = request.reasons.filter(Boolean).join("; ");
+      const prompt = reasons
+        ? `🔒 ${request.title} requests bash approval: ${request.command}\n${reasons} (${labels})`
+        : `🔒 ${request.title} requests bash approval: ${request.command}\n${labels}`;
+      const allowSession = `Allow for session ("${request.sessionAllowKey}")`;
+      for (;;) {
+        const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
+        const viewConversation = record?.session ? "View conversation" : undefined;
+        const choice = await ui.select(prompt, [
+          "Allow",
+          allowSession,
+          ...(viewConversation ? [viewConversation] : []),
+          "Deny",
+        ]);
 
-      if (request.agentId)
-        fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
-      try {
-        const labels = request.labels.join(", ") || "unknown rule";
-        const reasons = request.reasons.filter(Boolean).join("; ");
-        const prompt = reasons
-          ? `🔒 ${request.title} requests bash approval: ${request.command}\n${reasons} (${labels})`
-          : `🔒 ${request.title} requests bash approval: ${request.command}\n${labels}`;
-        const allowSession = `Allow for session ("${request.sessionAllowKey}")`;
-        for (;;) {
-          const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
-          const viewConversation = record?.session ? "View conversation" : undefined;
-          const choice = await ui.select(prompt, [
-            "Allow",
-            allowSession,
-            ...(viewConversation ? [viewConversation] : []),
-            "Deny",
-          ]);
-
-          if (choice === viewConversation && record?.session) {
-            await ui.custom<undefined>(
-              (tui, theme, keybindings, done) =>
-                new ConversationViewer(
-                  tui,
-                  record.session!,
-                  record,
-                  agentActivity.get(record.id),
-                  theme,
-                  done,
-                  undefined,
-                  keybindings,
-                ),
-            );
-            continue;
-          }
-
-          pi.events.emit(replyChannel, {
-            decision:
-              choice === allowSession ? "allow-session" : choice === "Allow" ? "allow" : "deny",
-          });
-          break;
+        if (choice === viewConversation && record?.session) {
+          await ui.custom<undefined>(
+            (tui, theme, keybindings, done) =>
+              new ConversationViewer(
+                tui,
+                record.session!,
+                record,
+                agentActivity.get(record.id),
+                theme,
+                done,
+                undefined,
+                keybindings,
+              ),
+          );
+          continue;
         }
-      } catch {
-        pi.events.emit(replyChannel, { decision: "deny" });
-      } finally {
-        if (request.agentId) fleet.setWaitingForBashApproval(request.agentId, request.requestId);
+
+        return choice === allowSession ? "allow-session" : choice === "Allow" ? "allow" : "deny";
       }
-    },
-  );
+    } catch {
+      return "deny";
+    } finally {
+      if (request.agentId) fleet.setWaitingForBashApproval(request.agentId, request.requestId);
+    }
+  });
 
   const {
     unsubPing: unsubPingRpc,
@@ -233,7 +202,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   });
 
   // Broadcast readiness so extensions loaded after us can discover us
-  pi.events.emit("subagents:ready", {});
+  emitSubagentEvent(pi, "subagents:ready", {});
 
   // On shutdown, abort all agents immediately and clean up.
   // If the session is going down, there's nothing left to consume agent results.
@@ -312,7 +281,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
 
   // Grab UI context from first tool execution.
   pi.on("tool_execution_start", async (_event, ctx) => {
-    fleet.setUICtx(ctx.ui as unknown as FleetUICtx);
+    fleet.setUICtx(ctx.ui);
   });
 
   // ---- Agent tool ----

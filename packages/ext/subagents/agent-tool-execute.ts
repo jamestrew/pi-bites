@@ -10,6 +10,7 @@ import { getAgentConfig, resolveType } from "./agent-types.js";
 import { isModelInScope, readEnabledModels, resolveEnabledModels } from "./enabled-models.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { resolveModel } from "./model-resolver.js";
+import { emitSubagentEvent } from "./events.js";
 import { createOutputFilePath, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { getStatusNote } from "./status-note.js";
 import { buildDetails, formatLifetimeTokens, textResult } from "./tool-result.js";
@@ -69,7 +70,7 @@ type PreparedInvocation = {
   subagentType: SubagentType;
   fellBack: boolean;
   displayName: string;
-  model: ExtensionContext["model"];
+  model: Model<Api> | undefined;
   isolated: boolean;
   inheritContext: boolean;
   thinking: ThinkingLevel;
@@ -153,7 +154,7 @@ async function runBackgroundAgent(
   try {
     id = manager.spawn(pi, ctx, subagentType, params.prompt, {
       description: params.description,
-      ...(model !== undefined && { model: model as Model<Api> }),
+      ...(model !== undefined && { model }),
       isolated,
       inheritContext,
       thinkingLevel: thinking,
@@ -184,7 +185,7 @@ async function runBackgroundAgent(
   fleet.update();
 
   // Emit created event
-  pi.events.emit("subagents:created", {
+  emitSubagentEvent(pi, "subagents:created", {
     id,
     type: subagentType,
     description: params.description,
@@ -301,7 +302,7 @@ async function runForegroundAgent(
       params.prompt,
       {
         description: params.description,
-        ...(model !== undefined && { model: model as Model<Api> }),
+        ...(model !== undefined && { model }),
         isolated,
         inheritContext,
         thinkingLevel: thinking,
@@ -390,7 +391,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
 
     // Resolve model from agent config first; tool-call params only fill gaps.
-    let model = ctx.model;
+    let model = ctx.model && ctx.modelRegistry.find(ctx.model.provider, ctx.model.id);
     if (resolvedConfig.modelInput) {
       const resolved = resolveModel(resolvedConfig.modelInput, ctx.modelRegistry);
       if (typeof resolved === "string") {
