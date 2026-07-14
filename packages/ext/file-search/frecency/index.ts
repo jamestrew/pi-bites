@@ -1,6 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { Type } from "typebox";
+import * as Value from "typebox/value";
 
 const HALF_LIFE_SECONDS = 30 * 24 * 3600;
 const LAMBDA = Math.log(2) / HALF_LIFE_SECONDS;
@@ -15,15 +17,17 @@ function defaultStoreFile(): string {
   return join(base, "pi-bites", "file-frecency.json");
 }
 
-function isNumberEntry(entry: [string, unknown]): entry is [string, number] {
-  return typeof entry[1] === "number" && Number.isFinite(entry[1]);
-}
+export const FrecencyStoreSchema = Type.Record(
+  Type.String(),
+  Type.Union([Type.Number(), Type.Record(Type.String(), Type.Number())]),
+);
 
-function parseStore(raw: string): FrecencyStore {
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
+export function parseFrecencyStore(value: unknown): FrecencyStore | undefined {
+  if (!Value.Check(FrecencyStoreSchema, value)) return undefined;
   const store: FrecencyStore = {};
 
-  for (const [key, value] of Object.entries(parsed)) {
+  for (const [key, entry] of Object.entries(value)) {
+    const value = entry;
     if (typeof value === "number" && Number.isFinite(value)) {
       // Back-compat for the original flat `${cwd}\0${path}` key format.
       const separator = key.indexOf("\0");
@@ -35,8 +39,7 @@ function parseStore(raw: string): FrecencyStore {
       continue;
     }
 
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    const entries = Object.entries(value).filter(isNumberEntry);
+    const entries = Object.entries(value).filter((entry) => Number.isFinite(entry[1]));
     if (entries.length > 0) store[key] = Object.fromEntries(entries);
   }
 
@@ -62,7 +65,7 @@ export class FileFrecency {
 
     try {
       const raw = await readFile(this.file, "utf8");
-      const store = parseStore(raw);
+      const store = parseFrecencyStore(JSON.parse(raw)) ?? {};
       this.cache = new Map(Object.entries(store[cwd] ?? {}));
       this.pruned.clear();
     } catch {
@@ -105,7 +108,7 @@ export class FileFrecency {
     let store: FrecencyStore = {};
     try {
       const raw = await readFile(this.file, "utf8");
-      store = parseStore(raw);
+      store = parseFrecencyStore(JSON.parse(raw)) ?? {};
     } catch {
       store = {};
     }

@@ -6,59 +6,25 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { JoinMode } from "./types.js";
+import { Type, type Static } from "typebox";
+import * as Value from "typebox/value";
+import type { SubagentEventMap } from "./events.js";
 
-export interface SubagentsSettings {
-  maxConcurrent?: number;
-  defaultJoinMode?: JoinMode;
-  /**
-   * When true, the effective model of each subagent spawn is validated
-   * against `enabledModels` from pi's settings — both global
-   * (`<agentDir>/settings.json`) and project-local (`<cwd>/.pi/settings.json`),
-   * with project overriding global (mirrors pi's SettingsManager deep-merge).
-   *
-   * scopeModels guards against runtime LLM choices, not user-level config.
-   * Out-of-scope handling reflects this:
-   *   - Caller-supplied via `Agent({ model: "..." })` (only when frontmatter
-   *     has no `model:`, since frontmatter is authoritative): hard error
-   *     returned to the orchestrator, listing the allowed models. The LLM
-   *     made an explicit out-of-scope choice and gets explicit feedback.
-   *   - Frontmatter-pinned: warning toast + the pinned model runs. The
-   *     agent's author/installer chose this; trust it.
-   *   - Parent-inherited (neither caller nor frontmatter sets a model):
-   *     warning toast + parent's model runs. The user chose the parent's
-   *     model when starting the session; trust it.
-   *
-   * No-op when pi's `enabledModels` is empty or absent — nothing to validate
-   * against. Defaults to false: subagents may use any model.
-   */
-  scopeModels?: boolean;
-  /**
-   * When true, the three built-in default agents (general, Explore, Plan)
-   * are not registered at startup. User-defined agents from .pi/agents/*.md are
-   * completely unaffected — only the hardcoded DEFAULT_AGENTS are suppressed.
-   * Defaults to false.
-   */
-  disableDefaultAgents?: boolean;
-  /**
-   * Which Agent tool description the LLM sees. "full" (default) is the rich
-   * Claude Code-style prompt; "compact" is a ~75% smaller version (one-line
-   * agent type list, terse usage notes) for small/local models where tool-spec
-   * tokens are expensive; "custom" reads `.pi/agent-tool-description.md`
-   * (project, falling back to `<agentDir>/agent-tool-description.md`) with
-   * `{{placeholder}}` substitution — a missing/empty file falls back to "full".
-   * The mode is read once at tool registration — changing it applies on the
-   * next pi session.
-   */
-  toolDescriptionMode?: ToolDescriptionMode;
-  /**
-   * Whether the Claude Code-style FleetView (the navigable main+subagents list
-   * rendered above the editor) is shown. Defaults to `true`. Pure-UI: when off,
-   * the list never registers and the global key handler never captures input.
-   */
-  fleetView?: boolean;
-}
+export const SubagentsSettingsSchema = Type.Object({
+  maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
+  defaultJoinMode: Type.Optional(
+    Type.Union([Type.Literal("async"), Type.Literal("group"), Type.Literal("smart")]),
+  ),
+  scopeModels: Type.Optional(Type.Boolean()),
+  disableDefaultAgents: Type.Optional(Type.Boolean()),
+  toolDescriptionMode: Type.Optional(
+    Type.Union([Type.Literal("full"), Type.Literal("compact"), Type.Literal("custom")]),
+  ),
+  fleetView: Type.Optional(Type.Boolean()),
+});
 
-export type ToolDescriptionMode = "full" | "compact" | "custom";
+export type SubagentsSettings = Static<typeof SubagentsSettingsSchema>;
+export type ToolDescriptionMode = NonNullable<SubagentsSettings["toolDescriptionMode"]>;
 
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
@@ -70,52 +36,45 @@ export interface SettingsAppliers {
   setFleetView: (b: boolean) => void;
 }
 
-/** Emit callback — a subset of `pi.events.emit` to keep helpers testable. */
-export type SettingsEmit = (event: string, payload: unknown) => void;
+/** Emit callback — the settings channels only, to keep helpers testable. */
+type SettingsEvent = "subagents:settings_loaded" | "subagents:settings_changed";
+export type SettingsEmit = <K extends SettingsEvent>(
+  event: K,
+  payload: SubagentEventMap[K],
+) => void;
 
-const VALID_JOIN_MODES: ReadonlySet<string> = new Set<JoinMode>(["async", "group", "smart"]);
-const VALID_TOOL_DESCRIPTION_MODES: ReadonlySet<string> = new Set<ToolDescriptionMode>([
-  "full",
-  "compact",
-  "custom",
-]);
-
-// Sanity ceilings — prevent hand-edited configs from asking for values that
-// make no operational sense (e.g. 1e6 concurrent subagents). Permissive enough
-// that any realistic power-user setting passes through.
-const MAX_CONCURRENT_CEILING = 1024;
-
-/** Drop fields that don't match the expected shape. Silent — garbage becomes absent. */
-function sanitize(raw: unknown): SubagentsSettings {
-  if (!raw || typeof raw !== "object") return {};
-  const r = raw as Record<string, unknown>;
-  const out: SubagentsSettings = {};
+export function parseSubagentsSettings(value: unknown): SubagentsSettings | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const settings: SubagentsSettings = {};
   if (
-    Number.isInteger(r.maxConcurrent) &&
-    (r.maxConcurrent as number) >= 1 &&
-    (r.maxConcurrent as number) <= MAX_CONCURRENT_CEILING
-  ) {
-    out.maxConcurrent = r.maxConcurrent as number;
-  }
-  if (typeof r.defaultJoinMode === "string" && VALID_JOIN_MODES.has(r.defaultJoinMode)) {
-    out.defaultJoinMode = r.defaultJoinMode as JoinMode;
-  }
-  if (typeof r.scopeModels === "boolean") {
-    out.scopeModels = r.scopeModels;
-  }
-  if (typeof r.disableDefaultAgents === "boolean") {
-    out.disableDefaultAgents = r.disableDefaultAgents;
-  }
+    "maxConcurrent" in value &&
+    typeof value.maxConcurrent === "number" &&
+    Number.isInteger(value.maxConcurrent) &&
+    value.maxConcurrent >= 1 &&
+    value.maxConcurrent <= 1024
+  )
+    settings.maxConcurrent = value.maxConcurrent;
   if (
-    typeof r.toolDescriptionMode === "string" &&
-    VALID_TOOL_DESCRIPTION_MODES.has(r.toolDescriptionMode)
-  ) {
-    out.toolDescriptionMode = r.toolDescriptionMode as ToolDescriptionMode;
-  }
-  if (typeof r.fleetView === "boolean") {
-    out.fleetView = r.fleetView;
-  }
-  return out;
+    "defaultJoinMode" in value &&
+    (value.defaultJoinMode === "async" ||
+      value.defaultJoinMode === "group" ||
+      value.defaultJoinMode === "smart")
+  )
+    settings.defaultJoinMode = value.defaultJoinMode;
+  if ("scopeModels" in value && typeof value.scopeModels === "boolean")
+    settings.scopeModels = value.scopeModels;
+  if ("disableDefaultAgents" in value && typeof value.disableDefaultAgents === "boolean")
+    settings.disableDefaultAgents = value.disableDefaultAgents;
+  if (
+    "toolDescriptionMode" in value &&
+    (value.toolDescriptionMode === "full" ||
+      value.toolDescriptionMode === "compact" ||
+      value.toolDescriptionMode === "custom")
+  )
+    settings.toolDescriptionMode = value.toolDescriptionMode;
+  if ("fleetView" in value && typeof value.fleetView === "boolean")
+    settings.fleetView = value.fleetView;
+  return Value.Check(SubagentsSettingsSchema, settings) ? settings : undefined;
 }
 
 function globalPath(): string {
@@ -134,7 +93,7 @@ function projectPath(cwd: string): string {
 function readSettingsFile(path: string): SubagentsSettings {
   if (!existsSync(path)) return {};
   try {
-    return sanitize(JSON.parse(readFileSync(path, "utf-8")));
+    return parseSubagentsSettings(JSON.parse(readFileSync(path, "utf-8"))) ?? {};
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     console.warn(`[pi-subagents] Ignoring malformed settings at ${path}: ${reason}`);

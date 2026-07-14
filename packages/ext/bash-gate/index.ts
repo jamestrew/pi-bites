@@ -30,12 +30,7 @@
  * ```
  */
 
-import type {
-  CustomEntry,
-  ExtensionAPI,
-  ExtensionContext,
-  SessionEntry,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
 import type {
   BashGateConfig,
@@ -44,31 +39,32 @@ import type {
   OneOrMany,
   BitesConfig,
 } from "../config.js";
-import type { AgentEventData } from "../subagents/event-data.ts";
+import {
+  SUBAGENT_METADATA_ENTRY,
+  parseSubagentMetadata,
+  type SubagentMetadata,
+} from "../subagents/agent-runner.js";
+import { onSubagentEvent } from "../subagents/events.js";
+import { emitBashGateEvent, requestSubagentApproval } from "./events.js";
 
-const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
+export type { ApprovalRequest } from "./events.js";
 type BashGatePolicy = "deny" | "prompt";
-type BashGateDecision = "allow" | "allow-session" | "deny";
 
-interface SubagentBashGateMetadata {
-  agentId?: string;
-  type?: string;
-  title?: string;
-  bashGatePolicy?: unknown;
-}
-
-function isSubagentMetadataEntry(entry: SessionEntry): entry is CustomEntry {
-  return entry.type === "custom" && entry.customType === SUBAGENT_METADATA_ENTRY;
-}
-
-function subagentMetadata(entries: SessionEntry[]): SubagentBashGateMetadata | undefined {
-  const entry = [...entries].reverse().find(isSubagentMetadataEntry);
-  return entry?.data as SubagentBashGateMetadata | undefined;
+function subagentMetadata(entries: SessionEntry[]): SubagentMetadata | null | undefined {
+  const entry = [...entries]
+    .reverse()
+    .find(
+      (candidate) =>
+        candidate.type === "custom" && candidate.customType === SUBAGENT_METADATA_ENTRY,
+    );
+  if (entry?.type !== "custom") return undefined;
+  return parseSubagentMetadata(entry.data) ?? null;
 }
 
 export function subagentBashGatePolicy(entries: SessionEntry[]): BashGatePolicy | undefined {
   const metadata = subagentMetadata(entries);
-  if (!metadata) return undefined;
+  if (metadata === undefined) return undefined;
+  if (metadata === null) return "deny";
   const policy = metadata.bashGatePolicy;
   return policy === "deny" || policy === "prompt" ? policy : "deny";
 }
@@ -121,16 +117,6 @@ interface BashRuleCommandMatch {
   label: string;
 }
 
-export type ApprovalRequest = {
-  requestId: string;
-  agentId?: string;
-  title: string;
-  command: string;
-  labels: string[];
-  reasons: string[];
-  sessionAllowKey: string;
-};
-
 /**
  * When a command is approved, add the time spent waiting in the gate to the
  * timeout (if one was set by the model). This is necessary because the TUI
@@ -162,9 +148,11 @@ function resolveConfiguredRules(config: BitesConfig): BashGateRule[] {
 
 function resolveEffectiveRules(config: BashGateConfig | BitesConfig = {}): BashGateRule[] {
   const configuredRules =
-    "bashGate" in config
-      ? resolveConfiguredRules(config)
-      : ((config as BashGateConfig).rules ?? []);
+    "rules" in config
+      ? (config.rules ?? [])
+      : "bashGate" in config
+        ? resolveConfiguredRules(config)
+        : [];
   return [...DEFAULT_BASH_GATE_RULES, ...configuredRules];
 }
 
@@ -269,9 +257,11 @@ export async function findMatchedPatterns(
 
   const configuredRules = Array.isArray(rulesOrConfig)
     ? rulesOrConfig
-    : "bashGate" in rulesOrConfig
-      ? resolveConfiguredRules(rulesOrConfig)
-      : ((rulesOrConfig as BashGateConfig).rules ?? []);
+    : "rules" in rulesOrConfig
+      ? (rulesOrConfig.rules ?? [])
+      : "bashGate" in rulesOrConfig
+        ? resolveConfiguredRules(rulesOrConfig)
+        : [];
   const builtinRules = Array.isArray(rulesOrConfig) ? [] : DEFAULT_BASH_GATE_RULES;
 
   const matches: BashGateMatch[] = [];
@@ -292,45 +282,6 @@ export async function findMatchedPattern(
   rulesOrConfig: BashGateRule[] | BashGateConfig | BitesConfig = {},
 ): Promise<BashGateMatch | undefined> {
   return (await findMatchedPatterns(command, rulesOrConfig))[0];
-}
-
-async function requestSubagentApproval(
-  pi: ExtensionAPI,
-  request: Omit<ApprovalRequest, "requestId">,
-): Promise<BashGateDecision> {
-  const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  const channel = "subagents:bash_gate:approval";
-  const ackChannel = `${channel}:ack:${requestId}`;
-  const replyChannel = `${channel}:reply:${requestId}`;
-
-  return await new Promise<BashGateDecision>((resolve) => {
-    let settled = false;
-    let acked = false;
-    let unsubAck = () => {};
-    let unsubReply = () => {};
-    const settle = (decision: BashGateDecision) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(ackTimer);
-      unsubAck();
-      unsubReply();
-      resolve(decision);
-    };
-
-    unsubAck = pi.events.on(ackChannel, () => {
-      acked = true;
-    });
-    unsubReply = pi.events.on(replyChannel, (raw: unknown) => {
-      const decision = (raw as { decision?: unknown } | undefined)?.decision;
-      settle(decision === "allow" || decision === "allow-session" ? decision : "deny");
-    });
-
-    const ackTimer = setTimeout(() => {
-      if (!acked) settle("deny");
-    }, 250);
-
-    pi.events.emit(channel, { requestId, ...request });
-  });
 }
 
 export default function registerBashGate(pi: ExtensionAPI, configRef: { current: BitesConfig }) {
@@ -365,8 +316,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
   const sessionAllowed = new Set<string>();
   const finishedSubagents = new Set<string>();
 
-  function clearSubagentAllowances(raw: unknown): void {
-    const eventData = raw as AgentEventData;
+  function clearSubagentAllowances(eventData: { id: string }): void {
     const agentId = eventData.id;
     finishedSubagents.add(agentId);
     const prefix = `subagent:${agentId}:`;
@@ -375,13 +325,14 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     }
   }
 
-  pi.events.on("subagents:completed", clearSubagentAllowances);
-  pi.events.on("subagents:failed", clearSubagentAllowances);
+  onSubagentEvent(pi, "subagents:completed", clearSubagentAllowances);
+  onSubagentEvent(pi, "subagents:failed", clearSubagentAllowances);
 
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
 
-    const command = event.input.command as string;
+    const { command } = event.input;
+    if (typeof command !== "string") return undefined;
 
     const matchedPatterns = await findMatchedPatterns(command, rules);
     if (matchedPatterns.length === 0) return undefined;
@@ -396,7 +347,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       : sessionAllowKey;
 
     // --yolo bypasses every gate; the shortcut only bypasses the main agent.
-    if (pi.getFlag("yolo") || (mainAgentYolo && !metadata)) return undefined;
+    if (pi.getFlag("yolo") || (mainAgentYolo && metadata === undefined)) return undefined;
 
     // Pattern was already approved for this session — run silently.
     if (sessionAllowed.has(effectiveSessionAllowKey)) return undefined;
@@ -410,12 +361,14 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       }
 
       const gateStartMs = Date.now();
-      pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
+      emitBashGateEvent(pi, "bites:bash_gate", { cwd: ctx.cwd, command });
       try {
-        const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean) as string[];
+        const reasons = matchedPatterns.flatMap((match) =>
+          match.reason === undefined ? [] : [match.reason],
+        );
         const decision = await requestSubagentApproval(pi, {
           agentId: metadata.agentId,
-          title: metadata.title ?? metadata.type ?? "Subagent",
+          title: metadata.title,
           command,
           labels: matchedPatternLabels,
           reasons,
@@ -439,7 +392,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
         return { block: true, reason: "Bash gate: command was denied by parent approval." };
       } finally {
-        pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+        emitBashGateEvent(pi, "bites:bash_gate_resolved", { cwd: ctx.cwd, command });
       }
     }
 
@@ -455,7 +408,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     // still gets its full intended timeout.
     const gateStartMs = Date.now();
 
-    pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
+    emitBashGateEvent(pi, "bites:bash_gate", { cwd: ctx.cwd, command });
 
     const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
     const prompt =
@@ -482,7 +435,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
       return { block: true, reason: "Bash gate: command was denied by the user." };
     } finally {
-      pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+      emitBashGateEvent(pi, "bites:bash_gate_resolved", { cwd: ctx.cwd, command });
     }
   });
 }

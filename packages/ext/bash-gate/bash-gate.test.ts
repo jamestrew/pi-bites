@@ -33,20 +33,23 @@ describe("subagentBashGatePolicy", () => {
       data,
     });
 
-    expect(subagentBashGatePolicy([entry({ bashGatePolicy: "prompt" })])).toBe("prompt");
-    expect(subagentBashGatePolicy([entry({ bashGatePolicy: "wat" })])).toBe("deny");
-    expect(subagentBashGatePolicy([entry({})])).toBe("deny");
+    const metadata = { type: "Explore", title: "Explore" };
+    expect(subagentBashGatePolicy([entry({ ...metadata, bashGatePolicy: "prompt" })])).toBe(
+      "prompt",
+    );
+    expect(subagentBashGatePolicy([entry({ ...metadata, bashGatePolicy: "wat" })])).toBe("deny");
+    expect(subagentBashGatePolicy([entry(metadata)])).toBe("deny");
   });
 });
 
-function subagentEntry(data: unknown): SessionEntry {
+function subagentEntry(data: Record<string, unknown>): SessionEntry {
   return {
     type: "custom",
     id: "id",
     parentId: null,
     timestamp: "now",
     customType: "pi-bites:subagent",
-    data,
+    data: { type: "Explore", title: "Explore", ...data },
   };
 }
 

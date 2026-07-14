@@ -33,8 +33,8 @@ import type { ModelEntry } from "./model-resolver.js";
 
 /** Minimal registry shape — only the methods resolveEnabledModels actually calls. */
 export interface ModelRegistryRef {
-  getAll(): unknown[];
-  getAvailable?(): unknown[];
+  getAll(): ModelEntry[];
+  getAvailable?(): ModelEntry[];
 }
 
 /** Paths to pi's settings.json files: [project, global] (project takes precedence). */
@@ -124,7 +124,7 @@ export function resolveEnabledModels(
     return undefined;
   }
 
-  const available = (registry.getAvailable?.() ?? registry.getAll()) as ModelEntry[];
+  const available = registry.getAvailable?.() ?? registry.getAll();
   const allowed = new Set<string>();
 
   for (const pattern of patterns) {

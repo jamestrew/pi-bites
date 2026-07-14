@@ -69,7 +69,7 @@ export function parseInlineReferences(text: string): InlineReference[] {
     const match = text.slice(i).match(/^\$(skill|prompt):([^\s]+)/);
     if (!match) continue;
 
-    const kind = match[1] as InlineReferenceKind;
+    const kind: InlineReferenceKind = match[1] === "skill" ? "skill" : "prompt";
     const name = match[2]!.replace(/[),.;!?]+$/, "");
     if (name.length === 0) continue;
 
@@ -208,8 +208,23 @@ function referenceItemFromCommand(command: SlashCommandLike): AutocompleteItem |
   return null;
 }
 
+function isSlashCommandLike(value: unknown): value is SlashCommandLike {
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    (!("name" in value) || value.name === undefined || typeof value.name === "string") &&
+    (!("value" in value) || value.value === undefined || typeof value.value === "string") &&
+    (!("label" in value) || value.label === undefined || typeof value.label === "string") &&
+    (!("description" in value) ||
+      value.description === undefined ||
+      typeof value.description === "string")
+  );
+}
+
 function referenceItems(current: AutocompleteProvider): AutocompleteItem[] {
-  const commands = (current as unknown as { commands?: SlashCommandLike[] }).commands ?? [];
+  const commands =
+    "commands" in current && Array.isArray(current.commands)
+      ? current.commands.filter(isSlashCommandLike)
+      : [];
   return commands
     .map(referenceItemFromCommand)
     .filter((item): item is AutocompleteItem => item !== null);
@@ -276,12 +291,13 @@ function registerDollarAutocomplete(pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     const promptNames = new Set(loadDefaultPromptTemplates(ctx.cwd).map((prompt) => prompt.name));
     ctx.ui.addAutocompleteProvider((current) => {
-      const currentWithTriggers = current as AutocompleteProvider & {
-        triggerCharacters?: string[];
-      };
+      const triggerCharacters =
+        "triggerCharacters" in current && Array.isArray(current.triggerCharacters)
+          ? current.triggerCharacters.filter((value) => typeof value === "string")
+          : [];
       return {
         ...current,
-        triggerCharacters: [...(currentWithTriggers.triggerCharacters ?? []), "$"],
+        triggerCharacters: [...triggerCharacters, "$"],
         async getSuggestions(lines, cursorLine, cursorCol, options) {
           const currentLine = lines[cursorLine] ?? "";
           const beforeCursor = currentLine.slice(0, cursorCol);

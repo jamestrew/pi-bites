@@ -107,8 +107,9 @@ export function parseArgs(
   let every = current.every;
   const parts = args.trim().split(/\s+/);
   for (let i = 0; i < parts.length; i++) {
-    if (parts[i] === "lite" || parts[i] === "medium" || parts[i] === "hard") {
-      difficulty = parts[i] as Difficulty;
+    const part = parts[i];
+    if (part === "lite" || part === "medium" || part === "hard") {
+      difficulty = part;
     }
     if (parts[i] === "--every" && parts[i + 1]) {
       const n = parseInt(parts[i + 1], 10);

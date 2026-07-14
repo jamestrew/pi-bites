@@ -78,12 +78,14 @@ export default function registerFzfFileSearch(pi: ExtensionAPI) {
     finderPromise = (async () => {
       resetFinder();
 
+      const frecencyFlag = pi.getFlag("fff-frecency-db");
+      const historyFlag = pi.getFlag("fff-history-db");
       const frecencyDbPath =
-        (pi.getFlag("fff-frecency-db") as string | undefined) ??
+        (typeof frecencyFlag === "string" ? frecencyFlag : undefined) ??
         process.env.FFF_FRECENCY_DB ??
         statePathFor(cwd, "frecency");
       const historyDbPath =
-        (pi.getFlag("fff-history-db") as string | undefined) ??
+        (typeof historyFlag === "string" ? historyFlag : undefined) ??
         process.env.FFF_HISTORY_DB ??
         statePathFor(cwd, "history");
 

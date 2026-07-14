@@ -33,8 +33,10 @@ import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
+import { Type, type Static } from "typebox";
+import * as Value from "typebox/value";
 import { preloadSkills } from "./skill-loader.js";
-import type { BashGatePolicy, SubagentType, ThinkingLevel } from "./types.js";
+import { isThinkingLevel, type SubagentType, type ThinkingLevel } from "./types.js";
 import type { AssistantUsage } from "./usage.js";
 
 /**
@@ -183,11 +185,17 @@ export interface ToolActivity {
 
 export const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
 
-export interface SubagentMetadata {
-  agentId?: string;
-  type: string;
-  title: string;
-  bashGatePolicy?: BashGatePolicy;
+export const SubagentMetadataSchema = Type.Object({
+  agentId: Type.Optional(Type.String()),
+  type: Type.String(),
+  title: Type.String(),
+  bashGatePolicy: Type.Optional(Type.Union([Type.Literal("deny"), Type.Literal("prompt")])),
+});
+
+export type SubagentMetadata = Static<typeof SubagentMetadataSchema>;
+
+export function parseSubagentMetadata(value: unknown): SubagentMetadata | undefined {
+  return Value.Check(SubagentMetadataSchema, value) ? value : undefined;
 }
 
 export interface RunOptions {
@@ -560,7 +568,8 @@ export async function runAgent(
     options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
 
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
-  const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;
+  const configuredThinking = options.thinkingLevel ?? agentConfig?.thinking;
+  const thinkingLevel = isThinkingLevel(configuredThinking) ? configuredThinking : undefined;
 
   const disallowedSet = agentConfig?.disallowedTools
     ? new Set(agentConfig.disallowedTools)

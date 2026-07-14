@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
-import type { AgentConfig, BashGatePolicy, MemoryScope, ThinkingLevel } from "./types.js";
+import type { AgentConfig, BashGatePolicy, MemoryScope } from "./types.js";
 
 /**
  * Scan for custom agent .md files from multiple locations.
@@ -59,7 +59,7 @@ function loadFromDir(
     const disallowedTools = csvListOptional(fm.disallowed_tools);
     const excludeExtensions = csvListOptional(fm.exclude_extensions);
     const model = str(fm.model);
-    const thinking = str(fm.thinking) as ThinkingLevel | undefined;
+    const thinking = str(fm.thinking);
     const sessionDir = str(fm.session_dir);
     const bashGatePolicy = parseBashGatePolicy(fm.bash_gate);
     const memory = parseMemory(fm.memory);

@@ -15,8 +15,10 @@ export interface SmallModel {
 export function getSmallModel(config: BitesConfig, ctx: ExtensionContext): SmallModel {
   const requested = config.smallModel?.model ?? DEFAULT_SMALL_MODEL;
   const resolved = resolveModel(requested, ctx.modelRegistry);
-  // TODO(strict-types): Pi exposes the current model as Model<any>; all runtime models use Api.
-  const model = typeof resolved === "string" ? (ctx.model as Model<Api> | undefined) : resolved;
+  const model =
+    typeof resolved === "string"
+      ? ctx.model && ctx.modelRegistry.find(ctx.model.provider, ctx.model.id)
+      : resolved;
 
   if (!model) throw new Error(typeof resolved === "string" ? resolved : "Missing model");
 
