@@ -6,6 +6,7 @@
     "lib": ["ES2022"],
     "types": ["node", "bun"],
     "strict": true,
+    "exactOptionalPropertyTypes": true,
     "noEmit": true,
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,

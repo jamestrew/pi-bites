@@ -1,3 +1,4 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 import {
   type AgentSession,
   type ExtensionAPI,
@@ -71,8 +72,8 @@ type PreparedInvocation = {
   model: ExtensionContext["model"];
   isolated: boolean;
   inheritContext: boolean;
-  thinking?: ThinkingLevel;
-  isolation?: IsolationMode;
+  thinking: ThinkingLevel;
+  isolation: IsolationMode | undefined;
   runInBackground: boolean;
   agentInvocation: AgentInvocation;
   detailBase: DetailBase;
@@ -152,12 +153,12 @@ async function runBackgroundAgent(
   try {
     id = manager.spawn(pi, ctx, subagentType, params.prompt, {
       description: params.description,
-      model,
+      ...(model !== undefined && { model: model as Model<Api> }),
       isolated,
       inheritContext,
       thinkingLevel: thinking,
       isBackground: true,
-      isolation,
+      ...(isolation !== undefined && { isolation }),
       invocation: agentInvocation,
       ...bgCallbacks,
     });
@@ -248,9 +249,9 @@ async function runForegroundAgent(
       activity: fgState.bashApproval
         ? formatBashApprovalActivity(fgState.bashApproval.command)
         : describeActivity(fgState.activeTools, fgState.responseText),
-      bashApprovalCommand: fgState.bashApproval?.command,
+      ...(fgState.bashApproval && { bashApprovalCommand: fgState.bashApproval.command }),
       spinnerFrame: spinnerFrame % SPINNER.length,
-      toolCalls: fgState.toolCalls,
+      ...(fgState.toolCalls !== undefined && { toolCalls: fgState.toolCalls }),
       lifetimeUsage: fgState.lifetimeUsage,
     };
     onUpdate?.({
@@ -300,13 +301,13 @@ async function runForegroundAgent(
       params.prompt,
       {
         description: params.description,
-        model,
+        ...(model !== undefined && { model: model as Model<Api> }),
         isolated,
         inheritContext,
         thinkingLevel: thinking,
-        isolation,
+        ...(isolation !== undefined && { isolation }),
         invocation: agentInvocation,
-        signal,
+        ...(signal !== undefined && { signal }),
         ...fgCallbacks,
       },
       (fgAgentId: string) => {
@@ -447,19 +448,19 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       isolation,
     };
     const { tags: agentTags } = buildInvocationTags(agentInvocation);
-    const detailBase = {
+    const detailBase: DetailBase = {
       displayName,
       description: params.description,
       subagentType,
-      modelName,
-      tags: agentTags.length > 0 ? agentTags : undefined,
+      ...(modelName !== undefined && { modelName }),
+      ...(agentTags.length > 0 && { tags: agentTags }),
     };
 
     const request: ExecuteRequest = {
       toolCallId,
       params,
-      signal,
-      onUpdate,
+      ...(signal !== undefined && { signal }),
+      ...(onUpdate !== undefined && { onUpdate }),
       ctx,
     };
     const invocation: PreparedInvocation = {

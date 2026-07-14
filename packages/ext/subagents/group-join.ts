@@ -84,7 +84,7 @@ export class GroupJoinManager {
 
   private onTimeout(group: AgentGroup): void {
     if (group.delivered) return;
-    group.timeoutHandle = undefined;
+    delete group.timeoutHandle;
 
     // Partial delivery — some agents still running
     const remaining = new Set<string>();
@@ -110,7 +110,7 @@ export class GroupJoinManager {
   private deliver(group: AgentGroup, partial: boolean): void {
     if (group.timeoutHandle) {
       clearTimeout(group.timeoutHandle);
-      group.timeoutHandle = undefined;
+      delete group.timeoutHandle;
     }
     group.delivered = true;
     this.deliverCb([...group.completedRecords.values()], partial);

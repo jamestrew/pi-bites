@@ -24,7 +24,7 @@ export interface AgentConfig {
   name: string;
   displayName?: string;
   description: string;
-  builtinToolNames?: string[];
+  builtinToolNames: string[];
   /** Raw `ext:` selector entries from the `tools:` CSV, e.g. ["ext:foo", "ext:bar/x"].
    * Presence of any entry flips extension tools to an explicit allowlist. */
   extSelectors?: string[];
@@ -113,19 +113,19 @@ export interface AgentRecord {
    * caller never declared it (e.g. a cross-extension RPC spawn, which is detached
    * and has no inline surface).
    */
-  isBackground?: boolean;
+  isBackground: boolean | undefined;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
-  invocation?: AgentInvocation;
+  invocation: AgentInvocation | undefined;
 }
 
 export interface AgentInvocation {
   /** Full effective provider/model identifier. */
-  modelName?: string;
-  thinking?: ThinkingLevel;
-  isolated?: boolean;
-  inheritContext?: boolean;
-  runInBackground?: boolean;
-  isolation?: IsolationMode;
+  modelName: string | undefined;
+  thinking: ThinkingLevel;
+  isolated: boolean;
+  inheritContext: boolean;
+  runInBackground: boolean;
+  isolation: IsolationMode | undefined;
 }
 
 /** Details attached to custom notification messages for visual rendering. */

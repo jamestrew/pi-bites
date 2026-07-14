@@ -152,9 +152,9 @@ export async function inferNeedsInputFromAssistantText(
       ],
     },
     {
-      apiKey: auth.apiKey,
-      headers: auth.headers,
-      env: auth.env,
+      ...(auth.apiKey !== undefined && { apiKey: auth.apiKey }),
+      ...(auth.headers !== undefined && { headers: auth.headers }),
+      ...(auth.env !== undefined && { env: auth.env }),
       reasoning: thinking,
       maxTokens: 16,
       timeoutMs: 10_000,
@@ -335,7 +335,10 @@ export async function runPiSessionsNext(
   try {
     const response = await requestSessionTracker(
       options.socketPath,
-      { type: "focus_next", currentPaneId: options.paneId },
+      {
+        type: "focus_next",
+        ...(options.paneId !== undefined && { currentPaneId: options.paneId }),
+      },
       options,
     );
     if (!response.ok) ctx.ui.notify("No tracked Pi sessions to focus.", "info");
@@ -569,12 +572,12 @@ export default function registerSessionTracker(
     ...defaultTrackerRuntimeOptions,
     runtimeId,
     socketPath,
-    paneId,
+    ...(paneId !== undefined && { paneId }),
   });
   const footerRuntime = createSessionTrackerFooterRuntime({
     ...defaultTrackerFooterOptions,
     socketPath,
-    paneId,
+    ...(paneId !== undefined && { paneId }),
   });
 
   let currentCtx:
@@ -621,6 +624,10 @@ export default function registerSessionTracker(
   });
   pi.registerShortcut("alt+s", {
     description: "Focus next tracked Pi tmux pane",
-    handler: async (ctx) => runPiSessionsNext(ctx, { ...defaultCallOptions, paneId }),
+    handler: async (ctx) =>
+      runPiSessionsNext(ctx, {
+        ...defaultCallOptions,
+        ...(paneId !== undefined && { paneId }),
+      }),
   });
 }

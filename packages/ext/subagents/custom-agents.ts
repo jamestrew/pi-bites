@@ -55,29 +55,37 @@ function loadFromDir(
     const { frontmatter: fm, body } = parseFrontmatter<Record<string, unknown>>(content);
 
     const { builtinToolNames, extSelectors } = parseToolsField(fm.tools);
+    const displayName = str(fm.display_name);
+    const disallowedTools = csvListOptional(fm.disallowed_tools);
+    const excludeExtensions = csvListOptional(fm.exclude_extensions);
+    const model = str(fm.model);
+    const thinking = str(fm.thinking) as ThinkingLevel | undefined;
+    const sessionDir = str(fm.session_dir);
+    const bashGatePolicy = parseBashGatePolicy(fm.bash_gate);
+    const memory = parseMemory(fm.memory);
 
     agents.set(name, {
       name,
-      displayName: str(fm.display_name),
+      ...(displayName !== undefined && { displayName }),
       description: str(fm.description) ?? name,
       builtinToolNames,
-      extSelectors,
-      disallowedTools: csvListOptional(fm.disallowed_tools),
+      ...(extSelectors !== undefined && { extSelectors }),
+      ...(disallowedTools !== undefined && { disallowedTools }),
       extensions: inheritField(fm.extensions ?? fm.inherit_extensions),
-      excludeExtensions: csvListOptional(fm.exclude_extensions),
+      ...(excludeExtensions !== undefined && { excludeExtensions }),
       skills: inheritField(fm.skills ?? fm.inherit_skills),
-      model: str(fm.model),
-      thinking: str(fm.thinking) as ThinkingLevel | undefined,
-      persistSession: fm.persist_session != null ? fm.persist_session === true : undefined,
-      sessionDir: str(fm.session_dir),
+      ...(model !== undefined && { model }),
+      ...(thinking !== undefined && { thinking }),
+      ...(fm.persist_session != null && { persistSession: fm.persist_session === true }),
+      ...(sessionDir !== undefined && { sessionDir }),
       systemPrompt: body.trim(),
       promptMode: fm.prompt_mode === "append" ? "append" : "replace",
-      inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
-      runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
-      isolated: fm.isolated != null ? fm.isolated === true : undefined,
-      bashGatePolicy: parseBashGatePolicy(fm.bash_gate),
-      memory: parseMemory(fm.memory),
-      isolation: fm.isolation === "worktree" ? "worktree" : undefined,
+      ...(fm.inherit_context != null && { inheritContext: fm.inherit_context === true }),
+      ...(fm.run_in_background != null && { runInBackground: fm.run_in_background === true }),
+      ...(fm.isolated != null && { isolated: fm.isolated === true }),
+      ...(bashGatePolicy !== undefined && { bashGatePolicy }),
+      ...(memory !== undefined && { memory }),
+      ...(fm.isolation === "worktree" && { isolation: "worktree" }),
       enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
     });

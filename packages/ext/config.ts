@@ -219,7 +219,7 @@ function writeConfigFile(filePath: string, config: BitesConfig): void {
 
 export function writePonytailDefaultMode(
   cwd: string,
-  defaultMode: PonytailConfig["defaultMode"],
+  defaultMode: NonNullable<PonytailConfig["defaultMode"]>,
 ): void {
   const targetPath = resolveWritePath(cwd);
   const config = readConfigFile(targetPath);

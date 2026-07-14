@@ -154,7 +154,7 @@ function extractRedirect(node: TSNode): BashRedirect {
 
   return {
     operator: operator || node.text.trim(),
-    target,
+    ...(target !== undefined && { target }),
   };
 }
 
@@ -190,9 +190,11 @@ function walk(node: TSNode, facts: BashFacts): void {
 
   if (node.type === "command") {
     const argv = extractArgv(node);
+    const name = extractCommandName(argv);
+    const subcommand = argv.at(1);
     facts.commands.push({
-      name: extractCommandName(argv),
-      subcommand: argv[1],
+      ...(name !== undefined && { name }),
+      ...(subcommand !== undefined && { subcommand }),
       argv,
       flags: argv.filter((arg, index) => index > 0 && arg.startsWith("-")),
     });

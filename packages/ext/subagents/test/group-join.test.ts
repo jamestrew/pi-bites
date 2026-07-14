@@ -20,6 +20,8 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
     startedAt: 0,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
     compactionCount: 0,
+    isBackground: undefined,
+    invocation: undefined,
     ...overrides,
   };
 }

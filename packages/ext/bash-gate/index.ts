@@ -256,7 +256,7 @@ function pushMatches(
       label,
       source,
       rule,
-      reason: rule.reason,
+      ...(rule.reason !== undefined && { reason: rule.reason }),
     });
   }
 }

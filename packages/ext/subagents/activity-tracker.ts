@@ -13,7 +13,6 @@ export function createActivityTracker(onStreamUpdate?: () => void) {
     toolUses: 0,
     turnCount: 1,
     responseText: "",
-    session: undefined,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
     toolCalls: [],
   };
