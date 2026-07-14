@@ -53,7 +53,7 @@ async function rewriteCommand(
 ): Promise<string | null> {
   const result = await pi.exec(RTK_COMMAND, ["rewrite", command], {
     timeout: REWRITE_TIMEOUT_MS,
-    signal,
+    ...(signal && { signal }),
   });
 
   if (result.killed) return null;

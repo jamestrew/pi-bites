@@ -102,9 +102,9 @@ export interface SpawnOptions {
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
   private cleanupInterval: ReturnType<typeof setInterval>;
-  private onComplete?: OnAgentComplete;
-  private onStart?: OnAgentStart;
-  private onCompact?: OnAgentCompact;
+  private onComplete: OnAgentComplete | undefined;
+  private onStart: OnAgentStart | undefined;
+  private onCompact: OnAgentCompact | undefined;
   private maxConcurrent: number;
   /** Base repos worktrees were created from — so dispose() can prune them all,
    *  not just the parent repo (caller-supplied cwd can target other repos). */
@@ -254,24 +254,28 @@ export class AgentManager {
     const promise = runAgent(ctx, type, prompt, {
       pi,
       agentId: id,
-      model: options.model,
-      isolated: options.isolated,
-      inheritContext: options.inheritContext,
-      thinkingLevel: options.thinkingLevel,
+      ...(options.model !== undefined && { model: options.model }),
+      ...(options.isolated !== undefined && { isolated: options.isolated }),
+      ...(options.inheritContext !== undefined && { inheritContext: options.inheritContext }),
+      ...(options.thinkingLevel !== undefined && { thinkingLevel: options.thinkingLevel }),
       // Worktree wins for the working dir (the agent must run in the copy —
       // which, with a custom cwd, was created from that target). Config stays
       // with the parent project when a caller-supplied cwd is in play; it must
       // stay undefined otherwise so plain worktree runs keep resolving config
       // (incl. relative extension paths and memory) inside the worktree copy.
-      cwd: worktreeCwd ?? customCwd,
-      configCwd: customCwd !== undefined ? ctx.cwd : undefined,
+      ...(worktreeCwd !== undefined
+        ? { cwd: worktreeCwd }
+        : customCwd !== undefined
+          ? { cwd: customCwd }
+          : {}),
+      ...(customCwd !== undefined && { configCwd: ctx.cwd }),
       signal: record.abortController!.signal,
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
         options.onToolActivity?.(activity);
       },
-      onTurnEnd: options.onTurnEnd,
-      onTextDelta: options.onTextDelta,
+      ...(options.onTurnEnd !== undefined && { onTurnEnd: options.onTurnEnd }),
+      ...(options.onTextDelta !== undefined && { onTextDelta: options.onTextDelta }),
       onAssistantUsage: (usage) => {
         addUsage(record.lifetimeUsage, usage);
         const model = options.model;
@@ -304,7 +308,7 @@ export class AgentManager {
           for (const msg of record.pendingSteers) {
             session.steer(msg).catch(() => {});
           }
-          record.pendingSteers = undefined;
+          delete record.pendingSteers;
         }
         options.onSessionCreated?.(session);
       },
@@ -312,7 +316,7 @@ export class AgentManager {
       .then(async ({ responseText, session }) => {
         if (record.pendingCancelSteer && record.status !== "stopped") {
           const message = record.pendingCancelSteer;
-          record.pendingCancelSteer = undefined;
+          delete record.pendingCancelSteer;
           record.status = "running";
           responseText = await resumeAgent(session, message, {
             onToolActivity: (activity) => {
@@ -346,7 +350,7 @@ export class AgentManager {
           } catch {
             /* ignore */
           }
-          record.outputCleanup = undefined;
+          delete record.outputCleanup;
         }
 
         // Clean up worktree if used
@@ -400,7 +404,7 @@ export class AgentManager {
           } catch {
             /* ignore */
           }
-          record.outputCleanup = undefined;
+          delete record.outputCleanup;
         }
 
         // Best-effort worktree cleanup on error
@@ -458,7 +462,7 @@ export class AgentManager {
    * Lets the caller set up the output file path on the record.
    * The record is guaranteed to be in this.agents at this point.
    */
-  private onSpawned?: (id: string) => void;
+  private onSpawned: ((id: string) => void) | undefined;
 
   /**
    * Spawn an agent and wait for completion (foreground use).
@@ -498,9 +502,9 @@ export class AgentManager {
 
     record.status = "running";
     record.startedAt = Date.now();
-    record.completedAt = undefined;
-    record.result = undefined;
-    record.error = undefined;
+    delete record.completedAt;
+    delete record.result;
+    delete record.error;
 
     try {
       const responseText = await resumeAgent(record.session, prompt, {
@@ -514,7 +518,7 @@ export class AgentManager {
           record.compactionCount++;
           this.onCompact?.(record, info);
         },
-        signal,
+        ...(signal !== undefined && { signal }),
       });
       record.status = "completed";
       record.result = responseText;
@@ -545,8 +549,8 @@ export class AgentManager {
         record.session.steer(message).catch(() => {});
       } else {
         record.status = "running";
-        record.completedAt = undefined;
-        record.error = undefined;
+        delete record.completedAt;
+        delete record.error;
         resumeAgent(record.session, message, {
           onToolActivity: (activity) => {
             if (activity.type === "end") record.toolUses++;
@@ -620,7 +624,7 @@ export class AgentManager {
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
     record.session?.dispose();
-    record.session = undefined;
+    delete record.session;
     this.agents.delete(id);
   }
 

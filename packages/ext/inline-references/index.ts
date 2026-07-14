@@ -192,10 +192,18 @@ function isPromptTemplateCommand(command: SlashCommandLike): boolean {
 function referenceItemFromCommand(command: SlashCommandLike): AutocompleteItem | null {
   const name = slashCommandName(command);
   if (name.startsWith("skill:")) {
-    return { value: `$${name}`, label: `$${name}`, description: command.description };
+    return {
+      value: `$${name}`,
+      label: `$${name}`,
+      ...(command.description !== undefined && { description: command.description }),
+    };
   }
   if (isPromptTemplateCommand(command)) {
-    return { value: `$prompt:${name}`, label: `$prompt:${name}`, description: command.description };
+    return {
+      value: `$prompt:${name}`,
+      label: `$prompt:${name}`,
+      ...(command.description !== undefined && { description: command.description }),
+    };
   }
   return null;
 }
@@ -217,13 +225,17 @@ function referenceItemFromSlashSuggestion(
 ): AutocompleteItem | null {
   if (isPathLikeSuggestion(item)) return null;
   if (item.value.startsWith("skill:")) {
-    return { value: `$${item.value}`, label: `$${item.value}`, description: item.description };
+    return {
+      value: `$${item.value}`,
+      label: `$${item.value}`,
+      ...(item.description !== undefined && { description: item.description }),
+    };
   }
   if (promptNames.has(item.value)) {
     return {
       value: `$prompt:${item.value}`,
       label: `$prompt:${item.value}`,
-      description: item.description,
+      ...(item.description !== undefined && { description: item.description }),
     };
   }
   return null;

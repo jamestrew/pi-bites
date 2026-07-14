@@ -130,7 +130,7 @@ export class FleetList {
           requestId,
           command: command.replace(/\s+/g, " ").trim(),
         };
-      else if (activity.bashApproval?.requestId === requestId) activity.bashApproval = undefined;
+      else if (activity.bashApproval?.requestId === requestId) delete activity.bashApproval;
     }
     this.update();
   }

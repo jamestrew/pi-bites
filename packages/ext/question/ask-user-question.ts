@@ -180,8 +180,8 @@ function buildMainItems(options: QuestionOption[]): WrappingSelectItem[] {
   return [
     ...options.map((o) => ({
       label: o.label,
-      description: o.description,
-      isRecommended: o.recommended,
+      ...(o.description !== undefined && { description: o.description }),
+      ...(o.recommended !== undefined && { isRecommended: o.recommended }),
     })),
     { label: TYPE_SOMETHING_LABEL, isOther: true },
   ];

@@ -373,7 +373,7 @@ Terse command-style prompts produce shallow, generic work.
         isScopeModelsEnabled,
         getDefaultJoinMode,
         trackSpawned,
-        updateHelperToolsActive,
+        ...(updateHelperToolsActive !== undefined && { updateHelperToolsActive }),
         setRenderMetadata: (toolCallId, model, thinking) =>
           renderMetadata.set(toolCallId, { model, thinking }),
       }),
