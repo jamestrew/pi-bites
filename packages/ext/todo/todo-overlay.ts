@@ -136,8 +136,8 @@ export class TodoOverlay {
       for (const t of all) {
         lines.push(truncate(theme.fg("dim", "├─") + " " + this.formatTaskLine(t, theme, showIds)));
       }
-      const last = lines.length - 1;
-      lines[last] = lines[last].replace("├─", "└─");
+      const last = lines.at(-1);
+      if (last !== undefined) lines[lines.length - 1] = last.replace("├─", "└─");
       return lines;
     }
 

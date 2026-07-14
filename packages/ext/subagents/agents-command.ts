@@ -234,6 +234,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     const idx = options.indexOf(choice);
     if (idx < 0) return;
     const record = agents[idx];
+    if (!record) return;
 
     await viewAgentConversation(ctx, record);
     // Back-navigation: re-show the list
@@ -590,8 +591,9 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           }
 
           // Enter on numeric field → close and prompt for typed input
-          if (matchesKey(data, Key.enter) && NUMERIC_IDS.has(items[currentIndex].id)) {
-            done(items[currentIndex].id);
+          const currentItem = items[currentIndex];
+          if (matchesKey(data, Key.enter) && currentItem && NUMERIC_IDS.has(currentItem.id)) {
+            done(currentItem.id);
             return;
           }
           list.handleInput(data);

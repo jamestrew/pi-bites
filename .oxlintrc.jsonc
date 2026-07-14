@@ -17,6 +17,7 @@
       },
     ],
     "typescript/no-unnecessary-condition": "error",
+    "typescript/no-non-null-assertion": "error",
     "typescript/no-explicit-any": "error",
     "typescript/no-unsafe-assignment": "error",
     "typescript/no-unsafe-member-access": "error",
@@ -30,6 +31,7 @@
       "files": ["**/*.test.ts", "**/test/**"],
       "rules": {
         "typescript/unbound-method": "off",
+        "typescript/no-non-null-assertion": "off",
         "typescript/no-explicit-any": "off",
         "typescript/no-unsafe-assignment": "off",
         "typescript/no-unsafe-member-access": "off",

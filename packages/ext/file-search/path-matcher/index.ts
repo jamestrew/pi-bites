@@ -37,7 +37,9 @@ function insertTopResult(
 ) {
   let insertIndex = results.length;
 
-  while (insertIndex > 0 && compareRankedResults(result, results[insertIndex - 1]) < 0) {
+  while (insertIndex > 0) {
+    const previous = results[insertIndex - 1];
+    if (previous === undefined || compareRankedResults(result, previous) >= 0) break;
     insertIndex -= 1;
   }
 
@@ -58,8 +60,8 @@ export function searchPaths(
   if (query === "") {
     const results: Array<PathSearchResult & { index: number }> = [];
 
-    for (let index = 0; index < items.length; index++) {
-      const item = normalizeItem(items[index]);
+    for (const [index, value] of items.entries()) {
+      const item = normalizeItem(value);
       insertTopResult(
         results,
         { path: item.path, score: EMPTY_QUERY_SCORE + (options.boost?.(item.path) ?? 0), index },
@@ -72,8 +74,8 @@ export function searchPaths(
 
   const results: Array<PathSearchResult & { index: number }> = [];
 
-  for (let index = 0; index < items.length; index++) {
-    const item = normalizeItem(items[index]);
+  for (const [index, value] of items.entries()) {
+    const item = normalizeItem(value);
     const matchScore = scorePath(query, item.path, item.lowerPath)?.score ?? 0;
     const score = matchScore > 0 ? matchScore + (options.boost?.(item.path) ?? 0) : 0;
 

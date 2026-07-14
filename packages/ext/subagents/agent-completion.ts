@@ -80,6 +80,7 @@ export function createAgentCompletionHandler({
         ? `${unconsumed.length} agent(s) finished (partial — others still running)`
         : `${unconsumed.length} agent(s) finished`;
       const [first, ...rest] = unconsumed;
+      if (!first) return;
       const details = buildNotificationDetails(first, 300, undefined);
       if (rest.length > 0) {
         details.others = rest.map((record) => buildNotificationDetails(record, 300, undefined));

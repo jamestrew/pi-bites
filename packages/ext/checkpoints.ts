@@ -152,8 +152,9 @@ function textFromMessage(message: UserMessage): string {
 
 function latestUser(ctx: Pick<ExtensionContext, "sessionManager">) {
   const branch = ctx.sessionManager.getBranch();
-  for (let i = branch.length - 1; i >= 0; i--) {
-    const entry = branch[i]!;
+  for (let index = branch.length - 1; index >= 0; index--) {
+    const entry = branch[index];
+    if (!entry) continue;
     if (entry.type === "message" && entry.message.role === "user") {
       return {
         userEntryId: entry.id,
@@ -218,6 +219,7 @@ function styledStat(stat: string, theme: Theme): string {
       const match = /^(.*) ([+-]\d+)$/.exec(part);
       if (!match) return theme.fg("dim", part);
       const [, file, delta] = match;
+      if (file === undefined || delta === undefined) return theme.fg("dim", part);
       return `${theme.fg("dim", file)} ${theme.fg(delta.startsWith("+") ? "success" : "error", delta)}`;
     })
     .join(theme.fg("dim", ", "));
@@ -336,19 +338,19 @@ async function restoreFile(
 async function buildRewindPoints(store: Store, gitDir: string): Promise<RewindPoint[]> {
   const points: RewindPoint[] = [];
   for (let i = 1; i < store.checkpoints.length; i++) {
-    const first = store.checkpoints[i]!;
+    const before = store.checkpoints[i - 1];
+    const first = store.checkpoints[i];
+    if (!before || !first) continue;
     const userEntryId = first.userEntryId;
     if (!userEntryId) continue;
     let end = i;
     while (store.checkpoints[end + 1]?.userEntryId === userEntryId) end++;
-    const stat = await statLine(
-      gitDir,
-      store.checkpoints[i - 1]!.files,
-      store.checkpoints[end]!.files,
-    );
+    const after = store.checkpoints[end];
+    if (!after) continue;
+    const stat = await statLine(gitDir, before.files, after.files);
     points.push({
-      before: store.checkpoints[i - 1]!,
-      after: store.checkpoints[end]!,
+      before,
+      after,
       first,
       stat,
     });
@@ -364,9 +366,9 @@ async function executeRestore(
   point: RewindPoint,
   store: Store,
 ): Promise<void> {
-  const files = Object.keys(point.before.files).sort();
-  for (const file of files) {
-    await restoreFile(cwd, currentSessionId, file, point.before.files[file]!);
+  const files = Object.entries(point.before.files).sort(([a], [b]) => a.localeCompare(b));
+  for (const [file, state] of files) {
+    await restoreFile(cwd, currentSessionId, file, state);
   }
   store.checkpoints = store.checkpoints.slice(
     0,
@@ -505,7 +507,9 @@ export default function registerCheckpoints(
       );
       const action = await selectRestoreAction(ctx, point, delta);
       if (action === "fork") {
-        await ctx.fork(point.first.userEntryId!, {
+        const userEntryId = point.first.userEntryId;
+        if (!userEntryId) return;
+        await ctx.fork(userEntryId, {
           position: "before",
           withSession: async (forkCtx) => {
             await executeRestore(forkCtx, forkCtx.cwd, currentSessionId, point, store);

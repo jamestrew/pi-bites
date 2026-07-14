@@ -123,10 +123,11 @@ export class FileFrecency {
       merged.set(path, Math.max(merged.get(path) ?? Number.NEGATIVE_INFINITY, deadline));
     }
 
-    store[this.cwd] = Object.fromEntries(
+    const currentStore = Object.fromEntries(
       [...merged.entries()].sort((a, b) => b[1] - a[1]).slice(0, MAX_STORE_SIZE),
     );
-    this.cache = new Map(Object.entries(store[this.cwd]));
+    store[this.cwd] = currentStore;
+    this.cache = new Map(Object.entries(currentStore));
     this.pruned.clear();
 
     await mkdir(dirname(this.file), { recursive: true });

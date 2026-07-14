@@ -70,7 +70,9 @@ export function parseInlineReferences(text: string): InlineReference[] {
     if (!match) continue;
 
     const kind: InlineReferenceKind = match[1] === "skill" ? "skill" : "prompt";
-    const name = match[2]!.replace(/[),.;!?]+$/, "");
+    const matchedName = match[2];
+    if (matchedName === undefined) continue;
+    const name = matchedName.replace(/[),.;!?]+$/, "");
     if (name.length === 0) continue;
 
     const raw = `$${kind}:${name}`;

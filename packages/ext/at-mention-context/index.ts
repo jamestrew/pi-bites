@@ -49,7 +49,11 @@ export function parseAtMentions(text: string): Mention[] {
     }
 
     let end = i + 1;
-    while (end < text.length && !/\s/.test(text[end]!)) end++;
+    while (end < text.length) {
+      const char = text[end];
+      if (char === undefined || /\s/.test(char)) break;
+      end++;
+    }
 
     const raw = text.slice(i, end);
     const path = raw.slice(1).replace(/[),.;:!?]+$/, "");
@@ -72,9 +76,10 @@ function parseLineSuffix(path: string): ParsedLineSuffix | null {
   const suffixMatch = path.match(/^(.*):(-?\d+)(?:-(-?\d+))?$/);
   if (!suffixMatch) return null;
 
-  const suffixPath = suffixMatch[1]!;
-  const start = Number(suffixMatch[2]);
-  const end = suffixMatch[3] ? Number(suffixMatch[3]) : undefined;
+  const [, suffixPath, startText, endText] = suffixMatch;
+  if (suffixPath === undefined || startText === undefined) return null;
+  const start = Number(startText);
+  const end = endText ? Number(endText) : undefined;
 
   if (start < 1 || (end !== undefined && end < start)) return { path: suffixPath };
 

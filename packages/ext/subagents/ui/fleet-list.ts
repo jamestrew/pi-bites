@@ -311,6 +311,7 @@ export class FleetList {
 
   private openSelected(): void {
     const entry = this.roster()[this.selectedIndex];
+    if (!entry) return;
     if (entry.kind === "main") {
       // `main` = return to the prompt; the native transcript is already shown.
       this.deactivate();
@@ -394,8 +395,8 @@ export class FleetList {
     const hiddenBelow = agents.length - (start + visible);
 
     if (start > 0) lines.push(rightAlign("", theme.fg("dim", `↑ ${start} more`), width));
-    for (let a = start; a < start + visible; a++) {
-      lines.push(this.renderAgentRow(a + 1, sel, agents[a].record, width, theme));
+    for (const [offset, agent] of agents.slice(start, start + visible).entries()) {
+      lines.push(this.renderAgentRow(start + offset + 1, sel, agent.record, width, theme));
     }
     if (hiddenBelow > 0)
       lines.push(rightAlign("", theme.fg("dim", `↓ ${hiddenBelow} more`), width));

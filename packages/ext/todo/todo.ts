@@ -254,11 +254,10 @@ export function applyTaskMutation(
       if (params.id === undefined) {
         return errorResult(state, action, params, "id required for update");
       }
-      const idx = state.tasks.findIndex((t) => t.id === params.id);
-      if (idx === -1) {
+      const current = state.tasks.find((t) => t.id === params.id);
+      if (!current) {
         return errorResult(state, action, params, `#${params.id} not found`);
       }
-      const current = state.tasks[idx];
 
       const hasMutation =
         params.subject !== undefined ||
@@ -341,8 +340,7 @@ export function applyTaskMutation(
         updated.metadata = newMetadata;
       }
 
-      const newTasks = [...state.tasks];
-      newTasks[idx] = updated;
+      const newTasks = state.tasks.map((task) => (task.id === updated.id ? updated : task));
       const transition = current.status !== newStatus ? ` (${current.status} → ${newStatus})` : "";
       return {
         state: { tasks: newTasks, nextId: state.nextId },
@@ -425,17 +423,15 @@ export function applyTaskMutation(
       if (params.id === undefined) {
         return errorResult(state, action, params, "id required for delete");
       }
-      const idx = state.tasks.findIndex((t) => t.id === params.id);
-      if (idx === -1) {
+      const current = state.tasks.find((t) => t.id === params.id);
+      if (!current) {
         return errorResult(state, action, params, `#${params.id} not found`);
       }
-      const current = state.tasks[idx];
       if (current.status === "deleted") {
         return errorResult(state, action, params, `#${current.id} is already deleted`);
       }
       const updated: Task = { ...current, status: "deleted" };
-      const newTasks = [...state.tasks];
-      newTasks[idx] = updated;
+      const newTasks = state.tasks.map((task) => (task.id === updated.id ? updated : task));
       return {
         state: { tasks: newTasks, nextId: state.nextId },
         details: {

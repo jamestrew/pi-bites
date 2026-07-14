@@ -216,8 +216,8 @@ describe("agent-runner final output capture", () => {
       expect.objectContaining({ onError: expect.any(Function) }),
     );
 
-    const bindOrder = session.bindExtensions.mock.invocationCallOrder[0];
-    const promptOrder = session.prompt.mock.invocationCallOrder[0];
+    const bindOrder = session.bindExtensions.mock.invocationCallOrder[0]!;
+    const promptOrder = session.prompt.mock.invocationCallOrder[0]!;
     expect(bindOrder).toBeLessThan(promptOrder);
   });
 
@@ -259,7 +259,7 @@ describe("agent-runner final output capture", () => {
       }),
     );
     // The override returns an empty list so any loaded sources are discarded.
-    const ctorArgs = defaultResourceLoaderCtor.mock.calls[0][0];
+    const ctorArgs = defaultResourceLoaderCtor.mock.calls[0]![0]!;
     expect(ctorArgs.appendSystemPromptOverride(["would-be-loaded"])).toEqual([]);
   });
 
@@ -278,8 +278,8 @@ describe("agent-runner final output capture", () => {
     await runAgent(ctx, "Explore", "go", { pi });
 
     expect(session.setSessionName).toHaveBeenCalledWith("Explore");
-    const setOrder = session.setSessionName.mock.invocationCallOrder[0];
-    const bindOrder = session.bindExtensions.mock.invocationCallOrder[0];
+    const setOrder = session.setSessionName.mock.invocationCallOrder[0]!;
+    const bindOrder = session.bindExtensions.mock.invocationCallOrder[0]!;
     expect(setOrder).toBeLessThan(bindOrder);
   });
 
@@ -578,11 +578,11 @@ function withExtensions(spec: Record<string, string[]>) {
 }
 
 function lastToolsPassed(): string[] {
-  return createAgentSession.mock.calls[0][0].tools;
+  return createAgentSession.mock.calls[0]![0]!.tools;
 }
 
 function lastLoaderOpts(): Record<string, unknown> {
-  return defaultResourceLoaderCtor.mock.calls[0][0];
+  return defaultResourceLoaderCtor.mock.calls[0]![0]!;
 }
 
 describe("agent-runner session persistence", () => {

@@ -14,6 +14,12 @@ import {
 } from "./agent-format.js";
 import { summarizeToolArg, wrapMultilineText } from "./tool-call-format.js";
 
+function getSpinnerFrame(index: number): string {
+  const frame = SPINNER[index];
+  if (!frame) throw new Error(`Invalid spinner frame: ${index}`);
+  return frame;
+}
+
 function formatStats(details: AgentDetails): string {
   const parts: string[] = [];
   if (details.modelName) parts.push(details.modelName);
@@ -35,7 +41,7 @@ function formatStats(details: AgentDetails): string {
 
 function renderStatus(details: AgentDetails, theme: Theme, stats: string): string[] {
   if (details.status === "running") {
-    const frame = SPINNER[details.spinnerFrame ?? 0];
+    const frame = getSpinnerFrame(details.spinnerFrame ?? 0);
     return [
       theme.fg("accent", frame) + (stats ? theme.fg("dim", ` ${stats}`) : ""),
       theme.fg("dim", details.activity ?? "thinking…"),
@@ -81,7 +87,7 @@ export function renderAgentToolResult(
         }
 
         if (details.status === "running" || options.isPartial) {
-          const frame = SPINNER[details.spinnerFrame ?? 0];
+          const frame = getSpinnerFrame(details.spinnerFrame ?? 0);
           lines.push(
             theme.fg("accent", frame) + (stats ? theme.fg("dim", ` ${stats}`) : ""),
             theme.fg("dim", details.activity ?? "thinking…"),
@@ -113,7 +119,7 @@ export function renderAgentToolResult(
       } else if (details.status === "running" || options.isPartial) {
         const toolCalls = details.toolCalls ?? [];
         if (details.bashApprovalCommand) {
-          const frame = SPINNER[details.spinnerFrame ?? 0];
+          const frame = getSpinnerFrame(details.spinnerFrame ?? 0);
           lines.push(
             theme.fg("accent", frame) + (stats ? theme.fg("dim", ` ${stats}`) : ""),
             truncateToWidth(

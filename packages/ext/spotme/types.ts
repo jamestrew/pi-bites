@@ -108,11 +108,13 @@ export function parseArgs(
   const parts = args.trim().split(/\s+/);
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
+    if (part === undefined) continue;
     if (part === "lite" || part === "medium" || part === "hard") {
       difficulty = part;
     }
-    if (parts[i] === "--every" && parts[i + 1]) {
-      const n = parseInt(parts[i + 1], 10);
+    const nextPart = parts[i + 1];
+    if (part === "--every" && nextPart) {
+      const n = parseInt(nextPart, 10);
       if (!isNaN(n) && n >= 1) every = n;
       i++;
     }
