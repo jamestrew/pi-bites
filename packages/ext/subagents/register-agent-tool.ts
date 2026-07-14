@@ -40,7 +40,7 @@ type RegisterAgentToolDeps = {
 /** Derive a short model label from a model string. */
 export function getModelLabelFromConfig(model: string): string {
   // Strip provider prefix (e.g. "anthropic/claude-sonnet-4-6" → "claude-sonnet-4-6")
-  const name = model.includes("/") ? model.split("/").pop()! : model;
+  const name = model.slice(model.lastIndexOf("/") + 1);
   // Strip trailing date suffix (e.g. "claude-haiku-4-5-20251001" → "claude-haiku-4-5")
   return name.replace(/-\d{8}$/, "");
 }
@@ -200,7 +200,8 @@ Terse command-style prompts produce shallow, generic work.
     };
     // Replacement callback (not a string) — agent descriptions may contain `$&` etc.
     return template.replace(/\{\{(\w+)\}\}/g, (raw, name: string) => {
-      if (name in vars) return vars[name]!();
+      const render = vars[name];
+      if (render) return render();
       console.warn(
         `[pi-subagents] agent-tool-description.md: unknown placeholder ${raw} left as-is`,
       );

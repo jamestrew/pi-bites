@@ -165,11 +165,12 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
         ]);
 
         if (choice === viewConversation && record?.session) {
+          const session = record.session;
           await ui.custom<undefined>(
             (tui, theme, keybindings, done) =>
               new ConversationViewer(
                 tui,
-                record.session!,
+                session,
                 record,
                 agentActivity.get(record.id),
                 theme,

@@ -37,7 +37,7 @@ async function updateStatus(
     const output = stdout.trim();
     setStatus(output ? fg("dim", output) : undefined);
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message.split("\n")[0] : "error";
+    const msg = err instanceof Error ? err.message.split("\n").at(0) || "error" : "error";
     setStatus(fg("error", msg));
   }
 }

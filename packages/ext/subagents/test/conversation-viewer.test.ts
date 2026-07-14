@@ -64,10 +64,10 @@ function ansiTheme() {
 
 function assertAllLinesFit(lines: string[], width: number) {
   for (let i = 0; i < lines.length; i++) {
-    const vw = visibleWidth(lines[i]);
+    const vw = visibleWidth(lines[i]!);
     expect(
       vw,
-      `line ${i} exceeds width (${vw} > ${width}): ${JSON.stringify(lines[i])}`,
+      `line ${i} exceeds width (${vw} > ${width}): ${JSON.stringify(lines[i]!)}`,
     ).toBeLessThanOrEqual(width);
   }
 }

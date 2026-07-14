@@ -553,7 +553,7 @@ export function agentToolCalls(session: AgentSession): Array<Record<string, unkn
 function lastAssistantText(session: AgentSession): string {
   const messages = session.messages;
   for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
+    const msg = messages[i]!;
     if (msg.role !== "assistant") continue;
     const text = msg.content
       .map((b) =>

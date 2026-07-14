@@ -95,6 +95,7 @@ export class WrappingSelect implements Component {
 
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.items[i];
+      if (!item) continue;
       const isActive = i === this.selectedIndex && this.focused;
       lines.push(...this.renderItem(item, i, isActive, width, numberWidth));
     }

@@ -253,9 +253,9 @@ export class SessionTracker {
       (record) => record.paneId === (this.focusedPaneId ?? currentPaneId),
     );
     for (let offset = 1; offset <= records.length; offset++) {
-      const response = await this.focusPane(
-        records[(currentIndex + offset) % records.length].paneId,
-      );
+      const record = records[(currentIndex + offset) % records.length];
+      if (!record) continue;
+      const response = await this.focusPane(record.paneId);
       if (response.ok || response.error !== "not-found") return response;
     }
     return { ok: false, error: "not-found" };

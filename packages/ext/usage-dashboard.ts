@@ -305,8 +305,8 @@ async function parseSessionFile(
       if (i % 500 === 0) {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
-      const line = lines[i]!;
-      if (!line.trim()) continue;
+      const line = lines[i];
+      if (!line?.trim()) continue;
       try {
         const entry = decodeSessionUsageEntry(JSON.parse(line));
         if (entry?.type === "session") {
@@ -350,8 +350,8 @@ async function parseSubagentUsageFile(
       if (i % 500 === 0) {
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
-      const line = lines[i]!;
-      if (!line.trim()) continue;
+      const line = lines[i];
+      if (!line?.trim()) continue;
       try {
         const entry = decodeSubagentUsageRecord(JSON.parse(line));
         if (
@@ -742,20 +742,23 @@ function computeParallelCostWeight(messages: RawMessage[]): number | null {
   let right = 0;
   let parallelCost = 0;
 
-  for (let i = 0; i < sorted.length; i++) {
-    const current = sorted[i]!;
+  for (const current of sorted) {
     const high = current.timestamp + PARALLEL_WINDOW_MS;
     const low = current.timestamp - PARALLEL_WINDOW_MS;
 
-    while (right < sorted.length && sorted[right]!.timestamp <= high) {
-      const sid = sorted[right]!.sessionId;
+    while (right < sorted.length) {
+      const message = sorted[right];
+      if (!message || message.timestamp > high) break;
+      const sid = message.sessionId;
       const next = (sidCount.get(sid) ?? 0) + 1;
       sidCount.set(sid, next);
       if (next === 1) uniqueCount++;
       right++;
     }
-    while (left < right && sorted[left]!.timestamp < low) {
-      const sid = sorted[left]!.sessionId;
+    while (left < right) {
+      const message = sorted[left];
+      if (!message || message.timestamp >= low) break;
+      const sid = message.sessionId;
       const next = (sidCount.get(sid) ?? 0) - 1;
       if (next === 0) {
         sidCount.delete(sid);
@@ -867,7 +870,8 @@ function getTableLayout(width: number): TableLayout {
     }
   }
 
-  const fallback = TABLE_LAYOUTS[TABLE_LAYOUTS.length - 1]!;
+  const fallback = TABLE_LAYOUTS.at(-1);
+  if (!fallback) throw new Error("At least one table layout is required");
   const fallbackColumnsWidth = sumColumnWidths(fallback.columns);
   const fallbackNameWidth = Math.min(
     MAX_NAME_COL_WIDTH,
@@ -935,12 +939,16 @@ class UsageComponent {
 
     if (matchesKey(data, "tab") || matchesKey(data, "right")) {
       const idx = TAB_ORDER.indexOf(this.activeTab);
-      this.activeTab = TAB_ORDER[(idx + 1) % TAB_ORDER.length]!;
+      const nextTab = TAB_ORDER[(idx + 1) % TAB_ORDER.length];
+      if (!nextTab) return;
+      this.activeTab = nextTab;
       this.updateProviderOrder();
       this.requestRender();
     } else if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
       const idx = TAB_ORDER.indexOf(this.activeTab);
-      this.activeTab = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length]!;
+      const nextTab = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length];
+      if (!nextTab) return;
+      this.activeTab = nextTab;
       this.updateProviderOrder();
       this.requestRender();
     } else if (this.viewMode === "table" && matchesKey(data, "up")) {
@@ -1132,9 +1140,9 @@ class UsageComponent {
       return lines;
     }
 
-    for (let i = 0; i < this.providerOrder.length; i++) {
-      const providerName = this.providerOrder[i]!;
-      const providerStats = stats.providers.get(providerName)!;
+    for (const [i, providerName] of this.providerOrder.entries()) {
+      const providerStats = stats.providers.get(providerName);
+      if (!providerStats) continue;
       const isSelected = i === this.selectedIndex;
       const isExpanded = this.expanded.has(providerName);
       const arrow = isExpanded ? "▾" : "▸";

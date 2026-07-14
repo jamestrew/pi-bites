@@ -295,9 +295,9 @@ function collectResponseText(session: AgentSession) {
 
 /** Get the last assistant text from the completed session history. */
 function getLastAssistantText(session: AgentSession): string {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const msg = session.messages[i];
-    if (msg.role !== "assistant") continue;
+  for (let index = session.messages.length - 1; index >= 0; index--) {
+    const msg = session.messages[index];
+    if (!msg || msg.role !== "assistant") continue;
     const text = extractText(msg.content).trim();
     if (text) return text;
   }

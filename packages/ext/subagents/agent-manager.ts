@@ -242,15 +242,18 @@ export class AgentManager {
     // Wire parent abort signal to stop the subagent when the parent is interrupted
     let detachParentSignal: (() => void) | undefined;
     if (options.signal) {
+      const parentSignal = options.signal;
       const onParentAbort = () => this.abort(id);
-      options.signal.addEventListener("abort", onParentAbort, { once: true });
-      detachParentSignal = () => options.signal!.removeEventListener("abort", onParentAbort);
+      parentSignal.addEventListener("abort", onParentAbort, { once: true });
+      detachParentSignal = () => parentSignal.removeEventListener("abort", onParentAbort);
     }
     const detach = () => {
       detachParentSignal?.();
       detachParentSignal = undefined;
     };
 
+    const abortController = record.abortController;
+    if (!abortController) throw new Error(`Agent ${id} has no abort controller`);
     const promise = runAgent(ctx, type, prompt, {
       pi,
       agentId: id,
@@ -269,7 +272,7 @@ export class AgentManager {
           ? { cwd: customCwd }
           : {}),
       ...(customCwd !== undefined && { configCwd: ctx.cwd }),
-      signal: record.abortController!.signal,
+      signal: abortController.signal,
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
         options.onToolActivity?.(activity);
@@ -441,7 +444,8 @@ export class AgentManager {
   /** Start queued agents up to the concurrency limit. */
   private drainQueue() {
     while (this.queue.length > 0 && this.runningBackground < this.maxConcurrent) {
-      const next = this.queue.shift()!;
+      const next = this.queue.shift();
+      if (!next) break;
       const record = this.agents.get(next.id);
       if (!record || record.status !== "queued") continue;
       try {
@@ -485,7 +489,8 @@ export class AgentManager {
     this.onSpawned = onSpawned;
     try {
       const id = this.spawn(pi, ctx, type, prompt, { ...options, isBackground: false });
-      const record = this.agents.get(id)!;
+      const record = this.agents.get(id);
+      if (!record) throw new Error(`Spawned agent ${id} was not registered`);
       await record.promise;
       return { id, record };
     } finally {

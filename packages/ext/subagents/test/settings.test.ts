@@ -281,7 +281,7 @@ describe("settings persistence", () => {
       try {
         expect(loadSettings(projectDir)).toEqual({});
         expect(spy).toHaveBeenCalledTimes(1);
-        expect(String(spy.mock.calls[0][0])).toMatch(/Ignoring malformed settings/);
+        expect(String(spy.mock.calls[0]![0])).toMatch(/Ignoring malformed settings/);
       } finally {
         spy.mockRestore();
       }

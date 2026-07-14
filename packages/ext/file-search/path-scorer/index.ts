@@ -149,11 +149,12 @@ export function scorePath(
   const searchableQuery = ignoreCase ? query.toLowerCase() : query;
   const searchableCandidate = ignoreCase ? lowerCandidatePath : candidatePath;
   let best: ScoreResult | null = null;
+  const firstQueryChar = searchableQuery.charAt(0);
 
   for (
-    let start = searchableCandidate.indexOf(searchableQuery[0]!);
+    let start = searchableCandidate.indexOf(firstQueryChar);
     start !== -1;
-    start = searchableCandidate.indexOf(searchableQuery[0]!, start + 1)
+    start = searchableCandidate.indexOf(firstQueryChar, start + 1)
   ) {
     const result = scoreAlignment(candidatePath, searchableCandidate, searchableQuery, start);
     if (result && (!best || result.score > best.score)) best = result;

@@ -53,6 +53,9 @@ export default function (pi: ExtensionAPI) {
   const originalBash = createBashTool(cwd);
   const originalBashDef = createBashToolDefinition(cwd);
   const originalEdit = createEditTool(cwd);
+  const renderReadResult = originalReadDef.renderResult;
+  const renderBashCall = originalBashDef.renderCall;
+  if (!renderReadResult || !renderBashCall) throw new Error("Built-in tool renderers unavailable");
 
   pi.registerTool({
     ...originalRead,
@@ -60,7 +63,7 @@ export default function (pi: ExtensionAPI) {
 
     renderResult(result: AgentToolResult<ReadToolDetails | undefined>, options, theme, context) {
       return stripReadExpandHint(
-        originalReadDef.renderResult!(result, { ...options, expanded: false }, theme, context),
+        renderReadResult(result, { ...options, expanded: false }, theme, context),
       );
     },
   });
@@ -94,7 +97,7 @@ export default function (pi: ExtensionAPI) {
       // The TUI sets context.executionStarted at `tool_execution_start`, which
       // fires before bash-gate runs. Override it so the elapsed timer only
       // starts when execute() is actually called (post-gate).
-      return originalBashDef.renderCall!(args, theme, {
+      return renderBashCall(args, theme, {
         ...context,
         executionStarted: executeStartTimes.has(context.toolCallId),
       });
