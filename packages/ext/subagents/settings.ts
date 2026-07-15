@@ -8,7 +8,6 @@ import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { JoinMode } from "./types.js";
 import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
-import type { SubagentEventMap } from "./events.js";
 
 export const SubagentsSettingsSchema = Type.Object({
   maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
@@ -37,10 +36,13 @@ export interface SettingsAppliers {
 }
 
 /** Emit callback — the settings channels only, to keep helpers testable. */
-type SettingsEvent = "subagents:settings_loaded" | "subagents:settings_changed";
-export type SettingsEmit = <K extends SettingsEvent>(
+type SettingsEventMap = {
+  "subagents:settings_loaded": { settings: SubagentsSettings };
+  "subagents:settings_changed": { settings: SubagentsSettings; persisted: boolean };
+};
+export type SettingsEmit = <K extends keyof SettingsEventMap>(
   event: K,
-  payload: SubagentEventMap[K],
+  payload: SettingsEventMap[K],
 ) => void;
 
 export function parseSubagentsSettings(value: unknown): SubagentsSettings | undefined {

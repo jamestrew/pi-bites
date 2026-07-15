@@ -10,7 +10,6 @@ import { getAgentConfig, resolveType } from "./agent-types.js";
 import { isModelInScope, readEnabledModels, resolveEnabledModels } from "./enabled-models.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { resolveModel } from "./model-resolver.js";
-import { emitSubagentEvent } from "./events.js";
 import { createOutputFilePath, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { getStatusNote } from "./status-note.js";
 import { buildDetails, formatLifetimeTokens, textResult } from "./tool-result.js";
@@ -185,7 +184,7 @@ async function runBackgroundAgent(
   fleet.update();
 
   // Emit created event
-  emitSubagentEvent(pi, "subagents:created", {
+  pi.events.emit("subagents:created", {
     id,
     type: subagentType,
     description: params.description,
@@ -391,7 +390,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
 
     // Resolve model from agent config first; tool-call params only fill gaps.
-    let model = ctx.model && ctx.modelRegistry.find(ctx.model.provider, ctx.model.id);
+    let model = ctx.model as Model<Api> | undefined;
     if (resolvedConfig.modelInput) {
       const resolved = resolveModel(resolvedConfig.modelInput, ctx.modelRegistry);
       if (typeof resolved === "string") {

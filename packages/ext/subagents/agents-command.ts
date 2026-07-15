@@ -26,7 +26,6 @@ import {
 } from "./settings.js";
 import { type AgentConfig, type AgentRecord, type JoinMode } from "./types.js";
 import { type AgentActivity, formatDuration, getDisplayName } from "./ui/agent-format.js";
-import { emitSubagentEvent } from "./events.js";
 
 type AgentsCommandDeps = {
   manager: AgentManager;
@@ -631,7 +630,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     const { message, level } = saveAndEmitChanged(
       snapshotSettings(),
       successMsg,
-      (event, payload) => emitSubagentEvent(pi, event, payload),
+      (event, payload) => pi.events.emit(event, payload),
     );
     ctx.ui.notify(message, level);
   }

@@ -22,38 +22,6 @@ export interface BitesBashGatePayload {
   command: string;
 }
 
-interface BashGateEventMap {
-  "bites:bash_gate": BitesBashGatePayload;
-  "bites:bash_gate_resolved": BitesBashGatePayload;
-  "bites:notify": BitesNotifyPayload;
-  "subagents:bash_gate:approval": ApprovalRequest;
-}
-
-declare module "@earendil-works/pi-coding-agent" {
-  interface EventBus {
-    on<K extends keyof BashGateEventMap>(
-      channel: K,
-      handler: (data: BashGateEventMap[K]) => void,
-    ): () => void;
-  }
-}
-
-export function onBashGateEvent<K extends keyof BashGateEventMap>(
-  pi: ExtensionAPI,
-  channel: K,
-  handler: (data: BashGateEventMap[K]) => void,
-): () => void {
-  return pi.events.on(channel, handler);
-}
-
-export function emitBashGateEvent<K extends keyof BashGateEventMap>(
-  pi: ExtensionAPI,
-  channel: K,
-  data: BashGateEventMap[K],
-): void {
-  pi.events.emit(channel, data);
-}
-
 export async function requestSubagentApproval(
   pi: ExtensionAPI,
   request: Omit<ApprovalRequest, "requestId">,
@@ -93,7 +61,7 @@ export async function requestSubagentApproval(
       if (!acked) settle("deny");
     }, 250);
 
-    emitBashGateEvent(pi, channel, { requestId, ...request });
+    pi.events.emit(channel, { requestId, ...request });
   });
 }
 
@@ -101,7 +69,8 @@ export function onSubagentApprovalRequest(
   pi: ExtensionAPI,
   handler: (request: ApprovalRequest) => Promise<BashGateDecision>,
 ): () => void {
-  return onBashGateEvent(pi, "subagents:bash_gate:approval", async (request) => {
+  return pi.events.on("subagents:bash_gate:approval", async (data) => {
+    const request = data as ApprovalRequest;
     const channel = "subagents:bash_gate:approval";
     pi.events.emit(`${channel}:ack:${request.requestId}`, {});
     let decision: BashGateDecision = "deny";

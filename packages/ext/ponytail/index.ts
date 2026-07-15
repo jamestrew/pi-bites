@@ -27,14 +27,14 @@ export function parsePonytailModeEntry(value: unknown): PonytailModeEntry | unde
 
 function normalizeConfigMode(mode: unknown): ConfigMode | null {
   if (typeof mode !== "string") return null;
-  const normalized = mode.trim().toLowerCase();
-  return VALID_MODES.find((candidate) => candidate === normalized) ?? null;
+  const normalized = mode.trim().toLowerCase() as ConfigMode;
+  return VALID_MODES.includes(normalized) ? normalized : null;
 }
 
 function normalizeMode(mode: unknown): RuntimeMode | null {
   if (typeof mode !== "string") return null;
-  const normalized = mode.trim().toLowerCase();
-  return RUNTIME_MODES.find((candidate) => candidate === normalized) ?? null;
+  const normalized = mode.trim().toLowerCase() as RuntimeMode;
+  return RUNTIME_MODES.includes(normalized) ? normalized : null;
 }
 
 function normalizePersistedMode(mode: unknown): ConfigMode | RuntimeMode | null {
@@ -53,19 +53,16 @@ function isDeactivationCommand(text: unknown): boolean {
   return trimmed === "stop ponytail" || trimmed === "normal mode";
 }
 
-function isUnknownArray(value: unknown): value is unknown[] {
-  return Array.isArray(value);
-}
-
 export function resolveSessionMode(
   entries: unknown,
   fallbackMode: ConfigMode = DEFAULT_MODE,
 ): ConfigMode {
   const fallback = normalizePersistedMode(fallbackMode) ?? DEFAULT_MODE;
-  if (!isUnknownArray(entries)) return fallback;
+  if (!Array.isArray(entries)) return fallback;
+  const list = entries as unknown[];
 
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
-    const entry = entries[i];
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const entry = list[i];
     if (
       typeof entry !== "object" ||
       entry === null ||

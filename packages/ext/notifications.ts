@@ -29,7 +29,7 @@ import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { extractLastAssistantText } from "./utils.ts";
 import type { BitesConfig } from "./config.js";
-import { onBashGateEvent, type BitesNotifyPayload } from "./bash-gate/events.js";
+import type { BitesBashGatePayload, BitesNotifyPayload } from "./bash-gate/events.js";
 
 export type { BitesBashGatePayload, BitesNotifyPayload } from "./bash-gate/events.js";
 
@@ -75,11 +75,10 @@ export default function registerNotifications(
     }
   }
 
-  onBashGateEvent(pi, "bites:notify", (data) => {
-    notify(data);
-  });
+  pi.events.on("bites:notify", (data) => notify(data as BitesNotifyPayload));
 
-  onBashGateEvent(pi, "bites:bash_gate", ({ cwd, command }) => {
+  pi.events.on("bites:bash_gate", (data) => {
+    const { cwd, command } = data as BitesBashGatePayload;
     notify({ cwd, message: `Waiting for bash approval: ${command}` });
   });
 

@@ -4,6 +4,7 @@
  * Shows OpenAI Codex usage/rate-limit information as a status-bar entry.
  */
 
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const CODEX_PROVIDER_ID = "openai-codex";
@@ -82,8 +83,7 @@ function isOpenAICodex(ctx: ExtensionContext): boolean {
 async function queryCodexUsage(ctx: ExtensionContext): Promise<CodexUsage> {
   if (!ctx.model) throw new Error("Missing model");
 
-  const model = ctx.modelRegistry.find(ctx.model.provider, ctx.model.id);
-  if (!model) throw new Error("Current model is not registered");
+  const model = ctx.model as Model<Api>;
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) throw new Error(auth.error);
 

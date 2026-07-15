@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildEventData } from "./event-data.js";
-import { emitSubagentEvent } from "./events.js";
 import { GroupJoinManager } from "./group-join.js";
 import { buildNotificationDetails, formatTaskNotification } from "./notifications.js";
 import type { AgentRecord, JoinMode, NotificationDetails } from "./types.js";
@@ -132,11 +131,7 @@ export function createAgentCompletionHandler({
 
   function onAgentComplete(record: AgentRecord): void {
     const failed = record.status === "error" || record.status === "stopped";
-    emitSubagentEvent(
-      pi,
-      failed ? "subagents:failed" : "subagents:completed",
-      buildEventData(record),
-    );
+    pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
     pi.appendEntry("subagents:record", {
       id: record.id,
       type: record.type,

@@ -10,7 +10,6 @@ import { basename } from "node:path";
 import { extractLastAssistantText } from "../utils.ts";
 import type { BitesConfig } from "../config.js";
 import { getSmallModel } from "../small-model.js";
-import { onBashGateEvent } from "../bash-gate/events.js";
 import {
   codeOf,
   compareTrackerStates,
@@ -590,8 +589,8 @@ export default function registerSessionTracker(
     (error) => logTrackerFailure(defaultCallOptions, "needs-input inference", error),
   );
   pi.on("agent_start", () => needsInputLifecycle.agentStart());
-  onBashGateEvent(pi, "bites:bash_gate", async () => runtime.setState("needs-permission"));
-  onBashGateEvent(pi, "bites:bash_gate_resolved", async () => runtime.setState("working"));
+  pi.events.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
+  pi.events.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
   pi.on("agent_end", (event) => needsInputLifecycle.agentEnd(event));
   pi.on("agent_settled", (_event, ctx) => needsInputLifecycle.agentSettled(ctx));
   pi.on("session_shutdown", async (event) => {

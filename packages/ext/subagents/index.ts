@@ -25,7 +25,6 @@ import { registerResultTools } from "./register-result-tools.js";
 import { type ToolDescriptionMode } from "./settings.js";
 import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
-import { emitSubagentEvent } from "./events.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { ConversationViewer } from "./ui/conversation-viewer.js";
 import { onSubagentApprovalRequest } from "../bash-gate/events.js";
@@ -70,7 +69,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     const current = pi.getActiveTools();
     const next = hasActionableBackgroundAgent()
       ? [...new Set([...current, ...helperTools])]
-      : current.filter((name) => !helperTools.some((toolName) => toolName === name));
+      : current.filter((name) => !helperTools.includes(name as (typeof helperTools)[number]));
     pi.setActiveTools(next);
   }
 
@@ -91,7 +90,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     undefined,
     (record) => {
       // Emit started event when agent transitions to running (including from queue)
-      emitSubagentEvent(pi, "subagents:started", {
+      pi.events.emit("subagents:started", {
         id: record.id,
         type: record.type,
         description: record.description,
@@ -99,7 +98,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     },
     (record, info) => {
       // Emit compacted event when agent's session compacts (preserves count on record).
-      emitSubagentEvent(pi, "subagents:compacted", {
+      pi.events.emit("subagents:compacted", {
         id: record.id,
         type: record.type,
         description: record.description,
@@ -203,7 +202,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   });
 
   // Broadcast readiness so extensions loaded after us can discover us
-  emitSubagentEvent(pi, "subagents:ready", {});
+  pi.events.emit("subagents:ready", {});
 
   // On shutdown, abort all agents immediately and clean up.
   // If the session is going down, there's nothing left to consume agent results.

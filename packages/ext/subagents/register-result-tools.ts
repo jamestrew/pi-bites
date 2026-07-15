@@ -6,7 +6,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { emitSubagentEvent } from "./events.js";
 import { getAgentConversation, SUBAGENT_TOOL_NAMES, steerAgent } from "./agent-runner.js";
 import { getStatusNote } from "./status-note.js";
 import { formatLifetimeTokens, textResult } from "./tool-result.js";
@@ -180,7 +179,7 @@ export function registerResultTools(
         if (!record.session) {
           if (!record.pendingSteers) record.pendingSteers = [];
           record.pendingSteers.push(params.message);
-          emitSubagentEvent(pi, "subagents:steered", { id: record.id, message: params.message });
+          pi.events.emit("subagents:steered", { id: record.id, message: params.message });
           return textResult(
             `Steering message queued for agent ${record.id}. It will be delivered once the session initializes.`,
             {
@@ -195,7 +194,7 @@ export function registerResultTools(
 
         try {
           await steerAgent(record.session, params.message);
-          emitSubagentEvent(pi, "subagents:steered", { id: record.id, message: params.message });
+          pi.events.emit("subagents:steered", { id: record.id, message: params.message });
           const tokens = formatLifetimeTokens(record);
           const contextPercent = getSessionContextPercent(record.session);
           const stateParts: string[] = [];

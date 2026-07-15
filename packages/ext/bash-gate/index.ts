@@ -44,8 +44,7 @@ import {
   parseSubagentMetadata,
   type SubagentMetadata,
 } from "../subagents/agent-runner.js";
-import { onSubagentEvent } from "../subagents/events.js";
-import { emitBashGateEvent, requestSubagentApproval } from "./events.js";
+import { requestSubagentApproval } from "./events.js";
 
 export type { ApprovalRequest } from "./events.js";
 type BashGatePolicy = "deny" | "prompt";
@@ -325,8 +324,8 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     }
   }
 
-  onSubagentEvent(pi, "subagents:completed", clearSubagentAllowances);
-  onSubagentEvent(pi, "subagents:failed", clearSubagentAllowances);
+  pi.events.on("subagents:completed", (data) => clearSubagentAllowances(data as { id: string }));
+  pi.events.on("subagents:failed", (data) => clearSubagentAllowances(data as { id: string }));
 
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "bash") return undefined;
@@ -361,7 +360,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
       }
 
       const gateStartMs = Date.now();
-      emitBashGateEvent(pi, "bites:bash_gate", { cwd: ctx.cwd, command });
+      pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
       try {
         const reasons = matchedPatterns.flatMap((match) =>
           match.reason === undefined ? [] : [match.reason],
@@ -392,7 +391,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
         return { block: true, reason: "Bash gate: command was denied by parent approval." };
       } finally {
-        emitBashGateEvent(pi, "bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+        pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
       }
     }
 
@@ -408,7 +407,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     // still gets its full intended timeout.
     const gateStartMs = Date.now();
 
-    emitBashGateEvent(pi, "bites:bash_gate", { cwd: ctx.cwd, command });
+    pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
 
     const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
     const prompt =
@@ -435,7 +434,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
 
       return { block: true, reason: "Bash gate: command was denied by the user." };
     } finally {
-      emitBashGateEvent(pi, "bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+      pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
     }
   });
 }
