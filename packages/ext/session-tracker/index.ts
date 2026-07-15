@@ -509,6 +509,11 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
       state = next;
       await report("report");
     },
+    async acknowledgeNeedsInput() {
+      if (state !== "needs-input") return;
+      state = "idle";
+      await report("report");
+    },
     async stop(release = false) {
       if (timer) options.clearInterval(timer);
       timer = undefined;
@@ -604,6 +609,10 @@ export default function registerSessionTracker(
   pi.registerCommand("pi-sessions", {
     description: "Pick a tracked Pi tmux pane to focus",
     handler: async (_args, ctx) => runPiSessionsPicker(ctx, defaultCallOptions),
+  });
+  pi.registerCommand("pi-sessions-ack", {
+    description: "Dismiss this session's needs-input state",
+    handler: async () => runtime.acknowledgeNeedsInput(),
   });
   pi.registerCommand("pi-sessions-restart-daemon", {
     description: "Restart the Pi sessions daemon",
