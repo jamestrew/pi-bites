@@ -2,9 +2,16 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { FileFrecency } from "./index.js";
+import { FileFrecency, parseFrecencyStore } from "./index.js";
 
 describe("FileFrecency", () => {
+  test("accepts valid persisted stores and rejects malformed entries", () => {
+    expect(parseFrecencyStore({ "/repo": { "src/index.ts": 123 } })).toEqual({
+      "/repo": { "src/index.ts": 123 },
+    });
+    expect(parseFrecencyStore({ "/repo": { "src/index.ts": "soon" } })).toBeUndefined();
+  });
+
   test("visits increase score and persist cwd-local paths", async () => {
     const dir = await mkdtemp(join(tmpdir(), "pi-bites-frecency-"));
     const file = join(dir, "frecency.json");

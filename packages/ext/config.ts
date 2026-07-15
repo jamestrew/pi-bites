@@ -41,64 +41,61 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Type, type Static } from "typebox";
-import * as Value from "typebox/value";
 
-const StringList = Type.Union([Type.String(), Type.Array(Type.String())]);
-const ThinkingLevelSchema = Type.Union([
-  Type.Literal("minimal"),
-  Type.Literal("low"),
-  Type.Literal("medium"),
-  Type.Literal("high"),
-  Type.Literal("xhigh"),
-  Type.Literal("max"),
-]);
-const BashGateRuleSchema = Type.Object({
-  cmd: Type.Optional(StringList),
-  subcommands: Type.Optional(StringList),
-  flagAny: Type.Optional(StringList),
-  redirects: Type.Optional(
-    Type.Union([Type.Literal("any-write"), Type.Literal("append"), Type.Literal("truncate")]),
-  ),
-  reason: Type.Optional(Type.String()),
-});
+export interface SmallModelConfig {
+  /** Cheap model for lightweight internal tasks. */
+  model?: string;
+  /** Thinking level for lightweight internal tasks. */
+  thinking?: ThinkingLevel;
+}
 
-export type SmallModelConfig = Static<typeof SmallModelConfigSchema>;
-export type StatuslineConfig = Static<typeof StatuslineConfigSchema>;
-export type CheckpointsConfig = Static<typeof CheckpointsConfigSchema>;
-export type PonytailConfig = Static<typeof PonytailConfigSchema>;
-export type SubagentsConfig = Static<typeof SubagentsConfigSchema>;
-export type NotificationsConfig = Static<typeof NotificationsConfigSchema>;
+export interface StatuslineConfig {
+  /** Shell command whose trimmed stdout is shown in the statusline. */
+  command?: string;
+}
+
+export interface CheckpointsConfig {
+  /** Set to false to disable checkpoint tracking and /rewind. */
+  enabled?: boolean;
+}
+
+export const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
+export type PonytailMode = (typeof PONYTAIL_MODES)[number];
+
+export interface PonytailConfig {
+  /** Default Ponytail mode for new sessions. */
+  defaultMode?: PonytailMode;
+}
+
+export interface SubagentsConfig {
+  /** Per-agent model overrides keyed by agent type. */
+  [agentType: string]: { model?: string };
+}
+
+export interface NotificationsConfig {
+  /** Shell command run when the agent loop ends; receives { cwd, message } on stdin. */
+  command?: string;
+}
+
 export type OneOrMany<T> = T | T[];
-export type BashGateRedirectRule = Static<typeof BashGateRuleSchema>["redirects"] & string;
-export type BashGateRule = Static<typeof BashGateRuleSchema>;
-export type BashGateConfig = Static<typeof BashGateConfigSchema>;
+export const BASH_GATE_REDIRECT_RULES = ["any-write", "append", "truncate"] as const;
+export type BashGateRedirectRule = (typeof BASH_GATE_REDIRECT_RULES)[number];
 
-const SmallModelConfigSchema = Type.Object({
-  model: Type.Optional(Type.String()),
-  thinking: Type.Optional(ThinkingLevelSchema),
-});
-const StatuslineConfigSchema = Type.Object({ command: Type.Optional(Type.String()) });
-const CheckpointsConfigSchema = Type.Object({ enabled: Type.Optional(Type.Boolean()) });
-const PonytailConfigSchema = Type.Object({
-  defaultMode: Type.Optional(
-    Type.Union([
-      Type.Literal("off"),
-      Type.Literal("lite"),
-      Type.Literal("full"),
-      Type.Literal("ultra"),
-      Type.Literal("review"),
-    ]),
-  ),
-});
-const SubagentsConfigSchema = Type.Record(
-  Type.String(),
-  Type.Object({ model: Type.Optional(Type.String()) }),
-);
-const NotificationsConfigSchema = Type.Object({ command: Type.Optional(Type.String()) });
-const BashGateConfigSchema = Type.Object({ rules: Type.Optional(Type.Array(BashGateRuleSchema)) });
+export interface BashGateRule {
+  cmd?: OneOrMany<string>;
+  subcommands?: OneOrMany<string>;
+  flagAny?: OneOrMany<string>;
+  redirects?: BashGateRedirectRule;
+  reason?: string;
+}
+
+export interface BashGateConfig {
+  /** Extra rules added to the built-in destructive-command rules. */
+  rules?: BashGateRule[];
+}
 
 export const EXTENSION_NAMES = [
   "bashGate",
@@ -126,47 +123,117 @@ export const EXTENSION_NAMES = [
 
 export type ExtensionName = (typeof EXTENSION_NAMES)[number];
 
-export const BitesConfigSchema = Type.Object({
-  smallModel: Type.Optional(SmallModelConfigSchema),
-  statusline: Type.Optional(StatuslineConfigSchema),
-  bashGate: Type.Optional(BashGateConfigSchema),
-  notifications: Type.Optional(NotificationsConfigSchema),
-  checkpoints: Type.Optional(CheckpointsConfigSchema),
-  ponytail: Type.Optional(PonytailConfigSchema),
-  subagents: Type.Optional(SubagentsConfigSchema),
-  disable: Type.Optional(
-    Type.Array(
-      Type.Union([
-        Type.Literal("bashGate"),
-        Type.Literal("rtk"),
-        Type.Literal("footer"),
-        Type.Literal("statusline"),
-        Type.Literal("tokenCount"),
-        Type.Literal("usageDashboard"),
-        Type.Literal("tools"),
-        Type.Literal("explore"),
-        Type.Literal("fzf"),
-        Type.Literal("todo"),
-        Type.Literal("question"),
-        Type.Literal("notifications"),
-        Type.Literal("checkpoints"),
-        Type.Literal("spotme"),
-        Type.Literal("inlineReferences"),
-        Type.Literal("slashSkillAutocomplete"),
-        Type.Literal("promptNormalization"),
-        Type.Literal("atMentionContext"),
-        Type.Literal("sessionTracker"),
-        Type.Literal("ponytail"),
-        Type.Literal("subagents"),
-      ]),
-    ),
-  ),
-});
+export interface BitesConfig {
+  smallModel?: SmallModelConfig;
+  statusline?: StatuslineConfig;
+  bashGate?: BashGateConfig;
+  notifications?: NotificationsConfig;
+  checkpoints?: CheckpointsConfig;
+  ponytail?: PonytailConfig;
+  subagents?: SubagentsConfig;
+  /** Extension names disabled globally or for this project. */
+  disable?: ExtensionName[];
+}
 
-export type BitesConfig = Static<typeof BitesConfigSchema>;
+const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isOptional(
+  value: Record<string, unknown>,
+  key: string,
+  check: (field: unknown) => boolean,
+): boolean {
+  return !(key in value) || check(value[key]);
+}
+
+function isStringList(value: unknown): boolean {
+  return (
+    typeof value === "string" ||
+    (Array.isArray(value) && value.every((item) => typeof item === "string"))
+  );
+}
+
+export function isPonytailMode(value: unknown): value is PonytailMode {
+  return PONYTAIL_MODES.some((mode) => mode === value);
+}
+
+function isSmallModelConfig(value: unknown): value is SmallModelConfig {
+  return (
+    isRecord(value) &&
+    isOptional(value, "model", (field) => typeof field === "string") &&
+    isOptional(value, "thinking", (field) => THINKING_LEVELS.some((level) => level === field))
+  );
+}
+
+function isStatuslineConfig(value: unknown): value is StatuslineConfig {
+  return isRecord(value) && isOptional(value, "command", (field) => typeof field === "string");
+}
+
+function isCheckpointsConfig(value: unknown): value is CheckpointsConfig {
+  return isRecord(value) && isOptional(value, "enabled", (field) => typeof field === "boolean");
+}
+
+function isPonytailConfig(value: unknown): value is PonytailConfig {
+  return isRecord(value) && isOptional(value, "defaultMode", isPonytailMode);
+}
+
+function isSubagentsConfig(value: unknown): value is SubagentsConfig {
+  return (
+    isRecord(value) &&
+    Object.values(value).every(
+      (agent) =>
+        isRecord(agent) && isOptional(agent, "model", (field) => typeof field === "string"),
+    )
+  );
+}
+
+function isNotificationsConfig(value: unknown): value is NotificationsConfig {
+  return isRecord(value) && isOptional(value, "command", (field) => typeof field === "string");
+}
+
+function isBashGateRule(value: unknown): value is BashGateRule {
+  return (
+    isRecord(value) &&
+    isOptional(value, "cmd", isStringList) &&
+    isOptional(value, "subcommands", isStringList) &&
+    isOptional(value, "flagAny", isStringList) &&
+    isOptional(value, "redirects", (field) =>
+      BASH_GATE_REDIRECT_RULES.some((rule) => rule === field),
+    ) &&
+    isOptional(value, "reason", (field) => typeof field === "string")
+  );
+}
+
+function isBashGateConfig(value: unknown): value is BashGateConfig {
+  return (
+    isRecord(value) &&
+    isOptional(value, "rules", (rules) => Array.isArray(rules) && rules.every(isBashGateRule))
+  );
+}
+
+function isExtensionName(value: unknown): value is ExtensionName {
+  return EXTENSION_NAMES.some((name) => name === value);
+}
+
+function isBitesConfig(value: unknown): value is BitesConfig {
+  return (
+    isRecord(value) &&
+    isOptional(value, "smallModel", isSmallModelConfig) &&
+    isOptional(value, "statusline", isStatuslineConfig) &&
+    isOptional(value, "bashGate", isBashGateConfig) &&
+    isOptional(value, "notifications", isNotificationsConfig) &&
+    isOptional(value, "checkpoints", isCheckpointsConfig) &&
+    isOptional(value, "ponytail", isPonytailConfig) &&
+    isOptional(value, "subagents", isSubagentsConfig) &&
+    isOptional(value, "disable", (field) => Array.isArray(field) && field.every(isExtensionName))
+  );
+}
 
 export function parseBitesConfig(value: unknown): BitesConfig | undefined {
-  return Value.Check(BitesConfigSchema, value) ? value : undefined;
+  return isBitesConfig(value) ? value : undefined;
 }
 
 function tryReadJson(filePath: string, label: string): BitesConfig {

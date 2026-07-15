@@ -37,7 +37,15 @@ describe("loadConfig", () => {
       { flag: "wx" },
     );
 
-    const { loadConfig } = await import("./config.js");
+    const { loadConfig, parseBitesConfig } = await import("./config.js");
+    expect(
+      parseBitesConfig({
+        ponytail: { defaultMode: "full" },
+        disable: ["checkpoints"],
+      }),
+    ).toBeDefined();
+    expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
+
     const config = loadConfig(project);
     expect(config.ponytail?.defaultMode).toBe("ultra");
     expect(config.smallModel).toEqual({
@@ -46,5 +54,30 @@ describe("loadConfig", () => {
     });
 
     rmSync(project, { recursive: true, force: true });
+  });
+
+  test("reports malformed config and falls back safely", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
+    agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
+    mkdirSync(join(project, ".pi"));
+    writeFileSync(join(project, ".pi", "pi-bites.json"), JSON.stringify({ disable: [42] }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const { loadConfig } = await import("./config.js");
+      expect(loadConfig(project)).toEqual({
+        smallModel: {},
+        statusline: {},
+        bashGate: {},
+        notifications: {},
+        checkpoints: {},
+        ponytail: {},
+        subagents: {},
+      });
+      expect(error).toHaveBeenCalledWith(expect.stringContaining("failed to parse project-local"));
+    } finally {
+      error.mockRestore();
+      rmSync(project, { recursive: true, force: true });
+    }
   });
 });

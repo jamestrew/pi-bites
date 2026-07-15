@@ -7,33 +7,56 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { spawn } from "node:child_process";
 import type { BitesConfig } from "./config.js";
-import { Type, type Static } from "typebox";
-import * as Value from "typebox/value";
 
-const FileStateSchema = Type.Union([
-  Type.Object({ exists: Type.Literal(false) }),
-  Type.Object({ exists: Type.Literal(true), blob: Type.String(), bytes: Type.Number() }),
-]);
-const CheckpointSchema = Type.Object({
-  id: Type.String(),
-  createdAt: Type.String(),
-  label: Type.String(),
-  files: Type.Record(Type.String(), FileStateSchema),
-  changedFiles: Type.Array(Type.String()),
-  userEntryId: Type.Optional(Type.String()),
-  userPrompt: Type.Optional(Type.String()),
-});
-export const CheckpointStoreSchema = Type.Object({
-  version: Type.Literal(1),
-  checkpoints: Type.Array(CheckpointSchema),
-});
+type FileState = { exists: false } | { exists: true; blob: string; bytes: number };
 
-type FileState = Static<typeof FileStateSchema>;
-type Checkpoint = Static<typeof CheckpointSchema>;
-type Store = Static<typeof CheckpointStoreSchema>;
+type Checkpoint = {
+  id: string;
+  createdAt: string;
+  label: string;
+  files: Record<string, FileState>;
+  changedFiles: string[];
+  userEntryId?: string;
+  userPrompt?: string;
+};
+
+type Store = { version: 1; checkpoints: Checkpoint[] };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isFileState(value: unknown): value is FileState {
+  if (!isRecord(value) || typeof value.exists !== "boolean") return false;
+  return !value.exists || (typeof value.blob === "string" && typeof value.bytes === "number");
+}
+
+function isCheckpoint(value: unknown): value is Checkpoint {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.label === "string" &&
+    isRecord(value.files) &&
+    Object.values(value.files).every(isFileState) &&
+    Array.isArray(value.changedFiles) &&
+    value.changedFiles.every((file) => typeof file === "string") &&
+    (!("userEntryId" in value) || typeof value.userEntryId === "string") &&
+    (!("userPrompt" in value) || typeof value.userPrompt === "string")
+  );
+}
+
+function isStore(value: unknown): value is Store {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    Array.isArray(value.checkpoints) &&
+    value.checkpoints.every(isCheckpoint)
+  );
+}
 
 export function parseCheckpointStore(value: unknown): Store | undefined {
-  return Value.Check(CheckpointStoreSchema, value) ? value : undefined;
+  return isStore(value) ? value : undefined;
 }
 
 type Pending = { path: string; before: FileState; userEntryId?: string; userPrompt?: string };

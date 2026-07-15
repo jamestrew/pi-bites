@@ -12,8 +12,6 @@ import {
 import { createServer, createConnection, type Server } from "node:net";
 import { fileURLToPath } from "node:url";
 import { basename, dirname, join } from "node:path";
-import { Type, type Static } from "typebox";
-import * as Value from "typebox/value";
 
 export type TrackerState = "idle" | "working" | "needs-input" | "needs-permission";
 
@@ -28,51 +26,88 @@ export function compareTrackerStates(a: TrackerState, b: TrackerState): number {
   return TRACKER_STATE_PRIORITY[a] - TRACKER_STATE_PRIORITY[b];
 }
 
-const PaneRecordSchema = Type.Object({
-  paneId: Type.String(),
-  cwd: Type.String(),
-  runtimeId: Type.String(),
-  seq: Type.Number(),
-  state: Type.Union([
-    Type.Literal("idle"),
-    Type.Literal("working"),
-    Type.Literal("needs-input"),
-    Type.Literal("needs-permission"),
-  ]),
-  heartbeatAt: Type.Number(),
-  sessionId: Type.Optional(Type.String()),
-});
+export interface PaneRecord {
+  paneId: string;
+  cwd: string;
+  runtimeId: string;
+  seq: number;
+  state: TrackerState;
+  heartbeatAt: number;
+  sessionId?: string;
+}
 
-export const TrackerRequestSchema = Type.Union([
-  Type.Object({ type: Type.Literal("report"), record: PaneRecordSchema }),
-  Type.Object({ type: Type.Literal("heartbeat"), record: PaneRecordSchema }),
-  Type.Object({
-    type: Type.Literal("release"),
-    paneId: Type.String(),
-    runtimeId: Type.String(),
-  }),
-  Type.Object({ type: Type.Literal("snapshot") }),
-  Type.Object({ type: Type.Literal("focus_pane"), paneId: Type.String() }),
-  Type.Object({ type: Type.Literal("focus_next"), currentPaneId: Type.Optional(Type.String()) }),
-  Type.Object({ type: Type.Literal("shutdown") }),
-]);
+export type TrackerRequest =
+  | { type: "report"; record: PaneRecord }
+  | { type: "heartbeat"; record: PaneRecord }
+  | { type: "release"; paneId: string; runtimeId: string }
+  | { type: "snapshot" }
+  | { type: "focus_pane"; paneId: string }
+  | { type: "focus_next"; currentPaneId?: string }
+  | { type: "shutdown" };
 
-export const TrackerResponseSchema = Type.Object({
-  ok: Type.Boolean(),
-  records: Type.Optional(Type.Array(PaneRecordSchema)),
-  error: Type.Optional(Type.String()),
-});
+export interface TrackerResponse {
+  ok: boolean;
+  records?: PaneRecord[];
+  error?: string;
+}
 
-export type PaneRecord = Static<typeof PaneRecordSchema>;
-export type TrackerRequest = Static<typeof TrackerRequestSchema>;
-export type TrackerResponse = Static<typeof TrackerResponseSchema>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isTrackerState(value: unknown): value is TrackerState {
+  return typeof value === "string" && Object.hasOwn(TRACKER_STATE_PRIORITY, value);
+}
+
+function isPaneRecord(value: unknown): value is PaneRecord {
+  return (
+    isRecord(value) &&
+    typeof value.paneId === "string" &&
+    typeof value.cwd === "string" &&
+    typeof value.runtimeId === "string" &&
+    typeof value.seq === "number" &&
+    isTrackerState(value.state) &&
+    typeof value.heartbeatAt === "number" &&
+    (!("sessionId" in value) || typeof value.sessionId === "string")
+  );
+}
+
+function isTrackerRequest(value: unknown): value is TrackerRequest {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  switch (value.type) {
+    case "report":
+    case "heartbeat":
+      return isPaneRecord(value.record);
+    case "release":
+      return typeof value.paneId === "string" && typeof value.runtimeId === "string";
+    case "focus_pane":
+      return typeof value.paneId === "string";
+    case "focus_next":
+      return !("currentPaneId" in value) || typeof value.currentPaneId === "string";
+    case "snapshot":
+    case "shutdown":
+      return true;
+    default:
+      return false;
+  }
+}
 
 export function parseTrackerRequest(value: unknown): TrackerRequest | undefined {
-  return Value.Check(TrackerRequestSchema, value) ? value : undefined;
+  return isTrackerRequest(value) ? value : undefined;
+}
+
+function isTrackerResponse(value: unknown): value is TrackerResponse {
+  return (
+    isRecord(value) &&
+    typeof value.ok === "boolean" &&
+    (!("records" in value) ||
+      (Array.isArray(value.records) && value.records.every(isPaneRecord))) &&
+    (!("error" in value) || typeof value.error === "string")
+  );
 }
 
 export function parseTrackerResponse(value: unknown): TrackerResponse | undefined {
-  return Value.Check(TrackerResponseSchema, value) ? value : undefined;
+  return isTrackerResponse(value) ? value : undefined;
 }
 
 export type TmuxRunner = (args: string[]) => void | Promise<void>;

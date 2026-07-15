@@ -1,8 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { Type } from "typebox";
-import * as Value from "typebox/value";
 
 const HALF_LIFE_SECONDS = 30 * 24 * 3600;
 const LAMBDA = Math.log(2) / HALF_LIFE_SECONDS;
@@ -17,17 +15,15 @@ function defaultStoreFile(): string {
   return join(base, "pi-bites", "file-frecency.json");
 }
 
-export const FrecencyStoreSchema = Type.Record(
-  Type.String(),
-  Type.Union([Type.Number(), Type.Record(Type.String(), Type.Number())]),
-);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-export function parseFrecencyStore(value: unknown): FrecencyStore | undefined {
-  if (!Value.Check(FrecencyStoreSchema, value)) return undefined;
+export function parseFrecencyStore(input: unknown): FrecencyStore | undefined {
+  if (!isRecord(input)) return undefined;
   const store: FrecencyStore = {};
 
-  for (const [key, entry] of Object.entries(value)) {
-    const value = entry;
+  for (const [key, value] of Object.entries(input)) {
     if (typeof value === "number" && Number.isFinite(value)) {
       // Back-compat for the original flat `${cwd}\0${path}` key format.
       const separator = key.indexOf("\0");
@@ -39,7 +35,12 @@ export function parseFrecencyStore(value: unknown): FrecencyStore | undefined {
       continue;
     }
 
-    const entries = Object.entries(value).filter((entry) => Number.isFinite(entry[1]));
+    if (!isRecord(value)) return undefined;
+    const entries: [string, number][] = [];
+    for (const [path, deadline] of Object.entries(value)) {
+      if (typeof deadline !== "number" || !Number.isFinite(deadline)) return undefined;
+      entries.push([path, deadline]);
+    }
     if (entries.length > 0) store[key] = Object.fromEntries(entries);
   }
 

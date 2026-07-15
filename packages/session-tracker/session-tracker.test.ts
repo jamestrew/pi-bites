@@ -10,6 +10,8 @@ import {
   getSessionTrackerDaemonCommand,
   getTrackerLogPath,
   getTrackerSocketPath,
+  parseTrackerRequest,
+  parseTrackerResponse,
   requestTracker,
   SessionTracker,
   startSessionTrackerDaemon,
@@ -49,6 +51,15 @@ function record(overrides: Partial<PaneRecord> = {}): PaneRecord {
     ...overrides,
   };
 }
+
+test("parses valid tracker messages and rejects malformed ones", () => {
+  const request = { type: "report", record: record(), futureField: true };
+  expect(parseTrackerRequest(request)).toBe(request);
+  expect(parseTrackerRequest({ type: "report", record: { state: "idle" } })).toBeUndefined();
+  const response = { ok: true, records: [record()], futureField: true };
+  expect(parseTrackerResponse(response)).toBe(response);
+  expect(parseTrackerResponse({ ok: true, records: [{ state: "unknown" }] })).toBeUndefined();
+});
 
 test("release removes only the owning runtime pane record", async () => {
   const tracker = new SessionTracker({
