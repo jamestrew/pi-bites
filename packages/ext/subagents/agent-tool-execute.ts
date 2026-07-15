@@ -208,7 +208,7 @@ async function runBackgroundAgent(
       toolUses: 0,
       tokens: "",
       durationMs: 0,
-      status: "background" as const,
+      status: isQueued ? ("queued" as const) : ("background" as const),
       agentId: id,
     },
   );
