@@ -373,7 +373,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     const fmFields: string[] = [];
     fmFields.push(`description: ${JSON.stringify(cfg.description)}`);
     if (cfg.displayName) fmFields.push(`display_name: ${cfg.displayName}`);
-    fmFields.push(`tools: ${cfg.builtinToolNames.join(", ") || "all"}`);
+    fmFields.push(`tools: ${cfg.builtinToolNames?.join(", ") || "all"}`);
     if (cfg.model) fmFields.push(`model: ${cfg.model}`);
     if (cfg.thinking) fmFields.push(`thinking: ${cfg.thinking}`);
     fmFields.push(`prompt_mode: ${cfg.promptMode}`);

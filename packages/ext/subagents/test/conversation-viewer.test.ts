@@ -280,14 +280,7 @@ describe("ConversationViewer", () => {
         mockSession(),
         mockRecord({
           type: "general",
-          invocation: {
-            modelName: "github-copilot/gpt-5.4",
-            thinking: "off",
-            isolated: false,
-            inheritContext: false,
-            runInBackground: false,
-            isolation: undefined,
-          },
+          invocation: { modelName: "github-copilot/gpt-5.4", thinking: "off" },
         }),
         undefined,
         ansiTheme(),

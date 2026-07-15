@@ -402,8 +402,8 @@ async function prepareCheckpoint(args: PrepareCheckpointArgs): Promise<Checkpoin
       label: "before Pi changes",
       files: { [relPath]: before },
       changedFiles: [relPath],
-      ...(user.userEntryId !== undefined && { userEntryId: user.userEntryId }),
-      ...(user.userPrompt !== undefined && { userPrompt: user.userPrompt }),
+      userEntryId: user.userEntryId,
+      userPrompt: user.userPrompt,
     });
   } else if (!(relPath in priorFiles)) {
     // Backfill the path's pre-Pi state into older checkpoints
@@ -420,8 +420,8 @@ async function prepareCheckpoint(args: PrepareCheckpointArgs): Promise<Checkpoin
     label: `after ${toolName} ${relPath}`,
     files: priorFiles,
     changedFiles: [relPath],
-    ...(user.userEntryId !== undefined && { userEntryId: user.userEntryId }),
-    ...(user.userPrompt !== undefined && { userPrompt: user.userPrompt }),
+    userEntryId: user.userEntryId,
+    userPrompt: user.userPrompt,
   };
 }
 
@@ -442,8 +442,8 @@ export default function registerCheckpoints(
       pending.set(event.toolCallId, {
         path: relPath,
         before: await snapshotPath(ctx.cwd, currentSessionId, relPath),
-        ...(user.userEntryId !== undefined && { userEntryId: user.userEntryId }),
-        ...(user.userPrompt !== undefined && { userPrompt: user.userPrompt }),
+        userEntryId: user.userEntryId,
+        userPrompt: user.userPrompt,
       });
     } catch (error) {
       console.warn("checkpoints pre-snapshot failed", error);

@@ -137,8 +137,8 @@ export function getToolNamesForType(type: string): string[] {
   const key = resolveKey(type);
   const raw = key ? agents.get(key) : undefined;
   const config = raw?.enabled !== false ? raw : undefined;
-  // An explicit `[]` (`tools: none` or a `tools:` with only `ext:` entries)
-  // means zero built-ins.
+  // `undefined` (definition omitted the field) → all built-ins; an explicit `[]`
+  // (`tools: none` or a `tools:` with only `ext:` entries) → zero built-ins.
   return config?.builtinToolNames ?? [...BUILTIN_TOOL_NAMES];
 }
 
@@ -158,11 +158,9 @@ export function getConfig(type: string): {
     return {
       displayName: config.displayName ?? config.name,
       description: config.description,
-      builtinToolNames: config.builtinToolNames,
+      builtinToolNames: config.builtinToolNames ?? BUILTIN_TOOL_NAMES,
       extensions: config.extensions,
-      ...(config.excludeExtensions !== undefined && {
-        excludeExtensions: config.excludeExtensions,
-      }),
+      excludeExtensions: config.excludeExtensions,
       skills: config.skills,
       promptMode: config.promptMode,
     };
@@ -174,9 +172,9 @@ export function getConfig(type: string): {
     return {
       displayName: gp.displayName ?? gp.name,
       description: gp.description,
-      builtinToolNames: gp.builtinToolNames,
+      builtinToolNames: gp.builtinToolNames ?? BUILTIN_TOOL_NAMES,
       extensions: gp.extensions,
-      ...(gp.excludeExtensions !== undefined && { excludeExtensions: gp.excludeExtensions }),
+      excludeExtensions: gp.excludeExtensions,
       skills: gp.skills,
       promptMode: gp.promptMode,
     };

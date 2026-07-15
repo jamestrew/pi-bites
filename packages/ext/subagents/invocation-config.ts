@@ -19,13 +19,13 @@ export function resolveAgentInvocationConfig(
   agentConfig: AgentConfig | undefined,
   params: AgentInvocationParams,
 ): {
-  modelInput: string | undefined;
+  modelInput?: string;
   modelFromParams: boolean;
-  thinking: ThinkingLevel | undefined;
+  thinking?: ThinkingLevel;
   inheritContext: boolean;
   runInBackground: boolean;
   isolated: boolean;
-  isolation: IsolationMode | undefined;
+  isolation?: IsolationMode;
 } {
   return {
     modelInput: params.model ?? agentConfig?.model,

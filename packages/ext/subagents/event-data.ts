@@ -33,11 +33,11 @@ export function buildEventData(record: AgentRecord): AgentEventData {
     id: record.id,
     type: record.type,
     description: record.description,
-    ...(record.result !== undefined && { result: record.result }),
-    ...(record.error !== undefined && { error: record.error }),
+    result: record.result,
+    error: record.error,
     status: record.status,
     toolUses: record.toolUses,
     durationMs,
-    ...(tokens !== undefined && { tokens }),
+    tokens,
   };
 }

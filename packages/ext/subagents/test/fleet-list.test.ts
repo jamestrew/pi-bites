@@ -339,6 +339,7 @@ describe("FleetList rendering", () => {
         id: "pending",
         description: "queued one",
         status: "queued",
+        session: undefined,
       }),
     ];
     const lines = harness(agents).render();

@@ -83,7 +83,7 @@ function parseLineSuffix(path: string): ParsedLineSuffix | null {
 
   if (start < 1 || (end !== undefined && end < start)) return { path: suffixPath };
 
-  return { path: suffixPath, lineRange: { start, ...(end !== undefined && { end }) } };
+  return { path: suffixPath, lineRange: { start, end } };
 }
 
 function textContentOnly(
@@ -111,11 +111,7 @@ export async function expandMention(
     const suffix = parseLineSuffix(mention.path);
     if (suffix === null) return null;
 
-    effectiveMention = {
-      ...mention,
-      path: suffix.path,
-      ...(suffix.lineRange && { lineRange: suffix.lineRange }),
-    };
+    effectiveMention = { ...mention, path: suffix.path, lineRange: suffix.lineRange };
     absolutePath = resolve(cwd, effectiveMention.path);
     try {
       stats = await stat(absolutePath);
@@ -141,10 +137,11 @@ export async function expandMention(
         `at-mention-read:${effectiveMention.path}`,
         {
           path: effectiveMention.path,
-          ...(effectiveMention.lineRange && { offset: effectiveMention.lineRange.start }),
-          ...(effectiveMention.lineRange?.end !== undefined && {
-            limit: effectiveMention.lineRange.end - effectiveMention.lineRange.start + 1,
-          }),
+          offset: effectiveMention.lineRange?.start,
+          limit:
+            effectiveMention.lineRange?.end === undefined
+              ? undefined
+              : effectiveMention.lineRange.end - effectiveMention.lineRange.start + 1,
         },
         signal,
       );

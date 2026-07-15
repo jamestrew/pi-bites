@@ -74,8 +74,8 @@ export function buildNotificationDetails(
     turnCount: activity?.turnCount ?? 0,
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
-    ...(record.outputFile !== undefined && { outputFile: record.outputFile }),
-    ...(record.error !== undefined && { error: record.error }),
+    outputFile: record.outputFile,
+    error: record.error,
     resultPreview: record.result
       ? record.result.length > resultMaxLen
         ? record.result.slice(0, resultMaxLen) + "…"

@@ -55,37 +55,29 @@ function loadFromDir(
     const { frontmatter: fm, body } = parseFrontmatter<Record<string, unknown>>(content);
 
     const { builtinToolNames, extSelectors } = parseToolsField(fm.tools);
-    const displayName = str(fm.display_name);
-    const disallowedTools = csvListOptional(fm.disallowed_tools);
-    const excludeExtensions = csvListOptional(fm.exclude_extensions);
-    const model = str(fm.model);
-    const thinking = str(fm.thinking);
-    const sessionDir = str(fm.session_dir);
-    const bashGatePolicy = parseBashGatePolicy(fm.bash_gate);
-    const memory = parseMemory(fm.memory);
 
     agents.set(name, {
       name,
-      ...(displayName !== undefined && { displayName }),
+      displayName: str(fm.display_name),
       description: str(fm.description) ?? name,
       builtinToolNames,
-      ...(extSelectors !== undefined && { extSelectors }),
-      ...(disallowedTools !== undefined && { disallowedTools }),
+      extSelectors,
+      disallowedTools: csvListOptional(fm.disallowed_tools),
       extensions: inheritField(fm.extensions ?? fm.inherit_extensions),
-      ...(excludeExtensions !== undefined && { excludeExtensions }),
+      excludeExtensions: csvListOptional(fm.exclude_extensions),
       skills: inheritField(fm.skills ?? fm.inherit_skills),
-      ...(model !== undefined && { model }),
-      ...(thinking !== undefined && { thinking }),
-      ...(fm.persist_session != null && { persistSession: fm.persist_session === true }),
-      ...(sessionDir !== undefined && { sessionDir }),
+      model: str(fm.model),
+      thinking: str(fm.thinking),
+      persistSession: fm.persist_session != null ? fm.persist_session === true : undefined,
+      sessionDir: str(fm.session_dir),
       systemPrompt: body.trim(),
       promptMode: fm.prompt_mode === "append" ? "append" : "replace",
-      ...(fm.inherit_context != null && { inheritContext: fm.inherit_context === true }),
-      ...(fm.run_in_background != null && { runInBackground: fm.run_in_background === true }),
-      ...(fm.isolated != null && { isolated: fm.isolated === true }),
-      ...(bashGatePolicy !== undefined && { bashGatePolicy }),
-      ...(memory !== undefined && { memory }),
-      ...(fm.isolation === "worktree" && { isolation: "worktree" }),
+      inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
+      runInBackground: fm.run_in_background != null ? fm.run_in_background === true : undefined,
+      isolated: fm.isolated != null ? fm.isolated === true : undefined,
+      bashGatePolicy: parseBashGatePolicy(fm.bash_gate),
+      memory: parseMemory(fm.memory),
+      isolation: fm.isolation === "worktree" ? "worktree" : undefined,
       enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
     });

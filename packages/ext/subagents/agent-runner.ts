@@ -475,8 +475,8 @@ export async function runAgent(
     cwd: configCwd,
     agentDir,
     noExtensions,
-    ...(additionalExtensionPaths !== undefined && { additionalExtensionPaths }),
-    ...(extensionsOverride !== undefined && { extensionsOverride }),
+    additionalExtensionPaths,
+    extensionsOverride,
     noSkills,
     noPromptTemplates: true,
     noThemes: true,
@@ -498,7 +498,7 @@ export async function runAgent(
   // go through `ext:`), so an unknown name there is unambiguously a typo. Previously
   // this produced a silently broken agent (#75) — pi-mono accepted the bogus name
   // into the allowlist, then dropped it at registration with no signal back.
-  if (agentConfig && agentConfig.builtinToolNames.length) {
+  if (agentConfig?.builtinToolNames?.length) {
     const knownBuiltins = new Set(BUILTIN_TOOL_NAMES);
     for (const name of agentConfig.builtinToolNames) {
       if (!knownBuiltins.has(name)) {
@@ -619,13 +619,13 @@ export async function runAgent(
     ? SessionManager.create(effectiveCwd, configuredSessionDir ?? defaultSessionDir)
     : SessionManager.inMemory(effectiveCwd);
 
-  const sessionOpts: NonNullable<Parameters<typeof createAgentSession>[0]> = {
+  const sessionOpts: Parameters<typeof createAgentSession>[0] = {
     cwd: effectiveCwd,
     agentDir,
     sessionManager,
     settingsManager,
     modelRegistry: ctx.modelRegistry,
-    ...(model !== undefined && { model }),
+    model,
     tools: allowedTools,
     resourceLoader: loader,
   };
@@ -636,12 +636,10 @@ export async function runAgent(
   const { session } = await createAgentSession(sessionOpts);
 
   sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
-    ...(options.agentId !== undefined && { agentId: options.agentId }),
+    agentId: options.agentId,
     type,
     title: agentConfig?.displayName ?? agentConfig?.name ?? type,
-    ...(agentConfig?.bashGatePolicy !== undefined && {
-      bashGatePolicy: agentConfig.bashGatePolicy,
-    }),
+    bashGatePolicy: agentConfig?.bashGatePolicy,
   } satisfies SubagentMetadata);
 
   const baseSessionName = agentConfig?.name ?? type;

@@ -73,8 +73,8 @@ type PreparedInvocation = {
   model: Model<Api> | undefined;
   isolated: boolean;
   inheritContext: boolean;
-  thinking: ThinkingLevel;
-  isolation: IsolationMode | undefined;
+  thinking?: ThinkingLevel;
+  isolation?: IsolationMode;
   runInBackground: boolean;
   agentInvocation: AgentInvocation;
   detailBase: DetailBase;
@@ -154,12 +154,12 @@ async function runBackgroundAgent(
   try {
     id = manager.spawn(pi, ctx, subagentType, params.prompt, {
       description: params.description,
-      ...(model !== undefined && { model }),
+      model,
       isolated,
       inheritContext,
       thinkingLevel: thinking,
       isBackground: true,
-      ...(isolation !== undefined && { isolation }),
+      isolation,
       invocation: agentInvocation,
       ...bgCallbacks,
     });
@@ -250,9 +250,9 @@ async function runForegroundAgent(
       activity: fgState.bashApproval
         ? formatBashApprovalActivity(fgState.bashApproval.command)
         : describeActivity(fgState.activeTools, fgState.responseText),
-      ...(fgState.bashApproval && { bashApprovalCommand: fgState.bashApproval.command }),
+      bashApprovalCommand: fgState.bashApproval?.command,
       spinnerFrame: spinnerFrame % SPINNER.length,
-      ...(fgState.toolCalls !== undefined && { toolCalls: fgState.toolCalls }),
+      toolCalls: fgState.toolCalls,
       lifetimeUsage: fgState.lifetimeUsage,
     };
     onUpdate?.({
@@ -302,13 +302,13 @@ async function runForegroundAgent(
       params.prompt,
       {
         description: params.description,
-        ...(model !== undefined && { model }),
+        model,
         isolated,
         inheritContext,
         thinkingLevel: thinking,
-        ...(isolation !== undefined && { isolation }),
+        isolation,
         invocation: agentInvocation,
-        ...(signal !== undefined && { signal }),
+        signal,
         ...fgCallbacks,
       },
       (fgAgentId: string) => {
@@ -449,19 +449,19 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       isolation,
     };
     const { tags: agentTags } = buildInvocationTags(agentInvocation);
-    const detailBase: DetailBase = {
+    const detailBase = {
       displayName,
       description: params.description,
       subagentType,
-      ...(modelName !== undefined && { modelName }),
-      ...(agentTags.length > 0 && { tags: agentTags }),
+      modelName,
+      tags: agentTags.length > 0 ? agentTags : undefined,
     };
 
     const request: ExecuteRequest = {
       toolCallId,
       params,
-      ...(signal !== undefined && { signal }),
-      ...(onUpdate !== undefined && { onUpdate }),
+      signal,
+      onUpdate,
       ctx,
     };
     const invocation: PreparedInvocation = {

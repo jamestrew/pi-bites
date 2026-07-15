@@ -136,15 +136,12 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): {
 } {
   const tags: string[] = [];
   if (!invocation) return { tags };
-  tags.push(`thinking: ${invocation.thinking}`);
+  if (invocation.thinking) tags.push(`thinking: ${invocation.thinking}`);
   if (invocation.isolated) tags.push("isolated");
   if (invocation.isolation === "worktree") tags.push("worktree");
   if (invocation.inheritContext) tags.push("inherit context");
   if (invocation.runInBackground) tags.push("background");
-  return {
-    ...(invocation.modelName !== undefined && { modelName: invocation.modelName }),
-    tags,
-  };
+  return { modelName: invocation.modelName, tags };
 }
 
 /** Truncate text to a single line, max `len` chars. */

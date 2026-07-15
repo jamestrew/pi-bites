@@ -813,7 +813,7 @@ describe("AgentManager — steer()", () => {
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
     const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r", isBackground: true });
     const record = manager.getRecord(id)!;
-    delete record.session; // not ready
+    record.session = undefined; // not ready
 
     expect(manager.steer(id, "first")).toBe(true);
     expect(manager.steer(id, "second")).toBe(true);

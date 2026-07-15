@@ -244,7 +244,7 @@ function pushMatches(
       label,
       source,
       rule,
-      ...(rule.reason !== undefined && { reason: rule.reason }),
+      reason: rule.reason,
     });
   }
 }

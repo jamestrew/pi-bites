@@ -342,7 +342,7 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   const { session } = await createAgentSession({
     cwd,
     agentDir,
-    ...(model !== undefined && { model }),
+    model,
     // Structural faux registry in faux mode; undefined in live mode (defaults).
     modelRegistry: modelRegistry as any,
     resourceLoader: loader,

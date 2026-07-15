@@ -11,6 +11,9 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     skills: false,
     systemPrompt: "Test agent",
     promptMode: "replace",
+    inheritContext: false,
+    runInBackground: false,
+    isolated: false,
     ...overrides,
   };
 }
@@ -64,12 +67,19 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.isolation).toBe("worktree");
   });
 
-  it("lets parent fill in booleans when config omits them", () => {
-    const resolved = resolveAgentInvocationConfig(makeConfig({}), {
-      inherit_context: true,
-      run_in_background: true,
-      isolated: true,
-    });
+  it("lets parent fill in booleans when config leaves them undefined", () => {
+    const resolved = resolveAgentInvocationConfig(
+      makeConfig({
+        inheritContext: undefined,
+        runInBackground: undefined,
+        isolated: undefined,
+      }),
+      {
+        inherit_context: true,
+        run_in_background: true,
+        isolated: true,
+      },
+    );
 
     expect(resolved.inheritContext).toBe(true);
     expect(resolved.runInBackground).toBe(true);
@@ -77,7 +87,14 @@ describe("resolveAgentInvocationConfig", () => {
   });
 
   it("defaults booleans to false when neither config nor params set them", () => {
-    const resolved = resolveAgentInvocationConfig(makeConfig({}), {});
+    const resolved = resolveAgentInvocationConfig(
+      makeConfig({
+        inheritContext: undefined,
+        runInBackground: undefined,
+        isolated: undefined,
+      }),
+      {},
+    );
 
     expect(resolved.inheritContext).toBe(false);
     expect(resolved.runInBackground).toBe(false);

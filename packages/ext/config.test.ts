@@ -1,8 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, expectTypeOf, test, vi } from "vitest";
-import type { PonytailConfig } from "./config.js";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 let agentDir = "";
 
@@ -14,28 +13,6 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 afterEach(() => {
   if (agentDir) rmSync(agentDir, { recursive: true, force: true });
   agentDir = "";
-});
-
-describe("writePonytailDefaultMode", () => {
-  test("replaces an existing saved default", async () => {
-    agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
-    const configPath = join(agentDir, "pi-bites.json");
-    writeFileSync(
-      configPath,
-      JSON.stringify({ ponytail: { defaultMode: "lite" }, checkpoints: { enabled: true } }),
-    );
-
-    const { writePonytailDefaultMode } = await import("./config.js");
-    expectTypeOf(writePonytailDefaultMode)
-      .parameter(1)
-      .toEqualTypeOf<NonNullable<PonytailConfig["defaultMode"]>>();
-    writePonytailDefaultMode("/project-without-local-config", "review");
-
-    expect(JSON.parse(readFileSync(configPath, "utf-8"))).toEqual({
-      ponytail: { defaultMode: "review" },
-      checkpoints: { enabled: true },
-    });
-  });
 });
 
 describe("loadConfig", () => {
