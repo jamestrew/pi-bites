@@ -10,10 +10,29 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 const readDescriptionSuffix = [
+  "Successful text-file results use cat -n format with source line numbers.",
   "Call this tool in parallel when you know there are multiple files you want to read.",
   "Avoid tiny repeated slices (30 line chunks).",
   "If you need more context, read a larger window.",
 ].join(" ");
+
+const readNoticePattern =
+  /\n\n\[(?:Showing lines \d+-\d+ of \d+(?: \([^)]+\))?\. Use offset=\d+ to continue\.|\d+ more lines in file\. Use offset=\d+ to continue\.)\]$/;
+
+function numberReadText(text: string, startLine: number, expectedLines?: number): string {
+  if (!text && expectedLines !== 1) return text;
+
+  const hasTrailingNewline = text.endsWith("\n");
+  const lines = text.split("\n");
+  const trailingNewlineEndsContent =
+    hasTrailingNewline && lines.length > (expectedLines ?? lines.length - 1);
+  if (trailingNewlineEndsContent) lines.pop();
+
+  const numbered = lines
+    .map((line, index) => `${String(startLine + index).padStart(6)}\t${line}`)
+    .join("\n");
+  return trailingNewlineEndsContent ? `${numbered}\n` : numbered;
+}
 
 function stripReadExpandHint<T extends { render(width: number): string[] }>(component: T): T {
   const originalRender = component.render.bind(component);
@@ -61,9 +80,54 @@ export default function (pi: ExtensionAPI) {
     ...originalRead,
     description: `${originalRead.description} ${readDescriptionSuffix}`,
 
-    renderResult(result: AgentToolResult<ReadToolDetails | undefined>, options, theme, context) {
+    async execute(toolCallId, params, signal, onUpdate) {
+      const result = (await originalRead.execute(
+        toolCallId,
+        params,
+        signal,
+        onUpdate,
+      )) as AgentToolResult<ReadToolDetails | undefined>;
+      if (
+        result.details?.truncation?.firstLineExceedsLimit ||
+        result.content.some((content) => content.type === "image") ||
+        result.content.some(
+          (content) => content.type === "text" && content.text.startsWith("Read image file ["),
+        )
+      ) {
+        return result;
+      }
+
+      const noticeMatch =
+        (params.limit !== undefined || result.details?.truncation?.truncated) &&
+        result.content[0]?.type === "text"
+          ? result.content[0].text.match(readNoticePattern)
+          : null;
+
+      const expectedLines =
+        result.details?.truncation?.outputLines ?? (noticeMatch ? params.limit : undefined);
+
+      return {
+        ...result,
+        content: result.content.map((content) => {
+          if (content.type !== "text") return content;
+          const notice = noticeMatch?.[0] ?? "";
+          const fileText = notice ? content.text.slice(0, -notice.length) : content.text;
+          return {
+            ...content,
+            text: `${numberReadText(fileText, Math.max(1, params.offset ?? 1), expectedLines)}${notice}`,
+          };
+        }),
+      };
+    },
+
+    renderResult(result, options, theme, context) {
       return stripReadExpandHint(
-        renderReadResult(result, { ...options, expanded: false }, theme, context),
+        renderReadResult(
+          result as AgentToolResult<ReadToolDetails | undefined>,
+          { ...options, expanded: false },
+          theme,
+          context,
+        ),
       );
     },
   });
