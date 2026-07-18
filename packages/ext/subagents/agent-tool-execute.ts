@@ -37,11 +37,9 @@ type AgentToolParams = {
   subagent_type: string;
   description: string;
   prompt: string;
-  resume?: string;
   model?: string;
   thinking?: string;
   run_in_background?: boolean;
-  inherit_context?: boolean;
   isolated?: boolean;
   isolation?: IsolationMode;
 };
@@ -91,30 +89,6 @@ type AgentToolExecuteDeps = {
   updateHelperToolsActive?: () => void;
   setRenderMetadata?: (toolCallId: string, model: string, thinking: ThinkingLevel) => void;
 };
-
-async function resumeAgent(
-  manager: AgentManager,
-  id: string,
-  prompt: string,
-  signal: AbortSignal | undefined,
-  detailBase: DetailBase,
-) {
-  const existing = manager.getRecord(id);
-  if (!existing) {
-    return textResult(`Agent not found: "${id}". It may have been cleaned up.`);
-  }
-  if (!existing.session) {
-    return textResult(`Agent "${id}" has no active session to resume.`);
-  }
-  const record = await manager.resume(id, prompt, signal);
-  if (!record) {
-    return textResult(`Failed to resume agent "${id}".`);
-  }
-  return textResult(
-    record.result?.trim() || record.error?.trim() || "No output.",
-    buildDetails(detailBase, record),
-  );
-}
 
 async function runBackgroundAgent(
   deps: AgentToolExecuteDeps,
@@ -366,7 +340,7 @@ async function runForegroundAgent(
 }
 
 export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
-  const { manager, reloadCustomAgents, isScopeModelsEnabled } = deps;
+  const { reloadCustomAgents, isScopeModelsEnabled } = deps;
   return async (
     toolCallId: string,
     params: AgentToolParams,
@@ -478,8 +452,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       detailBase,
     };
 
-    if (params.resume)
-      return resumeAgent(manager, params.resume, params.prompt, signal, detailBase);
     return runInBackground
       ? runBackgroundAgent(deps, request, invocation)
       : runForegroundAgent(deps, request, invocation);

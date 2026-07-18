@@ -138,7 +138,7 @@ Notes:
 - Start bounded investigations with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader searching is needed; include what was already checked. Delegate immediately only for obviously broad or high-fanout work.
 - Parallel work: one message, multiple Agent calls, run_in_background: true on each. You are notified when background agents finish — never poll or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
-- resume continues a previous agent by ID; steer_subagent messages a running one.
+- steer_subagent redirects a running background agent.
 - isolation: "worktree" runs the agent in an isolated git worktree; changes land on a branch.`;
 
   const fullAgentToolDescription = `Launch a new agent when delegation has a concrete benefit. Each agent type has specific capabilities and tools available to it.
@@ -164,13 +164,11 @@ Start bounded investigations with direct tools — \`read\` for a known path, \`
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an agent writes or edits code, check the actual changes before reporting work as done.
 - Use run_in_background for work you don't need immediately. You will be notified when it completes — do NOT poll or sleep waiting for it. Continue with other work or respond to the user instead.
 - Foreground vs background: use foreground (default) when you need the agent's results before you can proceed. Use background when you have genuinely independent work to do in parallel.
-- Use resume with an agent ID to continue a previous agent's work. A new (non-resume) Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
-- Use steer_subagent to send mid-run messages to a running background agent.
+- Use steer_subagent to send mid-run messages to a running background agent. A new Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
 - Do not duplicate delegated exploration. Pass prior findings into the prompt, then use the result to narrow any source files you need to read yourself.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
 - Use thinking to control extended thinking level.
-- Use inherit_context if the agent needs the parent conversation history.
 - Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications). The worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned in the result.
 
 ## Writing the prompt
@@ -299,17 +297,6 @@ Terse command-style prompts produce shallow, generic work.
           Type.Boolean({
             description:
               "Set to true to run in background. Returns agent ID immediately. You will be notified on completion.",
-          }),
-        ),
-        resume: Type.Optional(
-          Type.String({
-            description: "Optional agent ID to resume from. Continues from previous context.",
-          }),
-        ),
-        inherit_context: Type.Optional(
-          Type.Boolean({
-            description:
-              "If true, fork parent conversation into the agent. Default: false (fresh context).",
           }),
         ),
         isolation: Type.Optional(
