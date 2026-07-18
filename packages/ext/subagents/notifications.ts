@@ -39,7 +39,9 @@ export function formatTaskNotification(record: AgentRecord, resultMaxLen: number
   const resultPreview = record.result
     ? record.result.length > resultMaxLen
       ? record.result.slice(0, resultMaxLen) +
-        "\n...(truncated, use get_subagent_result for full output)"
+        (record.outputFile
+          ? `\n...(truncated; full transcript: ${record.outputFile})`
+          : "\n...(truncated)")
       : record.result
     : "No output.";
 

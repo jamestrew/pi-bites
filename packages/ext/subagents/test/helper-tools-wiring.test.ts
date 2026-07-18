@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../agent-runner.js")>("../agent-runner.js");
-  return { ...actual, runAgent: vi.fn() };
+  return { ...actual, runAgent: vi.fn(), steerAgent: vi.fn() };
 });
 
-import { runAgent } from "../agent-runner.js";
+import { runAgent, steerAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
 
 function makePi(active = ["Agent", "read"]) {
@@ -14,7 +14,7 @@ function makePi(active = ["Agent", "read"]) {
   const eventHandlers = new Map<string, (data: unknown) => void>();
   const pi = {
     registerMessageRenderer: vi.fn(),
-    registerTool: vi.fn((t: any) => tools.set(t.name, t)),
+    registerTool: vi.fn((tool: any) => tools.set(tool.name, tool)),
     registerCommand: vi.fn(),
     on: vi.fn((event: string, handler: () => void) => handlers.set(event, handler)),
     events: {
@@ -45,101 +45,99 @@ function ctx() {
   } as any;
 }
 
-const textOf = (r: any): string => r.content[0].text;
-const theme = { fg: (_color: string, s: string) => s };
+const textOf = (result: any): string => result.content[0].text;
+
+async function spawnBackground(tools: Map<string, any>) {
+  return tools.get("Agent").execute(
+    "bg",
+    {
+      prompt: "go",
+      description: "bg",
+      subagent_type: "general-purpose",
+      run_in_background: true,
+    },
+    undefined,
+    undefined,
+    ctx(),
+  );
+}
 
 describe("background helper tools", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("toggle with actionable background records only", async () => {
-    vi.mocked(runAgent).mockResolvedValue({
-      responseText: "done result",
-      session: { dispose: vi.fn() } as any,
-    });
-    const { pi, tools, active, handlers } = makePi();
+  it("registers only Agent and MessageAgent and activates messaging only while running", async () => {
+    let finish!: (value: any) => void;
+    vi.mocked(runAgent).mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const { pi, tools, active } = makePi();
     subagentsExtension(pi);
 
+    expect([...tools.keys()]).toContain("Agent");
+    expect(tools.get("Agent").parameters.properties).not.toHaveProperty("resume");
+    expect(tools.get("Agent").parameters.properties).not.toHaveProperty("inherit_context");
+    expect([...tools.keys()]).toContain("MessageAgent");
+    expect([...tools.keys()]).not.toContain("get_subagent_result");
+    expect([...tools.keys()]).not.toContain("steer_subagent");
     expect(active()).toEqual(["Agent", "read"]);
 
-    await tools
-      .get("Agent")
-      .execute(
-        "fg",
-        { prompt: "go", description: "fg", subagent_type: "general-purpose" },
-        undefined,
-        undefined,
-        ctx(),
-      );
+    await spawnBackground(tools);
+    expect(active()).toEqual(["Agent", "read", "MessageAgent"]);
+
+    finish({ responseText: "done result", session: { dispose: vi.fn() } as any });
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
+
     expect(active()).toEqual(["Agent", "read"]);
-
-    const spawn = await tools.get("Agent").execute(
-      "bg",
-      {
-        prompt: "go",
-        description: "bg",
-        subagent_type: "general-purpose",
-        run_in_background: true,
-      },
-      undefined,
-      undefined,
-      ctx(),
-    );
-    expect(active()).toEqual(["Agent", "read", "get_subagent_result", "steer_subagent"]);
-
-    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
-    let out = "";
-    for (let i = 0; i < 10; i++) {
-      out = textOf(
-        await tools
-          .get("get_subagent_result")
-          .execute("r", { agent_id: id }, undefined, undefined, ctx()),
-      );
-      if (out.includes("done result")) break;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    expect(out).toContain("done result");
-    expect(active()).toEqual(["Agent", "read"]);
-
-    handlers.get("session_before_switch")?.();
-    const rendered = tools
-      .get("Agent")
-      .renderResult(spawn, { expanded: false, isPartial: false }, theme, {
-        args: {},
-        toolCallId: "bg",
-      })
-      .render(80)
-      .join("\n");
-    expect(rendered).toContain("Done");
-    expect(rendered).not.toContain("Running in background");
+    const notification = pi.sendMessage.mock.calls[0]?.[0];
+    expect(notification.content).toContain("done result");
+    expect(notification.content).not.toContain("get_subagent_result");
   });
 
-  it("renders helper tool results compactly until expanded", () => {
-    const real = makePi();
-    subagentsExtension(real.pi);
-    const rendered = real.tools
-      .get("get_subagent_result")
-      .renderResult(
-        {
-          content: [{ type: "text", text: "FULL\n" + "x".repeat(500) }],
-          details: {
-            kind: "get_result",
-            agentId: "a1",
-            type: "explore",
-            status: "completed",
-            stats: "Tool uses: 8",
-            description: "d",
-            preview: "short",
-          },
-        },
-        { expanded: false },
-        theme,
-      )
-      .render(80)
-      .join("\n");
+  it("queues a message while the session initializes", async () => {
+    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    const { pi, tools } = makePi();
+    subagentsExtension(pi);
+    const spawn = await spawnBackground(tools);
+    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
 
-    expect(rendered).toContain("a1: explore | completed");
-    expect(rendered).toContain("short");
-    expect(rendered).not.toContain("xxxxx");
-    expect(rendered).toContain("ctrl+o");
+    const result = await tools
+      .get("MessageAgent")
+      .execute("msg", { agent_id: id, message: "focus here" }, undefined, undefined, ctx());
+
+    expect(textOf(result)).toContain("Message queued");
+    expect(pi.events.emit).toHaveBeenCalledWith("subagents:steered", {
+      id,
+      message: "focus here",
+    });
+  });
+
+  it("messages a live agent and rejects missing or completed agents", async () => {
+    let finish!: (value: any) => void;
+    const session = { dispose: vi.fn() } as any;
+    vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, options) => {
+      options.onSessionCreated?.(session);
+      return new Promise((resolve) => (finish = resolve));
+    });
+    vi.mocked(steerAgent).mockResolvedValue(undefined);
+    const { pi, tools } = makePi();
+    subagentsExtension(pi);
+    const spawn = await spawnBackground(tools);
+    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
+
+    const sent = await tools
+      .get("MessageAgent")
+      .execute("msg", { agent_id: id, message: "focus here" }, undefined, undefined, ctx());
+    expect(textOf(sent)).toContain("Message sent");
+    expect(steerAgent).toHaveBeenCalledWith(session, "focus here");
+
+    const missing = await tools
+      .get("MessageAgent")
+      .execute("msg", { agent_id: "missing", message: "x" }, undefined, undefined, ctx());
+    expect(textOf(missing)).toContain("Agent not found");
+
+    finish({ responseText: "done", session });
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
+    const completed = await tools
+      .get("MessageAgent")
+      .execute("msg", { agent_id: id, message: "again" }, undefined, undefined, ctx());
+    expect(textOf(completed)).toContain("is not running (status: completed)");
   });
 });

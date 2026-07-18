@@ -1,8 +1,7 @@
 /**
  * status-note-wiring.test.ts — proves the status note actually reaches the
- * PARENT through the real tool handlers, not just that getStatusNote() returns
- * a string. Drives the registered `Agent` / `get_subagent_result` tools and
- * inspects the text delivered back for a user stop.
+ * parent through the real Agent lifecycle, not just that getStatusNote() returns
+ * a string. It inspects the automatic completion notification for a user stop.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -77,9 +76,13 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(lines).toEqual(["⎿  Running… (ctrl+o to expand)"]);
   });
 
-  it("background user-stop → get_subagent_result flags STOPPED BY THE USER (not completed)", async () => {
-    // A background agent that never settles on its own — only a stop ends it.
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}) as any);
+  it("background user-stop is delivered automatically as STOPPED BY THE USER", async () => {
+    vi.mocked(runAgent).mockImplementation(
+      (_ctx, _type, _prompt, options) =>
+        new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        }),
+    );
     const { pi, tools, eventHandlers } = makePi();
     subagentsExtension(pi);
 
@@ -101,13 +104,10 @@ describe("status note reaches the parent through the real handlers", () => {
     // The user stops it — same path the viewer's stop key uses (manager.abort).
     eventHandlers.get("subagents:rpc:stop")?.({ requestId: "r1", agentId: id });
 
-    const res = await tools
-      .get("get_subagent_result")
-      .execute("tc3", { agent_id: id }, undefined, undefined, ctx());
-
-    const out = textOf(res);
-    expect(out).toContain("STOPPED BY THE USER");
-    expect(out).toContain("the task was NOT finished");
-    expect(out).not.toContain("Done"); // not surfaced as a normal completion
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
+    const notification = pi.sendMessage.mock.calls[0]?.[0];
+    expect(notification.content).toContain("STOPPED BY THE USER");
+    expect(notification.content).toContain("the task was NOT finished");
+    expect(notification.content).not.toContain("<status>Done</status>");
   });
 });

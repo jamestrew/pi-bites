@@ -14,6 +14,7 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
     completedAt: 200,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
     compactionCount: 0,
+    isBackground: true,
     ...overrides,
   };
 }
@@ -60,15 +61,34 @@ describe("agent completion notifications", () => {
     completion.dispose();
   });
 
-  it("cancels an individual completion during the hold window", () => {
-    const record = makeRecord("a");
+  it("notifies for detached agents that have no inline result surface", () => {
+    const record = makeRecord("a", { isBackground: undefined });
     const { completion, pi } = makeHarness([record]);
 
     completion.onAgentComplete(record);
-    completion.cancelNudge("a");
-    vi.runAllTimers();
+    vi.advanceTimersByTime(200);
 
-    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("<task-id>a</task-id>") }),
+      { deliverAs: "followUp", triggerTurn: true },
+    );
+
+    completion.dispose();
+  });
+
+  it("includes the transcript path when automatic output is truncated", () => {
+    const record = makeRecord("a", {
+      result: "x".repeat(1_000),
+      outputFile: "/tmp/agent-a.jsonl",
+    });
+    const { completion, pi } = makeHarness([record]);
+
+    completion.onAgentComplete(record);
+    vi.advanceTimersByTime(200);
+
+    const notification = pi.sendMessage.mock.calls[0]?.[0];
+    expect(notification.content).toContain("...(truncated; full transcript: /tmp/agent-a.jsonl)");
+    expect(notification.content).toContain("Full transcript available at: /tmp/agent-a.jsonl");
 
     completion.dispose();
   });
@@ -147,8 +167,8 @@ describe("agent completion notifications", () => {
     completion.dispose();
   });
 
-  it("records a consumed completion without notifying the parent", () => {
-    const record = makeRecord("a", { resultConsumed: true });
+  it("records a foreground completion without notifying the parent", () => {
+    const record = makeRecord("a", { isBackground: false });
     const { completion, pi, onAgentFinishedUI, onActionableAgentsChanged } = makeHarness([record]);
 
     completion.onAgentComplete(record);

@@ -2,9 +2,8 @@
  * pi-agents — A pi extension providing Claude Code-style autonomous sub-agents.
  *
  * Tools:
- *   Agent             — LLM-callable: spawn a sub-agent
- *   get_subagent_result  — LLM-callable: check background agent status/result
- *   steer_subagent       — LLM-callable: send a steering message to a running agent
+ *   Agent         — LLM-callable: spawn a sub-agent
+ *   MessageAgent  — LLM-callable: send a message to a running agent
  *
  * Commands:
  *   /agents                 — Interactive agent management menu
@@ -21,7 +20,7 @@ import { loadCustomAgents } from "./custom-agents.js";
 import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig, registerAgentTool } from "./register-agent-tool.js";
-import { registerResultTools } from "./register-result-tools.js";
+import { registerMessageAgent } from "./register-message-agent.js";
 import { type ToolDescriptionMode } from "./settings.js";
 import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
@@ -53,23 +52,23 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
 
-  function hasActionableBackgroundAgent(): boolean {
+  function hasRunningAgentWithoutInlineResult(): boolean {
     return manager
       .listAgents()
       .some(
-        (r) =>
-          r.isBackground === true &&
-          (r.status === "running" || r.status === "queued" || !r.resultConsumed),
+        (record) =>
+          record.isBackground !== false &&
+          (record.status === "running" || record.status === "queued"),
       );
   }
 
   function updateHelperToolsActive(): void {
     if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
-    const helperTools = [SUBAGENT_TOOL_NAMES.GET_RESULT, SUBAGENT_TOOL_NAMES.STEER];
+    const helperTool = SUBAGENT_TOOL_NAMES.MESSAGE_AGENT;
     const current = pi.getActiveTools();
-    const next = hasActionableBackgroundAgent()
-      ? [...new Set([...current, ...helperTools])]
-      : current.filter((name) => !helperTools.includes(name as (typeof helperTools)[number]));
+    const next = hasRunningAgentWithoutInlineResult()
+      ? [...new Set([...current, helperTool])]
+      : current.filter((name) => name !== helperTool);
     pi.setActiveTools(next);
   }
 
@@ -131,12 +130,12 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   // Capture ctx from session_start for the RPC spawn handler.
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
-    manager.clearCompleted(true);
+    manager.clearCompleted();
     updateHelperToolsActive();
   });
 
   pi.on("session_before_switch", () => {
-    manager.clearCompleted(true);
+    manager.clearCompleted();
     updateHelperToolsActive();
   });
 
@@ -302,8 +301,8 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     updateHelperToolsActive,
   });
 
-  // ---- get_subagent_result + steer_subagent tools ----
-  registerResultTools(pi, manager, completion.cancelNudge, updateHelperToolsActive);
+  // ---- MessageAgent tool ----
+  registerMessageAgent(pi, manager);
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {

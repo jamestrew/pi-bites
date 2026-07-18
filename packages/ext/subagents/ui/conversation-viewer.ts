@@ -267,9 +267,9 @@ export class ConversationViewer implements Component {
     return !!this.onStop && (this.record.status === "running" || this.record.status === "queued");
   }
 
-  /** Steerable whenever a live session can accept a queued or follow-up prompt. */
+  /** Messageable only while the agent is still active. */
   private canSteer(): boolean {
-    return !!this.onSteer && this.record.status !== "stopped" && this.record.status !== "error";
+    return !!this.onSteer && (this.record.status === "running" || this.record.status === "queued");
   }
 
   /** Cancelable only while a live session is active. */

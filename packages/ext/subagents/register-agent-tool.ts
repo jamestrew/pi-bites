@@ -138,7 +138,7 @@ Notes:
 - Start bounded investigations with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader searching is needed; include what was already checked. Delegate immediately only for obviously broad or high-fanout work.
 - Parallel work: one message, multiple Agent calls, run_in_background: true on each. You are notified when background agents finish — never poll or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before reporting work done.
-- steer_subagent redirects a running background agent.
+- MessageAgent sends a message to a running background agent; it does not resume completed agents.
 - isolation: "worktree" runs the agent in an isolated git worktree; changes land on a branch.`;
 
   const fullAgentToolDescription = `Launch a new agent when delegation has a concrete benefit. Each agent type has specific capabilities and tools available to it.
@@ -164,7 +164,8 @@ Start bounded investigations with direct tools — \`read\` for a known path, \`
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an agent writes or edits code, check the actual changes before reporting work as done.
 - Use run_in_background for work you don't need immediately. You will be notified when it completes — do NOT poll or sleep waiting for it. Continue with other work or respond to the user instead.
 - Foreground vs background: use foreground (default) when you need the agent's results before you can proceed. Use background when you have genuinely independent work to do in parallel.
-- Use steer_subagent to send mid-run messages to a running background agent. A new Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
+- Every Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
+- Use MessageAgent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.), since it is not aware of the user's intent.
 - Do not duplicate delegated exploration. Pass prior findings into the prompt, then use the result to narrow any source files you need to read yourself.
 - Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").

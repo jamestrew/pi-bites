@@ -661,11 +661,11 @@ describe("ConversationViewer", () => {
       expect(viewer.render(W).join("\n")).toContain("Enter send · Esc cancel");
     });
 
-    it("still offers steering for a completed session follow-up", () => {
+    it("does not offer messaging for a completed session", () => {
       const { viewer } = makeViewer({ status: "completed" });
-      expect(viewer.render(W).join("\n")).toContain("Enter steer");
+      expect(viewer.render(W).join("\n")).not.toContain("Enter steer");
       viewer.handleInput("\r");
-      expect(viewer.render(W).join("\n")).toContain("Enter send");
+      expect(viewer.render(W).join("\n")).not.toContain("Enter send");
     });
 
     it("no steer affordance when no onSteer handler is provided", () => {

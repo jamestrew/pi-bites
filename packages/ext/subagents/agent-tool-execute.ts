@@ -174,9 +174,9 @@ async function runBackgroundAgent(
       `Description: ${params.description}\n` +
       (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
       (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
-      `\nYou will be notified when this agent completes.\n` +
-      `Use get_subagent_result to retrieve full results, or steer_subagent to send it messages.\n` +
-      `Do not duplicate this agent's work.`,
+      `\nYou will be notified automatically when this agent completes.\n` +
+      `Use MessageAgent to send it a message while it is running.\n` +
+      `Do not poll or duplicate this agent's work.`,
     {
       ...detailBase,
       toolUses: 0,
