@@ -46,7 +46,6 @@ export function createAgentCompletionHandler({
   }
 
   function emitIndividualNudge(record: AgentRecord): void {
-    if (record.resultConsumed) return;
     const footer = record.outputFile ? `\nFull transcript available at: ${record.outputFile}` : "";
     pi.sendMessage<NotificationDetails>(
       {
@@ -69,16 +68,13 @@ export function createAgentCompletionHandler({
 
     const groupKey = `group:${records.map((record) => record.id).join(",")}`;
     scheduleNudge(groupKey, () => {
-      const unconsumed = records.filter((record) => !record.resultConsumed);
-      if (unconsumed.length === 0) return;
-
-      const notifications = unconsumed
+      const notifications = records
         .map((record) => formatTaskNotification(record, 300))
         .join("\n\n");
       const label = partial
-        ? `${unconsumed.length} agent(s) finished (partial — others still running)`
-        : `${unconsumed.length} agent(s) finished`;
-      const [first, ...rest] = unconsumed;
+        ? `${records.length} agent(s) finished (partial — others still running)`
+        : `${records.length} agent(s) finished`;
+      const [first, ...rest] = records;
       if (!first) return;
       const details = buildNotificationDetails(first, 300, undefined);
       if (rest.length > 0) {
@@ -88,7 +84,7 @@ export function createAgentCompletionHandler({
       pi.sendMessage<NotificationDetails>(
         {
           customType: "subagent-notification",
-          content: `Background agent group completed: ${label}\n\n${notifications}\n\nUse get_subagent_result for full output.`,
+          content: `Background agent group completed: ${label}\n\n${notifications}`,
           display: true,
           details,
         },
@@ -109,16 +105,14 @@ export function createAgentCompletionHandler({
         const record = getRecord(id);
         if (!record) continue;
         record.groupId = groupId;
-        if (record.completedAt != null && !record.resultConsumed) {
-          groupJoin.onAgentComplete(record);
-        }
+        if (record.completedAt != null) groupJoin.onAgentComplete(record);
       }
       return;
     }
 
     for (const id of batchAgents) {
       const record = getRecord(id);
-      if (record?.completedAt != null && !record.resultConsumed) sendIndividualNudge(record);
+      if (record?.completedAt != null) sendIndividualNudge(record);
     }
   }
 
@@ -143,13 +137,16 @@ export function createAgentCompletionHandler({
       completedAt: record.completedAt,
     });
 
-    if (record.resultConsumed) {
+    if (record.isBackground === false) {
       onAgentFinishedUI(record.id);
       onActionableAgentsChanged();
       return;
     }
 
-    if (currentBatchAgents.includes(record.id)) return;
+    if (currentBatchAgents.includes(record.id)) {
+      onActionableAgentsChanged();
+      return;
+    }
 
     if (groupJoin.onAgentComplete(record) === "pass") sendIndividualNudge(record);
     onActionableAgentsChanged();
@@ -158,7 +155,6 @@ export function createAgentCompletionHandler({
   return {
     trackSpawned,
     onAgentComplete,
-    cancelNudge,
     dispose(): void {
       if (batchFinalizeTimer) clearTimeout(batchFinalizeTimer);
       batchFinalizeTimer = undefined;

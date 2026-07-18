@@ -367,9 +367,7 @@ export class AgentManager {
         }
 
         // Fire onComplete for foreground agents too — lifecycle symmetry.
-        // Mark resultConsumed so the callback skips notifications (result returned inline).
         if (!options.isBackground) {
-          record.resultConsumed = true;
           try {
             this.onComplete?.(record);
           } catch {
@@ -417,9 +415,7 @@ export class AgentManager {
         }
 
         // Fire onComplete for foreground agents too — lifecycle symmetry.
-        // Mark resultConsumed so the callback skips notifications (result returned inline).
         if (!options.isBackground) {
-          record.resultConsumed = true;
           this.onComplete?.(record);
         } else {
           this.runningBackground--;
@@ -534,8 +530,8 @@ export class AgentManager {
   }
 
   /**
-   * Send a steering message to an agent from the UI (mirrors the steer_subagent
-   * tool). A live session delivers it now — it interrupts the agent after its
+   * Send a message to an agent from the UI (mirrors the MessageAgent tool).
+   * A live session delivers it now — it interrupts the agent after its
    * current tool execution and appears as a user message. If the session isn't
    * ready yet, the message is queued on `pendingSteers` and flushed when the
    * session is created. Returns false if the agent can't accept steering
@@ -543,46 +539,12 @@ export class AgentManager {
    */
   steer(id: string, message: string): boolean {
     const record = this.agents.get(id);
-    if (!record) return false;
-    if (record.status === "stopped" || record.status === "error") return false;
+    if (!record || (record.status !== "running" && record.status !== "queued")) return false;
     if (record.session) {
-      if (record.status === "running" && record.session.isStreaming !== false) {
-        record.session.steer(message).catch(() => {});
-      } else {
-        record.status = "running";
-        record.completedAt = undefined;
-        record.error = undefined;
-        resumeAgent(record.session, message, {
-          onToolActivity: (activity) => {
-            if (activity.type === "end") record.toolUses++;
-          },
-          onAssistantUsage: (usage) => addUsage(record.lifetimeUsage, usage),
-          onCompaction: (info) => {
-            record.compactionCount++;
-            this.onCompact?.(record, info);
-          },
-        })
-          .then((responseText) => {
-            if (record.status !== "stopped") {
-              record.status = "completed";
-              record.result = responseText;
-              record.completedAt = Date.now();
-              this.onComplete?.(record);
-            }
-          })
-          .catch((err) => {
-            if (record.status !== "stopped") {
-              record.status = "error";
-              record.error = err instanceof Error ? err.message : String(err);
-              record.completedAt = Date.now();
-            }
-          });
-      }
-    } else if (record.status === "running" || record.status === "queued") {
+      record.session.steer(message).catch(() => {});
+    } else {
       if (!record.pendingSteers) record.pendingSteers = [];
       record.pendingSteers.push(message);
-    } else {
-      return false;
     }
     return true;
   }
@@ -612,6 +574,11 @@ export class AgentManager {
       this.queue = this.queue.filter((q) => q.id !== id);
       record.status = "stopped";
       record.completedAt = Date.now();
+      try {
+        this.onComplete?.(record);
+      } catch {
+        /* ignore completion side-effect errors */
+      }
       return true;
     }
 
@@ -638,16 +605,10 @@ export class AgentManager {
     }
   }
 
-  /**
-   * Remove all completed/stopped/errored records immediately.
-   * Called on session start/switch so tasks from a prior session don't persist.
-   * Pass skipUnconsumed=true to preserve records the LLM hasn't read yet
-   * (resultConsumed=false) — they will be evicted by the 10-minute cleanup timer instead.
-   */
-  clearCompleted(skipUnconsumed = false): void {
+  /** Remove all completed/stopped/errored records immediately. */
+  clearCompleted(): void {
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
-      if (skipUnconsumed && !record.resultConsumed) continue;
       this.removeRecord(id, record);
     }
   }

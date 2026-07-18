@@ -14,7 +14,7 @@ vi.mock("../worktree.js", () => ({
   pruneWorktrees: vi.fn(),
 }));
 
-import { resumeAgent, runAgent } from "../agent-runner.js";
+import { runAgent } from "../agent-runner.js";
 
 const mockPi = {} as any;
 const mockCtx = { cwd: "/tmp" } as any;
@@ -27,75 +27,17 @@ const resolvedRun = () =>
     session: mockSession(),
   });
 
-describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)", () => {
+describe("AgentManager — completion lifecycle", () => {
   let manager: AgentManager;
 
   afterEach(() => {
     manager.dispose();
   });
 
-  it("reproduces bug: onComplete fires with resultConsumed=false when set after await", async () => {
-    let seenConsumed: boolean | undefined;
-    manager = new AgentManager((r) => {
-      seenConsumed = r.resultConsumed;
-    });
-    resolvedRun();
-
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isBackground: true,
-    });
-    const record = manager.getRecord(id)!;
-
-    // Simulate the buggy get_subagent_result: await THEN mark consumed
-    await record.promise;
-    record.resultConsumed = true; // too late — onComplete already fired
-
-    // onComplete saw resultConsumed as falsy (undefined) — would queue a notification (the bug)
-    expect(seenConsumed).toBeFalsy();
-  });
-
-  it("fix: onComplete sees resultConsumed=true when pre-marked before await", async () => {
-    let seenConsumed: boolean | undefined;
-    manager = new AgentManager((r) => {
-      seenConsumed = r.resultConsumed;
-    });
-    resolvedRun();
-
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isBackground: true,
-    });
-    const record = manager.getRecord(id)!;
-
-    // The fix: pre-mark BEFORE awaiting
-    record.resultConsumed = true;
-    await record.promise;
-
-    expect(seenConsumed).toBe(true);
-  });
-
-  it("normal case: onComplete fires with resultConsumed falsy when no explicit polling", async () => {
+  it("calls onComplete for foreground agents", async () => {
     let completedRecord: AgentRecord | undefined;
-    manager = new AgentManager((r) => {
-      completedRecord = r;
-    });
-    resolvedRun();
-
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isBackground: true,
-    });
-    await manager.getRecord(id)!.promise;
-
-    expect(completedRecord).toBeDefined();
-    expect(completedRecord!.resultConsumed).toBeFalsy();
-  });
-
-  it("onComplete IS called for foreground agents (lifecycle symmetry)", async () => {
-    let completedRecord: AgentRecord | undefined;
-    manager = new AgentManager((r) => {
-      completedRecord = r;
+    manager = new AgentManager((record) => {
+      completedRecord = record;
     });
     resolvedRun();
 
@@ -105,8 +47,6 @@ describe("AgentManager — Bug 1 race condition (resultConsumed vs onComplete)",
 
     expect(completedRecord).toBeDefined();
     expect(completedRecord!.status).toBe("completed");
-    // resultConsumed is set by spawnAndWait so onComplete skips notifications
-    expect(completedRecord!.resultConsumed).toBe(true);
     expect(record).toBe(completedRecord);
   });
 });
@@ -175,7 +115,7 @@ describe("AgentManager — spawnAndWait onSpawned + foreground output file wirin
     expect(spawnedId).toBe(id);
   });
 
-  it("onComplete fires on the error path with resultConsumed=true", async () => {
+  it("onComplete fires on the foreground error path", async () => {
     // The .then path is covered by the lifecycle-symmetry test above; this guards
     // the .catch path which lacks try/catch around onComplete (a known asymmetry).
     let completedRecord: AgentRecord | undefined;
@@ -190,7 +130,6 @@ describe("AgentManager — spawnAndWait onSpawned + foreground output file wirin
 
     expect(completedRecord).toBeDefined();
     expect(completedRecord!.status).toBe("error");
-    expect(completedRecord!.resultConsumed).toBe(true);
     expect(record).toBe(completedRecord);
   });
 });
@@ -320,57 +259,6 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
 
     manager.clearCompleted();
     expect(manager.getRecord(id)).toBeUndefined();
-  });
-
-  it("clearCompleted(true) preserves completed records with resultConsumed=false", async () => {
-    manager = new AgentManager();
-    resolvedRun();
-
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isBackground: true,
-    });
-    await manager.getRecord(id)!.promise;
-    expect(manager.getRecord(id)!.status).toBe("completed");
-    expect(manager.getRecord(id)!.resultConsumed).toBeFalsy();
-
-    manager.clearCompleted(true);
-    expect(manager.getRecord(id)).toBeDefined();
-  });
-
-  it("clearCompleted(true) removes completed records with resultConsumed=true", async () => {
-    manager = new AgentManager();
-    resolvedRun();
-
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isBackground: true,
-    });
-    const record = manager.getRecord(id)!;
-    await record.promise;
-    record.resultConsumed = true;
-
-    manager.clearCompleted(true);
-    expect(manager.getRecord(id)).toBeUndefined();
-  });
-
-  it("clearCompleted(true) still removes running=false queued=false records when resultConsumed=false for error status", async () => {
-    manager = new AgentManager();
-    vi.mocked(runAgent).mockRejectedValue(new Error("boom"));
-
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isBackground: true,
-    });
-    await manager.getRecord(id)!.promise;
-    expect(manager.getRecord(id)!.status).toBe("error");
-    expect(manager.getRecord(id)!.resultConsumed).toBeFalsy();
-
-    // Error records with unread results are also preserved — the LLM should
-    // be able to read the error message via get_subagent_result before the
-    // record is evicted.
-    manager.clearCompleted(true);
-    expect(manager.getRecord(id)).toBeDefined();
   });
 });
 
@@ -820,15 +708,14 @@ describe("AgentManager — steer()", () => {
     expect(record.pendingSteers).toEqual(["first", "second"]);
   });
 
-  it("resumes a completed session with a follow-up prompt", async () => {
+  it("rejects a message to a completed session", async () => {
     manager = new AgentManager();
     resolvedRun();
-    vi.mocked(resumeAgent).mockResolvedValue("again");
     const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "x", isBackground: false });
     await manager.getRecord(id)?.promise;
+
     expect(manager.getRecord(id)?.status).toBe("completed");
-    expect(manager.steer(id, "keep going")).toBe(true);
-    expect(resumeAgent).toHaveBeenCalledWith(expect.anything(), "keep going", expect.anything());
+    expect(manager.steer(id, "keep going")).toBe(false);
   });
 });
 
