@@ -1,5 +1,10 @@
+import { constants } from "node:fs";
+import { access, readFile, realpath, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   type AgentToolResult,
+  type EditToolDetails,
+  type EditToolInput,
   type ExtensionAPI,
   type ReadToolDetails,
   createReadTool,
@@ -7,7 +12,10 @@ import {
   createBashTool,
   createBashToolDefinition,
   createEditTool,
+  createEditToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { type Static, Type } from "typebox";
+import { normalizeLineEndings, planEdit } from "./edit-planner.js";
 
 const readDescriptionSuffix = [
   "Call this tool in parallel when you know there are multiple files you want to read.",
@@ -23,28 +31,87 @@ function stripReadExpandHint<T extends { render(width: number): string[] }>(comp
 }
 
 const editDescription = [
-  "Edit a single existing file using exact-first text replacement.",
-  "Each edits[].oldText must identify one unique, non-overlapping region of the original file.",
-  "All edits are matched against the original file, not incrementally.",
-  "When copying from read output, use only the actual file text: never include line numbers or prefixes, and preserve indentation exactly, including tabs vs spaces.",
-  "Prefer the smallest stable unique snippet rather than a large copied block, and merge nearby changes into one edit instead of emitting overlapping edits.",
+  "Edit one exact string in an existing file.",
+  "By default old_string must identify exactly one match; set replace_all only to replace every match intentionally.",
+  "Matching is exact first, then tolerates trailing whitespace and common Unicode punctuation, then per-line indentation differences.",
+  "Read the file first and copy its text without line-number prefixes, preserving whitespace and indentation.",
 ].join(" ");
 
-const editPromptSnippet = [
-  "Make precise file edits with exact-first text replacement,",
-  "using small unique anchors and preserving exact indentation from read output",
-].join(" ");
+const editPromptSnippet =
+  "Replace one exact string in an existing file, with optional intentional replace_all";
 
 const editPromptGuidelines = [
-  "Use edit for precise changes to existing files; use write only for new files or complete rewrites.",
-  "When copying from read output, use only the actual file text. Never include line numbers or prefixes in oldText or newText.",
-  "Preserve indentation exactly, including tabs vs spaces.",
-  "Each edits[].oldText should be as small as possible while still being unique in the file.",
-  "Prefer a small stable anchor over a large copied block. Do not pad oldText with large unchanged regions.",
-  "All edits are matched against the original file contents, not after earlier edits in the same call.",
-  "Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
-  "For repeated rename-style changes in one file, prefer one deliberate multi-edit strategy rather than many ad hoc replacements.",
+  "Read a target file before using edit, and copy old_string from the current file without line-number prefixes.",
+  "Use edit for narrow changes to existing files; use write only for new files or complete rewrites.",
+  "Preserve exact whitespace and indentation in old_string and new_string, including tabs versus spaces.",
+  "Use edit replace_all only when every occurrence should change; otherwise include enough context for one unique match.",
 ];
+
+const editParameters = Type.Object({
+  path: Type.String({ description: "Path to the existing file (relative or absolute)" }),
+  old_string: Type.String({
+    description: "Text to replace; must be unique unless replace_all is true",
+  }),
+  new_string: Type.String({ description: "Replacement text" }),
+  replace_all: Type.Optional(
+    Type.Boolean({
+      default: false,
+      description: "Replace every match at the first successful matching tier",
+    }),
+  ),
+});
+
+type EditInput = Static<typeof editParameters>;
+type EditRenderAdapterState = {
+  adapterArgs?: EditToolInput;
+  adapterKey?: string;
+  adapterPending?: boolean;
+};
+
+const editQueues = new Map<string, Promise<void>>();
+
+async function serializeEdit<T>(path: string, task: () => Promise<T>): Promise<T> {
+  const previous = editQueues.get(path) ?? Promise.resolve();
+  let release = () => {};
+  const gate = new Promise<void>((resolveGate) => (release = resolveGate));
+  const queued = previous.then(() => gate);
+  editQueues.set(path, queued);
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+    if (editQueues.get(path) === queued) editQueues.delete(path);
+  }
+}
+
+async function prepareEdit(cwd: string, input: EditInput, writable: boolean) {
+  const filePath = input.path.startsWith("@") ? input.path.slice(1) : input.path;
+  const absolutePath = resolve(cwd, filePath);
+  try {
+    await access(absolutePath, writable ? constants.R_OK | constants.W_OK : constants.R_OK);
+    const raw = (await readFile(absolutePath)).toString("utf8");
+    const content = normalizeLineEndings(raw.startsWith("\uFEFF") ? raw.slice(1) : raw);
+    return {
+      filePath,
+      absolutePath,
+      plan: planEdit(
+        content,
+        normalizeLineEndings(input.old_string),
+        normalizeLineEndings(input.new_string),
+        input.replace_all ?? false,
+        input.path,
+      ),
+    };
+  } catch (error) {
+    if (error instanceof Error && !Reflect.has(error, "code")) throw error;
+    const code =
+      error instanceof Error && Reflect.has(error, "code")
+        ? ` Error code: ${Reflect.get(error, "code")}.`
+        : "";
+    throw new Error(`Could not edit file: ${input.path}.${code}`);
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
@@ -53,9 +120,15 @@ export default function (pi: ExtensionAPI) {
   const originalBash = createBashTool(cwd);
   const originalBashDef = createBashToolDefinition(cwd);
   const originalEdit = createEditTool(cwd);
+  const { prepareArguments: _builtInPrepareArguments, ...editToolBase } = originalEdit;
+  void _builtInPrepareArguments;
+  const originalEditDef = createEditToolDefinition(cwd);
   const renderReadResult = originalReadDef.renderResult;
   const renderBashCall = originalBashDef.renderCall;
-  if (!renderReadResult || !renderBashCall) throw new Error("Built-in tool renderers unavailable");
+  const renderEditCall = originalEditDef.renderCall;
+  const renderEditResult = originalEditDef.renderResult;
+  if (!renderReadResult || !renderBashCall || !renderEditCall || !renderEditResult)
+    throw new Error("Built-in tool renderers unavailable");
 
   pi.registerTool({
     ...originalRead,
@@ -69,10 +142,114 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    ...originalEdit,
+    ...editToolBase,
     description: editDescription,
     promptSnippet: editPromptSnippet,
     promptGuidelines: editPromptGuidelines,
+    parameters: editParameters,
+    renderShell: originalEditDef.renderShell,
+
+    renderCall(args, theme, context) {
+      const state = context.state as EditRenderAdapterState;
+      const adapterKey = JSON.stringify(args);
+      if (state.adapterKey !== adapterKey) {
+        state.adapterKey = adapterKey;
+        state.adapterArgs = undefined;
+        state.adapterPending = false;
+      }
+
+      if (context.argsComplete && !state.adapterArgs && !state.adapterPending) {
+        state.adapterPending = true;
+        void prepareEdit(cwd, args, false)
+          .then(({ filePath, plan }) => {
+            if (state.adapterKey === adapterKey) {
+              state.adapterArgs = {
+                path: filePath,
+                edits: [{ oldText: plan.content, newText: plan.nextContent }],
+              };
+            }
+          })
+          .catch(() => {
+            if (state.adapterKey === adapterKey) {
+              state.adapterArgs = {
+                path: args.path,
+                edits: [{ oldText: args.old_string, newText: args.new_string }],
+              };
+            }
+          })
+          .finally(() => {
+            if (state.adapterKey === adapterKey) {
+              state.adapterPending = false;
+              context.invalidate();
+            }
+          });
+      }
+
+      const rendererArgs = state.adapterArgs ?? { path: args.path };
+      return renderEditCall(rendererArgs as Parameters<typeof renderEditCall>[0], theme, {
+        ...context,
+        args: rendererArgs,
+      } as Parameters<typeof renderEditCall>[2]);
+    },
+
+    renderResult(result, options, theme, context) {
+      return renderEditResult(
+        result as Parameters<typeof renderEditResult>[0],
+        options,
+        theme,
+        context as unknown as Parameters<typeof renderEditResult>[3],
+      );
+    },
+
+    async execute(toolCallId, params, signal, onUpdate) {
+      const unresolvedPath = resolve(
+        cwd,
+        params.path.startsWith("@") ? params.path.slice(1) : params.path,
+      );
+      const queuePath = await realpath(unresolvedPath).catch(() => unresolvedPath);
+
+      return serializeEdit(queuePath, async () => {
+        const { filePath, plan } = await prepareEdit(cwd, params, true);
+        const guardedEdit = createEditTool(cwd, {
+          operations: {
+            access: (path) => access(path, constants.R_OK | constants.W_OK),
+            async readFile(path) {
+              const buffer = await readFile(path);
+              const raw = buffer.toString("utf8");
+              const current = normalizeLineEndings(raw.startsWith("\uFEFF") ? raw.slice(1) : raw);
+              if (current !== plan.content) {
+                throw new Error(
+                  `Could not edit ${params.path}: the file changed; reread it and try again.`,
+                );
+              }
+              return buffer;
+            },
+            writeFile: (path, content) => writeFile(path, content, "utf8"),
+          },
+        });
+        const result = await guardedEdit.execute(
+          toolCallId,
+          {
+            path: filePath,
+            edits: [{ oldText: plan.content, newText: plan.nextContent }],
+          },
+          signal,
+          onUpdate,
+        );
+        const fuzzyNotice = plan.matchTier === "exact" ? "" : ` Used ${plan.matchTier} matching.`;
+        const details = result.details as EditToolDetails | undefined;
+        return {
+          ...result,
+          content: [
+            {
+              type: "text",
+              text: `Successfully replaced ${plan.replacementCount} occurrence(s) in ${params.path}.${fuzzyNotice}`,
+            },
+          ],
+          details: details && { ...details, matchTier: plan.matchTier },
+        };
+      });
+    },
   });
 
   // Track the moment execute() is actually called (i.e. after bash-gate approval).
