@@ -290,7 +290,7 @@ Terse command-style prompts produce shallow, generic work.
         thinking: Type.Optional(
           Type.String({
             description:
-              "Thinking level: off, minimal, low, medium, high, xhigh. Overrides agent default.",
+              "Thinking level: off, minimal, low, medium, high, xhigh, max. Overrides agent default.",
           }),
         ),
         run_in_background: Type.Optional(

@@ -3,7 +3,7 @@
  */
 
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type {
   ExtensionContext,
@@ -17,6 +17,7 @@ import {
   DefaultResourceLoader,
   type ExtensionAPI,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -619,12 +620,21 @@ export async function runAgent(
     ? SessionManager.create(effectiveCwd, configuredSessionDir ?? defaultSessionDir)
     : SessionManager.inMemory(effectiveCwd);
 
-  const sessionOpts: Parameters<typeof createAgentSession>[0] = {
+  const modelRuntime = await ModelRuntime.create({
+    authPath: join(agentDir, "auth.json"),
+    modelsPath: join(agentDir, "models.json"),
+  });
+  for (const providerId of ctx.modelRegistry.getRegisteredProviderIds()) {
+    const provider = ctx.modelRegistry.getRegisteredProviderConfig(providerId);
+    if (provider) modelRuntime.registerProvider(providerId, provider);
+  }
+
+  const sessionOpts: NonNullable<Parameters<typeof createAgentSession>[0]> = {
     cwd: effectiveCwd,
     agentDir,
     sessionManager,
     settingsManager,
-    modelRegistry: ctx.modelRegistry,
+    modelRuntime,
     model,
     tools: allowedTools,
     resourceLoader: loader,

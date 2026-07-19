@@ -114,6 +114,8 @@ describe("ext: / tools: scoping — template-driven e2e (real pi-mono, headless)
       hasConfiguredAuth: () => true,
       isUsingOAuth: () => false,
       getApiKeyAndHeaders: async () => ({ apiKey: "faux", headers: {} }),
+      getRegisteredProviderIds: () => [],
+      getRegisteredProviderConfig: () => undefined,
       registerProvider: () => {},
       unregisterProvider: () => {},
     };

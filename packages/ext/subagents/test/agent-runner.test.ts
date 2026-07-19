@@ -11,6 +11,8 @@ const {
   sessionManagerCreate,
   settingsManagerCreate,
   settingsManagerGetSessionDir,
+  modelRuntimeCreate,
+  modelRuntimeRegisterProvider,
 } = vi.hoisted(() => ({
   createAgentSession: vi.fn(),
   defaultResourceLoaderCtor: vi.fn(),
@@ -35,6 +37,8 @@ const {
     kind: "settings-manager",
     getSessionDir: settingsManagerGetSessionDir,
   })),
+  modelRuntimeRegisterProvider: vi.fn(),
+  modelRuntimeCreate: vi.fn(async () => ({ registerProvider: modelRuntimeRegisterProvider })),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
@@ -68,6 +72,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     }
   },
   getAgentDir,
+  ModelRuntime: { create: modelRuntimeCreate },
   SessionManager: { inMemory: sessionManagerInMemory, create: sessionManagerCreate },
   SettingsManager: { create: settingsManagerCreate },
 }));
@@ -153,7 +158,12 @@ function createSession(finalText: string) {
 const ctx = {
   cwd: "/tmp",
   model: undefined,
-  modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+  modelRegistry: {
+    find: vi.fn(),
+    getAvailable: vi.fn(() => []),
+    getRegisteredProviderIds: vi.fn(() => []),
+    getRegisteredProviderConfig: vi.fn(),
+  },
   getSystemPrompt: vi.fn(() => "parent prompt"),
   sessionManager: { getBranch: vi.fn(() => []) },
 } as any;
@@ -192,6 +202,8 @@ beforeEach(() => {
   settingsManagerGetSessionDir.mockReset();
   settingsManagerGetSessionDir.mockReturnValue(undefined);
   settingsManagerCreate.mockClear();
+  modelRuntimeCreate.mockClear();
+  modelRuntimeRegisterProvider.mockClear();
   loaderExtensionsRef.current = { extensions: [], errors: [], runtime: {} };
 });
 
@@ -236,12 +248,29 @@ describe("agent-runner final output capture", () => {
     );
     expect(settingsManagerCreate).toHaveBeenCalledWith("/tmp/worktree", "/mock/agent-dir");
     expect(sessionManagerInMemory).toHaveBeenCalledWith("/tmp/worktree");
+    expect(modelRuntimeCreate).toHaveBeenCalledWith({
+      authPath: "/mock/agent-dir/auth.json",
+      modelsPath: "/mock/agent-dir/models.json",
+    });
     expect(createAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
         cwd: "/tmp/worktree",
         agentDir: "/mock/agent-dir",
+        modelRuntime: await modelRuntimeCreate.mock.results[0]!.value,
       }),
     );
+  });
+
+  it("copies parent extension providers into the subagent model runtime", async () => {
+    const { session } = createSession("CONFIGURED");
+    const provider = { apiKey: "secret", models: [] };
+    ctx.modelRegistry.getRegisteredProviderIds.mockReturnValueOnce(["custom"]);
+    ctx.modelRegistry.getRegisteredProviderConfig.mockReturnValueOnce(provider);
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "go", { pi });
+
+    expect(modelRuntimeRegisterProvider).toHaveBeenCalledWith("custom", provider);
   });
 
   it("suppresses AGENTS.md/CLAUDE.md/APPEND_SYSTEM.md for subagents", async () => {

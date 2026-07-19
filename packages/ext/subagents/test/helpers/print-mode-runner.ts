@@ -53,6 +53,7 @@ import {
   fauxAssistantMessage,
   fauxText,
   fauxToolCall,
+  getApiProvider,
   getModel,
   type Model,
   registerFauxProvider,
@@ -64,6 +65,7 @@ import {
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -263,7 +265,6 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   // --- model backend ---
   let faux: ReturnType<typeof registerFauxProvider> | undefined;
   let model: Model<string> | undefined;
-  let modelRegistry: unknown;
   if (live) {
     // Explicit pin wins (options.live or PI_PROVIDER + PI_MODEL). Otherwise leave
     // `model` undefined: createAgentSession then calls findInitialModel() against
@@ -275,7 +276,6 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
       // getModel's overloads need the concrete provider literal; cast through.
       model = (getModel as (p: string, m: string) => Model<string>)(provider, modelId);
     }
-    modelRegistry = undefined; // let createAgentSession build the real, auth-backed registry
   } else {
     if (!options.steps && !options.respond) {
       throw new Error("runPrintMode (faux mode): provide `respond` or `steps`");
@@ -285,23 +285,6 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
       models: [{ id: "faux-1", contextWindow: 200_000 }],
     });
     model = faux.getModel();
-    // Structural faux registry (matches the existing e2e suites): the parent
-    // session uses `model` directly; subagents inherit it via ctx.model since
-    // resolveDefaultModel falls back to the parent model when no model is pinned.
-    modelRegistry = {
-      find: () => model,
-      getAll: () => [model],
-      getAvailable: () => [model],
-      hasConfiguredAuth: () => true,
-      isUsingOAuth: () => false,
-      // createAgentSession's injected streamFn checks `auth.ok` and throws
-      // Error(auth.error) otherwise — so the `ok: true` flag is mandatory, not
-      // cosmetic. Without it the turn dies before streaming (empty error message).
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "faux", headers: {} }),
-      registerProvider: () => {},
-      unregisterProvider: () => {},
-    };
-
     // Pad the response queue: one context-branching responder per expected model
     // call. The queue is a single FIFO shared by parent + child, but every entry
     // is the same responder that decides from its own context, so interleaving
@@ -339,12 +322,26 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   // are isolated but before the parent turn spawns anything.
   await options.beforeRun?.();
 
+  const modelRuntime = await ModelRuntime.create({
+    authPath: join(agentDir, "auth.json"),
+    modelsPath: join(agentDir, "models.json"),
+  });
+  if (faux) {
+    const apiProvider = getApiProvider(faux.api);
+    if (!apiProvider) throw new Error("Faux API provider was not registered");
+    modelRuntime.registerProvider("faux", {
+      api: faux.api,
+      apiKey: "faux",
+      streamSimple: apiProvider.streamSimple,
+      models: faux.models,
+    });
+  }
+
   const { session } = await createAgentSession({
     cwd,
     agentDir,
     model,
-    // Structural faux registry in faux mode; undefined in live mode (defaults).
-    modelRegistry: modelRegistry as any,
+    modelRuntime,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(cwd),
     // Live: real settings so an omitted model resolves to your local default

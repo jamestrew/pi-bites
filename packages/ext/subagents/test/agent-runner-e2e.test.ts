@@ -99,6 +99,8 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
       hasConfiguredAuth: () => true,
       isUsingOAuth: () => false,
       getApiKeyAndHeaders: async () => ({ apiKey: "faux", headers: {} }),
+      getRegisteredProviderIds: () => [],
+      getRegisteredProviderConfig: () => undefined,
       registerProvider: () => {},
       unregisterProvider: () => {},
     };
