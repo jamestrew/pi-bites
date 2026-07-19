@@ -13,7 +13,8 @@
     "fmt:check": "oxfmt --check .",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run packages",
-    "check": "bun run lint && bun run fmt && bun run typecheck && bun run test"
+    "check": "bun run lint && bun run fmt && bun run typecheck && bun run test",
+    "update:pi": "./scripts/update-pi.sh"
   },
   "dependencies": {
     "@ff-labs/fff-node": "0.9.6",
