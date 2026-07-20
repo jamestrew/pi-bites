@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getAgentToolDescription } from "../agent-tool-description.js";
+import {
+  AGENT_PROMPT_GUIDELINES,
+  getAgentToolDescription,
+  getAgentToolParameters,
+} from "../agent-tool-description.js";
 import { registerAgents, setDefaultsDisabled } from "../agent-types.js";
 import { type AgentConfig } from "../types.js";
 
@@ -50,6 +54,18 @@ describe("Agent tool descriptions", () => {
     );
     expect(getAgentToolDescription("compact")).toContain(
       "- scout: Researches code. (Tools: read, grep)",
+    );
+  });
+
+  it("describes explicit exploration and background-by-default behavior", () => {
+    expect(getAgentToolDescription("full")).toContain(
+      "Use Explore immediately when the user asks to explore",
+    );
+    expect(AGENT_PROMPT_GUIDELINES.join("\n")).toContain(
+      "Use Explore immediately when the user asks to explore",
+    );
+    expect(JSON.stringify(getAgentToolParameters().properties.run_in_background)).toContain(
+      "background by default",
     );
   });
 

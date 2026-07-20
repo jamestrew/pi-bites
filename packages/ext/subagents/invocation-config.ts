@@ -15,6 +15,13 @@ interface AgentInvocationParams {
   isolation?: IsolationMode;
 }
 
+export function resolveRunInBackground(
+  agentConfig: AgentConfig | undefined,
+  runInBackground: boolean | undefined,
+): boolean {
+  return runInBackground ?? agentConfig?.runInBackground ?? true;
+}
+
 export function resolveAgentInvocationConfig(
   agentConfig: AgentConfig | undefined,
   params: AgentInvocationParams,
@@ -36,7 +43,7 @@ export function resolveAgentInvocationConfig(
         ? agentConfig.thinking
         : undefined,
     inheritContext: params.inherit_context ?? agentConfig?.inheritContext ?? false,
-    runInBackground: params.run_in_background ?? agentConfig?.runInBackground ?? false,
+    runInBackground: resolveRunInBackground(agentConfig, params.run_in_background),
     isolated: agentConfig?.isolated ?? params.isolated ?? false,
     isolation: params.isolation ?? agentConfig?.isolation,
   };
