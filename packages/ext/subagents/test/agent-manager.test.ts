@@ -16,7 +16,7 @@ vi.mock("../worktree.js", () => ({
 
 import { runAgent } from "../agent-runner.js";
 
-const mockPi = {} as any;
+const mockPi = { events: { emit: vi.fn() } } as any;
 const mockCtx = { cwd: "/tmp" } as any;
 
 const mockSession = () => ({ dispose: vi.fn() }) as any;
@@ -48,6 +48,28 @@ describe("AgentManager — completion lifecycle", () => {
     expect(completedRecord).toBeDefined();
     expect(completedRecord!.status).toBe("completed");
     expect(record).toBe(completedRecord);
+  });
+});
+
+describe("AgentManager — detached lifecycle", () => {
+  let manager: AgentManager;
+  afterEach(() => manager.dispose());
+
+  it("emits created for detached spawns but not foreground agents", async () => {
+    const pi = { events: { emit: vi.fn() } } as any;
+    manager = new AgentManager();
+    resolvedRun();
+
+    manager.spawn(pi, mockCtx, "general-purpose", "detached", { description: "detached" });
+    await manager.spawnAndWait(pi, mockCtx, "general-purpose", "foreground", {
+      description: "foreground",
+    });
+
+    expect(pi.events.emit).toHaveBeenCalledTimes(1);
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "subagents:created",
+      expect.objectContaining({ description: "detached", isBackground: true }),
+    );
   });
 });
 

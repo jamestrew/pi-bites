@@ -157,13 +157,6 @@ async function runBackgroundAgent(
   fleet.ensureTimer();
   fleet.update();
 
-  // Emit created event
-  pi.events.emit("subagents:created", {
-    id,
-    type: subagentType,
-    description: params.description,
-    isBackground: true,
-  });
   updateHelperToolsActive?.();
 
   const isQueued = record?.status === "queued";

@@ -532,12 +532,18 @@ export function createNeedsInputLifecycle(
   classify: (text: string, ctx: ExtensionContext) => Promise<boolean>,
   onError: (error: unknown) => void,
 ) {
+  const backgroundAgents = new Set<string>();
   let pendingText: string | undefined;
+  let settledState: TrackerState = "idle";
+  let agentRunning = false;
   let generation = 0;
+
+  const reportSettledState = () => setState(backgroundAgents.size > 0 ? "working" : settledState);
 
   return {
     async agentStart() {
       generation++;
+      agentRunning = true;
       pendingText = undefined;
       await setState("working");
     },
@@ -548,14 +554,24 @@ export function createNeedsInputLifecycle(
       const text = pendingText;
       const settledGeneration = generation;
       pendingText = undefined;
-      if (!text) return setState("idle");
+      let nextSettledState: TrackerState = "idle";
       try {
-        const needsInput = await classify(text, ctx);
-        if (generation === settledGeneration) await setState(needsInput ? "needs-input" : "idle");
+        if (text && (await classify(text, ctx))) nextSettledState = "needs-input";
       } catch (error) {
         onError(error);
-        if (generation === settledGeneration) await setState("idle");
       }
+      if (generation !== settledGeneration) return;
+      agentRunning = false;
+      settledState = nextSettledState;
+      await reportSettledState();
+    },
+    async backgroundAgentStarted(id: string) {
+      backgroundAgents.add(id);
+      await setState("working");
+    },
+    async backgroundAgentFinished(id: string) {
+      if (!backgroundAgents.delete(id) || backgroundAgents.size > 0 || agentRunning) return;
+      await reportSettledState();
     },
   };
 }
@@ -596,6 +612,13 @@ export default function registerSessionTracker(
   pi.on("agent_start", () => needsInputLifecycle.agentStart());
   pi.events.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
   pi.events.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
+  pi.events.on("subagents:created", (data) =>
+    needsInputLifecycle.backgroundAgentStarted((data as { id: string }).id),
+  );
+  const finishBackgroundAgent = (data: unknown) =>
+    needsInputLifecycle.backgroundAgentFinished((data as { id: string }).id);
+  pi.events.on("subagents:completed", finishBackgroundAgent);
+  pi.events.on("subagents:failed", finishBackgroundAgent);
   pi.on("agent_end", (event) => needsInputLifecycle.agentEnd(event));
   pi.on("agent_settled", (_event, ctx) => needsInputLifecycle.agentSettled(ctx));
   pi.on("session_shutdown", async (event) => {

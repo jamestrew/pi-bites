@@ -182,16 +182,24 @@ export class AgentManager {
     if (options.isBackground && this.runningBackground >= this.maxConcurrent) {
       // Queue it — will be started when a running agent completes
       this.queue.push({ id, args });
-      return id;
+    } else {
+      // startAgent can throw (e.g. strict worktree-isolation failure) — clean
+      // up the record so callers don't see an orphan in `listAgents()`.
+      try {
+        this.startAgent(id, record, args);
+      } catch (err) {
+        this.agents.delete(id);
+        throw err;
+      }
     }
 
-    // startAgent can throw (e.g. strict worktree-isolation failure) — clean
-    // up the record so callers don't see an orphan in `listAgents()`.
-    try {
-      this.startAgent(id, record, args);
-    } catch (err) {
-      this.agents.delete(id);
-      throw err;
+    if (record.isBackground !== false) {
+      pi.events.emit("subagents:created", {
+        id,
+        type,
+        description: record.description,
+        isBackground: true,
+      });
     }
     return id;
   }
