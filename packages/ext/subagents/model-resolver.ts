@@ -9,6 +9,12 @@ export type ModelEntry = Pick<Model<Api>, "id" | "name" | "provider">;
 export type ModelRegistry = Pick<PiModelRegistry, "find" | "getAll"> &
   Partial<Pick<PiModelRegistry, "getAvailable">>;
 
+/** Derive a short display label from a configured model string. */
+export function getModelLabelFromConfig(model: string): string {
+  const name = model.slice(model.lastIndexOf("/") + 1);
+  return name.replace(/-\d{8}$/, "");
+}
+
 /**
  * Resolve a model string to a Model instance.
  * Tries exact match first ("provider/modelId"), then fuzzy match against all available models.
