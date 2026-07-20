@@ -20,8 +20,9 @@ Notes:
 - Start bounded investigations with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader
   searching is needed; include what was already checked. Use Explore immediately when the user asks to explore
   or investigate the codebase, or for obviously broad or high-fanout work.
-- Agents run in the background by default. Use foreground only when you need the result before continuing.
-  You are notified when background agents finish — never poll or sleep.
+- Use foreground when you need the agent's result before continuing, especially when exploration informs your
+  next steps. Use background for genuinely independent work. You are notified when background agents finish —
+  never poll or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before
   reporting work done.
 - MessageAgent sends a message to a running background agent; it does not resume completed agents.
@@ -63,9 +64,10 @@ to bloat the main context. Afterward, read only the files needed to act on or ve
   show the user, send a text message with a concise summary.
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an
   agent writes or edits code, check the actual changes before reporting work as done.
-- Agents run in the background by default. You will be notified when one completes — do NOT poll or sleep waiting
-  for it. Continue with other work or respond to the user instead.
-- Use foreground (run_in_background: false) when you need the agent's result before you can proceed.
+- Use foreground (run_in_background: false) when you need the agent's result before you can proceed, especially
+  when exploration informs your next steps.
+- Use background for genuinely independent work. You will be notified when one completes — do NOT poll or sleep
+  waiting for it. Continue with other independent work or respond to the user instead.
 - Every Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use MessageAgent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.),
@@ -110,7 +112,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "If 2-4 targeted tool calls do not locate the answer and broader searching is needed, delegate to Explore and pass along what was already checked.",
     "Use Explore immediately when the user asks to explore or investigate the codebase, or for obviously broad, high-fanout, or context-heavy exploration.",
   ].join(" "),
-  "Background is the default. Use foreground only when you need the agent's result before continuing. You will be notified when background agents finish — do not poll or sleep.",
+  "Use foreground when you need the agent's result before continuing, especially when exploration informs your next steps. Use background for genuinely independent work. You will be notified when background agents finish — do not poll or sleep.",
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",
 ];
 
@@ -138,7 +140,7 @@ export function getAgentToolParameters() {
     run_in_background: Type.Optional(
       Type.Boolean({
         description:
-          "Agents run in the background by default. Set to false to run synchronously when you need the result before continuing.",
+          "Defaults to the agent's configured mode, otherwise background. Set to false when you need the result before continuing.",
       }),
     ),
     isolation: Type.Optional(

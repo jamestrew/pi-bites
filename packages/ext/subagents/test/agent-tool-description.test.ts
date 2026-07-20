@@ -57,15 +57,13 @@ describe("Agent tool descriptions", () => {
     );
   });
 
-  it("describes explicit exploration and background-by-default behavior", () => {
+  it("describes explicit exploration and dependent foreground work", () => {
     expect(getAgentToolDescription("full")).toContain(
       "Use Explore immediately when the user asks to explore",
     );
-    expect(AGENT_PROMPT_GUIDELINES.join("\n")).toContain(
-      "Use Explore immediately when the user asks to explore",
-    );
+    expect(AGENT_PROMPT_GUIDELINES.join("\n")).toContain("exploration informs your next steps");
     expect(JSON.stringify(getAgentToolParameters().properties.run_in_background)).toContain(
-      "background by default",
+      "configured mode",
     );
   });
 

@@ -102,6 +102,7 @@ Caveats, uncertainty, or searches that did not find results.
 `,
       promptMode: "replace",
       bashGatePolicy: "deny",
+      runInBackground: false,
       isDefault: true,
     },
   ],

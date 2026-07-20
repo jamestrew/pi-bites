@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_AGENTS } from "../default-agents.js";
 import {
   resolveAgentInvocationConfig,
   resolveJoinMode,
@@ -27,6 +28,13 @@ describe("resolveRunInBackground", () => {
     expect(resolveRunInBackground(undefined, undefined)).toBe(true);
     expect(resolveRunInBackground(makeConfig({ runInBackground: true }), false)).toBe(false);
     expect(resolveRunInBackground(makeConfig({ runInBackground: false }), undefined)).toBe(false);
+  });
+
+  it("runs the built-in Explore agent in the foreground unless overridden", () => {
+    const explore = DEFAULT_AGENTS.get("explore");
+
+    expect(resolveRunInBackground(explore, undefined)).toBe(false);
+    expect(resolveRunInBackground(explore, true)).toBe(true);
   });
 });
 
