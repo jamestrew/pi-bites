@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveAgentInvocationConfig, resolveJoinMode } from "../invocation-config.js";
+import {
+  resolveAgentInvocationConfig,
+  resolveJoinMode,
+  resolveRunInBackground,
+} from "../invocation-config.js";
 import type { AgentConfig } from "../types.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -17,6 +21,14 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     ...overrides,
   };
 }
+
+describe("resolveRunInBackground", () => {
+  it("applies caller, config, then background-default precedence", () => {
+    expect(resolveRunInBackground(undefined, undefined)).toBe(true);
+    expect(resolveRunInBackground(makeConfig({ runInBackground: true }), false)).toBe(false);
+    expect(resolveRunInBackground(makeConfig({ runInBackground: false }), undefined)).toBe(false);
+  });
+});
 
 describe("resolveAgentInvocationConfig", () => {
   it("prefers public tool-call params over agent defaults", () => {
@@ -86,7 +98,7 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.isolated).toBe(true);
   });
 
-  it("defaults booleans to false when neither config nor params set them", () => {
+  it("defaults agents to background when config and params leave it unset", () => {
     const resolved = resolveAgentInvocationConfig(
       makeConfig({
         inheritContext: undefined,
@@ -97,7 +109,7 @@ describe("resolveAgentInvocationConfig", () => {
     );
 
     expect(resolved.inheritContext).toBe(false);
-    expect(resolved.runInBackground).toBe(false);
+    expect(resolved.runInBackground).toBe(true);
     expect(resolved.isolated).toBe(false);
   });
 });

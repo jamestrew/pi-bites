@@ -43,8 +43,9 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       displayName: "explore",
       description: [
         "Fast read-only codebase reconnaissance in an isolated subagent.",
-        "Use after 2-4 targeted tool calls fail to answer a bounded investigation and the next step requires broader searching; pass along what was already checked.",
-        "Delegate immediately only when the task is obviously broad, high-fanout, or likely to return enough output to bloat the main context.",
+        "Use when the user asks to explore or investigate the codebase.",
+        "Otherwise, use after 2-4 targeted tool calls fail to answer a bounded investigation and the next step requires broader searching; pass along what was already checked.",
+        "Delegate immediately when the task is obviously broad, high-fanout, or likely to return enough output to bloat the main context.",
         "Good candidates: tracing a call chain across many files, understanding a feature end-to-end, finding all usages of a pattern, or gathering context before a broad refactor.",
         "Bad candidates: known paths or symbols, a few files the parent will need to read fully to make a change, or a direct search likely to answer the question.",
         "After Explore returns, read only the files needed to act on or verify its findings.",

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { getModelLabelFromConfig } from "./model-resolver.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { type ToolDescriptionMode } from "./settings.js";
@@ -17,10 +18,10 @@ Notes:
   can run in parallel, or delegation has another concrete stated benefit; do not spawn it foreground just because
   work is complex or multi-step.
 - Start bounded investigations with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader
-  searching is needed; include what was already checked. Delegate immediately only for obviously broad or
-  high-fanout work.
-- Parallel work: one message, multiple Agent calls, run_in_background: true on each. You are notified when
-  background agents finish — never poll or sleep.
+  searching is needed; include what was already checked. Use Explore immediately when the user asks to explore
+  or investigate the codebase, or for obviously broad or high-fanout work.
+- Agents run in the background by default. Use foreground only when you need the result before continuing.
+  You are notified when background agents finish — never poll or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before
   reporting work done.
 - MessageAgent sends a message to a running background agent; it does not resume completed agents.
@@ -47,9 +48,9 @@ Continue to use specialized agents when their specialization provides a clear be
 
 Start bounded investigations with direct tools — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or
 string. If 2-4 targeted tool calls do not locate the answer and the next step requires broader searching,
-delegate to Explore and include what was already checked. Delegate immediately only when the task is obviously
-broad, high-fanout, or likely to produce enough output to bloat the main context. Afterward, read only the files
-needed to act on or verify its findings.
+delegate to Explore and include what was already checked. Use Explore immediately when the user asks to explore
+or investigate the codebase, or when the task is obviously broad, high-fanout, or likely to produce enough output
+to bloat the main context. Afterward, read only the files needed to act on or verify its findings.
 
 ## Usage notes
 
@@ -62,10 +63,9 @@ needed to act on or verify its findings.
   show the user, send a text message with a concise summary.
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an
   agent writes or edits code, check the actual changes before reporting work as done.
-- Use run_in_background for work you don't need immediately. You will be notified when it completes — do NOT poll
-  or sleep waiting for it. Continue with other work or respond to the user instead.
-- Foreground vs background: use foreground (default) when you need the agent's results before you can proceed.
-  Use background when you have genuinely independent work to do in parallel.
+- Agents run in the background by default. You will be notified when one completes — do NOT poll or sleep waiting
+  for it. Continue with other work or respond to the user instead.
+- Use foreground (run_in_background: false) when you need the agent's result before you can proceed.
 - Every Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use MessageAgent to send mid-run messages to a running background agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.),
@@ -97,6 +97,58 @@ Terse command-style prompts produce shallow, generic work.
 **Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research,
 implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove
 you understood: include file paths, line numbers, what specifically to change.`;
+
+export const AGENT_PROMPT_GUIDELINES = [
+  [
+    "Use Agent with specialized agents when the task matches an agent type's description.",
+    "Use general only when the user explicitly requests it, independent work can run in parallel, or delegation has another concrete stated benefit.",
+    "Handle ordinary implementation requests directly; complexity alone is not a reason to spawn a general subagent.",
+    "Avoid duplicating work that subagents are already doing.",
+  ].join(" "),
+  [
+    "Start bounded investigations with direct tools (read, grep, find).",
+    "If 2-4 targeted tool calls do not locate the answer and broader searching is needed, delegate to Explore and pass along what was already checked.",
+    "Use Explore immediately when the user asks to explore or investigate the codebase, or for obviously broad, high-fanout, or context-heavy exploration.",
+  ].join(" "),
+  "Background is the default. Use foreground only when you need the agent's result before continuing. You will be notified when background agents finish — do not poll or sleep.",
+  "Trust but verify: check an agent's claimed code changes before reporting work as done.",
+];
+
+export function getAgentToolParameters() {
+  return Type.Object({
+    subagent_type: Type.String({
+      description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
+    }),
+    description: Type.String({
+      description: "A short (3-5 word) description of the task (shown in UI).",
+    }),
+    prompt: Type.String({ description: "The task for the agent to perform." }),
+    model: Type.Optional(
+      Type.String({
+        description:
+          'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+      }),
+    ),
+    thinking: Type.Optional(
+      Type.String({
+        description:
+          "Thinking level: off, minimal, low, medium, high, xhigh, max. Overrides agent default.",
+      }),
+    ),
+    run_in_background: Type.Optional(
+      Type.Boolean({
+        description:
+          "Agents run in the background by default. Set to false to run synchronously when you need the result before continuing.",
+      }),
+    ),
+    isolation: Type.Optional(
+      Type.Literal("worktree", {
+        description:
+          'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
+      }),
+    ),
+  });
+}
 
 function formatTools(cfg: { builtinToolNames?: string[] } | undefined): string {
   const tools = cfg?.builtinToolNames;
