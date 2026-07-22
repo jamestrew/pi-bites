@@ -13,7 +13,8 @@ describe("usage", () => {
       decodeSubagentUsageRecord({
         type: "subagent_usage",
         subagent: "explore",
-        sessionId: "session-1",
+        sessionId: "subagent-session-1",
+        parentSessionId: "session-1",
         timestamp: 123,
         provider: "anthropic",
         model: "claude",
@@ -28,7 +29,8 @@ describe("usage", () => {
     ).toEqual({
       type: "subagent_usage",
       subagent: "explore",
-      sessionId: "session-1",
+      sessionId: "subagent-session-1",
+      parentSessionId: "session-1",
       timestamp: 123,
       provider: "anthropic",
       model: "claude",

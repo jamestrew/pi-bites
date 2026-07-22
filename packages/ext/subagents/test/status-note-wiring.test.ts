@@ -97,7 +97,7 @@ describe("status note reaches the parent through the real handlers", () => {
     );
 
     expect(textOf(spawn)).not.toContain("Output file:");
-    expect(runCtx.sessionManager.getSessionId).not.toHaveBeenCalled();
+    expect(runCtx.sessionManager.getSessionId).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
     const notification = pi.sendMessage.mock.calls[0]?.[0];
     expect(notification.content).toContain(`<result>${result}</result>`);

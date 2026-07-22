@@ -84,6 +84,7 @@ export type JoinMode = "async" | "group" | "smart";
 export interface AgentRecord {
   id: string;
   type: SubagentType;
+  parentSessionId: string;
   description: string;
   status: "queued" | "running" | "completed" | "stopped" | "error";
   result?: string;

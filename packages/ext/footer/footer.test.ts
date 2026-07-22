@@ -9,7 +9,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import {
   buildExtensionStatusLines,
   buildFooterLine,
-  ExploreUsageReader,
+  SubagentUsageReader,
   formatUsageStats,
   type UsageTotals,
 } from "./index.js";
@@ -80,7 +80,7 @@ test("buildExtensionStatusLines gives session tracker its own line", () => {
   ).toEqual(["○ 🐴 ponytail: ⚡ FULL codex: 5h: 4%", "pi-sessions: 1 · 1 idle"]);
 });
 
-test("ExploreUsageReader reset starts counting from current file end", () => {
+test("SubagentUsageReader includes existing usage for its parent session", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const agentDir = mkdtempSync(join(tmpdir(), "pi-bites-footer-"));
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -94,24 +94,16 @@ test("ExploreUsageReader reset starts counting from current file end", () => {
       JSON.stringify({
         type: "subagent_usage",
         subagent: "explore",
-        sessionId: "old",
+        sessionId: "agent-1",
+        parentSessionId: "parent-1",
         timestamp: 1,
         provider: "anthropic",
         model: "claude",
-        usage: { input: 100, output: 100, cacheRead: 100, cost: 1 },
-      }) + "\n",
-    );
-
-    const reader = new ExploreUsageReader();
-    reader.reset();
-    appendFileSync(
-      usageFile,
-      JSON.stringify({
-        type: "subagent_usage",
-        subagent: "explore",
         usage: { input: 2, output: 3, cacheRead: 5, cost: 0.01 },
       }) + "\n",
     );
+
+    const reader = new SubagentUsageReader("parent-1");
 
     expect(reader.readNewUsage()).toEqual({
       input: 2,
@@ -131,7 +123,7 @@ test("ExploreUsageReader reset starts counting from current file end", () => {
   }
 });
 
-test("ExploreUsageReader counts non-explore subagent files", () => {
+test("SubagentUsageReader only counts subagents owned by its parent session", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const agentDir = mkdtempSync(join(tmpdir(), "pi-bites-footer-"));
   process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -139,28 +131,50 @@ test("ExploreUsageReader counts non-explore subagent files", () => {
   try {
     const usageDir = join(agentDir, "pi-bites", "usage");
     mkdirSync(usageDir, { recursive: true });
-    writeFileSync(
-      join(usageDir, "subagents.jsonl"),
-      JSON.stringify({
-        type: "subagent_usage",
-        subagent: "general-purpose",
-        sessionId: "general-1",
-        timestamp: 1,
-        provider: "anthropic",
-        model: "claude",
-        usage: { input: 7, output: 8, cacheRead: 9, cacheWrite: 10, cost: { total: 0.02 } },
-      }) + "\n",
+    const usageFile = join(usageDir, "subagents.jsonl");
+    writeFileSync(usageFile, "");
+
+    const owningReader = new SubagentUsageReader("parent-1");
+    const idleReader = new SubagentUsageReader("parent-2");
+
+    appendFileSync(
+      usageFile,
+      [
+        {
+          type: "subagent_usage",
+          subagent: "general-purpose",
+          sessionId: "general-1",
+          parentSessionId: "parent-1",
+          timestamp: 1,
+          provider: "anthropic",
+          model: "claude",
+          usage: {
+            input: 7,
+            output: 8,
+            cacheRead: 9,
+            cacheWrite: 10,
+            cost: { total: 0.02 },
+          },
+        },
+        {
+          type: "subagent_usage",
+          subagent: "explore",
+          sessionId: "legacy-agent",
+          usage: { input: 100, output: 100, cacheRead: 100, cost: 1 },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n") + "\n",
     );
 
-    const reader = new ExploreUsageReader();
-
-    expect(reader.readNewUsage()).toEqual({
+    expect(owningReader.readNewUsage()).toEqual({
       input: 7,
       output: 8,
       cacheRead: 9,
       cacheWrite: 10,
       cost: 0.02,
     });
+    expect(idleReader.readNewUsage()).toEqual(usage());
   } finally {
     rmSync(agentDir, { recursive: true, force: true });
 

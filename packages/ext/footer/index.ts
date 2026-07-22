@@ -89,22 +89,11 @@ export function getMainSessionUsage(ctx: ExtensionContext): UsageTotals {
   return totals;
 }
 
-export class ExploreUsageReader {
+export class SubagentUsageReader {
   private files = new Map<string, { offset: number; inode: number }>();
   private totals: UsageTotals = { ...EMPTY_USAGE };
 
-  reset(): void {
-    this.totals = { ...EMPTY_USAGE };
-    this.files.clear();
-    for (const file of getUsageFiles()) {
-      try {
-        const stat = statSync(file);
-        this.files.set(file, { inode: stat.ino, offset: stat.size });
-      } catch {
-        // Ignore files that disappear while scanning.
-      }
-    }
-  }
+  constructor(private parentSessionId: string) {}
 
   readNewUsage(): UsageTotals {
     for (const file of getUsageFiles()) {
@@ -128,7 +117,9 @@ export class ExploreUsageReader {
         if (!line.trim()) continue;
         try {
           const record = decodeSubagentUsageRecord(JSON.parse(line));
-          if (record) addUsage(this.totals, record.usage);
+          if (record?.parentSessionId === this.parentSessionId) {
+            addUsage(this.totals, record.usage);
+          }
         } catch {
           // Ignore partially written or malformed records.
         }
@@ -263,7 +254,7 @@ class BitesFooter implements Component {
     private ctx: ExtensionContext,
     private theme: Theme,
     private footerData: ReadonlyFooterDataProvider,
-    private exploreUsageReader: ExploreUsageReader,
+    private subagentUsageReader: SubagentUsageReader,
     private requestRender: () => void,
   ) {
     this.unsubscribe = footerData.onBranchChange(requestRender);
@@ -281,7 +272,7 @@ class BitesFooter implements Component {
     const line = buildFooterLine(
       this.ctx,
       this.footerData,
-      this.exploreUsageReader.readNewUsage(),
+      this.subagentUsageReader.readNewUsage(),
       width,
       colorizeContextUsage(this.theme),
     );
@@ -297,13 +288,11 @@ class BitesFooter implements Component {
 }
 
 export default function registerFooter(pi: ExtensionAPI): void {
-  const exploreUsageReader = new ExploreUsageReader();
-
   pi.on("session_start", async (_event, ctx) => {
-    exploreUsageReader.reset();
+    const subagentUsageReader = new SubagentUsageReader(ctx.sessionManager.getSessionId());
 
     ctx.ui.setFooter((tui, theme, footerData) => {
-      return new BitesFooter(ctx, theme, footerData, exploreUsageReader, () => {
+      return new BitesFooter(ctx, theme, footerData, subagentUsageReader, () => {
         tui.requestRender();
       });
     });

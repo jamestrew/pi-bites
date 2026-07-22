@@ -14,10 +14,19 @@ vi.mock("../worktree.js", () => ({
   pruneWorktrees: vi.fn(),
 }));
 
+vi.mock("../usage.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../usage.js")>()),
+  appendSubagentUsageRecord: vi.fn(() => Promise.resolve()),
+}));
+
 import { runAgent } from "../agent-runner.js";
+import { appendSubagentUsageRecord } from "../usage.js";
 
 const mockPi = { events: { emit: vi.fn() } } as any;
-const mockCtx = { cwd: "/tmp" } as any;
+const mockCtx = {
+  cwd: "/tmp",
+  sessionManager: { getSessionId: () => "parent-session" },
+} as any;
 
 const mockSession = () => ({ dispose: vi.fn() }) as any;
 
@@ -366,6 +375,38 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     expect(manager.getRecord(id)!.compactionCount).toBe(2);
   });
 
+  it("cancel-and-steer persists resumed usage with the original parent session", async () => {
+    manager = new AgentManager();
+    const session = { ...mockSession(), abort: vi.fn(() => Promise.resolve()) };
+    let finishInitialRun!: () => void;
+
+    vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, opts: any) => {
+      opts.onSessionCreated?.(session);
+      await new Promise<void>((resolve) => {
+        finishInitialRun = resolve;
+      });
+      return { responseText: "first", session: session as any };
+    });
+    const { resumeAgent: resumeMock } = await import("../agent-runner.js");
+    vi.mocked(resumeMock).mockImplementation(async (_session, _prompt, opts: any) => {
+      opts.onAssistantUsage?.({ input: 12, output: 3, cacheWrite: 1 });
+      return "second";
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isBackground: true,
+    });
+    expect(manager.cancelAndSteer(id, "change course")).toBe(true);
+    vi.mocked(appendSubagentUsageRecord).mockClear();
+    finishInitialRun();
+    await manager.getRecord(id)!.promise;
+
+    expect(appendSubagentUsageRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: id, parentSessionId: "parent-session" }),
+    );
+  });
+
   it("resume() also accumulates usage and increments compactions on the same record", async () => {
     manager = new AgentManager();
 
@@ -387,6 +428,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     expect(manager.getRecord(id)!.compactionCount).toBe(0);
 
     // Now resume — drive callbacks via the mocked resumeAgent
+    vi.mocked(appendSubagentUsageRecord).mockClear();
     const { resumeAgent: resumeMock } = await import("../agent-runner.js");
     vi.mocked(resumeMock).mockImplementation(async (_session, _prompt, opts: any) => {
       opts.onAssistantUsage?.({ input: 70, output: 30, cacheWrite: 5 });
@@ -397,6 +439,9 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     await manager.resume(id, "more");
 
     expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5 });
+    expect(appendSubagentUsageRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: id, parentSessionId: "parent-session" }),
+    );
     expect(manager.getRecord(id)!.compactionCount).toBe(1);
   });
 });

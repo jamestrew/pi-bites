@@ -14,6 +14,7 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
   return {
     id,
     type: "general-purpose",
+    parentSessionId: "parent-session",
     description: "test",
     status: "completed",
     toolUses: 0,

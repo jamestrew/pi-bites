@@ -29,6 +29,7 @@ export type SubagentUsageRecord = {
   type: "subagent_usage";
   subagent: string;
   sessionId: string;
+  parentSessionId: string;
   timestamp: number;
   provider: string;
   model: string;
@@ -42,7 +43,9 @@ export type SubagentUsageRecord = {
 };
 
 export type DecodedSubagentUsageRecord = Pick<SubagentUsageRecord, "type" | "subagent" | "usage"> &
-  Partial<Pick<SubagentUsageRecord, "sessionId" | "timestamp" | "provider" | "model">>;
+  Partial<
+    Pick<SubagentUsageRecord, "sessionId" | "parentSessionId" | "timestamp" | "provider" | "model">
+  >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -60,6 +63,7 @@ export function decodeSubagentUsageRecord(value: unknown): DecodedSubagentUsageR
     typeof value.subagent !== "string" ||
     !isRecord(value.usage) ||
     (value.sessionId !== undefined && typeof value.sessionId !== "string") ||
+    (value.parentSessionId !== undefined && typeof value.parentSessionId !== "string") ||
     (value.timestamp !== undefined && typeof value.timestamp !== "number") ||
     (value.provider !== undefined && typeof value.provider !== "string") ||
     (value.model !== undefined && typeof value.model !== "string")
@@ -72,6 +76,7 @@ export function decodeSubagentUsageRecord(value: unknown): DecodedSubagentUsageR
     type: "subagent_usage",
     subagent: value.subagent,
     ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }),
+    ...(value.parentSessionId === undefined ? {} : { parentSessionId: value.parentSessionId }),
     ...(value.timestamp === undefined ? {} : { timestamp: finiteNumberOrZero(value.timestamp) }),
     ...(value.provider === undefined ? {} : { provider: value.provider }),
     ...(value.model === undefined ? {} : { model: value.model }),

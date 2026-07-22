@@ -130,6 +130,32 @@ export class AgentManager {
     this.cleanupInterval.unref();
   }
 
+  private recordAssistantUsage(
+    record: AgentRecord,
+    usage: AssistantUsage,
+    model?: Model<Api>,
+    callback?: (usage: AssistantUsage) => void,
+  ): void {
+    addUsage(record.lifetimeUsage, usage);
+    appendSubagentUsageRecord({
+      type: "subagent_usage",
+      subagent: record.type,
+      sessionId: record.id,
+      parentSessionId: record.parentSessionId,
+      timestamp: usage.timestamp ?? Date.now(),
+      provider: usage.provider ?? model?.provider ?? "unknown",
+      model: usage.model ?? model?.id ?? "unknown",
+      usage: {
+        input: usage.input,
+        output: usage.output,
+        cacheRead: usage.cacheRead ?? 0,
+        cacheWrite: usage.cacheWrite,
+        cost: { total: usage.cost ?? 0 },
+      },
+    }).catch(() => undefined);
+    callback?.(usage);
+  }
+
   /** Update the max concurrent background agents limit. */
   setMaxConcurrent(n: number) {
     this.maxConcurrent = Math.max(1, n);
@@ -158,10 +184,12 @@ export class AgentManager {
     assertValidSpawnCwd(options.cwd);
 
     const id = randomUUID().slice(0, 17);
+    const parentSessionId = ctx.sessionManager.getSessionId();
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
       type,
+      parentSessionId,
       description: options.description,
       status: options.isBackground ? "queued" : "running",
       toolUses: 0,
@@ -284,24 +312,7 @@ export class AgentManager {
       onTurnEnd: options.onTurnEnd,
       onTextDelta: options.onTextDelta,
       onAssistantUsage: (usage) => {
-        addUsage(record.lifetimeUsage, usage);
-        const model = options.model;
-        appendSubagentUsageRecord({
-          type: "subagent_usage",
-          subagent: type,
-          sessionId: id,
-          timestamp: usage.timestamp ?? Date.now(),
-          provider: usage.provider ?? model?.provider ?? "unknown",
-          model: usage.model ?? model?.id ?? "unknown",
-          usage: {
-            input: usage.input,
-            output: usage.output,
-            cacheRead: usage.cacheRead ?? 0,
-            cacheWrite: usage.cacheWrite,
-            cost: { total: usage.cost ?? 0 },
-          },
-        }).catch(() => undefined);
-        options.onAssistantUsage?.(usage);
+        this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
       },
       onCompaction: (info) => {
         record.compactionCount++;
@@ -331,8 +342,7 @@ export class AgentManager {
               options.onToolActivity?.(activity);
             },
             onAssistantUsage: (usage) => {
-              addUsage(record.lifetimeUsage, usage);
-              options.onAssistantUsage?.(usage);
+              this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
             },
             onCompaction: (info) => {
               record.compactionCount++;
@@ -517,7 +527,7 @@ export class AgentManager {
           if (activity.type === "end") record.toolUses++;
         },
         onAssistantUsage: (usage) => {
-          addUsage(record.lifetimeUsage, usage);
+          this.recordAssistantUsage(record, usage);
         },
         onCompaction: (info) => {
           record.compactionCount++;
