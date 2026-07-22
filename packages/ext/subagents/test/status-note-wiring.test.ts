@@ -76,6 +76,35 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(lines).toEqual(["⎿  Running… (ctrl+o to expand)"]);
   });
 
+  it("background execution publishes the full final response without creating a transcript", async () => {
+    const result = "x".repeat(1_000) + "final marker";
+    vi.mocked(runAgent).mockResolvedValue({ responseText: result, session: {} as any });
+    const { pi, tools } = makePi();
+    subagentsExtension(pi);
+    const runCtx = ctx();
+
+    const spawn = await tools.get("Agent").execute(
+      "tc1",
+      {
+        prompt: "go",
+        description: "d",
+        subagent_type: "general-purpose",
+        run_in_background: true,
+      },
+      undefined,
+      undefined,
+      runCtx,
+    );
+
+    expect(textOf(spawn)).not.toContain("Output file:");
+    expect(runCtx.sessionManager.getSessionId).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
+    const notification = pi.sendMessage.mock.calls[0]?.[0];
+    expect(notification.content).toContain(`<result>${result}</result>`);
+    expect(notification.content).not.toContain("output-file");
+    expect(notification.details).not.toHaveProperty("outputFile");
+  });
+
   it("background user-stop is delivered automatically as STOPPED BY THE USER", async () => {
     vi.mocked(runAgent).mockImplementation(
       (_ctx, _type, _prompt, options) =>

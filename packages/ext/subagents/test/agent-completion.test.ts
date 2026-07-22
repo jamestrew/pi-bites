@@ -76,26 +76,24 @@ describe("agent completion notifications", () => {
     completion.dispose();
   });
 
-  it("includes the transcript path when automatic output is truncated", () => {
-    const record = makeRecord("a", {
-      result: "x".repeat(1_000),
-      outputFile: "/tmp/agent-a.jsonl",
-    });
+  it("sends the full final response while keeping display details concise", () => {
+    const result = "x".repeat(1_000) + "final marker";
+    const record = makeRecord("a", { result });
     const { completion, pi } = makeHarness([record]);
 
     completion.onAgentComplete(record);
     vi.advanceTimersByTime(200);
 
     const notification = pi.sendMessage.mock.calls[0]?.[0];
-    expect(notification.content).toContain("...(truncated; full transcript: /tmp/agent-a.jsonl)");
-    expect(notification.content).toContain("Full transcript available at: /tmp/agent-a.jsonl");
+    expect(notification.content).toContain(`<result>${result}</result>`);
+    expect(notification.details.resultPreview).toBe("x".repeat(500) + "…");
 
     completion.dispose();
   });
 
-  it("groups smart-mode agents that complete during batch debounce", () => {
-    const a = makeRecord("a");
-    const b = makeRecord("b");
+  it("groups smart-mode agents with their full final responses", () => {
+    const a = makeRecord("a", { result: "a".repeat(500) + "end-a" });
+    const b = makeRecord("b", { result: "b".repeat(500) + "end-b" });
     const { completion, pi } = makeHarness([a, b]);
 
     completion.trackSpawned("a", "smart");
@@ -110,7 +108,9 @@ describe("agent completion notifications", () => {
     expect(pi.sendMessage).toHaveBeenCalledOnce();
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("Background agent group completed: 2 agent(s) finished"),
+        content: expect.stringMatching(
+          /Background agent group completed: 2 agent\(s\) finished[\s\S]*end-a[\s\S]*end-b/,
+        ),
         details: expect.objectContaining({ others: [expect.objectContaining({ id: "b" })] }),
       }),
       { deliverAs: "followUp", triggerTurn: true },

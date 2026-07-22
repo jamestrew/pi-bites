@@ -149,7 +149,6 @@ export interface NotificationDetails {
   turnCount: number;
   totalTokens: number;
   durationMs: number;
-  outputFile?: string;
   error?: string;
   resultPreview: string;
   /** Additional agents in a group notification. */

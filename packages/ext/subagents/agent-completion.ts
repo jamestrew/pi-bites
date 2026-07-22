@@ -46,11 +46,10 @@ export function createAgentCompletionHandler({
   }
 
   function emitIndividualNudge(record: AgentRecord): void {
-    const footer = record.outputFile ? `\nFull transcript available at: ${record.outputFile}` : "";
     pi.sendMessage<NotificationDetails>(
       {
         customType: "subagent-notification",
-        content: formatTaskNotification(record, 500) + footer,
+        content: formatTaskNotification(record),
         display: true,
         details: buildNotificationDetails(record, 500, undefined),
       },
@@ -68,9 +67,7 @@ export function createAgentCompletionHandler({
 
     const groupKey = `group:${records.map((record) => record.id).join(",")}`;
     scheduleNudge(groupKey, () => {
-      const notifications = records
-        .map((record) => formatTaskNotification(record, 300))
-        .join("\n\n");
+      const notifications = records.map(formatTaskNotification).join("\n\n");
       const label = partial
         ? `${records.length} agent(s) finished (partial — others still running)`
         : `${records.length} agent(s) finished`;

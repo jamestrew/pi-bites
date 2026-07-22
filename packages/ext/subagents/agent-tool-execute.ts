@@ -111,19 +111,7 @@ async function runBackgroundAgent(
   } = invocation;
   const { state: bgState, callbacks: bgCallbacks } = createActivityTracker();
 
-  // Wrap onSessionCreated to wire output file streaming.
-  // The callback lazily reads record.outputFile (set right after spawn)
-  // rather than closing over a value that doesn't exist yet.
   let id: string;
-  const origBgOnSession = bgCallbacks.onSessionCreated;
-  bgCallbacks.onSessionCreated = (session: AgentSession) => {
-    origBgOnSession(session);
-    const rec = manager.getRecord(id);
-    if (rec?.outputFile) {
-      rec.outputCleanup = streamToOutputFile(session, rec.outputFile, id, ctx.cwd);
-    }
-  };
-
   try {
     id = manager.spawn(pi, ctx, subagentType, params.prompt, {
       description: params.description,
@@ -140,15 +128,11 @@ async function runBackgroundAgent(
     return textResult(err instanceof Error ? err.message : String(err));
   }
 
-  // Set output file + join mode synchronously after spawn, before the
-  // event loop yields — onSessionCreated is async so this is safe.
   const joinMode = resolveJoinMode(getDefaultJoinMode(), true);
   const record = manager.getRecord(id);
   if (record && joinMode) {
     record.joinMode = joinMode;
     record.toolCallId = toolCallId;
-    record.outputFile = createOutputFilePath(ctx.cwd, id, ctx.sessionManager.getSessionId());
-    writeInitialEntry(record.outputFile, id, params.prompt, ctx.cwd);
   }
 
   if (joinMode != null) trackSpawned(id, joinMode);
@@ -165,7 +149,6 @@ async function runBackgroundAgent(
       `Agent ID: ${id}\n` +
       `Type: ${displayName}\n` +
       `Description: ${params.description}\n` +
-      (record?.outputFile ? `Output file: ${record.outputFile}\n` : "") +
       (isQueued ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n` : "") +
       `\nYou will be notified automatically when this agent completes.\n` +
       `Use MessageAgent to send it a message while it is running.\n` +

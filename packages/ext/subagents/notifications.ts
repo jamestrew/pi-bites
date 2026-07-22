@@ -23,7 +23,7 @@ function escapeXml(s: string): string {
 }
 
 /** Format a structured task notification matching Claude Code's <task-notification> XML. */
-export function formatTaskNotification(record: AgentRecord, resultMaxLen: number): string {
+export function formatTaskNotification(record: AgentRecord): string {
   const status = getStatusLabel(record.status, record.error);
   const durationMs = record.completedAt ? record.completedAt - record.startedAt : 0;
   const totalTokens = getLifetimeTotal(record.lifetimeUsage);
@@ -36,23 +36,15 @@ export function formatTaskNotification(record: AgentRecord, resultMaxLen: number
     ? `<compactions>${record.compactionCount}</compactions>`
     : "";
 
-  const resultPreview = record.result
-    ? record.result.length > resultMaxLen
-      ? record.result.slice(0, resultMaxLen) +
-        (record.outputFile
-          ? `\n...(truncated; full transcript: ${record.outputFile})`
-          : "\n...(truncated)")
-      : record.result
-    : "No output.";
+  const result = record.result || "No output.";
 
   return [
     `<task-notification>`,
     `<task-id>${record.id}</task-id>`,
     record.toolCallId ? `<tool-use-id>${escapeXml(record.toolCallId)}</tool-use-id>` : null,
-    record.outputFile ? `<output-file>${escapeXml(record.outputFile)}</output-file>` : null,
     `<status>${escapeXml(status)}</status>`,
     `<summary>Agent "${escapeXml(record.description)}" ${record.status}${getStatusNote(record.status)}</summary>`,
-    `<result>${escapeXml(resultPreview)}</result>`,
+    `<result>${escapeXml(result)}</result>`,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
     `</task-notification>`,
   ]
@@ -76,7 +68,6 @@ export function buildNotificationDetails(
     turnCount: activity?.turnCount ?? 0,
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
-    outputFile: record.outputFile,
     error: record.error,
     resultPreview: record.result
       ? record.result.length > resultMaxLen
@@ -116,10 +107,6 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
         } else {
           const preview = d.resultPreview.split("\n")[0]?.slice(0, 80) ?? "";
           line += "\n  " + theme.fg("dim", `⎿  ${preview}`);
-        }
-
-        if (d.outputFile) {
-          line += "\n  " + theme.fg("muted", `transcript: ${d.outputFile}`);
         }
 
         return line;
