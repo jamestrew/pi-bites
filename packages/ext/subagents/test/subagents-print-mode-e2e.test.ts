@@ -16,11 +16,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentCall,
   agentToolCalls,
   agentToolResults,
+  cleanupPrintModeTempDirs,
   conversationText,
   invokedToolNames,
   type PrintModeRun,
@@ -33,6 +34,8 @@ import {
 vi.setConfig({ testTimeout: 30_000 });
 
 const LIVE = /^(1|true|yes)$/i.test(process.env.PI_E2E_LIVE ?? "");
+
+afterAll(cleanupPrintModeTempDirs);
 
 describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", () => {
   let run: PrintModeRun | undefined;

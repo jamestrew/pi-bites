@@ -76,6 +76,26 @@ const EXTENSION_PATH = fileURLToPath(new URL("../../index.ts", import.meta.url))
 /** The cross-package handle the extension publishes on a global Symbol. */
 const MANAGER_KEY = Symbol.for("pi-subagents:manager");
 
+/** Temp dirs owned by this test worker, including runs that failed before returning. */
+const ownedTempDirs = new Set<string>();
+
+function makeTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  ownedTempDirs.add(dir);
+  return dir;
+}
+
+function removeTempDir(dir: string): void {
+  rmSync(dir, { recursive: true, force: true });
+}
+
+/** Remove runner-owned dirs after fire-and-forget usage writes have settled. */
+export async function cleanupPrintModeTempDirs(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  for (const dir of ownedTempDirs) removeTempDir(dir);
+  ownedTempDirs.clear();
+}
+
 export interface ManagerHandle {
   waitForAll(): Promise<void>;
   hasRunning(): boolean;
@@ -238,12 +258,15 @@ function isLive(options: RunPrintModeOptions): boolean {
 
 export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintModeRun> {
   const live = isLive(options);
+  if (!live && !options.steps && !options.respond) {
+    throw new Error("runPrintMode (faux mode): provide `respond` or `steps`");
+  }
   const isolateGlobals = options.isolateGlobals ?? !live;
   const timeoutMs = options.timeoutMs ?? 30_000;
 
   // --- working dir (own it only if we created it) ---
   const ownsCwd = options.cwd == null;
-  const cwd = options.cwd ?? mkdtempSync(join(tmpdir(), "subagents-print-"));
+  const cwd = options.cwd ?? makeTempDir("subagents-print-");
 
   // chdir into cwd: the extension discovers .pi/agents/*.md from process.cwd()
   // (not ctx.cwd), and re-reads it on every Agent invocation — so a custom agent
@@ -257,7 +280,7 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   const prevHome = process.env.HOME;
   let hermeticDir: string | undefined;
   if (isolateGlobals) {
-    hermeticDir = mkdtempSync(join(tmpdir(), "subagents-print-home-"));
+    hermeticDir = makeTempDir("subagents-print-home-");
     process.env.PI_CODING_AGENT_DIR = hermeticDir;
     process.env.HOME = hermeticDir;
   }
@@ -277,9 +300,6 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
       model = (getModel as (p: string, m: string) => Model<string>)(provider, modelId);
     }
   } else {
-    if (!options.steps && !options.respond) {
-      throw new Error("runPrintMode (faux mode): provide `respond` or `steps`");
-    }
     faux = registerFauxProvider({
       provider: "faux",
       models: [{ id: "faux-1", contextWindow: 200_000 }],
@@ -461,9 +481,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
       else process.env.PI_CODING_AGENT_DIR = prevAgentDir;
       if (prevHome == null) delete process.env.HOME;
       else process.env.HOME = prevHome;
-      if (hermeticDir) rmSync(hermeticDir, { recursive: true, force: true });
+      if (hermeticDir) removeTempDir(hermeticDir);
     }
-    if (ownsCwd) rmSync(cwd, { recursive: true, force: true });
+    if (ownsCwd) removeTempDir(cwd);
   };
 
   return {
