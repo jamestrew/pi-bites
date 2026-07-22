@@ -57,10 +57,23 @@ describe("Agent tool descriptions", () => {
     );
   });
 
-  it("describes explicit exploration and dependent foreground work", () => {
-    expect(getAgentToolDescription("full")).toContain(
-      "Use Explore immediately when the user asks to explore",
-    );
+  it("keeps Explore retrieval-only in full, compact, and injected guidance", () => {
+    for (const mode of ["full", "compact"] as const) {
+      const description = getAgentToolDescription(mode);
+      expect(description).toContain("high-fanout searches");
+      expect(description).toContain("code review");
+      expect(description).toContain("root-cause analysis");
+      expect(description).toContain("judgment-heavy work");
+    }
+
+    const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
+    expect(guidelines).toContain("symbol or reference retrieval");
+    expect(guidelines).toContain("code review");
+    expect(guidelines).toContain("judgment-heavy work");
+    expect(guidelines).toContain("primary agent must read decisive files");
+  });
+
+  it("describes dependent foreground work", () => {
     expect(AGENT_PROMPT_GUIDELINES.join("\n")).toContain("exploration informs your next steps");
     expect(JSON.stringify(getAgentToolParameters().properties.run_in_background)).toContain(
       "configured mode",

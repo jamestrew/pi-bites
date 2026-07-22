@@ -17,9 +17,10 @@ Notes:
 - Handle ordinary implementation requests directly. Use general when the user requests it, independent work
   can run in parallel, or delegation has another concrete stated benefit; do not spawn it foreground just because
   work is complex or multi-step.
-- Start bounded investigations with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader
-  searching is needed; include what was already checked. Use Explore immediately when the user asks to explore
-  or investigate the codebase, or for obviously broad or high-fanout work.
+- Start bounded lookups with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader retrieval
+  is needed; include what was already checked. Use Explore immediately for clearly high-fanout searches or
+  explicit requests to locate, trace, or factually map code. Do not delegate code review, design or plan evaluation,
+  cross-file consistency audits, root-cause analysis, or other judgment-heavy work; synthesize the evidence yourself.
 - Use foreground when you need the agent's result before continuing, especially when exploration informs your
   next steps. Use background for genuinely independent work. You are notified when background agents finish —
   never poll or sleep.
@@ -47,11 +48,13 @@ explicitly requests one, independent work can run in parallel, or delegation has
 benefit. Do not spawn a blocking foreground general subagent merely because a task is complex or multi-step.
 Continue to use specialized agents when their specialization provides a clear benefit.
 
-Start bounded investigations with direct tools — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or
-string. If 2-4 targeted tool calls do not locate the answer and the next step requires broader searching,
-delegate to Explore and include what was already checked. Use Explore immediately when the user asks to explore
-or investigate the codebase, or when the task is obviously broad, high-fanout, or likely to produce enough output
-to bloat the main context. Afterward, read only the files needed to act on or verify its findings.
+Start bounded lookups with direct tools — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or string.
+If 2-4 targeted tool calls do not locate the answer and the next step requires broader retrieval, delegate to
+Explore and include what was already checked. Use Explore immediately for broad, high-fanout searches likely to
+produce excessive output, or when the user explicitly asks to locate, trace, or factually map code. Do not use
+Explore for code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other
+judgment-heavy work. The primary agent must read decisive files and perform synthesis, evaluation, recommendations,
+and final technical conclusions.
 
 ## Usage notes
 
@@ -108,9 +111,11 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Avoid duplicating work that subagents are already doing.",
   ].join(" "),
   [
-    "Start bounded investigations with direct tools (read, grep, find).",
-    "If 2-4 targeted tool calls do not locate the answer and broader searching is needed, delegate to Explore and pass along what was already checked.",
-    "Use Explore immediately when the user asks to explore or investigate the codebase, or for obviously broad, high-fanout, or context-heavy exploration.",
+    "Start bounded lookups with direct tools (read, grep, find).",
+    "If 2-4 targeted tool calls do not locate the answer and broader retrieval is needed, delegate to Explore and pass along what was already checked.",
+    "Use Explore immediately for broad high-fanout searches, symbol or reference retrieval, and explicit requests to locate, trace, or factually map code.",
+    "Do not delegate code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy work to Explore.",
+    "The primary agent must read decisive files and perform synthesis, evaluation, and recommendations.",
   ].join(" "),
   "Use foreground when you need the agent's result before continuing, especially when exploration informs your next steps. Use background for genuinely independent work. You will be notified when background agents finish — do not poll or sleep.",
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",

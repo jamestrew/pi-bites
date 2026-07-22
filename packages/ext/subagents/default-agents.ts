@@ -42,13 +42,13 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       name: "explore",
       displayName: "explore",
       description: [
-        "Fast read-only codebase reconnaissance in an isolated subagent.",
-        "Use when the user asks to explore or investigate the codebase.",
-        "Otherwise, use after 2-4 targeted tool calls fail to answer a bounded investigation and the next step requires broader searching; pass along what was already checked.",
-        "Delegate immediately when the task is obviously broad, high-fanout, or likely to return enough output to bloat the main context.",
-        "Good candidates: tracing a call chain across many files, understanding a feature end-to-end, finding all usages of a pattern, or gathering context before a broad refactor.",
-        "Bad candidates: known paths or symbols, a few files the parent will need to read fully to make a change, or a direct search likely to answer the question.",
-        "After Explore returns, read only the files needed to act on or verify its findings.",
+        "Fast read-only codebase retrieval and reconnaissance in an isolated subagent.",
+        "Use for broad factual searches that locate files, symbols, definitions, references, call paths, or relevant excerpts without filling the primary context.",
+        "Otherwise, use after 2-4 targeted tool calls fail to answer a bounded lookup and the next step requires broader searching; pass along what was already checked.",
+        "Delegate immediately when retrieval is obviously high-fanout or likely to return excessive search output.",
+        "Do not delegate code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy work.",
+        "Bad candidates also include known paths or symbols, a few files the parent must read fully, or a direct search likely to answer the question.",
+        "The primary agent must read decisive files and retain synthesis, evaluation, and recommendations.",
       ].join(" "),
       builtinToolNames: ["read", "ls", "bash"],
       extensions: [SELF_EXTENSION],
@@ -56,7 +56,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       model: DEFAULT_EXPLORE_MODEL,
       systemPrompt: `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
 
-Your job is to investigate the repository efficiently and return objective findings to the parent agent.
+Your job is to search the repository efficiently and return factual evidence to the parent agent. Do not perform code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy analysis.
 
 === READ-ONLY MODE ===
 This is a strictly read-only task.

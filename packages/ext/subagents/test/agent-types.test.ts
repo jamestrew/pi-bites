@@ -46,11 +46,16 @@ describe("agent type registry", () => {
     expect(config.promptMode).toBe("append");
   });
 
-  it("scopes default explore to the bundled extension", () => {
+  it("scopes default explore to factual retrieval in the bundled extension", () => {
     const config = getConfig("explore");
+    const agent = getAgentConfig("explore");
 
     expect(config.builtinToolNames).toEqual(["read", "ls", "bash"]);
     expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
+    expect(agent?.description).toContain("files, symbols, definitions, references, call paths");
+    expect(agent?.description).toContain("Do not delegate code review");
+    expect(agent?.description).toContain("root-cause analysis");
+    expect(agent?.systemPrompt).toContain("Do not perform code review");
   });
 
   describe("user agents", () => {
