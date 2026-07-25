@@ -4,6 +4,7 @@ import registerStatusline from "./statusline.js";
 import registerFooter from "./footer/index.js";
 import registerTokenCount from "./token-count/index.js";
 import registerUsageDashboard from "./usage-dashboard.js";
+import registerContext from "./context.js";
 import registerCustomTools from "./tools.js";
 import registerFzfFileSearch from "./file-search/index.js";
 import registerAtMentionContext from "./at-mention-context/index.js";
@@ -50,6 +51,7 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!isNonInteractive && !disabled.has("tokenCount")) registerTokenCount(pi);
   if (!isNonInteractive && !disabled.has("usageDashboard")) registerUsageDashboard(pi);
+  if (!isNonInteractive && !disabled.has("context")) registerContext(pi);
   if (!isNonInteractive && !disabled.has("fzf")) registerFzfFileSearch(pi);
   if (!disabled.has("promptNormalization")) registerPromptNormalization(pi);
   if (!disabled.has("atMentionContext")) registerAtMentionContext(pi);

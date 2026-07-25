@@ -13,6 +13,7 @@ A small collection of personal extensions for the pi coding agent.
 - Script-driven statusline
 - Token-count/status helpers
 - `/usage` dashboard for session cost/token statistics
+- `/context [all]` breakdown of the active context window
 - Custom todo and question tools
 - Optional notifications
 - Session-scoped `/rollback` checkpoints for Pi-authored `edit`/`write` changes
@@ -71,7 +72,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, tools, explore, fzf, todo, question, notifications, rollback, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail
+bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, rollback, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail
 ```
 
 You can also edit config directly:

@@ -7,6 +7,7 @@ const registerModules = [
   "./footer/index.js",
   "./token-count/index.js",
   "./usage-dashboard.js",
+  "./context.js",
   "./tools.js",
   "./file-search/index.js",
   "./at-mention-context/index.js",
