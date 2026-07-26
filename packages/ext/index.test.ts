@@ -31,8 +31,10 @@ async function loadExtension(
   vi.resetModules();
 
   const registerSpies = new Map<RegisterModule, ReturnType<typeof vi.fn>>();
+  const previewPonytailPrompt = vi.fn((prompt: string) => prompt);
   for (const modulePath of registerModules) {
     const spy = vi.fn();
+    if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
     registerSpies.set(modulePath, spy);
     vi.doMock(modulePath, () => ({ default: spy }));
   }
@@ -60,6 +62,7 @@ async function loadExtension(
   return {
     pi,
     registerSpies,
+    previewPonytailPrompt,
     loadConfig,
     registerBitesCommands,
     restoreArgv: () => {
@@ -84,6 +87,10 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
+        loaded.pi,
+        loaded.previewPonytailPrompt,
+      );
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();

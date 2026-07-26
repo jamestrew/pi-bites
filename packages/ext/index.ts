@@ -51,7 +51,6 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!isNonInteractive && !disabled.has("tokenCount")) registerTokenCount(pi);
   if (!isNonInteractive && !disabled.has("usageDashboard")) registerUsageDashboard(pi);
-  if (!isNonInteractive && !disabled.has("context")) registerContext(pi);
   if (!isNonInteractive && !disabled.has("fzf")) registerFzfFileSearch(pi);
   if (!disabled.has("promptNormalization")) registerPromptNormalization(pi);
   if (!disabled.has("atMentionContext")) registerAtMentionContext(pi);
@@ -62,6 +61,9 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("spotme")) registerSpotme(pi);
   if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
     registerInlineReferences(pi);
-  if (!disabled.has("ponytail")) registerPonytail(pi, configRef);
+  const previewPonytailPrompt = disabled.has("ponytail")
+    ? undefined
+    : registerPonytail(pi, configRef);
+  if (!isNonInteractive && !disabled.has("context")) registerContext(pi, previewPonytailPrompt);
   registerBitesCommands(pi);
 }

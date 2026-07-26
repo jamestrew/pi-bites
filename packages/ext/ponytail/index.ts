@@ -9,6 +9,11 @@ import {
 } from "../config.js";
 
 const DEFAULT_MODE = "full" satisfies PonytailMode;
+const PONYTAIL_BLOCK_START = "<pi-bites-ponytail>";
+const PONYTAIL_BLOCK_END = "</pi-bites-ponytail>";
+const PONYTAIL_BLOCK_PATTERN = /\n\n<pi-bites-ponytail>[\s\S]*?<\/pi-bites-ponytail>/g;
+
+export type PonytailPromptPreview = (systemPrompt: string) => string;
 const RUNTIME_MODES = ["off", "lite", "full", "ultra"] as const;
 type RuntimeMode = (typeof RUNTIME_MODES)[number];
 
@@ -142,6 +147,18 @@ function getPonytailInstructions(mode: PonytailMode): string {
   return `PONYTAIL MODE ACTIVE — level: ${effectiveMode}\n\nUse the laziest solution that actually works: YAGNI first, existing code second, stdlib/native features before custom code or new dependencies. Shortest working diff wins, but never skip understanding, security, validation, data-loss handling, accessibility, or explicit user requirements.`;
 }
 
+export function previewPonytailPrompt(systemPrompt: string, currentInstructions?: string): string {
+  const block = currentInstructions
+    ? `\n\n${PONYTAIL_BLOCK_START}\n${currentInstructions}\n${PONYTAIL_BLOCK_END}`
+    : "";
+  const matches = [...systemPrompt.matchAll(PONYTAIL_BLOCK_PATTERN)];
+  if (matches.length === 0) return block ? `${systemPrompt}${block}` : systemPrompt;
+  const firstOffset = matches[0]?.index ?? -1;
+  return systemPrompt.replace(PONYTAIL_BLOCK_PATTERN, (_owned, offset: number) =>
+    block && offset === firstOffset ? block : "",
+  );
+}
+
 function sendAlias(pi: ExtensionAPI, skillName: string, ctx: ExtensionContext): void {
   if (ctx.isIdle() === false) {
     pi.sendUserMessage(skillName, { deliverAs: "followUp" });
@@ -162,7 +179,7 @@ function dimStatus(ctx: ExtensionContext, text: string): string {
 export default function registerPonytail(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig } = { current: {} },
-): void {
+): PonytailPromptPreview {
   let currentMode: PonytailMode = DEFAULT_MODE;
   let configuredDefaultMode = getDefaultMode(configRef.current);
   let isActive = false;
@@ -253,8 +270,15 @@ export default function registerPonytail(
     syncStatus(ctx);
   });
 
-  pi.on("before_agent_start", async (event) => {
-    if (currentMode === "off") return;
-    return { systemPrompt: `${event.systemPrompt}\n\n${getPonytailInstructions(currentMode)}` };
-  });
+  const previewPrompt: PonytailPromptPreview = (systemPrompt) =>
+    previewPonytailPrompt(
+      systemPrompt,
+      currentMode === "off" ? undefined : getPonytailInstructions(currentMode),
+    );
+
+  pi.on("before_agent_start", async (event) => ({
+    systemPrompt: previewPrompt(event.systemPrompt),
+  }));
+
+  return previewPrompt;
 }

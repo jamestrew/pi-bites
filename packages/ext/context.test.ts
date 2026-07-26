@@ -3,7 +3,7 @@ import {
   type BuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { buildContextBreakdown } from "./context.js";
+import { availableContextTokens, buildContextBreakdown } from "./context.js";
 
 const sourceInfo = {
   path: "<builtin:read>",
@@ -80,7 +80,7 @@ describe("buildContextBreakdown", () => {
     expect(result.parts.find((part) => part.label === "Messages")?.tokens).toBe(3);
   });
 
-  it("preserves a positive provider total below the static estimate", () => {
+  it("does not rescale category estimates to fit a provider total", () => {
     const result = buildContextBreakdown({
       total: 4,
       window: 1_000,
@@ -92,5 +92,9 @@ describe("buildContextBreakdown", () => {
     });
 
     expect(result.total).toBe(4);
+    expect(result.parts.find((part) => part.label === "System prompt")?.tokens).toBe(5);
+    expect(result.parts.find((part) => part.label === "Messages")?.tokens).toBe(3);
+    expect(result.parts.reduce((sum, part) => sum + part.tokens, 0)).toBe(8);
+    expect(availableContextTokens(result)).toBe(996);
   });
 });

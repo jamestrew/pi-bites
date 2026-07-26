@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { formatTokens } from "./footer/index.js";
+import type { PonytailPromptPreview } from "./ponytail/index.js";
 
 export interface ContextPart {
   label: string;
@@ -94,37 +95,26 @@ export function buildContextBreakdown(input: {
   const estimatedTotal = fullSystemTokens + toolTokens + input.messageTokens;
   // Pi reports zero before the first model response, but static prompt and tool context already exists.
   const total = input.total === null || input.total === 0 ? estimatedTotal : input.total;
-  const fixedTokens = systemTokens + toolTokens + fileTokens + skillTokens;
-  const scale = fixedTokens > total ? total / fixedTokens : 1;
-  const scaleDetails = (items: Array<{ label: string; tokens: number }>) =>
-    items.map((item) => ({ ...item, tokens: Math.floor(item.tokens * scale) }));
-  const scaledTools = scaleDetails(tools);
-  const scaledFiles = scaleDetails(files);
-  const scaledSkills = scaleDetails(skills);
-  const scaledSystem = Math.floor(systemTokens * scale);
-  const scaledToolTokens = scaledTools.reduce((sum, item) => sum + item.tokens, 0);
-  const scaledFileTokens = scaledFiles.reduce((sum, item) => sum + item.tokens, 0);
-  const scaledSkillTokens = scaledSkills.reduce((sum, item) => sum + item.tokens, 0);
-  const messages = Math.max(
-    0,
-    total - scaledSystem - scaledToolTokens - scaledFileTokens - scaledSkillTokens,
-  );
 
   return {
     total,
     window: input.window,
     parts: [
-      { label: "System prompt", tokens: scaledSystem },
-      { label: "System tools", tokens: scaledToolTokens, details: scaledTools },
-      { label: "Context files", tokens: scaledFileTokens, details: scaledFiles },
-      { label: "Skills", tokens: scaledSkillTokens, details: scaledSkills },
-      { label: "Messages", tokens: messages },
+      { label: "System prompt", tokens: systemTokens },
+      { label: "System tools", tokens: toolTokens, details: tools },
+      { label: "Context files", tokens: fileTokens, details: files },
+      { label: "Skills", tokens: skillTokens, details: skills },
+      { label: "Messages", tokens: input.messageTokens },
     ],
   };
 }
 
 const PART_GLYPHS = ["⛀", "⛁", "⛂", "⛃", "⛒"];
 const PART_COLORS = ["accent", "warning", "success", "mdLink", "text"] as const;
+
+export function availableContextTokens(data: Pick<ContextBreakdown, "total" | "window">): number {
+  return Math.max(0, data.window - data.total);
+}
 
 class ContextComponent {
   constructor(
@@ -142,8 +132,10 @@ class ContextComponent {
   }
 
   render(width: number): string[] {
-    const free = Math.max(0, this.data.window - this.data.total);
-    const all = [...this.data.parts, { label: "Free space", tokens: free }];
+    const all = [
+      ...this.data.parts,
+      { label: "Free space", tokens: availableContextTokens(this.data) },
+    ];
     const glyphs = [...PART_GLYPHS, "⛶"];
     const colors = [...PART_COLORS, "dim"] as const;
     const cells: string[] = [];
@@ -166,19 +158,20 @@ class ContextComponent {
       "",
     ];
     for (let row = 0; row < 5; row++) lines.push(cells.slice(row * 20, row * 20 + 20).join(" "));
-    lines.push("", this.theme.fg("muted", "Estimated usage by category"));
+    lines.push("", this.theme.fg("muted", "Independent category estimates (may not sum to total)"));
     for (let i = 0; i < all.length; i++) {
       const part = all[i];
       if (!part) continue;
+      const approximate = part.label === "Free space" ? "" : "~";
       lines.push(
-        `${this.theme.fg(colors[i] ?? "dim", glyphs[i] ?? "⛶")} ${part.label}: ${formatTokens(part.tokens)} tokens (${percent(part.tokens)})`,
+        `${this.theme.fg(colors[i] ?? "dim", glyphs[i] ?? "⛶")} ${part.label}: ${approximate}${formatTokens(part.tokens)} tokens (${percent(part.tokens)})`,
       );
     }
 
     for (const part of this.data.parts.filter((item) => item.details)) {
       lines.push(
         "",
-        `${part.label} · ${part.details?.length ?? 0} items · ${formatTokens(part.tokens)} tokens`,
+        `${part.label} · ${part.details?.length ?? 0} items · ~${formatTokens(part.tokens)} tokens`,
       );
       if (this.expanded) {
         for (const [index, item] of (part.details ?? []).entries()) {
@@ -202,7 +195,10 @@ function estimateMessages(ctx: ExtensionCommandContext): number {
     .reduce((sum, message) => sum + estimateTokens(message), 0);
 }
 
-export default function registerContext(pi: ExtensionAPI): void {
+export default function registerContext(
+  pi: ExtensionAPI,
+  previewPrompt?: PonytailPromptPreview,
+): void {
   pi.registerCommand("context", {
     description: "Show estimated context window usage",
     getArgumentCompletions: (prefix) =>
@@ -217,10 +213,12 @@ export default function registerContext(pi: ExtensionAPI): void {
       }
       if (ctx.mode !== "tui" || !ctx.model) return;
       const usage = ctx.getContextUsage();
+      const currentSystemPrompt = ctx.getSystemPrompt();
+      const systemPrompt = previewPrompt?.(currentSystemPrompt) ?? currentSystemPrompt;
       const data = buildContextBreakdown({
         total: usage?.tokens ?? null,
         window: usage?.contextWindow ?? ctx.model.contextWindow,
-        systemPrompt: ctx.getSystemPrompt(),
+        systemPrompt,
         options: ctx.getSystemPromptOptions(),
         tools: pi.getAllTools(),
         activeTools: pi.getActiveTools(),
