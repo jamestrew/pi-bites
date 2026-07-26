@@ -1,6 +1,7 @@
 ---
 name: pi-upstream-watch
 description: Pi upstream watch reviews pi changelog entries since the stored checkpoint, cross-checks this extension repo for leverage, deprecations, and adaptation tasks, then advances the checkpoint only when the user asks.
+disable-model-invocation: true
 ---
 
 # Pi Upstream Watch
