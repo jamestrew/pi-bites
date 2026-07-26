@@ -29,6 +29,14 @@ describe("buildContextBreakdown", () => {
           sourceInfo,
           disableModelInvocation: false,
         },
+        {
+          name: "manual-only",
+          description: "Only available through its command",
+          filePath: "/tmp/manual-only/SKILL.md",
+          baseDir: "/tmp/manual-only",
+          sourceInfo,
+          disableModelInvocation: true,
+        },
       ],
     };
     const systemPrompt = `${options.customPrompt}\n\n${options.appendSystemPrompt}\n\n<project_context>\n\nProject-specific instructions and guidelines:\n\n<project_instructions path="/tmp/project/AGENTS.md">\nRun bun check.\n</project_instructions>\n\n</project_context>\n${formatSkillsForPrompt(options.skills ?? [])}\nCurrent working directory: /tmp/project`;

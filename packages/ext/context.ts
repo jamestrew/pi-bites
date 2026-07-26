@@ -43,7 +43,7 @@ function contextFileDetails(options: BuildSystemPromptOptions) {
 }
 
 function skillDetails(options: BuildSystemPromptOptions): Array<{ label: string; tokens: number }> {
-  const skills = options.skills ?? [];
+  const skills = (options.skills ?? []).filter((skill) => !skill.disableModelInvocation);
   const hasRead = !options.selectedTools || options.selectedTools.includes("read");
   if (!hasRead || skills.length === 0) return [];
   const total = estimateText(formatSkillsForPrompt(skills));
