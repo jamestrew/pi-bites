@@ -86,7 +86,6 @@ type AgentToolExecuteDeps = {
   isScopeModelsEnabled: () => boolean;
   getDefaultJoinMode: () => JoinMode;
   trackSpawned: (id: string, joinMode: JoinMode) => void;
-  updateHelperToolsActive?: () => void;
   setRenderMetadata?: (toolCallId: string, model: string, thinking: ThinkingLevel) => void;
 };
 
@@ -96,7 +95,7 @@ async function runBackgroundAgent(
   invocation: PreparedInvocation,
 ) {
   const { pi, manager, agentActivity, fleet } = deps;
-  const { getDefaultJoinMode, trackSpawned, updateHelperToolsActive } = deps;
+  const { getDefaultJoinMode, trackSpawned } = deps;
   const { toolCallId, params, ctx } = request;
   const {
     subagentType,
@@ -140,8 +139,6 @@ async function runBackgroundAgent(
   agentActivity.set(id, bgState);
   fleet.ensureTimer();
   fleet.update();
-
-  updateHelperToolsActive?.();
 
   const isQueued = record?.status === "queued";
   return textResult(

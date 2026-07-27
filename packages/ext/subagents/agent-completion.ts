@@ -8,14 +8,12 @@ type AgentCompletionDeps = {
   pi: ExtensionAPI;
   getRecord: (id: string) => AgentRecord | undefined;
   onAgentFinishedUI: (id: string) => void;
-  onActionableAgentsChanged: () => void;
 };
 
 export function createAgentCompletionHandler({
   pi,
   getRecord,
   onAgentFinishedUI,
-  onActionableAgentsChanged,
 }: AgentCompletionDeps) {
   const pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
   const NUDGE_HOLD_MS = 200;
@@ -136,17 +134,12 @@ export function createAgentCompletionHandler({
 
     if (record.isBackground === false) {
       onAgentFinishedUI(record.id);
-      onActionableAgentsChanged();
       return;
     }
 
-    if (currentBatchAgents.includes(record.id)) {
-      onActionableAgentsChanged();
-      return;
-    }
+    if (currentBatchAgents.includes(record.id)) return;
 
     if (groupJoin.onAgentComplete(record) === "pass") sendIndividualNudge(record);
-    onActionableAgentsChanged();
   }
 
   return {

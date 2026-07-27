@@ -28,15 +28,13 @@ function makeHarness(records: AgentRecord[] = []) {
     sendMessage: vi.fn(),
   };
   const onAgentFinishedUI = vi.fn();
-  const onActionableAgentsChanged = vi.fn();
   const completion = createAgentCompletionHandler({
     pi: pi as any,
     getRecord: (id) => byId.get(id),
     onAgentFinishedUI,
-    onActionableAgentsChanged,
   });
 
-  return { completion, pi, onAgentFinishedUI, onActionableAgentsChanged };
+  return { completion, pi, onAgentFinishedUI };
 }
 
 describe("agent completion notifications", () => {
@@ -45,12 +43,11 @@ describe("agent completion notifications", () => {
 
   it("sends an individual completion after the hold window", () => {
     const record = makeRecord("a");
-    const { completion, pi, onAgentFinishedUI, onActionableAgentsChanged } = makeHarness([record]);
+    const { completion, pi, onAgentFinishedUI } = makeHarness([record]);
 
     completion.onAgentComplete(record);
 
     expect(onAgentFinishedUI).toHaveBeenCalledWith("a");
-    expect(onActionableAgentsChanged).toHaveBeenCalledOnce();
     vi.advanceTimersByTime(199);
     expect(pi.sendMessage).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
@@ -170,7 +167,7 @@ describe("agent completion notifications", () => {
 
   it("records a foreground completion without notifying the parent", () => {
     const record = makeRecord("a", { isBackground: false });
-    const { completion, pi, onAgentFinishedUI, onActionableAgentsChanged } = makeHarness([record]);
+    const { completion, pi, onAgentFinishedUI } = makeHarness([record]);
 
     completion.onAgentComplete(record);
     vi.runAllTimers();
@@ -190,7 +187,6 @@ describe("agent completion notifications", () => {
       }),
     );
     expect(onAgentFinishedUI).toHaveBeenCalledWith("a");
-    expect(onActionableAgentsChanged).toHaveBeenCalledOnce();
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     completion.dispose();

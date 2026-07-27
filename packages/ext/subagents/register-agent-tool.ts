@@ -31,7 +31,6 @@ type RegisterAgentToolDeps = {
   setFleetViewEnabled: (enabled: boolean) => void;
   getDefaultJoinMode: () => JoinMode;
   trackSpawned: (id: string, joinMode: JoinMode) => void;
-  updateHelperToolsActive?: () => void;
 };
 
 export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
@@ -49,7 +48,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     setFleetViewEnabled,
     getDefaultJoinMode,
     trackSpawned,
-    updateHelperToolsActive,
   } = deps;
   const terminalRecords = new Map<string, AgentRecord>();
   const rememberTerminalRecord = (event: { id: string }) => {
@@ -141,7 +139,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
         isScopeModelsEnabled,
         getDefaultJoinMode,
         trackSpawned,
-        updateHelperToolsActive,
         setRenderMetadata: (toolCallId, model, thinking) =>
           renderMetadata.set(toolCallId, { model, thinking }),
       }),

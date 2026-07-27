@@ -65,10 +65,10 @@ async function spawnBackground(tools: Map<string, any>) {
 describe("background helper tools", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("registers only Agent and MessageAgent and activates messaging only while running", async () => {
+  it("keeps MessageAgent registered without changing active tools at runtime", async () => {
     let finish!: (value: any) => void;
     vi.mocked(runAgent).mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    const { pi, tools, active } = makePi();
+    const { pi, tools } = makePi();
     subagentsExtension(pi);
 
     expect([...tools.keys()]).toContain("Agent");
@@ -77,15 +77,15 @@ describe("background helper tools", () => {
     expect([...tools.keys()]).toContain("MessageAgent");
     expect([...tools.keys()]).not.toContain("get_subagent_result");
     expect([...tools.keys()]).not.toContain("steer_subagent");
-    expect(active()).toEqual(["Agent", "read"]);
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
 
     await spawnBackground(tools);
-    expect(active()).toEqual(["Agent", "read", "MessageAgent"]);
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
 
     finish({ responseText: "done result", session: { dispose: vi.fn() } as any });
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
 
-    expect(active()).toEqual(["Agent", "read"]);
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
     const notification = pi.sendMessage.mock.calls[0]?.[0];
     expect(notification.content).toContain("done result");
     expect(notification.content).not.toContain("get_subagent_result");

@@ -13,7 +13,6 @@ import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-cod
 import { type BitesConfig } from "../config.js";
 import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
-import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { getAgentConfig, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
@@ -53,26 +52,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
 
-  function hasRunningAgentWithoutInlineResult(): boolean {
-    return manager
-      .listAgents()
-      .some(
-        (record) =>
-          record.isBackground !== false &&
-          (record.status === "running" || record.status === "queued"),
-      );
-  }
-
-  function updateHelperToolsActive(): void {
-    if (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function") return;
-    const helperTool = SUBAGENT_TOOL_NAMES.MESSAGE_AGENT;
-    const current = pi.getActiveTools();
-    const next = hasRunningAgentWithoutInlineResult()
-      ? [...new Set([...current, helperTool])]
-      : current.filter((name) => name !== helperTool);
-    pi.setActiveTools(next);
-  }
-
   let manager: AgentManager;
   let fleet: FleetList;
   const completion = createAgentCompletionHandler({
@@ -82,7 +61,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
       agentActivity.delete(id);
       fleet.onAgentFinished(id);
     },
-    onActionableAgentsChanged: updateHelperToolsActive,
   });
 
   manager = new AgentManager(
@@ -132,12 +110,10 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
     manager.clearCompleted();
-    updateHelperToolsActive();
   });
 
   pi.on("session_before_switch", () => {
     manager.clearCompleted();
-    updateHelperToolsActive();
   });
 
   const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
@@ -214,7 +190,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     currentCtx = undefined;
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
     manager.abortAll();
-    updateHelperToolsActive();
     completion.dispose();
     fleet.dispose();
     manager.dispose();
@@ -299,7 +274,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     setFleetViewEnabled,
     getDefaultJoinMode,
     trackSpawned: completion.trackSpawned,
-    updateHelperToolsActive,
   });
 
   // ---- MessageAgent tool ----
