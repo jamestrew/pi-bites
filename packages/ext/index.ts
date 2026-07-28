@@ -21,6 +21,7 @@ import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
 import registerSubagents from "./subagents/index.js";
 import registerView from "./view/index.js";
+import registerGoal from "./goal/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
 
@@ -48,6 +49,7 @@ export default function (pi: ExtensionAPI) {
 
   if (isSubagent) return;
 
+  if (!disabled.has("goal")) registerGoal(pi);
   if (!disabled.has("view")) registerView(pi);
   if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi, configRef);
   if (!isNonInteractive && !disabled.has("subagents")) registerSubagents(pi, configRef);

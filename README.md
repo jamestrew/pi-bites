@@ -20,6 +20,7 @@ A small collection of personal extensions for the pi coding agent.
 - Session-scoped `/rollback` checkpoints for Pi-authored `edit`/`write` changes
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
 - Inline `$skill:name` / `$prompt:name` references with hidden context injection
+- Codex-style `/goal` workflow with persisted goals and automatic continuation
 
 ## Installation
 
@@ -78,7 +79,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, checkpoints, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view
+bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, checkpoints, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal
 ```
 
 You can also edit config directly:

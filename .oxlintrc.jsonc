@@ -39,6 +39,15 @@
         "typescript/no-unsafe-return": "off",
       },
     },
+    {
+      "files": ["packages/ext/goal/test/**"],
+      "rules": {
+        "no-unused-vars": "off",
+        "typescript/no-base-to-string": "off",
+        "typescript/no-redundant-type-constituents": "off",
+        "typescript/no-unnecessary-condition": "off",
+      },
+    },
   ],
   "env": {
     "builtin": true,

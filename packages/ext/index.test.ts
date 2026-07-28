@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 const registerModules = [
@@ -24,12 +26,13 @@ const registerModules = [
   "./subagents/index.js",
   "./ponytail/index.js",
   "./view/index.js",
+  "./goal/index.js",
 ] as const;
 
 type RegisterModule = (typeof registerModules)[number];
 
 async function loadExtension(
-  options: { disable?: string[]; argv?: string[]; subagent?: string } = {},
+  options: { disable?: string[]; argv?: string[]; subagent?: string; realGoal?: boolean } = {},
 ) {
   vi.resetModules();
 
@@ -37,7 +40,9 @@ async function loadExtension(
   const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
   const previewCacheSystemPrompt = vi.fn((prompt: string) => `cache:${prompt}`);
   const previewCacheTools = vi.fn((tools: unknown[]) => tools);
+  if (options.realGoal) vi.doUnmock("./goal/index.js");
   for (const modulePath of registerModules) {
+    if (modulePath === "./goal/index.js" && options.realGoal) continue;
     const spy = vi.fn();
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
     if (modulePath === "./cache-padding/index.js")
@@ -63,7 +68,12 @@ async function loadExtension(
   else delete process.env.PI_BITES_SUBAGENT;
 
   const { default: registerExtension } = await import("./index.js");
-  const pi = { on: vi.fn() };
+  const pi = {
+    on: vi.fn(),
+    registerCommand: vi.fn(),
+    registerTool: vi.fn(),
+    sendMessage: vi.fn(),
+  };
   registerExtension(pi as never);
 
   return {
@@ -88,6 +98,13 @@ afterEach(() => {
 });
 
 describe("extension entrypoint", () => {
+  test("does not expose the goal prompt outside the runtime config gate", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+    ) as { pi?: { prompts?: string[] } };
+    expect(manifest.pi?.prompts).toBeUndefined();
+  });
+
   test("default registers in normal interactive sessions", async () => {
     const loaded = await loadExtension();
     try {
@@ -96,6 +113,7 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./goal/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./cache-padding/index.js")).toHaveBeenCalledWith(loaded.pi);
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,
@@ -140,6 +158,38 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();
+    }
+  });
+
+  test("can disable goal mode without disabling unrelated extensions", async () => {
+    const loaded = await loadExtension({ disable: ["goal"] });
+    try {
+      expect(loaded.registerSpies.get("./goal/index.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
+  test("complete registry exposes goal APIs only when enabled", async () => {
+    const enabled = await loadExtension({ realGoal: true });
+    try {
+      expect(enabled.pi.registerCommand.mock.calls.map(([name]) => name)).toContain("goal");
+      expect(enabled.pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
+        "get_goal",
+        "create_goal",
+        "update_goal",
+      ]);
+    } finally {
+      enabled.restoreArgv();
+    }
+
+    const disabled = await loadExtension({ disable: ["goal"], realGoal: true });
+    try {
+      expect(disabled.pi.registerCommand).not.toHaveBeenCalled();
+      expect(disabled.pi.registerTool).not.toHaveBeenCalled();
+    } finally {
+      disabled.restoreArgv();
     }
   });
 });

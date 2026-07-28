@@ -43,7 +43,7 @@ describe("loadConfig", () => {
     expect(
       parseBitesConfig({
         ponytail: { defaultMode: "full" },
-        disable: ["checkpoints"],
+        disable: ["checkpoints", "goal"],
       }),
     ).toBeDefined();
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
