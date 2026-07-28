@@ -123,6 +123,10 @@ export function createGoalAccounting(
     }
   };
 
+  const resetForNavigation = (): void => {
+    Object.assign(deps.getAccounting(), createAccountingState());
+  };
+
   const beginAccounting = (adoptForCurrentTurn = false): void => {
     const goal = deps.getGoal();
     const accounting = deps.getAccounting();
@@ -256,6 +260,7 @@ export function createGoalAccounting(
 
   return {
     detach,
+    resetForNavigation,
     beginAccounting,
     beginTurn,
     finishTurn,

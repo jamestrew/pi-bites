@@ -4,6 +4,7 @@ import type {
   ExtensionHandler,
   SessionBeforeCompactEvent,
   SessionBeforeForkEvent,
+  SessionBeforeTreeEvent,
   SessionCompactEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -128,13 +129,31 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       continuation.maybeContinue(ctx);
     }) satisfies ExtensionHandler<SessionStartEvent>,
 
+    onSessionBeforeTree: (async (_event, ctx) => {
+      if (!ctx.isIdle()) {
+        ctx.abort();
+      }
+      while (!ctx.isIdle()) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }) satisfies ExtensionHandler<SessionBeforeTreeEvent>,
+
     onSessionTree: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
+      continuation.clearContinuationState();
+      continuation.clearPassthroughContinuationInput();
+      goalAccounting.resetForNavigation();
+      resetErrorRecovery();
+      runtimeState.staleQueuedWorkGuard.reset();
+      runtimeState.currentTurnIndex = null;
+      runtimeState.turnEndAccounted = false;
+      runtimeState.agentRunSequence += 1;
+
       stateController.reloadFromSession(ctx);
       if (!stateController.isContinuationDeferred()) {
         goalAccounting.beginAccounting();
       }
-      continuation.maybeContinue(ctx);
+      continuation.maybeContinueAfterCurrentEvent(ctx);
     }) satisfies ExtensionHandler<SessionTreeEvent>,
 
     onSessionBeforeFork: (async (event, ctx) => {

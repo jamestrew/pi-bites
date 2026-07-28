@@ -19,6 +19,7 @@ export type {
 export interface StaleQueuedWorkGuard {
   lifecycleKind(): StaleQueuedWorkLifecycleKind;
   isBlockingContinuation(): boolean;
+  reset(): void;
   noteRunnableWorkStarted(): void;
   noteStaleWorkStarted(goalId: string): void;
   planContextAbort(currentTurnIndex: number | null): StaleQueuedWorkPlan | null;
@@ -56,6 +57,10 @@ export function createStaleQueuedWorkGuard(): StaleQueuedWorkGuard {
 
     isBlockingContinuation(): boolean {
       return state.kind === "abortingTurn";
+    },
+
+    reset(): void {
+      state = createInitialStaleQueuedWorkState();
     },
 
     noteRunnableWorkStarted(): void {

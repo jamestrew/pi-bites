@@ -94,6 +94,7 @@ export function createRuntimeHarness(
   } = {},
 ) {
   const entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]> = [];
+  let branch: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]> = entries;
   const handlers = new Map<string, EventHandler[]>();
   const sentMessages: SentMessage[] = [];
   const sentUserMessages: SentUserMessage[] = [];
@@ -142,14 +143,18 @@ export function createRuntimeHarness(
         runtime.appendFailures -= 1;
         throw new Error("durable append failed");
       }
-      entries.push({
-        type: "custom",
+      const entry = {
+        type: "custom" as const,
         id: `entry-${++entryIndex}`,
-        parentId: null,
+        parentId: branch.at(-1)?.id ?? null,
         timestamp: new Date(0).toISOString(),
         customType,
         data,
-      });
+      };
+      entries.push(entry);
+      if (branch !== entries) {
+        branch.push(entry);
+      }
     },
     events: {
       emit() {
@@ -217,8 +222,8 @@ export function createRuntimeHarness(
   };
 
   const sessionManager: ExtensionCommandContext["sessionManager"] = {
-    buildContextEntries: () => entries,
-    getBranch: () => entries,
+    buildContextEntries: () => branch,
+    getBranch: () => branch,
     getCwd: () => "/tmp",
     getEntries: () => entries,
     getEntry: () => undefined,
@@ -388,6 +393,14 @@ export function createRuntimeHarness(
     setContextUsage(contextUsage: ReturnType<ExtensionContext["getContextUsage"]>) {
       runtime.contextUsage = contextUsage;
     },
+    selectBranch(entryIds: readonly string[]) {
+      const selected = entryIds.map((id) => entries.find((entry) => entry.id === id));
+      assert.ok(
+        selected.every((entry) => entry !== undefined),
+        "Expected branch entries to exist.",
+      );
+      branch = selected;
+    },
     failNextAppends(count = 1) {
       runtime.appendFailures = count;
     },
@@ -407,7 +420,7 @@ export function createRuntimeHarness(
     get abortCount() {
       return runtime.abortCount;
     },
-    snapshot: () => reconstructGoal(entries),
+    snapshot: () => reconstructGoal(branch),
   };
 }
 

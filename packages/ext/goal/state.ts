@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import {
   applyForkInheritanceEntry,
   isForkGoalEntry,
-  reconstructForkInheritanceBaseline,
   type RestoredGoalState,
 } from "./fork-inheritance.js";
 import {
@@ -296,45 +295,6 @@ export function reconstructGoal(entries: Iterable<SessionEntryLike>): RestoredGo
       applyGoalEntry(restored, entry.data);
     }
   }
-  return restored;
-}
-
-/** Fold the selected branch over immutable child inheritance metadata. */
-export function reconstructSessionGoal(
-  branch: readonly SessionEntryLike[],
-  allEntries: readonly SessionEntryLike[],
-): RestoredGoalState {
-  const baseline = reconstructForkInheritanceBaseline(allEntries, isThreadGoal);
-  if (!baseline) return reconstructGoal(branch);
-
-  const branchContainsSnapshot = branch.some((entry) => entry.id === baseline.snapshotEntryId);
-  const restored: RestoredGoalState = branchContainsSnapshot
-    ? reconstructGoal(branch)
-    : {
-        goal: baseline.goal ? cloneGoal(baseline.goal) : null,
-        inheritedTransferId: baseline.inheritedTransferId,
-        deferredTransferId: baseline.deferredTransferId,
-      };
-
-  if (!branchContainsSnapshot) {
-    const snapshotIndex = allEntries.findIndex((entry) => entry.id === baseline.snapshotEntryId);
-    const entryIndexes = new Map(allEntries.map((entry, index) => [entry.id, index]));
-    for (const entry of branch) {
-      if (
-        (entryIndexes.get(entry.id) ?? -1) <= snapshotIndex ||
-        entry.type !== "custom" ||
-        entry.customType !== CUSTOM_ENTRY_TYPE ||
-        !isGoalCustomEntry(entry.data) ||
-        isForkGoalEntry(entry.data, isThreadGoal)
-      ) {
-        continue;
-      }
-      applyGoalEntry(restored, entry.data);
-    }
-  }
-
-  restored.inheritedTransferId = baseline.inheritedTransferId;
-  restored.deferredTransferId = baseline.deferredTransferId;
   return restored;
 }
 

@@ -134,7 +134,13 @@ test("back-to-back stale aborts unblock continuation when active id-less agent_e
     assert.equal(harness.sentMessages.length, 0);
 
     harness.sentMessages.length = 0;
+    await harness.emit("session_before_tree", {
+      type: "session_before_tree",
+      preparation: {},
+      signal: new AbortController().signal,
+    });
     await harness.emit("session_tree", { type: "session_tree" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const goal = harness.snapshot().goal;
     assert.equal(goal?.goalId, replacement?.goalId);
@@ -204,7 +210,13 @@ test("same-goal stale abort unblocks continuation when active agent_end arrives 
     assert.equal(harness.sentMessages.length, 0);
 
     harness.sentMessages.length = 0;
+    await harness.emit("session_before_tree", {
+      type: "session_before_tree",
+      preparation: {},
+      signal: new AbortController().signal,
+    });
     await harness.emit("session_tree", { type: "session_tree" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const goal = harness.snapshot().goal;
     assert.equal(goal?.goalId, replacement?.goalId);

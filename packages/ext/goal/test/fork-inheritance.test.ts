@@ -436,7 +436,7 @@ describe("goal fork inheritance through Pi runtime", () => {
     await runtime.dispose();
   });
 
-  test("tree navigation before the child snapshot keeps continuation deferred", async () => {
+  test("tree navigation before the child snapshot reconstructs the visible branch goal", async () => {
     const env = await createForkRuntime();
     const manager = SessionManager.create(env.cwd, env.sessionDir);
     manager.appendMessage({ role: "user", content: "first", timestamp: 1 });
@@ -477,20 +477,15 @@ describe("goal fork inheritance through Pi runtime", () => {
 
     await runtime.session.navigateTree(copiedAssistantId, { summarize: false });
     await new Promise((resolve) => setTimeout(resolve, __testHooks.continuationRetryMs + 25));
-    expect(streamCalls).toBe(0);
-    expect(
-      runtime.session.sessionManager
-        .getEntries()
-        .filter(
-          (entry) => entry.type === "custom_message" && entry.customType === CUSTOM_ENTRY_TYPE,
-        ),
-    ).toHaveLength(0);
-
-    await runtime.session.prompt("destination setup is ready");
-    await new Promise((resolve) => setTimeout(resolve, __testHooks.continuationRetryMs + 25));
     await runtime.session.agent.waitForIdle();
     expect(streamCalls).toBe(2);
-    expect(countKind(runtime.session.sessionManager, "fork_deferral")).toBe(1);
+    expect(
+      (
+        (await executeGoalTool(runtime.session, "get_goal", {})).details as {
+          goal: { objective: string; status: string };
+        }
+      ).goal,
+    ).toMatchObject({ objective: "copied historical", status: "blocked" });
 
     await runtime.session.navigateTree(copiedAssistantId, { summarize: false });
     expect(
@@ -499,7 +494,7 @@ describe("goal fork inheritance through Pi runtime", () => {
           goal: { objective: string };
         }
       ).goal.objective,
-    ).toBe("stay deferred");
+    ).toBe("copied historical");
     await runtime.dispose();
   });
 

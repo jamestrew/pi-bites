@@ -46,10 +46,6 @@ export interface RestoredGoalState {
   deferredTransferId: string | null;
 }
 
-export interface ForkInheritanceBaseline extends RestoredGoalState {
-  snapshotEntryId: string;
-}
-
 interface SourceSessionForFork {
   getEntries(): readonly SessionEntryLike[];
   getHeader(): { id: string } | null;
@@ -219,37 +215,6 @@ export function applyForkInheritanceEntry(restored: RestoredGoalState, entry: Fo
   } else if (entry.kind === "fork_deferral" && entry.transferId === restored.deferredTransferId) {
     restored.deferredTransferId = null;
   }
-}
-
-/** Session-level inherited baseline and deferral metadata, independent of tree position. */
-export function reconstructForkInheritanceBaseline(
-  entries: readonly SessionEntryLike[],
-  isThreadGoal: (goal: unknown) => goal is ThreadGoal,
-): ForkInheritanceBaseline | null {
-  let baseline: ForkInheritanceBaseline | null = null;
-  for (const entry of entries) {
-    if (
-      entry.type !== "custom" ||
-      entry.customType !== CUSTOM_ENTRY_TYPE ||
-      !isForkGoalEntry(entry.data, isThreadGoal)
-    ) {
-      continue;
-    }
-    if (entry.data.kind === "fork_snapshot" && entry.id) {
-      baseline = {
-        goal: entry.data.goal ? cloneGoal(entry.data.goal) : null,
-        inheritedTransferId: entry.data.transferId,
-        deferredTransferId: entry.data.continuationDeferred ? entry.data.transferId : null,
-        snapshotEntryId: entry.id,
-      };
-    } else if (
-      entry.data.kind === "fork_deferral" &&
-      entry.data.transferId === baseline?.deferredTransferId
-    ) {
-      baseline.deferredTransferId = null;
-    }
-  }
-  return baseline;
 }
 
 export function canPersistForkDestination(

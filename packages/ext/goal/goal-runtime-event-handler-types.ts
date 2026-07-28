@@ -11,6 +11,7 @@ import type {
   InputEventResult,
   SessionBeforeCompactEvent,
   SessionBeforeForkEvent,
+  SessionBeforeTreeEvent,
   SessionCompactEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -34,6 +35,7 @@ export interface GoalRuntimeEventHandlers {
   onInput: ExtensionHandler<InputEvent, InputEventResult>;
   onContext: ExtensionHandler<ContextEvent, ContextEventResult | undefined>;
   onSessionStart: ExtensionHandler<SessionStartEvent>;
+  onSessionBeforeTree: ExtensionHandler<SessionBeforeTreeEvent>;
   onSessionTree: ExtensionHandler<SessionTreeEvent>;
   onBeforeAgentStart: ExtensionHandler<BeforeAgentStartEvent, undefined>;
   onAgentStart: ExtensionHandler<AgentStartEvent>;
@@ -87,6 +89,7 @@ export interface GoalAccountingPort {
   beginTurn: (chargeable?: boolean) => void;
   finishTurn: () => void;
   detach: () => void;
+  resetForNavigation: () => void;
   observeAssistantUsage: (message: TurnEndEvent["message"]) => void;
 }
 
@@ -152,7 +155,11 @@ export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectCon
 export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectContext {
   runtimeState: Pick<
     GoalRuntimeState,
-    "agentRunSequence" | "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard"
+    | "agentRunSequence"
+    | "currentTurnIndex"
+    | "recoveryState"
+    | "staleQueuedWorkGuard"
+    | "turnEndAccounted"
   >;
   stateController: Pick<
     GoalStateController,
@@ -166,6 +173,7 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
   >;
   continuation: Pick<
     GoalRuntimeContinuationPort,
+    | "clearContinuationState"
     | "clearContinuationTimer"
     | "clearPostCompactContinuationFallback"
     | "clearPassthroughContinuationInput"

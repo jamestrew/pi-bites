@@ -9,6 +9,7 @@ export function registerGoalRuntimeEvents(
   pi.on("input", (event, ctx) => controller.onInput(event, ctx));
   pi.on("context", (event, ctx) => controller.onContext(event, ctx));
   pi.on("session_start", (event, ctx) => controller.onSessionStart(event, ctx));
+  pi.on("session_before_tree", (event, ctx) => controller.onSessionBeforeTree(event, ctx));
   pi.on("session_tree", (event, ctx) => controller.onSessionTree(event, ctx));
   pi.on("before_agent_start", (event, ctx) => controller.onBeforeAgentStart(event, ctx));
   pi.on("agent_start", (event, ctx) => controller.onAgentStart(event, ctx));

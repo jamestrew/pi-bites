@@ -20,8 +20,8 @@ import {
 import {
   goalsEquivalent,
   hostOverflowCapResetEntry,
+  reconstructGoal,
   reconstructHostOverflowCapNeedsUserReset,
-  reconstructSessionGoal,
   updateGoalStatus,
 } from "./state.js";
 import {
@@ -139,7 +139,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
   const reloadFromSession = (ctx: ExtensionContext): void => {
     const previousGoalId = getGoal()?.goalId ?? null;
     const branch = ctx.sessionManager.getBranch();
-    const reconstructed = reconstructSessionGoal(branch, ctx.sessionManager.getEntries());
+    const reconstructed = reconstructGoal(branch);
     deps.persistence.restore(reconstructed);
     deps.persistence.syncPersistedSnapshot(reconstructed.goal);
     syncHostOverflowUserResetFromSession(
