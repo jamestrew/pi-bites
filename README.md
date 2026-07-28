@@ -90,6 +90,16 @@ You can also edit config directly:
 }
 ```
 
+## Goal model smoke
+
+The real-model goal workflow is intentionally separate from `bun check`:
+
+```bash
+PI_GOAL_SMOKE_MODEL=provider/model bun run smoke:goal-model
+```
+
+It creates, works, inspects, verifies, completes, and reports usage for a temporary goal. It requires configured model/network access and leaves no repository files behind.
+
 ## Rollback checkpoints
 
 Run `/rollback` inside pi to restore files Pi changed with tracked `edit` and `write` tool calls back to an earlier checkpoint in the current session.

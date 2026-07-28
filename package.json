@@ -14,6 +14,7 @@
     "typecheck": "tsgo --noEmit",
     "test": "env -u PI_PACKAGE_DIR vitest run packages",
     "check": "bun run lint && bun run fmt && bun run typecheck && bun run test",
+    "smoke:goal-model": "./scripts/goal-model-smoke.sh",
     "update:pi": "./scripts/update-pi.sh"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { budgetLimitPrompt } from "./prompts.js";
+import type { StatusContext } from "./goal-runtime-status.js";
 import { applyUsage } from "./state.js";
 import { CUSTOM_ENTRY_TYPE, type ThreadGoal } from "./types.js";
 
@@ -12,6 +13,8 @@ export interface AccountingState {
   currentTurnTokens: number;
   lastAccountedTurnTokens: number;
   turnChargeable: boolean;
+  turnGoalId: string | null;
+  turnInProgress: boolean;
   budgetWarningSentFor: string | null;
 }
 
@@ -47,6 +50,8 @@ export function createAccountingState(): AccountingState {
     currentTurnTokens: 0,
     lastAccountedTurnTokens: 0,
     turnChargeable: true,
+    turnGoalId: null,
+    turnInProgress: false,
     budgetWarningSentFor: null,
   };
 }
@@ -97,7 +102,7 @@ export function isToolUseAssistantMessage(message: AssistantTurnMessage): boolea
 interface GoalAccountingDeps {
   getGoal: () => ThreadGoal | null;
   getAccounting: () => AccountingState;
-  applyRuntimeAccountingTransition: (ctx: ExtensionContext, nextGoal: ThreadGoal) => void;
+  applyRuntimeAccountingTransition: (ctx: StatusContext, nextGoal: ThreadGoal) => boolean;
   sendMessage: ExtensionAPI["sendMessage"];
 }
 
@@ -118,12 +123,22 @@ export function createGoalAccounting(
     }
   };
 
-  const beginAccounting = (): void => {
+  const beginAccounting = (adoptForCurrentTurn = false): void => {
     const goal = deps.getGoal();
     const accounting = deps.getAccounting();
     if (!goal || goal.status !== "active") {
       detach();
       return;
+    }
+
+    if (accounting.turnInProgress) {
+      if (adoptForCurrentTurn && accounting.turnGoalId === null) {
+        accounting.turnGoalId = goal.goalId;
+      }
+      if (accounting.turnGoalId !== goal.goalId) {
+        detach({ preserveCarry: false });
+        return;
+      }
     }
 
     if (accounting.elapsedCarryGoalId !== goal.goalId) {
@@ -138,10 +153,20 @@ export function createGoalAccounting(
 
   const beginTurn = (chargeable = true): void => {
     const accounting = deps.getAccounting();
+    const goal = deps.getGoal();
     accounting.currentTurnTokens = 0;
     accounting.lastAccountedTurnTokens = 0;
     accounting.turnChargeable = chargeable;
+    accounting.turnInProgress = true;
+    accounting.turnGoalId = goal?.status === "active" ? goal.goalId : null;
     beginAccounting();
+  };
+
+  const finishTurn = (): void => {
+    const accounting = deps.getAccounting();
+    accounting.turnInProgress = false;
+    accounting.turnGoalId = null;
+    detach();
   };
 
   const observeAssistantUsage = (message: AssistantTurnMessage): void => {
@@ -158,7 +183,7 @@ export function createGoalAccounting(
   };
 
   const accountProgress = (
-    ctx: ExtensionContext,
+    ctx: StatusContext,
     allowBudgetSteering: boolean,
     accountBudgetLimited = false,
   ): void => {
@@ -166,8 +191,13 @@ export function createGoalAccounting(
     const accounting = deps.getAccounting();
     const canAccount =
       goal?.status === "active" || (accountBudgetLimited && goal?.status === "budgetLimited");
-    if (!goal || accounting.activeGoalId !== goal.goalId || !canAccount) {
-      beginAccounting();
+    if (
+      !goal ||
+      accounting.activeGoalId !== goal.goalId ||
+      (accounting.turnInProgress && accounting.turnGoalId !== goal.goalId) ||
+      !canAccount
+    ) {
+      detach({ preserveCarry: accounting.elapsedCarryGoalId === goal?.goalId });
       return;
     }
 
@@ -190,8 +220,11 @@ export function createGoalAccounting(
       expectedGoalId: accounting.activeGoalId,
       accountBudgetLimited,
     });
-    if (result.changed && result.goal) {
-      deps.applyRuntimeAccountingTransition(ctx, result.goal);
+    const committed =
+      !result.changed ||
+      (result.goal !== null && deps.applyRuntimeAccountingTransition(ctx, result.goal));
+    if (!committed) {
+      return;
     }
 
     // Advance baselines only after the durable transition succeeds. A budget crossing
@@ -225,6 +258,7 @@ export function createGoalAccounting(
     detach,
     beginAccounting,
     beginTurn,
+    finishTurn,
     observeAssistantUsage,
     accountProgress,
   };

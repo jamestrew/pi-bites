@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { RUNTIME_PERSIST_INTERVAL_MS } from "./runtime-config.js";
 import {
   clearEntry,
   cloneGoal,
@@ -33,7 +32,6 @@ function canPersistRuntimeUsageEntry(
 export function createGoalPersistence(deps: GoalPersistenceDeps) {
   let goal: ThreadGoal | null = null;
   let lastPersistedGoal: ThreadGoal | null = null;
-  let lastRuntimePersistAt: number | null = null;
 
   const getGoal = (): ThreadGoal | null => (goal ? cloneGoal(goal) : null);
 
@@ -43,55 +41,51 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
 
   const syncPersistedSnapshot = (snapshot: ThreadGoal | null): void => {
     lastPersistedGoal = snapshot ? cloneGoal(snapshot) : null;
-    lastRuntimePersistAt = null;
   };
 
-  const flushGoalPersistence = (source: GoalEntrySource): boolean => {
-    if (!goal) {
+  const matchesExpectedGoal = (expectedGoalId: string | null): boolean =>
+    (goal?.goalId ?? null) === expectedGoalId;
+
+  /** Synchronous by design: no lifecycle event can interleave snapshot, write, and commit. */
+  const persistGoalSnapshot = (
+    nextGoal: ThreadGoal,
+    source: GoalEntrySource,
+    expectedGoalId: string | null,
+  ): boolean => {
+    if (!matchesExpectedGoal(expectedGoalId)) {
       return false;
     }
-    if (lastPersistedGoal && goalsEquivalent(goal, lastPersistedGoal)) {
-      return false;
+    if (lastPersistedGoal && goalsEquivalent(nextGoal, lastPersistedGoal)) {
+      goal = cloneGoal(nextGoal);
+      return true;
     }
 
     deps.pi.appendEntry(
       CUSTOM_ENTRY_TYPE,
-      source === "runtime" && canPersistRuntimeUsageEntry(goal, lastPersistedGoal)
-        ? runtimeUsageEntry(goal)
-        : setEntry(goal, source),
+      source === "runtime" && canPersistRuntimeUsageEntry(nextGoal, lastPersistedGoal)
+        ? runtimeUsageEntry(nextGoal)
+        : setEntry(nextGoal, source),
     );
-    lastPersistedGoal = cloneGoal(goal);
-    lastRuntimePersistAt = Date.now();
+    // appendEntry is the durable boundary. Never expose the new snapshot before it succeeds.
+    goal = cloneGoal(nextGoal);
+    lastPersistedGoal = cloneGoal(nextGoal);
     return true;
   };
 
-  const maybeFlushRuntimePersistence = (source: GoalEntrySource): void => {
-    if (!goal || goal.status !== "active") {
-      return;
+  const appendClearEntry = (clearedGoalId: string | null, source: GoalEntrySource): boolean => {
+    if (!matchesExpectedGoal(clearedGoalId)) {
+      return false;
     }
-    const now = Date.now();
-    if (lastRuntimePersistAt !== null && now - lastRuntimePersistAt < RUNTIME_PERSIST_INTERVAL_MS) {
-      return;
-    }
-    flushGoalPersistence(source);
-  };
-
-  const clearGoalSnapshot = (): void => {
+    deps.pi.appendEntry(CUSTOM_ENTRY_TYPE, clearEntry(clearedGoalId, source));
     goal = null;
     lastPersistedGoal = null;
-    lastRuntimePersistAt = null;
-  };
-
-  const appendClearEntry = (clearedGoalId: string | null, source: GoalEntrySource): void => {
-    clearGoalSnapshot();
-    deps.pi.appendEntry(CUSTOM_ENTRY_TYPE, clearEntry(clearedGoalId, source));
+    return true;
   };
 
   return {
     appendClearEntry,
-    flushGoalPersistence,
     getGoal,
-    maybeFlushRuntimePersistence,
+    persistGoalSnapshot,
     setGoalSnapshot,
     syncPersistedSnapshot,
   };

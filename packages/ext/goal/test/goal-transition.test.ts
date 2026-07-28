@@ -154,7 +154,7 @@ test("planGoalTransition clear persists clear with full memory reset", () => {
   assert.deepEqual(effectTypes(plan.afterPersist), ["stopStatusRefresh"]);
 });
 
-test("planGoalTransition runtime accounting defers persistence for active usage updates", () => {
+test("planGoalTransition persists every runtime accounting update", () => {
   const goal = createThreadGoal("ship it");
   const next = {
     ...cloneGoal(goal),
@@ -167,8 +167,8 @@ test("planGoalTransition runtime accounting defers persistence for active usage 
     nextGoal: next,
   });
 
-  assertDisjointPrimitivePlan(plan, "runtime defer");
-  assert.equal(plan.persist, "defer");
+  assertDisjointPrimitivePlan(plan, "runtime set");
+  assert.equal(plan.persist, "set");
   assert.deepEqual(effectTypes(plan.beforePersist), ["clearBudgetWarning"]);
   assert.deepEqual(plan.afterPersist, []);
 });

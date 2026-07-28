@@ -2,6 +2,7 @@ import type {
   ExtensionContext,
   ExtensionHandler,
   SessionBeforeCompactEvent,
+  SessionBeforeForkEvent,
   SessionCompactEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -81,6 +82,10 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       continuation.maybeContinue(ctx);
     }) satisfies ExtensionHandler<SessionTreeEvent>,
 
+    onSessionBeforeFork: (async (_event, ctx) => {
+      goalAccounting.accountProgress(ctx, false, true);
+    }) satisfies ExtensionHandler<SessionBeforeForkEvent>,
+
     onSessionBeforeCompact: (async (_event, ctx) => {
       if (
         runStaleQueuedWorkPlan(
@@ -93,7 +98,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       }
 
       goalAccounting.accountProgress(ctx, false, true);
-      stateController.flushGoalPersistence("runtime");
     }) satisfies ExtensionHandler<SessionBeforeCompactEvent>,
 
     onSessionCompact: (async (event, ctx) => {
@@ -103,7 +107,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
         return;
       }
 
-      stateController.flushGoalPersistence("runtime");
+      goalAccounting.accountProgress(ctx, false, true);
       const wasRecoveringFromHostOverflow = recoveryPhaseBlocksContinuation(
         runtimeState.recoveryState.phase,
       );
@@ -133,7 +137,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       );
 
       goalAccounting.accountProgress(ctx, false, true);
-      stateController.flushGoalPersistence("runtime");
       if (hasPendingOverflowRecovery(deps)) {
         clearActiveHostOverflowRecovery(runtimeState.recoveryState);
         stateController.updateGoal("blocked", "runtime", ctx);

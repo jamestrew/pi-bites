@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import { __testHooks } from "../index.js";
+import { createGoalPersistence } from "../goal-persistence.js";
 import {
+  cloneGoal,
   isGoalCustomEntry,
   reconstructGoal,
   createThreadGoal,
@@ -54,6 +55,25 @@ test("compaction after complete does not append duplicate runtime entries", asyn
   assert.equal(harness.snapshot().goal?.status, "complete");
 });
 
+test("persistence ignores writes for a stale expected incarnation", () => {
+  const entries: unknown[] = [];
+  const persistence = createGoalPersistence({
+    pi: {
+      appendEntry(customType, data) {
+        entries.push({ customType, data });
+      },
+    },
+  });
+  const goal = createThreadGoal("current");
+  assert.equal(persistence.persistGoalSnapshot(goal, "tool", null), true);
+  const staleUpdate = cloneGoal(goal);
+  staleUpdate.usage.tokensUsed = 10;
+
+  assert.equal(persistence.persistGoalSnapshot(staleUpdate, "runtime", "replaced-goal"), false);
+  assert.equal(entries.length, 1);
+  assert.equal(persistence.getGoal()?.usage.tokensUsed, 0);
+});
+
 test("repeated tool_execution_end events coalesce runtime persistence when usage is unchanged", async () => {
   const originalNow = Date.now;
   let now = 1_000;
@@ -80,7 +100,7 @@ test("repeated tool_execution_end events coalesce runtime persistence when usage
   }
 });
 
-test("turn_end flushes coalesced runtime usage to session entries", async () => {
+test("tool completion and turn_end durably persist their own deltas", async () => {
   const originalNow = Date.now;
   let now = 1_000;
   Date.now = () => now;
@@ -103,7 +123,7 @@ test("turn_end flushes coalesced runtime usage to session entries", async () => 
     });
 
     assert.equal(countGoalSetEntries(harness.entries, goalId), 1);
-    assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 2);
     const goal = harness.snapshot().goal;
     assert.equal(goal?.usage.tokensUsed, 12);
     assert.equal(goal?.usage.activeSeconds, 5);
@@ -138,7 +158,7 @@ test("session_shutdown flushes pending runtime usage", async () => {
   }
 });
 
-test("runtime persistence interval flush appends one entry then coalesces until turn_end", async () => {
+test("each elapsed delta is durable before turn_end", async () => {
   const originalNow = Date.now;
   let now = 1_000;
   Date.now = () => now;
@@ -152,16 +172,13 @@ test("runtime persistence interval flush appends one entry then coalesces until 
 
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
 
-    now += __testHooks.runtimePersistIntervalMs + 1_000;
+    now += 61_000;
     await emitToolExecutionEnd(harness);
 
     assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries);
     assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
     const afterIntervalFlush = harness.snapshot().goal;
-    assert.equal(
-      afterIntervalFlush?.usage.activeSeconds,
-      Math.floor((__testHooks.runtimePersistIntervalMs + 1_000) / 1_000),
-    );
+    assert.equal(afterIntervalFlush?.usage.activeSeconds, 61);
 
     for (let index = 0; index < 3; index += 1) {
       now += 2_000;
@@ -169,7 +186,7 @@ test("runtime persistence interval flush appends one entry then coalesces until 
     }
 
     assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries);
-    assert.equal(countGoalUsageEntries(harness.entries, goalId), 1);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 4);
 
     await harness.emit("turn_end", {
       type: "turn_end",
@@ -179,13 +196,10 @@ test("runtime persistence interval flush appends one entry then coalesces until 
     });
 
     assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries);
-    assert.equal(countGoalUsageEntries(harness.entries, goalId), 2);
+    assert.equal(countGoalUsageEntries(harness.entries, goalId), 5);
     const goal = harness.snapshot().goal;
     assert.equal(goal?.usage.tokensUsed, 12);
-    assert.equal(
-      goal?.usage.activeSeconds,
-      Math.floor((__testHooks.runtimePersistIntervalMs + 1_000 + 6_000) / 1_000),
-    );
+    assert.equal(goal?.usage.activeSeconds, 67);
   } finally {
     Date.now = originalNow;
   }

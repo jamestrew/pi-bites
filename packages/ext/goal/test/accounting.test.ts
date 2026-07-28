@@ -156,6 +156,95 @@ test("pause and resume preserve sub-second carry for the same goal", async () =>
   assert.equal((await publicUsage(harness)).timeUsedSeconds, 1);
 });
 
+test("parallel and repeated tool completions charge a cumulative snapshot once", async () => {
+  const harness = createRuntimeHarness({ monotonicNow: () => 0 });
+  await harness.runTool("create_goal", { objective: "ship" });
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  const message = assistantMessage("toolUse", { input: 11, output: 4 });
+  await harness.emit("message_update", {
+    type: "message_update",
+    message,
+    assistantMessageEvent: { type: "text_delta", delta: "x" },
+  });
+
+  await Promise.all([
+    emitToolExecutionEnd(harness),
+    emitToolExecutionEnd(harness),
+    emitToolExecutionEnd(harness),
+  ]);
+
+  assert.equal(harness.snapshot().goal?.usage.tokensUsed, 15);
+  await emitToolExecutionEnd(harness);
+  assert.equal(harness.snapshot().goal?.usage.tokensUsed, 15);
+});
+
+test("replacement makes delayed turn accounting and status effects no-ops", async () => {
+  const harness = createRuntimeHarness({ monotonicNow: () => 0 });
+  await harness.runCommand("old goal");
+  const oldGoalId = harness.snapshot().goal?.goalId;
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  const delayed = assistantMessage("error", { input: 20, output: 5 }, "terminal failure");
+  await harness.emit("message_update", {
+    type: "message_update",
+    message: delayed,
+    assistantMessageEvent: { type: "text_delta", delta: "x" },
+  });
+
+  await harness.runCommand("replacement");
+  const replacement = harness.snapshot().goal;
+  assert.notEqual(replacement?.goalId, oldGoalId);
+
+  await harness.emit("message_end", { type: "message_end", message: delayed });
+  await emitToolExecutionEnd(harness);
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: delayed,
+    toolResults: [],
+  });
+
+  assert.deepEqual(harness.snapshot().goal, replacement);
+});
+
+test("failed durable accounting write retains the pending delta for retry", async () => {
+  const harness = createRuntimeHarness({ monotonicNow: () => 0 });
+  await harness.runTool("create_goal", { objective: "ship" });
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  const message = assistantMessage("toolUse", { input: 8, output: 2 });
+  await harness.emit("message_update", {
+    type: "message_update",
+    message,
+    assistantMessageEvent: { type: "text_delta", delta: "x" },
+  });
+
+  harness.failNextAppends();
+  await assert.rejects(emitToolExecutionEnd(harness), /durable append failed/);
+  assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
+
+  await emitToolExecutionEnd(harness);
+  assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
+});
+
+test("fork snapshot flushes outstanding accounting", async () => {
+  const harness = createRuntimeHarness({ monotonicNow: () => 0 });
+  await harness.runTool("create_goal", { objective: "ship" });
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  const message = assistantMessage("toolUse", { input: 6, output: 2 });
+  await harness.emit("message_update", {
+    type: "message_update",
+    message,
+    assistantMessageEvent: { type: "text_delta", delta: "x" },
+  });
+
+  await harness.emit("session_before_fork", {
+    type: "session_before_fork",
+    entryId: "entry-1",
+    position: "at",
+  });
+
+  assert.equal(harness.snapshot().goal?.usage.tokensUsed, 8);
+});
+
 test("exact budget equality persists usage and limits before continuation", async () => {
   let now = 0;
   const harness = createRuntimeHarness({ monotonicNow: () => now });

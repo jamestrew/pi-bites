@@ -42,7 +42,6 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
       }
       goalAccounting.observeAssistantUsage(event.message);
       goalAccounting.accountProgress(ctx, true, true);
-      stateController.maybeFlushRuntimePersistence("runtime");
     }) satisfies ExtensionHandler<MessageEndEvent>,
 
     onToolExecutionEnd: (async (_event, ctx) => {
@@ -53,7 +52,6 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
       }
 
       goalAccounting.accountProgress(ctx, true, true);
-      stateController.maybeFlushRuntimePersistence("runtime");
     }) satisfies ExtensionHandler<ToolExecutionEndEvent>,
 
     onTurnEnd: (async (event, ctx) => {
@@ -67,11 +65,10 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
         return;
       }
 
-      const expectedGoalId = runtimeState.accounting.activeGoalId;
+      const expectedGoalId = runtimeState.accounting.turnGoalId;
       goalAccounting.observeAssistantUsage(event.message);
       goalAccounting.accountProgress(ctx, true);
       runtimeState.turnEndAccounted = true;
-      stateController.flushGoalPersistence("runtime");
       if (isAbortedAssistantMessage(event.message)) {
         return;
       }

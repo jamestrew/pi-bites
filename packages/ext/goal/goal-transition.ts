@@ -31,7 +31,7 @@ type GoalTransitionPlanBase = {
 
 export type GoalTransitionPlan =
   | (GoalTransitionPlanBase & {
-      persist: "skip" | "defer" | "set";
+      persist: "skip" | "set";
       nextGoal: ThreadGoal;
     })
   | (GoalTransitionPlanBase & {
@@ -105,10 +105,6 @@ function memoryEffectsFromGoalChange(
     appendGoalTransitionEffectOnce(effects, { type: "clearBudgetWarning" });
   }
   return effects;
-}
-
-function crossedBudgetTransition(current: ThreadGoal | null, nextGoal: ThreadGoal): boolean {
-  return current?.status !== "budgetLimited" && nextGoal.status === "budgetLimited";
 }
 
 function commandAfterPersistEffects(nextGoal: ThreadGoal): GoalTransitionEffect[] {
@@ -268,21 +264,11 @@ export function planGoalTransition(
     case "runtime_accounting": {
       const { nextGoal } = request;
       validateRuntimeAccounting(current, nextGoal);
-      const beforePersist = memoryEffectsFromGoalChange(current, nextGoal);
-      if (crossedBudgetTransition(current, nextGoal)) {
-        return {
-          persist: "set",
-          nextGoal,
-          source: "runtime",
-          beforePersist,
-          afterPersist: [],
-        };
-      }
       return {
-        persist: "defer",
+        persist: "set",
         nextGoal,
         source: "runtime",
-        beforePersist,
+        beforePersist: memoryEffectsFromGoalChange(current, nextGoal),
         afterPersist: [],
       };
     }

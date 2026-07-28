@@ -90,6 +90,7 @@ export function createRuntimeHarness(
     contextWindow?: number;
     contextUsage?: ReturnType<ExtensionContext["getContextUsage"]>;
     monotonicNow?: () => number;
+    appendFailures?: number;
   } = {},
 ) {
   const entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]> = [];
@@ -115,6 +116,7 @@ export function createRuntimeHarness(
     compactCompletion: options.compactCompletion ?? "immediate",
     contextUsage: options.contextUsage,
     hostOverflowRecoveryAttempted: false,
+    appendFailures: options.appendFailures ?? 0,
   };
   let commandHandler:
     | ((args: string, ctx: ExtensionCommandContext) => void | Promise<void>)
@@ -136,6 +138,10 @@ export function createRuntimeHarness(
 
   const pi: ExtensionAPI = {
     appendEntry(customType: string, data: unknown) {
+      if (runtime.appendFailures > 0) {
+        runtime.appendFailures -= 1;
+        throw new Error("durable append failed");
+      }
       entries.push({
         type: "custom",
         id: `entry-${++entryIndex}`,
@@ -381,6 +387,9 @@ export function createRuntimeHarness(
     },
     setContextUsage(contextUsage: ReturnType<ExtensionContext["getContextUsage"]>) {
       runtime.contextUsage = contextUsage;
+    },
+    failNextAppends(count = 1) {
+      runtime.appendFailures = count;
     },
     setContextWindow(contextWindow: number) {
       ctx.model = {

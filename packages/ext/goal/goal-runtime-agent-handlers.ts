@@ -32,40 +32,42 @@ export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
       ) {
         return;
       }
-
-      const expectedGoalId = runtimeState.accounting.activeGoalId;
-      const abortedMessages = event.messages.filter(isAbortedAssistantMessage);
-      if (!runtimeState.turnEndAccounted) {
-        const lastAbortedMessage = abortedMessages.at(-1);
-        if (lastAbortedMessage) {
-          goalAccounting.observeAssistantUsage(lastAbortedMessage);
+      try {
+        const expectedGoalId = runtimeState.accounting.turnGoalId;
+        const abortedMessages = event.messages.filter(isAbortedAssistantMessage);
+        if (!runtimeState.turnEndAccounted) {
+          const lastAbortedMessage = abortedMessages.at(-1);
+          if (lastAbortedMessage) {
+            goalAccounting.observeAssistantUsage(lastAbortedMessage);
+          }
         }
-      }
-      goalAccounting.accountProgress(ctx, false, true);
-      stateController.flushGoalPersistence("runtime");
-      if (abortedMessages.length > 0) {
-        return;
-      }
-      const errorMessages = event.messages.filter(isErrorAssistantMessage);
-      const lastError = errorMessages.at(-1);
-      if (lastError) {
-        stateController.updateGoal(
-          terminalFailureStatus(lastError),
-          "runtime",
-          ctx,
-          expectedGoalId,
-        );
-        return;
-      }
+        goalAccounting.accountProgress(ctx, false, true);
+        if (abortedMessages.length > 0) {
+          return;
+        }
+        const errorMessages = event.messages.filter(isErrorAssistantMessage);
+        const lastError = errorMessages.at(-1);
+        if (lastError) {
+          stateController.updateGoal(
+            terminalFailureStatus(lastError),
+            "runtime",
+            ctx,
+            expectedGoalId,
+          );
+          return;
+        }
 
-      const lastAssistant = [...event.messages]
-        .reverse()
-        .find((message) => message.role === "assistant");
-      if (lastAssistant && recordAssistantContextOverflow(lastAssistant, ctx, deps)) {
-        return;
+        const lastAssistant = [...event.messages]
+          .reverse()
+          .find((message) => message.role === "assistant");
+        if (lastAssistant && recordAssistantContextOverflow(lastAssistant, ctx, deps)) {
+          return;
+        }
+        resetErrorRecovery();
+        continuation.maybeContinue(ctx);
+      } finally {
+        goalAccounting.finishTurn();
       }
-      resetErrorRecovery();
-      continuation.maybeContinue(ctx);
     }) satisfies ExtensionHandler<AgentEndEvent>,
   };
 }

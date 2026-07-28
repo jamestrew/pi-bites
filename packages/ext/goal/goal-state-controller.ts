@@ -47,10 +47,8 @@ export interface GoalStateController {
     ctx: StatusContext,
     expectedGoalId?: string | null,
   ) => GoalResult;
-  flushGoalPersistence: GoalPersistence["flushGoalPersistence"];
   getGoal: () => ThreadGoal | null;
   isCurrentActiveGoalId: (goalId: string) => boolean;
-  maybeFlushRuntimePersistence: GoalPersistence["maybeFlushRuntimePersistence"];
   persistHostOverflowUserReset: (needsReset: boolean) => void;
   reloadFromSession: (ctx: ExtensionContext) => void;
 }
@@ -67,19 +65,11 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     request: GoalTransitionRequest,
     ctx: StatusContext | null,
   ): boolean => {
-    const plan = planGoalTransition(getGoal(), request);
-
-    applyGoalTransitionEffects(plan.beforePersist, deps.transitionEffectHandlers);
-
-    if (plan.persist === "clear") {
-      const clearedGoalId = getGoal()?.goalId ?? null;
-      deps.persistence.appendClearEntry(clearedGoalId, plan.source);
-      applyGoalTransitionEffects(plan.afterPersist, deps.transitionEffectHandlers);
-      if (ctx) {
-        deps.refreshUi(ctx);
-      }
-      return true;
+    const current = getGoal();
+    if (request.kind === "runtime_accounting" && current?.goalId !== request.nextGoal.goalId) {
+      return false;
     }
+    const plan = planGoalTransition(current, request);
 
     if (plan.persist === "skip") {
       applyGoalTransitionEffects(plan.afterPersist, deps.transitionEffectHandlers);
@@ -89,22 +79,22 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
       return false;
     }
 
-    if (plan.persist === "defer") {
-      deps.persistence.setGoalSnapshot(plan.nextGoal);
-      if (ctx) {
-        deps.refreshUi(ctx);
-      }
+    const expectedGoalId = current?.goalId ?? null;
+    const persisted =
+      plan.persist === "clear"
+        ? deps.persistence.appendClearEntry(expectedGoalId, plan.source)
+        : deps.persistence.persistGoalSnapshot(plan.nextGoal, plan.source, expectedGoalId);
+    if (!persisted) {
       return false;
     }
 
-    deps.persistence.setGoalSnapshot(plan.nextGoal);
-    const persisted = deps.persistence.flushGoalPersistence(plan.source);
+    // Memory effects happen only after the durable write commits.
+    applyGoalTransitionEffects(plan.beforePersist, deps.transitionEffectHandlers);
     applyGoalTransitionEffects(plan.afterPersist, deps.transitionEffectHandlers);
     if (ctx) {
       deps.refreshUi(ctx);
     }
-
-    return persisted;
+    return true;
   };
 
   const persistHostOverflowUserReset = (needsReset: boolean): void => {
@@ -175,10 +165,8 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     applyGoalTransition,
     beginOverflowRecovery,
     updateGoal,
-    flushGoalPersistence: deps.persistence.flushGoalPersistence,
     getGoal,
     isCurrentActiveGoalId,
-    maybeFlushRuntimePersistence: deps.persistence.maybeFlushRuntimePersistence,
     persistHostOverflowUserReset,
     reloadFromSession,
   };

@@ -87,7 +87,7 @@ export function createGoalRuntimeController(
       getGoal: () => stateController.getGoal(),
       getAccounting: () => runtimeState.accounting,
       applyRuntimeAccountingTransition(ctx, nextGoal) {
-        stateController.applyGoalTransition({ kind: "runtime_accounting", nextGoal }, ctx);
+        return stateController.applyGoalTransition({ kind: "runtime_accounting", nextGoal }, ctx);
       },
       sendMessage: pi.sendMessage.bind(pi),
     },
@@ -126,6 +126,7 @@ export function createGoalRuntimeController(
     source: GoalEntrySource,
     ctx: StatusContext,
   ): GoalResult => {
+    goalAccounting.accountProgress(ctx, false, true);
     const resumedFromBlocked = stateController.getGoal()?.status === "blocked";
     const result = stateController.updateGoal("active", source, ctx, goalId);
     if (!result.ok || !result.goal || result.goal.status !== "active") {
@@ -153,7 +154,6 @@ export function createGoalRuntimeController(
 
   const applyAccountedGoalMutation = <T>(ctx: ExtensionContext, mutate: () => T): T => {
     goalAccounting.accountProgress(ctx, false, true);
-    stateController.flushGoalPersistence("runtime");
     return mutate();
   };
 
@@ -161,16 +161,24 @@ export function createGoalRuntimeController(
     goalStatus: "complete" | "blocked",
     source: GoalEntrySource,
     ctx: ExtensionContext,
-  ): GoalResult =>
-    applyAccountedGoalMutation(ctx, () => stateController.updateGoal(goalStatus, source, ctx));
+  ): GoalResult => {
+    const expectedGoalId = runtimeState.accounting.turnInProgress
+      ? runtimeState.accounting.turnGoalId
+      : stateController.getGoal()?.goalId;
+    return applyAccountedGoalMutation(ctx, () =>
+      stateController.updateGoal(goalStatus, source, ctx, expectedGoalId),
+    );
+  };
 
   return {
     getGoalForDisplay: goalForDisplay,
     getGoalStartTurnStrategy: () => goalStartTurnStrategy(runtimeState.recoveryState.phase),
     setGoal(nextGoal, source, ctx) {
+      const adoptForCurrentTurn = stateController.getGoal() === null;
       applyAccountedGoalMutation(ctx, () =>
         stateController.applyGoalTransition({ kind: "set", nextGoal, source }, ctx),
       );
+      goalAccounting.beginAccounting(adoptForCurrentTurn);
     },
     clearGoal(source, ctx) {
       applyAccountedGoalMutation(ctx, () =>

@@ -10,6 +10,7 @@ import type {
   InputEvent,
   InputEventResult,
   SessionBeforeCompactEvent,
+  SessionBeforeForkEvent,
   SessionCompactEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -44,6 +45,7 @@ export interface GoalRuntimeEventHandlers {
   onTurnEnd: ExtensionHandler<TurnEndEvent>;
   onAgentEnd: ExtensionHandler<AgentEndEvent>;
   onSessionBeforeCompact: ExtensionHandler<SessionBeforeCompactEvent>;
+  onSessionBeforeFork: ExtensionHandler<SessionBeforeForkEvent>;
   onSessionCompact: ExtensionHandler<SessionCompactEvent>;
   onSessionShutdown: ExtensionHandler<SessionShutdownEvent>;
 }
@@ -81,8 +83,9 @@ export interface GoalAccountingPort {
     allowBudgetSteering: boolean,
     accountBudgetLimited?: boolean,
   ) => void;
-  beginAccounting: () => void;
+  beginAccounting: (adoptForCurrentTurn?: boolean) => void;
   beginTurn: (chargeable?: boolean) => void;
+  finishTurn: () => void;
   detach: () => void;
   observeAssistantUsage: (message: TurnEndEvent["message"]) => void;
 }
@@ -119,10 +122,7 @@ export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectCont
     GoalRuntimeState,
     "accounting" | "currentTurnIndex" | "staleQueuedWorkGuard" | "turnEndAccounted"
   >;
-  stateController: Pick<
-    GoalStateController,
-    "beginOverflowRecovery" | "flushGoalPersistence" | "maybeFlushRuntimePersistence" | "updateGoal"
-  >;
+  stateController: Pick<GoalStateController, "beginOverflowRecovery" | "updateGoal">;
   continuation: Pick<GoalRuntimeContinuationPort, "bindPassthroughContinuationInputToTurn">;
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "finishSuccessfulAssistantTurn">;
@@ -133,15 +133,15 @@ export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectCon
     GoalRuntimeState,
     "accounting" | "agentRunSequence" | "staleQueuedWorkGuard" | "turnEndAccounted"
   >;
-  stateController: Pick<
-    GoalStateController,
-    "beginOverflowRecovery" | "flushGoalPersistence" | "updateGoal"
-  >;
+  stateController: Pick<GoalStateController, "beginOverflowRecovery" | "updateGoal">;
   continuation: Pick<
     GoalRuntimeContinuationPort,
     "clearPassthroughContinuationInput" | "maybeContinue"
   >;
-  goalAccounting: Pick<GoalAccountingPort, "accountProgress" | "observeAssistantUsage">;
+  goalAccounting: Pick<
+    GoalAccountingPort,
+    "accountProgress" | "finishTurn" | "observeAssistantUsage"
+  >;
   recoveryRuntime: Pick<RecoveryRuntimePort, "handleSilentContextOverflow">;
   resetErrorRecovery: () => void;
 }
@@ -151,10 +151,7 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
     GoalRuntimeState,
     "agentRunSequence" | "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard"
   >;
-  stateController: Pick<
-    GoalStateController,
-    "flushGoalPersistence" | "getGoal" | "reloadFromSession" | "updateGoal"
-  >;
+  stateController: Pick<GoalStateController, "getGoal" | "reloadFromSession" | "updateGoal">;
   continuation: Pick<
     GoalRuntimeContinuationPort,
     | "clearContinuationTimer"
