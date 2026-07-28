@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
 
 const SYSTEM_TARGET_TOKENS = 4_900;
 const TOOL_TARGET_TOKENS = 4_200;
@@ -205,8 +205,13 @@ export interface CachePaddingPreview {
 export default function registerCachePadding(pi: ExtensionAPI): CachePaddingPreview {
   let enabled = true;
 
+  function syncStatus(ctx: ExtensionContext): void {
+    ctx.ui.setStatus("cache-padding", enabled ? "🧱 CACHE PAD" : undefined);
+  }
+
   pi.on("session_start", (_event, ctx) => {
     enabled = resolveEnabled(ctx.sessionManager.getBranch());
+    syncStatus(ctx);
   });
 
   pi.registerCommand("cache-padding", {
@@ -227,6 +232,7 @@ export default function registerCachePadding(pi: ExtensionAPI): CachePaddingPrev
       }
       enabled = argument ? argument === "on" : !enabled;
       pi.appendEntry("cache-padding", { enabled });
+      syncStatus(ctx);
       ctx.ui.notify(`Cache padding ${enabled ? "enabled" : "disabled"}.`, "info");
     },
   });

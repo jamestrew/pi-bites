@@ -35,18 +35,27 @@ describe("cache padding", () => {
     const preview = registerCachePadding({ on, appendEntry, registerCommand } as never);
     const sessionStart = on.mock.calls.find(([event]) => event === "session_start")?.[1] as (
       event: unknown,
-      ctx: { sessionManager: { getBranch: () => unknown[] } },
+      ctx: {
+        sessionManager: { getBranch: () => unknown[] };
+        ui: { setStatus: ReturnType<typeof vi.fn> };
+      },
     ) => void;
     const command = registerCommand.mock.calls[0]?.[1] as {
-      handler: (args: string, ctx: { ui: { notify: ReturnType<typeof vi.fn> } }) => Promise<void>;
+      handler: (
+        args: string,
+        ctx: { ui: { notify: ReturnType<typeof vi.fn>; setStatus: ReturnType<typeof vi.fn> } },
+      ) => Promise<void>;
     };
+    const setStatus = vi.fn();
 
-    sessionStart({}, { sessionManager: { getBranch: () => [] } });
+    sessionStart({}, { sessionManager: { getBranch: () => [] }, ui: { setStatus } });
+    expect(setStatus).toHaveBeenLastCalledWith("cache-padding", "🧱 CACHE PAD");
     expect(preview.systemPrompt("Base prompt. ".repeat(800))).toContain(
       "# Coding-agent operating guidance",
     );
 
-    await command.handler("off", { ui: { notify: vi.fn() } });
+    await command.handler("off", { ui: { notify: vi.fn(), setStatus } });
+    expect(setStatus).toHaveBeenLastCalledWith("cache-padding", undefined);
     expect(preview.systemPrompt("Base prompt")).toBe("Base prompt");
     expect(appendEntry).toHaveBeenCalledWith("cache-padding", { enabled: false });
   });
