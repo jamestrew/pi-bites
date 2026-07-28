@@ -8,6 +8,7 @@ const registerModules = [
   "./token-count/index.js",
   "./usage-dashboard.js",
   "./context.js",
+  "./cache-padding/index.js",
   "./tools.js",
   "./file-search/index.js",
   "./at-mention-context/index.js",
@@ -31,10 +32,14 @@ async function loadExtension(
   vi.resetModules();
 
   const registerSpies = new Map<RegisterModule, ReturnType<typeof vi.fn>>();
-  const previewPonytailPrompt = vi.fn((prompt: string) => prompt);
+  const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
+  const previewCacheSystemPrompt = vi.fn((prompt: string) => `cache:${prompt}`);
+  const previewCacheTools = vi.fn((tools: unknown[]) => tools);
   for (const modulePath of registerModules) {
     const spy = vi.fn();
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
+    if (modulePath === "./cache-padding/index.js")
+      spy.mockReturnValue({ systemPrompt: previewCacheSystemPrompt, tools: previewCacheTools });
     registerSpies.set(modulePath, spy);
     vi.doMock(modulePath, () => ({ default: spy }));
   }
@@ -63,6 +68,8 @@ async function loadExtension(
     pi,
     registerSpies,
     previewPonytailPrompt,
+    previewCacheSystemPrompt,
+    previewCacheTools,
     loadConfig,
     registerBitesCommands,
     restoreArgv: () => {
@@ -87,10 +94,14 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./cache-padding/index.js")).toHaveBeenCalledWith(loaded.pi);
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,
-        loaded.previewPonytailPrompt,
+        expect.any(Function),
+        loaded.previewCacheTools,
       );
+      const preview = loaded.registerSpies.get("./context.js")?.mock.calls[0]?.[1];
+      expect(preview("base")).toBe("cache:ponytail:base");
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();

@@ -5,6 +5,7 @@ import registerFooter from "./footer/index.js";
 import registerTokenCount from "./token-count/index.js";
 import registerUsageDashboard from "./usage-dashboard.js";
 import registerContext from "./context.js";
+import registerCachePadding from "./cache-padding/index.js";
 import registerCustomTools from "./tools.js";
 import registerFzfFileSearch from "./file-search/index.js";
 import registerAtMentionContext from "./at-mention-context/index.js";
@@ -64,6 +65,12 @@ export default function (pi: ExtensionAPI) {
   const previewPonytailPrompt = disabled.has("ponytail")
     ? undefined
     : registerPonytail(pi, configRef);
-  if (!isNonInteractive && !disabled.has("context")) registerContext(pi, previewPonytailPrompt);
+  const cachePadding = disabled.has("cachePadding") ? undefined : registerCachePadding(pi);
+  const previewSystemPrompt = (prompt: string) => {
+    const withPonytail = previewPonytailPrompt?.(prompt) ?? prompt;
+    return cachePadding?.systemPrompt(withPonytail) ?? withPonytail;
+  };
+  if (!isNonInteractive && !disabled.has("context"))
+    registerContext(pi, previewSystemPrompt, cachePadding?.tools);
   registerBitesCommands(pi);
 }
