@@ -4,7 +4,7 @@ import type {
   ExtensionHandler,
 } from "@earendil-works/pi-coding-agent";
 
-import { assistantTurnTokens, isAbortedAssistantMessage } from "./goal-accounting.js";
+import { isAbortedAssistantMessage } from "./goal-accounting.js";
 import { isErrorAssistantMessage, terminalFailureStatus } from "./recovery.js";
 import {
   recordAssistantContextOverflow,
@@ -35,10 +35,13 @@ export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
 
       const expectedGoalId = runtimeState.accounting.activeGoalId;
       const abortedMessages = event.messages.filter(isAbortedAssistantMessage);
-      const abortedTurnTokens = runtimeState.turnEndAccounted
-        ? 0
-        : abortedMessages.reduce((sum, message) => sum + assistantTurnTokens(message), 0);
-      goalAccounting.accountProgress(ctx, false, abortedTurnTokens, true);
+      if (!runtimeState.turnEndAccounted) {
+        const lastAbortedMessage = abortedMessages.at(-1);
+        if (lastAbortedMessage) {
+          goalAccounting.observeAssistantUsage(lastAbortedMessage);
+        }
+      }
+      goalAccounting.accountProgress(ctx, false, true);
       stateController.flushGoalPersistence("runtime");
       if (abortedMessages.length > 0) {
         return;

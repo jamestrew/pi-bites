@@ -11,7 +11,7 @@ import {
 import { registerGoalRuntimeEvents } from "./goal-runtime-events.js";
 import { createGoalRuntimeState } from "./goal-runtime-state.js";
 import { createGoalRuntimeStatus, type StatusContext } from "./goal-runtime-status.js";
-import { createGoalStateController } from "./goal-state-controller.js";
+import { createGoalStateController, type GoalStateController } from "./goal-state-controller.js";
 import { continuationPrompt } from "./prompts.js";
 import { createGoalRecoveryRuntime } from "./recovery-runtime.js";
 import {
@@ -28,6 +28,7 @@ export interface GoalRuntimeController extends GoalRuntimeEventHandlers {
   getGoalStartTurnStrategy(): GoalStartTurnStrategy;
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: ExtensionContext): void;
   clearGoal(source: GoalEntrySource, ctx: ExtensionContext): void;
+  pauseGoal(goalId: string, source: GoalEntrySource, ctx: ExtensionContext): GoalResult;
   updateGoal(
     status: "complete" | "blocked",
     source: GoalEntrySource,
@@ -40,14 +41,17 @@ export interface GoalRuntimeController extends GoalRuntimeEventHandlers {
   ): GoalResult;
 }
 
-export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeController {
-  const runtimeState = createGoalRuntimeState();
-  const persistence = createGoalPersistence({ pi });
+export interface GoalRuntimeOptions {
+  monotonicNow?: () => number;
+}
 
-  const clearActiveAccounting = (): void => {
-    runtimeState.accounting.activeGoalId = null;
-    runtimeState.accounting.lastAccountedAt = null;
-  };
+export function createGoalRuntimeController(
+  pi: ExtensionAPI,
+  options: GoalRuntimeOptions = {},
+): GoalRuntimeController {
+  const runtimeState = createGoalRuntimeState();
+  const monotonicNow = options.monotonicNow ?? (() => performance.now());
+  const persistence = createGoalPersistence({ pi });
 
   const resetErrorRecovery = (): void => {
     resetRecoveryMachine(runtimeState.recoveryState);
@@ -58,6 +62,8 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       persistence.getGoal(),
       runtimeState.accounting.activeGoalId,
       runtimeState.accounting.lastAccountedAt,
+      monotonicNow(),
+      runtimeState.accounting.elapsedCarryMs,
     );
 
   const status = createGoalRuntimeStatus({
@@ -75,13 +81,26 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     getAgentRunSequence: () => runtimeState.agentRunSequence,
   });
 
-  const stateController = createGoalStateController({
+  let stateController: GoalStateController;
+  const goalAccounting = createGoalAccounting(
+    {
+      getGoal: () => stateController.getGoal(),
+      getAccounting: () => runtimeState.accounting,
+      applyRuntimeAccountingTransition(ctx, nextGoal) {
+        stateController.applyGoalTransition({ kind: "runtime_accounting", nextGoal }, ctx);
+      },
+      sendMessage: pi.sendMessage.bind(pi),
+    },
+    { monotonicNow },
+  );
+
+  stateController = createGoalStateController({
     pi,
     persistence,
     getRecoveryState: () => runtimeState.recoveryState,
     transitionEffectHandlers: {
       clearContinuation: continuation.clearContinuationState,
-      clearActiveAccounting,
+      clearActiveAccounting: (preserveCarry) => goalAccounting.detach({ preserveCarry }),
       resetRecovery: resetErrorRecovery,
       clearBudgetWarning: () => {
         runtimeState.accounting.budgetWarningSentFor = null;
@@ -90,15 +109,6 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
       stopStatusRefresh: () => status.stopStatusRefresh(),
     },
     refreshUi: (ctx) => status.refreshUi(ctx),
-  });
-
-  const goalAccounting = createGoalAccounting({
-    getGoal: () => stateController.getGoal(),
-    getAccounting: () => runtimeState.accounting,
-    applyRuntimeAccountingTransition(ctx, nextGoal) {
-      stateController.applyGoalTransition({ kind: "runtime_accounting", nextGoal }, ctx);
-    },
-    sendMessage: pi.sendMessage.bind(pi),
   });
 
   const recoveryRuntime = createGoalRecoveryRuntime({
@@ -121,6 +131,7 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     if (!result.ok || !result.goal || result.goal.status !== "active") {
       return result;
     }
+    goalAccounting.beginAccounting();
     pi.sendUserMessage(continuationPrompt(result.goal, { freshBlockedAudit: resumedFromBlocked }), {
       deliverAs: "followUp",
     });
@@ -135,29 +146,41 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     goalAccounting,
     recoveryRuntime,
     status,
-    clearActiveAccounting,
+    clearActiveAccounting: goalAccounting.detach,
     resetErrorRecovery,
     resumeGoalWithContinuation,
   });
+
+  const applyAccountedGoalMutation = <T>(ctx: ExtensionContext, mutate: () => T): T => {
+    goalAccounting.accountProgress(ctx, false, true);
+    stateController.flushGoalPersistence("runtime");
+    return mutate();
+  };
 
   const updateGoal = (
     goalStatus: "complete" | "blocked",
     source: GoalEntrySource,
     ctx: ExtensionContext,
-  ): GoalResult => {
-    goalAccounting.accountProgress(ctx, false, 0, true);
-    stateController.flushGoalPersistence("runtime");
-    return stateController.updateGoal(goalStatus, source, ctx);
-  };
+  ): GoalResult =>
+    applyAccountedGoalMutation(ctx, () => stateController.updateGoal(goalStatus, source, ctx));
 
   return {
     getGoalForDisplay: goalForDisplay,
     getGoalStartTurnStrategy: () => goalStartTurnStrategy(runtimeState.recoveryState.phase),
     setGoal(nextGoal, source, ctx) {
-      stateController.applyGoalTransition({ kind: "set", nextGoal, source }, ctx);
+      applyAccountedGoalMutation(ctx, () =>
+        stateController.applyGoalTransition({ kind: "set", nextGoal, source }, ctx),
+      );
     },
     clearGoal(source, ctx) {
-      stateController.applyGoalTransition({ kind: "clear", source }, ctx);
+      applyAccountedGoalMutation(ctx, () =>
+        stateController.applyGoalTransition({ kind: "clear", source }, ctx),
+      );
+    },
+    pauseGoal(goalId, source, ctx) {
+      return applyAccountedGoalMutation(ctx, () =>
+        stateController.updateGoal("paused", source, ctx, goalId),
+      );
     },
     updateGoal,
     resumeGoalWithContinuation,
@@ -165,8 +188,11 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
   };
 }
 
-export function registerGoalRuntimeController(pi: ExtensionAPI): void {
-  const controller = createGoalRuntimeController(pi);
+export function registerGoalRuntimeController(
+  pi: ExtensionAPI,
+  options: GoalRuntimeOptions = {},
+): void {
+  const controller = createGoalRuntimeController(pi, options);
   registerGoalTools(pi, {
     getGoal: () => controller.getGoalForDisplay(),
     setGoal: controller.setGoal.bind(controller),
@@ -177,6 +203,7 @@ export function registerGoalRuntimeController(pi: ExtensionAPI): void {
     getGoalStartTurnStrategy: controller.getGoalStartTurnStrategy.bind(controller),
     setGoal: controller.setGoal.bind(controller),
     clearGoal: controller.clearGoal.bind(controller),
+    pauseGoal: controller.pauseGoal.bind(controller),
     resumeGoalWithContinuation: controller.resumeGoalWithContinuation.bind(controller),
   });
   registerGoalRuntimeEvents(pi, controller);

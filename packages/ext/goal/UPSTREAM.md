@@ -9,3 +9,5 @@ This directory is owned Pi-bites source vendored from [`pi-codex-goal`](https://
 Imported runtime source, state, tools, command/UI behavior, prompts, the runtime harness/scenarios, and all upstream behavioral and SDK runtime test suites. Tests were adapted to Vitest and Pi-bites paths before runtime semantics were changed.
 
 Upstream package metadata, its package-manifest and type-hygiene tests, publishing/release automation, generated artifacts, platform-smoke machinery, and standalone-package documentation are intentionally excluded. Pi-bites' own manifest, lint, and type checks cover the two omitted package-specific suites.
+
+Pi's extension events currently expose host mode (`tui`, `rpc`, `json`, or `print`), not a reliable per-turn plan-mode identity. Goal accounting therefore does not guess from prompt text; plan-mode exclusion can be wired at `beginTurn` when Pi adds that host signal.

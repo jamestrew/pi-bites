@@ -1,6 +1,6 @@
 export type GoalTransitionEffect =
   | { type: "clearContinuation" }
-  | { type: "clearActiveAccounting" }
+  | { type: "clearActiveAccounting"; preserveCarry: boolean }
   | { type: "resetRecovery" }
   | { type: "clearBudgetWarning" }
   | { type: "markContinuationQueued"; goalId: string }
@@ -8,7 +8,7 @@ export type GoalTransitionEffect =
 
 export interface GoalTransitionEffectHandlers {
   clearContinuation: () => void;
-  clearActiveAccounting: () => void;
+  clearActiveAccounting: (preserveCarry: boolean) => void;
   resetRecovery: () => void;
   clearBudgetWarning: () => void;
   markContinuationQueued: (goalId: string) => void;
@@ -56,7 +56,7 @@ export function applyGoalTransitionEffects(
         handlers.clearContinuation();
         break;
       case "clearActiveAccounting":
-        handlers.clearActiveAccounting();
+        handlers.clearActiveAccounting(effect.preserveCarry);
         break;
       case "resetRecovery":
         handlers.resetRecovery();

@@ -89,6 +89,7 @@ export function createRuntimeHarness(
     compactCompletion?: "immediate" | "manual";
     contextWindow?: number;
     contextUsage?: ReturnType<ExtensionContext["getContextUsage"]>;
+    monotonicNow?: () => number;
   } = {},
 ) {
   const entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]> = [];
@@ -323,11 +324,12 @@ export function createRuntimeHarness(
     } as ExtensionCommandContext["model"];
   }
 
-  goalExtension(pi);
+  const goalRuntimeOptions = { monotonicNow: options.monotonicNow ?? (() => Date.now()) };
+  goalExtension(pi, goalRuntimeOptions);
 
   function reloadExtension(): void {
     handlers.clear();
-    goalExtension(pi);
+    goalExtension(pi, goalRuntimeOptions);
   }
 
   async function reloadSession(reason: "startup" | "reload" | "resume" = "startup"): Promise<void> {

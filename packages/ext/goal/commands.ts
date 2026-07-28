@@ -11,6 +11,11 @@ export interface CommandHost {
   getGoal(): ThreadGoal | null;
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: GoalCommandContext): void;
   clearGoal(source: GoalEntrySource, ctx: GoalCommandContext): void;
+  pauseGoal(
+    goalId: string,
+    source: GoalEntrySource,
+    ctx: GoalCommandContext,
+  ): { ok: boolean; message: string; goal: ThreadGoal | null };
   getGoalStartTurnStrategy(): GoalStartTurnStrategy;
   resumeGoalWithContinuation(
     goalId: string,
@@ -128,13 +133,14 @@ export async function handleGoalCommand(
       return;
     }
 
-    const result = updateGoalStatus(current, trimmed === "pause" ? "paused" : "active");
-    if (!result.ok || !result.goal) {
-      ctx.ui.notify(result.message, "warning");
+    if (trimmed === "pause" && current) {
+      const result = host.pauseGoal(current.goalId, "command", ctx);
+      ctx.ui.notify(result.message, result.ok ? undefined : "warning");
       return;
     }
-    host.setGoal(result.goal, "command", ctx);
-    ctx.ui.notify(result.message);
+
+    const result = updateGoalStatus(current, "active");
+    ctx.ui.notify(result.message, result.ok ? undefined : "warning");
     return;
   }
 

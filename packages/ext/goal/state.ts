@@ -489,7 +489,8 @@ export function goalWithLiveUsage(
   current: ThreadGoal | null,
   activeGoalId: string | null,
   lastAccountedAt: number | null,
-  now = Date.now(),
+  now = performance.now(),
+  elapsedCarryMs = 0,
 ): ThreadGoal | null {
   if (
     !current ||
@@ -500,7 +501,10 @@ export function goalWithLiveUsage(
     return current;
   }
 
-  const liveSeconds = Math.max(0, Math.floor((now - lastAccountedAt) / 1000));
+  const liveSeconds = Math.max(
+    0,
+    Math.floor((elapsedCarryMs + Math.max(0, now - lastAccountedAt)) / 1000),
+  );
   if (liveSeconds === 0) {
     return current;
   }

@@ -48,6 +48,11 @@ function createHarness() {
       goal = null;
     },
     getGoalStartTurnStrategy: () => "hiddenFollowUp",
+    pauseGoal(goalId: string) {
+      const result = updateGoalStatus(goal?.goalId === goalId ? goal : null, "paused");
+      if (result.ok) goal = result.goal;
+      return result;
+    },
     resumeGoalWithContinuation(goalId: string) {
       const result = updateGoalStatus(goal, "active");
       if (result.ok && result.goal?.goalId === goalId) {
@@ -209,6 +214,14 @@ test("/goal objective after overflow recovery sends a user start turn", async ()
       harness.setGoal(null);
     },
     getGoalStartTurnStrategy: () => startTurnStrategy,
+    pauseGoal(goalId: string) {
+      const result = updateGoalStatus(
+        harness.goal?.goalId === goalId ? harness.goal : null,
+        "paused",
+      );
+      if (result.ok) harness.setGoal(result.goal);
+      return result;
+    },
     resumeGoalWithContinuation(goalId: string) {
       const result = updateGoalStatus(harness.goal, "active");
       if (result.ok && result.goal?.goalId === goalId) {
@@ -294,6 +307,14 @@ test("/goal resume restarts an active goal waiting for user-start overflow recov
       harness.setGoal(null);
     },
     getGoalStartTurnStrategy: () => "userFollowUp",
+    pauseGoal(goalId: string) {
+      const result = updateGoalStatus(
+        harness.goal?.goalId === goalId ? harness.goal : null,
+        "paused",
+      );
+      if (result.ok) harness.setGoal(result.goal);
+      return result;
+    },
     resumeGoalWithContinuation(goalId: string) {
       const result = updateGoalStatus(harness.goal, "active");
       if (result.ok && result.goal?.goalId === goalId) {

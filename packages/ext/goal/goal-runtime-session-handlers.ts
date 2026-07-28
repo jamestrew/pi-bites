@@ -92,7 +92,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
         return;
       }
 
-      goalAccounting.accountProgress(ctx, false, 0, true);
+      goalAccounting.accountProgress(ctx, false, true);
       stateController.flushGoalPersistence("runtime");
     }) satisfies ExtensionHandler<SessionBeforeCompactEvent>,
 
@@ -132,7 +132,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
         deps,
       );
 
-      goalAccounting.accountProgress(ctx, false, 0, true);
+      goalAccounting.accountProgress(ctx, false, true);
       stateController.flushGoalPersistence("runtime");
       if (hasPendingOverflowRecovery(deps)) {
         clearActiveHostOverflowRecovery(runtimeState.recoveryState);

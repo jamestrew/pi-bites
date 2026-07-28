@@ -42,7 +42,7 @@ export interface GoalStateController {
   applyGoalTransition: (request: GoalTransitionRequest, ctx: StatusContext | null) => boolean;
   beginOverflowRecovery: (ctx: StatusContext) => void;
   updateGoal: (
-    status: "active" | "complete" | "blocked" | "usageLimited",
+    status: "active" | "paused" | "complete" | "blocked" | "usageLimited",
     source: GoalEntrySource,
     ctx: StatusContext,
     expectedGoalId?: string | null,
@@ -151,7 +151,7 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
   };
 
   const updateGoal = (
-    status: "active" | "complete" | "blocked" | "usageLimited",
+    status: "active" | "paused" | "complete" | "blocked" | "usageLimited",
     source: GoalEntrySource,
     ctx: StatusContext,
     expectedGoalId?: string | null,

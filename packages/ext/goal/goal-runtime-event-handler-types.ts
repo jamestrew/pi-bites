@@ -25,6 +25,8 @@ import type { GoalEntrySource, GoalResult } from "./types.js";
 
 export type ContextEventResult = { messages?: ContextEvent["messages"] };
 export type MessageStartEvent = Extract<ExtensionEvent, { type: "message_start" }>;
+export type MessageUpdateEvent = Extract<ExtensionEvent, { type: "message_update" }>;
+export type MessageEndEvent = Extract<ExtensionEvent, { type: "message_end" }>;
 export type ToolExecutionEndEvent = Extract<ExtensionEvent, { type: "tool_execution_end" }>;
 
 export interface GoalRuntimeEventHandlers {
@@ -35,6 +37,8 @@ export interface GoalRuntimeEventHandlers {
   onBeforeAgentStart: ExtensionHandler<BeforeAgentStartEvent, undefined>;
   onAgentStart: ExtensionHandler<AgentStartEvent>;
   onMessageStart: ExtensionHandler<MessageStartEvent>;
+  onMessageUpdate: ExtensionHandler<MessageUpdateEvent>;
+  onMessageEnd: ExtensionHandler<MessageEndEvent>;
   onTurnStart: ExtensionHandler<TurnStartEvent>;
   onToolExecutionEnd: ExtensionHandler<ToolExecutionEndEvent>;
   onTurnEnd: ExtensionHandler<TurnEndEvent>;
@@ -74,11 +78,13 @@ export interface GoalRuntimeContinuationPort {
 export interface GoalAccountingPort {
   accountProgress: (
     ctx: ExtensionContext,
-    includeActiveElapsed: boolean,
-    completedTurnTokens: number,
-    forceFlush?: boolean,
+    allowBudgetSteering: boolean,
+    accountBudgetLimited?: boolean,
   ) => void;
   beginAccounting: () => void;
+  beginTurn: (chargeable?: boolean) => void;
+  detach: () => void;
+  observeAssistantUsage: (message: TurnEndEvent["message"]) => void;
 }
 
 export interface RecoveryRuntimePort {
@@ -135,7 +141,7 @@ export interface GoalRuntimeAgentHandlerContext extends StaleQueuedWorkEffectCon
     GoalRuntimeContinuationPort,
     "clearPassthroughContinuationInput" | "maybeContinue"
   >;
-  goalAccounting: Pick<GoalAccountingPort, "accountProgress">;
+  goalAccounting: Pick<GoalAccountingPort, "accountProgress" | "observeAssistantUsage">;
   recoveryRuntime: Pick<RecoveryRuntimePort, "handleSilentContextOverflow">;
   resetErrorRecovery: () => void;
 }

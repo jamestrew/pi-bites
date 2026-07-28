@@ -4,11 +4,7 @@ import type {
   TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
-import {
-  assistantTurnTokens,
-  isAbortedAssistantMessage,
-  isToolUseAssistantMessage,
-} from "./goal-accounting.js";
+import { isAbortedAssistantMessage, isToolUseAssistantMessage } from "./goal-accounting.js";
 import {
   isAssistantContextOverflow,
   isErrorAssistantMessage,
@@ -17,6 +13,8 @@ import {
 import { getContextWindow, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
 import type {
   GoalRuntimeTurnHandlerContext,
+  MessageEndEvent,
+  MessageUpdateEvent,
   ToolExecutionEndEvent,
 } from "./goal-runtime-event-handler-types.js";
 
@@ -30,9 +28,22 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
       runtimeState.turnEndAccounted = false;
       continuation.bindPassthroughContinuationInputToTurn(event.turnIndex);
       runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planTurnStart(), ctx, deps);
-      goalAccounting.beginAccounting();
+      goalAccounting.beginTurn();
       status.refreshUi(ctx);
     }) satisfies ExtensionHandler<TurnStartEvent>,
+
+    onMessageUpdate: (async (event) => {
+      goalAccounting.observeAssistantUsage(event.message);
+    }) satisfies ExtensionHandler<MessageUpdateEvent>,
+
+    onMessageEnd: (async (event, ctx) => {
+      if (event.message.role !== "assistant") {
+        return;
+      }
+      goalAccounting.observeAssistantUsage(event.message);
+      goalAccounting.accountProgress(ctx, true, true);
+      stateController.maybeFlushRuntimePersistence("runtime");
+    }) satisfies ExtensionHandler<MessageEndEvent>,
 
     onToolExecutionEnd: (async (_event, ctx) => {
       if (
@@ -41,7 +52,7 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
         return;
       }
 
-      goalAccounting.accountProgress(ctx, true, 0, true);
+      goalAccounting.accountProgress(ctx, true, true);
       stateController.maybeFlushRuntimePersistence("runtime");
     }) satisfies ExtensionHandler<ToolExecutionEndEvent>,
 
@@ -57,8 +68,8 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
       }
 
       const expectedGoalId = runtimeState.accounting.activeGoalId;
-      const completedTurnTokens = assistantTurnTokens(event.message);
-      goalAccounting.accountProgress(ctx, true, completedTurnTokens);
+      goalAccounting.observeAssistantUsage(event.message);
+      goalAccounting.accountProgress(ctx, true);
       runtimeState.turnEndAccounted = true;
       stateController.flushGoalPersistence("runtime");
       if (isAbortedAssistantMessage(event.message)) {

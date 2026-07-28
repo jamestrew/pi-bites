@@ -379,7 +379,7 @@ test("applyGoalTransitionEffects invokes handlers in effect order", () => {
   applyGoalTransitionEffects(
     [
       { type: "clearContinuation" },
-      { type: "clearActiveAccounting" },
+      { type: "clearActiveAccounting", preserveCarry: false },
       { type: "resetRecovery" },
       { type: "clearBudgetWarning" },
     ],

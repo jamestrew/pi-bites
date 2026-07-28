@@ -45,7 +45,10 @@ export function reloadGoalRuntimeEffects(
 ): GoalTransitionEffect[] {
   const effects: GoalTransitionEffect[] = [{ type: "clearContinuation" }];
   if (reconstructed?.status !== "active") {
-    effects.push({ type: "clearActiveAccounting" });
+    effects.push({
+      type: "clearActiveAccounting",
+      preserveCarry: (reconstructed?.goalId ?? null) === previousGoalId,
+    });
   }
   if ((reconstructed?.goalId ?? null) !== previousGoalId) {
     effects.push({ type: "resetRecovery" });
@@ -62,13 +65,19 @@ function memoryEffectsFromGoalChange(
 
   if (goalIdChanged) {
     appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
-    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, {
+      type: "clearActiveAccounting",
+      preserveCarry: false,
+    });
     appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
     appendGoalTransitionEffectOnce(effects, { type: "clearBudgetWarning" });
   }
   if (next.status === "complete") {
     appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
-    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, {
+      type: "clearActiveAccounting",
+      preserveCarry: true,
+    });
     appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
   } else if (
     next.status === "paused" ||
@@ -76,14 +85,20 @@ function memoryEffectsFromGoalChange(
     next.status === "usageLimited"
   ) {
     appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
-    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, {
+      type: "clearActiveAccounting",
+      preserveCarry: true,
+    });
     appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
   } else if (next.status === "active" && previous?.status !== "active") {
     appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
     appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
   } else if (next.status === "budgetLimited") {
     appendGoalTransitionEffectOnce(effects, { type: "clearContinuation" });
-    appendGoalTransitionEffectOnce(effects, { type: "clearActiveAccounting" });
+    appendGoalTransitionEffectOnce(effects, {
+      type: "clearActiveAccounting",
+      preserveCarry: true,
+    });
     appendGoalTransitionEffectOnce(effects, { type: "resetRecovery" });
   }
   if (next.status !== "budgetLimited") {
@@ -104,7 +119,7 @@ function commandAfterPersistEffects(nextGoal: ThreadGoal): GoalTransitionEffect[
 
 const CLEAR_BEFORE_PERSIST: GoalTransitionEffect[] = [
   { type: "clearContinuation" },
-  { type: "clearActiveAccounting" },
+  { type: "clearActiveAccounting", preserveCarry: false },
   { type: "resetRecovery" },
   { type: "clearBudgetWarning" },
 ];
