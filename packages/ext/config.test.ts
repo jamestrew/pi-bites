@@ -24,6 +24,7 @@ describe("loadConfig", () => {
       join(agentDir, "pi-bites.json"),
       JSON.stringify({
         ponytail: { defaultMode: "lite" },
+        autoCompaction: { thresholdTokens: 150_000 },
         smallModel: { model: "github-copilot/claude-haiku-4.5", thinking: "low" },
       }),
     );
@@ -32,6 +33,7 @@ describe("loadConfig", () => {
       join(project, ".pi", "pi-bites.json"),
       JSON.stringify({
         ponytail: { defaultMode: "ultra" },
+        autoCompaction: { thresholdTokens: 120_000 },
         smallModel: { thinking: "minimal" },
       }),
       { flag: "wx" },
@@ -45,9 +47,11 @@ describe("loadConfig", () => {
       }),
     ).toBeDefined();
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
+    expect(parseBitesConfig({ autoCompaction: { thresholdTokens: 0 } })).toBeUndefined();
 
     const config = loadConfig(project);
     expect(config.ponytail?.defaultMode).toBe("ultra");
+    expect(config.autoCompaction?.thresholdTokens).toBe(120_000);
     expect(config.smallModel).toEqual({
       model: "github-copilot/claude-haiku-4.5",
       thinking: "minimal",
@@ -71,6 +75,7 @@ describe("loadConfig", () => {
         bashGate: {},
         notifications: {},
         checkpoints: {},
+        autoCompaction: {},
         ponytail: {},
         subagents: {},
       });

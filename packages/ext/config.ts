@@ -15,6 +15,9 @@
  *   "statusline": {
  *     "command": "python get_usage_limits.py"
  *   },
+ *   "autoCompaction": {
+ *     "thresholdTokens": 150000
+ *   },
  *   "bashGate": {
  *     "rules": [
  *       { "cmd": "bun", "subcommands": ["test"] },
@@ -33,7 +36,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "cachePadding" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view"
+ *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "cachePadding" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -60,6 +63,11 @@ export interface StatuslineConfig {
 export interface CheckpointsConfig {
   /** Set to false to disable checkpoint tracking and /rewind. */
   enabled?: boolean;
+}
+
+export interface AutoCompactionConfig {
+  /** Compact once the active context reaches this many tokens. Defaults to 150,000. */
+  thresholdTokens?: number;
 }
 
 export const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
@@ -113,6 +121,7 @@ export const EXTENSION_NAMES = [
   "question",
   "notifications",
   "checkpoints",
+  "autoCompaction",
   "spotme",
   "inlineReferences",
   "slashSkillAutocomplete",
@@ -132,6 +141,7 @@ export interface BitesConfig {
   bashGate?: BashGateConfig;
   notifications?: NotificationsConfig;
   checkpoints?: CheckpointsConfig;
+  autoCompaction?: AutoCompactionConfig;
   ponytail?: PonytailConfig;
   subagents?: SubagentsConfig;
   /** Extension names disabled globally or for this project. */
@@ -177,6 +187,17 @@ function isStatuslineConfig(value: unknown): value is StatuslineConfig {
 
 function isCheckpointsConfig(value: unknown): value is CheckpointsConfig {
   return isRecord(value) && isOptional(value, "enabled", (field) => typeof field === "boolean");
+}
+
+function isAutoCompactionConfig(value: unknown): value is AutoCompactionConfig {
+  return (
+    isRecord(value) &&
+    isOptional(
+      value,
+      "thresholdTokens",
+      (field) => typeof field === "number" && Number.isInteger(field) && field > 0,
+    )
+  );
 }
 
 function isPonytailConfig(value: unknown): value is PonytailConfig {
@@ -229,6 +250,7 @@ function isBitesConfig(value: unknown): value is BitesConfig {
     isOptional(value, "bashGate", isBashGateConfig) &&
     isOptional(value, "notifications", isNotificationsConfig) &&
     isOptional(value, "checkpoints", isCheckpointsConfig) &&
+    isOptional(value, "autoCompaction", isAutoCompactionConfig) &&
     isOptional(value, "ponytail", isPonytailConfig) &&
     isOptional(value, "subagents", isSubagentsConfig) &&
     isOptional(value, "disable", (field) => Array.isArray(field) && field.every(isExtensionName))
@@ -273,6 +295,7 @@ export function loadConfig(cwd: string): BitesConfig {
     bashGate: { ...global.bashGate, ...project.bashGate },
     notifications: { ...global.notifications, ...project.notifications },
     checkpoints: { ...global.checkpoints, ...project.checkpoints },
+    autoCompaction: { ...global.autoCompaction, ...project.autoCompaction },
     ponytail: { ...global.ponytail, ...project.ponytail },
     subagents: { ...global.subagents, ...project.subagents },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),

@@ -12,6 +12,7 @@ A small collection of personal extensions for the pi coding agent.
 - Better fuzzy finding for `@` file mentions powered by `fff`
 - Script-driven statusline
 - Token-count/status helpers
+- Fixed-token auto-compaction (150k tokens by default)
 - `/usage` dashboard for session cost/token statistics
 - `/context [all]` breakdown of the active context window
 - Custom todo and question tools
@@ -49,6 +50,9 @@ Example:
   "notifications": {
     "command": "notify-send 'pi'"
   },
+  "autoCompaction": {
+    "thresholdTokens": 150000
+  },
   "ponytail": {
     "defaultMode": "full"
   },
@@ -58,6 +62,8 @@ Example:
   "disable": ["tokenCount"]
 }
 ```
+
+`autoCompaction.thresholdTokens` is an absolute context-size limit, independent of the model's context window and Pi's `compaction.reserveTokens`. Pi's native overflow protection still applies for models with smaller context windows.
 
 ## Disabling extensions
 
@@ -72,7 +78,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, rollback, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view
+bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, checkpoints, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view
 ```
 
 You can also edit config directly:
@@ -95,11 +101,11 @@ To disable checkpoint tracking:
 
 ```json
 {
-  "rollback": { "enabled": false }
+  "checkpoints": { "enabled": false }
 }
 ```
 
-Or disable the extension entirely with `/bites:off rollback`.
+Or disable the extension entirely with `/bites:off checkpoints`.
 
 ## Usage dashboard
 

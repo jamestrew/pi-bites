@@ -13,6 +13,7 @@ import registerTodo from "./todo/index.js";
 import registerQuestion from "./question/index.js";
 import registerNotifications from "./notifications.js";
 import registerCheckpoints from "./checkpoints.js";
+import registerAutoCompaction from "./auto-compaction.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
@@ -43,6 +44,7 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("bashGate")) registerBashGate(pi, configRef);
   if (!disabled.has("rtk")) registerRtk(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);
+  if (!disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
 
   if (isSubagent) return;
 
