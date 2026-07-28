@@ -75,6 +75,7 @@ export function createGoalRuntimeController(
   const continuation = createContinuationScheduler({
     pi,
     getGoal: () => persistence.getGoal(),
+    isContinuationDeferred: persistence.isContinuationDeferred,
     getRecoveryState: () => runtimeState.recoveryState,
     staleQueuedWorkGuard: runtimeState.staleQueuedWorkGuard,
     getCurrentTurnIndex: () => runtimeState.currentTurnIndex,

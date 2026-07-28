@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
+import { persistForkTransfer, type ForkTransferEntry } from "./fork-inheritance.js";
 import type { GoalPersistence } from "./goal-persistence.js";
 import type { StatusContext } from "./goal-runtime-status.js";
 import {
@@ -19,8 +20,8 @@ import {
 import {
   goalsEquivalent,
   hostOverflowCapResetEntry,
-  reconstructGoal,
   reconstructHostOverflowCapNeedsUserReset,
+  reconstructSessionGoal,
   updateGoalStatus,
 } from "./state.js";
 import {
@@ -48,7 +49,19 @@ export interface GoalStateController {
     expectedGoalId?: string | null,
   ) => GoalResult;
   getGoal: () => ThreadGoal | null;
+  hasInheritedForkSnapshot: () => boolean;
+  isContinuationDeferred: () => boolean;
   isCurrentActiveGoalId: (goalId: string) => boolean;
+  prepareForkTransfer: (
+    sourceSessionId: string,
+    entryId: string,
+    position: "before" | "at",
+    targetLeafId: string | null,
+    sessionFile: string | undefined,
+    destinationHasPersistenceBoundary: boolean,
+  ) => ForkTransferEntry;
+  inheritForkSnapshot: (transfer: ForkTransferEntry, ctx: ExtensionContext) => boolean;
+  clearForkDeferral: (ctx: ExtensionContext) => boolean;
   persistHostOverflowUserReset: (needsReset: boolean) => void;
   reloadFromSession: (ctx: ExtensionContext) => void;
 }
@@ -126,18 +139,58 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
   const reloadFromSession = (ctx: ExtensionContext): void => {
     const previousGoalId = getGoal()?.goalId ?? null;
     const branch = ctx.sessionManager.getBranch();
-    const reconstructed = reconstructGoal(branch).goal;
-    deps.persistence.setGoalSnapshot(reconstructed);
-    deps.persistence.syncPersistedSnapshot(reconstructed);
+    const reconstructed = reconstructSessionGoal(branch, ctx.sessionManager.getEntries());
+    deps.persistence.restore(reconstructed);
+    deps.persistence.syncPersistedSnapshot(reconstructed.goal);
     syncHostOverflowUserResetFromSession(
       deps.getRecoveryState(),
       reconstructHostOverflowCapNeedsUserReset(branch),
     );
     applyGoalTransitionEffects(
-      reloadGoalRuntimeEffects(previousGoalId, reconstructed),
+      reloadGoalRuntimeEffects(previousGoalId, reconstructed.goal),
       deps.transitionEffectHandlers,
     );
     deps.refreshUi(ctx);
+  };
+
+  const prepareForkTransfer = (
+    sourceSessionId: string,
+    entryId: string,
+    position: "before" | "at",
+    targetLeafId: string | null,
+    sessionFile: string | undefined,
+    destinationHasPersistenceBoundary: boolean,
+  ): ForkTransferEntry => {
+    const goal = getGoal();
+    return persistForkTransfer(deps.pi.appendEntry.bind(deps.pi), sessionFile, {
+      sourceSessionId,
+      entryId,
+      position,
+      targetLeafId,
+      goal,
+      destinationHasPersistenceBoundary,
+    });
+  };
+
+  const inheritForkSnapshot = (transfer: ForkTransferEntry, ctx: ExtensionContext): boolean => {
+    const previousGoalId = getGoal()?.goalId ?? null;
+    if (!deps.persistence.persistForkSnapshot(transfer)) {
+      return false;
+    }
+    applyGoalTransitionEffects(
+      reloadGoalRuntimeEffects(previousGoalId, transfer.goal),
+      deps.transitionEffectHandlers,
+    );
+    deps.refreshUi(ctx);
+    return true;
+  };
+
+  const clearForkDeferral = (ctx: ExtensionContext): boolean => {
+    if (!deps.persistence.clearForkDeferral()) {
+      return false;
+    }
+    deps.refreshUi(ctx);
+    return true;
   };
 
   const updateGoal = (
@@ -166,7 +219,12 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     beginOverflowRecovery,
     updateGoal,
     getGoal,
+    hasInheritedForkSnapshot: deps.persistence.hasInheritedForkSnapshot,
+    isContinuationDeferred: deps.persistence.isContinuationDeferred,
     isCurrentActiveGoalId,
+    prepareForkTransfer,
+    inheritForkSnapshot,
+    clearForkDeferral,
     persistHostOverflowUserReset,
     reloadFromSession,
   };

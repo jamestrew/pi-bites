@@ -45,7 +45,7 @@ export interface GoalRuntimeEventHandlers {
   onTurnEnd: ExtensionHandler<TurnEndEvent>;
   onAgentEnd: ExtensionHandler<AgentEndEvent>;
   onSessionBeforeCompact: ExtensionHandler<SessionBeforeCompactEvent>;
-  onSessionBeforeFork: ExtensionHandler<SessionBeforeForkEvent>;
+  onSessionBeforeFork: ExtensionHandler<SessionBeforeForkEvent, { cancel: true } | undefined>;
   onSessionCompact: ExtensionHandler<SessionCompactEvent>;
   onSessionShutdown: ExtensionHandler<SessionShutdownEvent>;
 }
@@ -122,7 +122,10 @@ export interface GoalRuntimeTurnHandlerContext extends StaleQueuedWorkEffectCont
     GoalRuntimeState,
     "accounting" | "currentTurnIndex" | "staleQueuedWorkGuard" | "turnEndAccounted"
   >;
-  stateController: Pick<GoalStateController, "beginOverflowRecovery" | "updateGoal">;
+  stateController: Pick<
+    GoalStateController,
+    "beginOverflowRecovery" | "clearForkDeferral" | "updateGoal"
+  >;
   continuation: Pick<GoalRuntimeContinuationPort, "bindPassthroughContinuationInputToTurn">;
   goalAccounting: GoalAccountingPort;
   recoveryRuntime: Pick<RecoveryRuntimePort, "finishSuccessfulAssistantTurn">;
@@ -151,7 +154,16 @@ export interface GoalRuntimeSessionHandlerContext extends StaleQueuedWorkEffectC
     GoalRuntimeState,
     "agentRunSequence" | "currentTurnIndex" | "recoveryState" | "staleQueuedWorkGuard"
   >;
-  stateController: Pick<GoalStateController, "getGoal" | "reloadFromSession" | "updateGoal">;
+  stateController: Pick<
+    GoalStateController,
+    | "getGoal"
+    | "hasInheritedForkSnapshot"
+    | "isContinuationDeferred"
+    | "inheritForkSnapshot"
+    | "prepareForkTransfer"
+    | "reloadFromSession"
+    | "updateGoal"
+  >;
   continuation: Pick<
     GoalRuntimeContinuationPort,
     | "clearContinuationTimer"

@@ -1,6 +1,12 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import {
+  persistClearedForkDeferral,
+  persistForkSnapshot as persistDurableForkSnapshot,
+  type ForkTransferEntry,
+  type RestoredGoalState,
+} from "./fork-inheritance.js";
+import {
   clearEntry,
   cloneGoal,
   goalsEquivalent,
@@ -32,11 +38,17 @@ function canPersistRuntimeUsageEntry(
 export function createGoalPersistence(deps: GoalPersistenceDeps) {
   let goal: ThreadGoal | null = null;
   let lastPersistedGoal: ThreadGoal | null = null;
+  let inheritedTransferId: string | null = null;
+  let deferredTransferId: string | null = null;
 
   const getGoal = (): ThreadGoal | null => (goal ? cloneGoal(goal) : null);
+  const hasInheritedForkSnapshot = (): boolean => inheritedTransferId !== null;
+  const isContinuationDeferred = (): boolean => deferredTransferId !== null;
 
-  const setGoalSnapshot = (nextGoal: ThreadGoal | null): void => {
-    goal = nextGoal ? cloneGoal(nextGoal) : null;
+  const restore = (restored: RestoredGoalState): void => {
+    goal = restored.goal ? cloneGoal(restored.goal) : null;
+    inheritedTransferId = restored.inheritedTransferId;
+    deferredTransferId = restored.deferredTransferId;
   };
 
   const syncPersistedSnapshot = (snapshot: ThreadGoal | null): void => {
@@ -66,7 +78,6 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
         ? runtimeUsageEntry(nextGoal)
         : setEntry(nextGoal, source),
     );
-    // appendEntry is the durable boundary. Never expose the new snapshot before it succeeds.
     goal = cloneGoal(nextGoal);
     lastPersistedGoal = cloneGoal(nextGoal);
     return true;
@@ -82,11 +93,36 @@ export function createGoalPersistence(deps: GoalPersistenceDeps) {
     return true;
   };
 
+  const persistForkSnapshot = (transfer: ForkTransferEntry): boolean => {
+    if (inheritedTransferId === transfer.transferId) {
+      return false;
+    }
+    persistDurableForkSnapshot(deps.pi.appendEntry.bind(deps.pi), transfer);
+    goal = transfer.goal ? cloneGoal(transfer.goal) : null;
+    lastPersistedGoal = transfer.goal ? cloneGoal(transfer.goal) : null;
+    inheritedTransferId = transfer.transferId;
+    deferredTransferId = transfer.goal ? transfer.transferId : null;
+    return true;
+  };
+
+  const clearForkDeferral = (): boolean => {
+    if (!deferredTransferId) {
+      return false;
+    }
+    persistClearedForkDeferral(deps.pi.appendEntry.bind(deps.pi), deferredTransferId);
+    deferredTransferId = null;
+    return true;
+  };
+
   return {
     appendClearEntry,
+    clearForkDeferral,
     getGoal,
+    hasInheritedForkSnapshot,
+    isContinuationDeferred,
+    persistForkSnapshot,
     persistGoalSnapshot,
-    setGoalSnapshot,
+    restore,
     syncPersistedSnapshot,
   };
 }

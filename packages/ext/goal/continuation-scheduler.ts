@@ -12,6 +12,7 @@ import { CUSTOM_ENTRY_TYPE, type ThreadGoal } from "./types.js";
 interface ContinuationSchedulerDeps {
   pi: Pick<ExtensionAPI, "sendMessage">;
   getGoal: () => ThreadGoal | null;
+  isContinuationDeferred: () => boolean;
   getRecoveryState: () => GoalRecoveryMachineState;
   staleQueuedWorkGuard: StaleQueuedWorkGuard;
   getCurrentTurnIndex: () => number | null;
@@ -127,6 +128,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
   const canPlanContinuationFor = (goal: ThreadGoal | null): goal is ThreadGoal => {
     return Boolean(
       !deps.staleQueuedWorkGuard.isBlockingContinuation() &&
+      !deps.isContinuationDeferred() &&
       goal &&
       goal.status === "active" &&
       continuationQueuedFor !== goal.goalId &&
@@ -194,6 +196,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
   ): goal is ThreadGoal => {
     return Boolean(
       !deps.staleQueuedWorkGuard.isBlockingContinuation() &&
+      !deps.isContinuationDeferred() &&
       goal &&
       goal.status === "active" &&
       continuationQueuedFor !== goal.goalId &&

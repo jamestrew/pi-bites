@@ -84,7 +84,11 @@ test("reconstructGoal follows branch-local set and clear entries", () => {
     { type: "message", message: { role: "assistant" } },
   ];
 
-  assert.deepEqual(reconstructGoal(branch), { goal: null, hasGoal: false });
+  assert.deepEqual(reconstructGoal(branch), {
+    goal: null,
+    inheritedTransferId: null,
+    deferredTransferId: null,
+  });
 });
 
 test("reconstructGoal ignores orphaned and stale compact usage entries", () => {
@@ -267,7 +271,11 @@ test("reconstructHostOverflowCapNeedsUserReset survives goal clear entries", () 
   ];
 
   assert.equal(reconstructHostOverflowCapNeedsUserReset(branch), true);
-  assert.deepEqual(reconstructGoal(branch), { goal: null, hasGoal: false });
+  assert.deepEqual(reconstructGoal(branch), {
+    goal: null,
+    inheritedTransferId: null,
+    deferredTransferId: null,
+  });
 });
 
 test("applyUsage marks active goals budgetLimited after crossing budget", () => {

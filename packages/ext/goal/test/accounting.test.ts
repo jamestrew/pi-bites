@@ -225,26 +225,6 @@ test("failed durable accounting write retains the pending delta for retry", asyn
   assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
 });
 
-test("fork snapshot flushes outstanding accounting", async () => {
-  const harness = createRuntimeHarness({ monotonicNow: () => 0 });
-  await harness.runTool("create_goal", { objective: "ship" });
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  const message = assistantMessage("toolUse", { input: 6, output: 2 });
-  await harness.emit("message_update", {
-    type: "message_update",
-    message,
-    assistantMessageEvent: { type: "text_delta", delta: "x" },
-  });
-
-  await harness.emit("session_before_fork", {
-    type: "session_before_fork",
-    entryId: "entry-1",
-    position: "at",
-  });
-
-  assert.equal(harness.snapshot().goal?.usage.tokensUsed, 8);
-});
-
 test("exact budget equality persists usage and limits before continuation", async () => {
   let now = 0;
   const harness = createRuntimeHarness({ monotonicNow: () => now });

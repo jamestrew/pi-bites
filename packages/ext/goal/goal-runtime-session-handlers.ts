@@ -1,3 +1,4 @@
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionContext,
   ExtensionHandler,
@@ -10,10 +11,17 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import {
+  canPersistForkDestination,
+  clearPendingUnpersistedTransfer,
+  readForkTransfer,
+  takePendingUnpersistedTransfer,
+} from "./fork-inheritance.js";
+import {
   clearActiveHostOverflowRecovery,
   recoveryPhaseBlocksContinuation,
 } from "./recovery-machine.js";
 import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
+import { isThreadGoal } from "./state.js";
 import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.js";
 
 export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContext) {
@@ -58,7 +66,52 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
     onSessionStart: (async (event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
       stateController.reloadFromSession(ctx);
-      goalAccounting.beginAccounting();
+      const destinationHeader = ctx.sessionManager.getHeader();
+      const parentSessionFile =
+        event.reason === "fork"
+          ? event.previousSessionFile
+          : event.reason === "startup"
+            ? destinationHeader?.parentSession
+            : undefined;
+      if (parentSessionFile && destinationHeader && !stateController.hasInheritedForkSnapshot()) {
+        try {
+          const destinationBranch = ctx.sessionManager.getBranch();
+          const pendingUnpersistedTransfer =
+            event.reason === "fork" &&
+            !destinationBranch.some(
+              (entry) => entry.type === "message" && entry.message.role === "assistant",
+            )
+              ? takePendingUnpersistedTransfer(parentSessionFile)
+              : null;
+          const lookup = pendingUnpersistedTransfer
+            ? { kind: "found" as const, transfer: pendingUnpersistedTransfer }
+            : readForkTransfer(
+                SessionManager.open(parentSessionFile),
+                destinationBranch,
+                destinationHeader.timestamp,
+                isThreadGoal,
+              );
+          if (lookup.kind === "unsafe") {
+            ctx.ui.notify(
+              "Goal fork intent is missing or ambiguous; automatic goal startup was disabled for safety.",
+              "error",
+            );
+            return;
+          }
+          if (lookup.kind === "found") {
+            stateController.inheritForkSnapshot(lookup.transfer, ctx);
+          }
+        } catch (error) {
+          ctx.ui.notify(
+            `Could not inherit goal snapshot: ${error instanceof Error ? error.message : String(error)}`,
+            "error",
+          );
+          return;
+        }
+      }
+      if (!stateController.isContinuationDeferred()) {
+        goalAccounting.beginAccounting();
+      }
       const goal = stateController.getGoal();
       const pausedGoal = goal?.status === "paused" ? goal : null;
       if (event.reason === "resume" && pausedGoal && ctx.hasUI) {
@@ -78,13 +131,45 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
     onSessionTree: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
       stateController.reloadFromSession(ctx);
-      goalAccounting.beginAccounting();
+      if (!stateController.isContinuationDeferred()) {
+        goalAccounting.beginAccounting();
+      }
       continuation.maybeContinue(ctx);
     }) satisfies ExtensionHandler<SessionTreeEvent>,
 
-    onSessionBeforeFork: (async (_event, ctx) => {
-      goalAccounting.accountProgress(ctx, false, true);
-    }) satisfies ExtensionHandler<SessionBeforeForkEvent>,
+    onSessionBeforeFork: (async (event, ctx) => {
+      clearPendingUnpersistedTransfer(ctx.sessionManager.getSessionFile());
+      const goal = stateController.getGoal();
+      const selectedEntry = ctx.sessionManager.getEntry(event.entryId);
+      const targetLeafId =
+        event.position === "at" ? event.entryId : (selectedEntry?.parentId ?? null);
+      const durableDestination = Boolean(
+        targetLeafId && canPersistForkDestination(ctx.sessionManager, targetLeafId),
+      );
+      if (!goal && !durableDestination) {
+        return;
+      }
+
+      try {
+        if (goal) {
+          goalAccounting.accountProgress(ctx, false, true);
+        }
+        stateController.prepareForkTransfer(
+          ctx.sessionManager.getSessionId(),
+          event.entryId,
+          event.position,
+          targetLeafId,
+          ctx.sessionManager.getSessionFile(),
+          durableDestination,
+        );
+      } catch (error) {
+        ctx.ui.notify(
+          `Could not prepare goal inheritance: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+        return { cancel: true };
+      }
+    }) satisfies ExtensionHandler<SessionBeforeForkEvent, { cancel: true } | undefined>,
 
     onSessionBeforeCompact: (async (_event, ctx) => {
       if (

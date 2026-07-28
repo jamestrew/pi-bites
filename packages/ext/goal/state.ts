@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  applyForkInheritanceEntry,
+  isForkGoalEntry,
+  reconstructForkInheritanceBaseline,
+  type RestoredGoalState,
+} from "./fork-inheritance.js";
+import {
   CUSTOM_ENTRY_TYPE,
   MAX_OBJECTIVE_CHARS,
   type GoalCustomEntry,
   type GoalEntrySource,
   type GoalResult,
-  type GoalSnapshot,
   type GoalStatus,
   type GoalUsage,
   type RuntimeUsageGoalStatus,
@@ -187,6 +192,9 @@ export function isGoalCustomEntry(data: unknown): data is GoalCustomEntry {
   if (entry.kind === "host_overflow_cap_reset") {
     return typeof entry.active === "boolean";
   }
+  if (isForkGoalEntry(entry, isThreadGoal)) {
+    return true;
+  }
   return entry.kind === "set" && isGoalEntrySource(entry.source) && isThreadGoal(entry.goal);
 }
 
@@ -256,35 +264,78 @@ function canApplyRuntimeUsageEntry(
   );
 }
 
-export function reconstructGoal(entries: Iterable<SessionEntryLike>): GoalSnapshot {
-  let goal: ThreadGoal | null = null;
+function applyGoalEntry(restored: RestoredGoalState, data: GoalCustomEntry): void {
+  if (data.kind === "clear") {
+    restored.goal = null;
+  } else if (data.kind === "set") {
+    restored.goal = cloneGoal(data.goal);
+  } else if (data.kind === "usage") {
+    if (!canApplyRuntimeUsageEntry(restored.goal, data)) return;
+    restored.goal = cloneGoal(restored.goal);
+    restored.goal.status = data.status;
+    restored.goal.usage = cloneUsage(data.usage);
+    restored.goal.updatedAt = data.updatedAt;
+  } else if (isForkGoalEntry(data, isThreadGoal)) {
+    applyForkInheritanceEntry(restored, data);
+  }
+}
+
+export function reconstructGoal(entries: Iterable<SessionEntryLike>): RestoredGoalState {
+  const restored: RestoredGoalState = {
+    goal: null,
+    inheritedTransferId: null,
+    deferredTransferId: null,
+  };
 
   for (const entry of entries) {
-    if (entry.type !== "custom" || entry.customType !== CUSTOM_ENTRY_TYPE) {
-      continue;
+    if (
+      entry.type === "custom" &&
+      entry.customType === CUSTOM_ENTRY_TYPE &&
+      isGoalCustomEntry(entry.data)
+    ) {
+      applyGoalEntry(restored, entry.data);
     }
-    if (!isGoalCustomEntry(entry.data)) {
-      continue;
-    }
-    if (entry.data.kind === "clear") {
-      goal = null;
-    } else if (entry.data.kind === "set") {
-      goal = cloneGoal(entry.data.goal);
-    } else if (entry.data.kind === "usage") {
-      if (!canApplyRuntimeUsageEntry(goal, entry.data)) {
+  }
+  return restored;
+}
+
+/** Fold the selected branch over immutable child inheritance metadata. */
+export function reconstructSessionGoal(
+  branch: readonly SessionEntryLike[],
+  allEntries: readonly SessionEntryLike[],
+): RestoredGoalState {
+  const baseline = reconstructForkInheritanceBaseline(allEntries, isThreadGoal);
+  if (!baseline) return reconstructGoal(branch);
+
+  const branchContainsSnapshot = branch.some((entry) => entry.id === baseline.snapshotEntryId);
+  const restored: RestoredGoalState = branchContainsSnapshot
+    ? reconstructGoal(branch)
+    : {
+        goal: baseline.goal ? cloneGoal(baseline.goal) : null,
+        inheritedTransferId: baseline.inheritedTransferId,
+        deferredTransferId: baseline.deferredTransferId,
+      };
+
+  if (!branchContainsSnapshot) {
+    const snapshotIndex = allEntries.findIndex((entry) => entry.id === baseline.snapshotEntryId);
+    const entryIndexes = new Map(allEntries.map((entry, index) => [entry.id, index]));
+    for (const entry of branch) {
+      if (
+        (entryIndexes.get(entry.id) ?? -1) <= snapshotIndex ||
+        entry.type !== "custom" ||
+        entry.customType !== CUSTOM_ENTRY_TYPE ||
+        !isGoalCustomEntry(entry.data) ||
+        isForkGoalEntry(entry.data, isThreadGoal)
+      ) {
         continue;
       }
-      goal = cloneGoal(goal);
-      goal.status = entry.data.status;
-      goal.usage = cloneUsage(entry.data.usage);
-      goal.updatedAt = entry.data.updatedAt;
+      applyGoalEntry(restored, entry.data);
     }
   }
 
-  return {
-    goal,
-    hasGoal: goal !== null,
-  };
+  restored.inheritedTransferId = baseline.inheritedTransferId;
+  restored.deferredTransferId = baseline.deferredTransferId;
+  return restored;
 }
 
 export function reconstructHostOverflowCapNeedsUserReset(

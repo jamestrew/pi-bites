@@ -29,9 +29,11 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
   } satisfies Pick<ExtensionAPI, "appendEntry">;
 
   const persistence = createGoalPersistence({ pi });
-  if (goal) {
-    persistence.setGoalSnapshot(goal);
-  }
+  persistence.restore({
+    goal,
+    inheritedTransferId: null,
+    deferredTransferId: null,
+  });
 
   let refreshCount = 0;
   const ctx = {

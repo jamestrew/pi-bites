@@ -1,3 +1,5 @@
+import type { ForkGoalEntry } from "./fork-inheritance.js";
+
 export const CUSTOM_ENTRY_TYPE = "pi-codex-goal";
 export const MAX_OBJECTIVE_CHARS = 4000;
 
@@ -58,7 +60,8 @@ export type GoalCustomEntry =
       kind: "host_overflow_cap_reset";
       active: boolean;
       at: number;
-    };
+    }
+  | ForkGoalEntry;
 
 export interface GoalResult {
   ok: boolean;
@@ -66,13 +69,11 @@ export interface GoalResult {
   goal: ThreadGoal | null;
 }
 
-export interface GoalSnapshot {
-  goal: ThreadGoal | null;
-  hasGoal: boolean;
-}
-
 export interface SessionEntryLike {
   type: string;
+  id?: string;
+  timestamp?: string;
   customType?: string;
   data?: unknown;
+  message?: { role?: unknown };
 }

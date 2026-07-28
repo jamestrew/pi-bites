@@ -28,6 +28,7 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
       runtimeState.turnEndAccounted = false;
       continuation.bindPassthroughContinuationInputToTurn(event.turnIndex);
       runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planTurnStart(), ctx, deps);
+      stateController.clearForkDeferral(ctx);
       goalAccounting.beginTurn();
       status.refreshUi(ctx);
     }) satisfies ExtensionHandler<TurnStartEvent>,
