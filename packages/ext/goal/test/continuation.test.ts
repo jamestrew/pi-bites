@@ -262,8 +262,10 @@ test("goal tools return Codex-shaped response details", async () => {
     token_budget: 20,
   })) as { content: Array<{ type: "text"; text: string }>; details: Record<string, unknown> };
 
+  assert.equal((created.details.goal as { threadId?: string }).threadId, "session");
   assert.equal((created.details.goal as { objective?: string }).objective, "ship it");
   assert.equal((created.details.goal as { tokenBudget?: number }).tokenBudget, 20);
+  assert.equal("goalId" in (created.details.goal as object), false);
   assert.equal(created.details.remainingTokens, 20);
   assert.equal(created.details.completionBudgetReport, null);
   assert.deepEqual(JSON.parse(created.content[0]?.text ?? ""), {
@@ -277,7 +279,7 @@ test("goal tools return Codex-shaped response details", async () => {
   };
   assert.match(
     String(completed.details.completionBudgetReport),
-    /^Goal achieved\. Report final budget usage to the user:/,
+    /^Goal achieved\. Report final usage from this tool result's structured goal fields\./,
   );
 });
 

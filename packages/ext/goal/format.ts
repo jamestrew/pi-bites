@@ -9,7 +9,7 @@ const COMPACT_TOKEN_UNITS = [
 ] as const;
 
 export interface GoalToolRecord {
-  goalId: string;
+  threadId: string;
   objective: string;
   status: GoalStatus;
   tokenBudget: number | null;
@@ -176,9 +176,9 @@ export function formatFooterStatus(
   return "Goal achieved";
 }
 
-export function toToolGoal(goal: ThreadGoal): GoalToolRecord {
+export function toToolGoal(goal: ThreadGoal, threadId: string): GoalToolRecord {
   return {
-    goalId: goal.goalId,
+    threadId,
     objective: goal.objective,
     status: goal.status,
     tokenBudget: goal.tokenBudget,
@@ -204,32 +204,17 @@ export function completionBudgetReport(goal: ThreadGoal | null): string | null {
     return null;
   }
 
-  const parts: string[] = [];
-  if (goal.usage.activeSeconds > 0) {
-    parts.push(`time used: ${formatDuration(goal.usage.activeSeconds)}.`);
-  }
-  if (goal.tokenBudget !== null) {
-    parts.push(
-      `tokens used: ${formatInteger(goal.usage.tokensUsed)} of ${formatInteger(goal.tokenBudget)}.`,
-    );
-  } else if (goal.usage.tokensUsed > 0) {
-    parts.push(`tokens used: ${formatInteger(goal.usage.tokensUsed)}.`);
-  }
-
-  return `Goal achieved. Report final budget usage to the user: ${parts.join(" ")}`;
+  return "Goal achieved. Report final usage from this tool result's structured goal fields. If `goal.tokenBudget` is present, include token usage from `goal.tokensUsed` and `goal.tokenBudget`. If `goal.timeUsedSeconds` is greater than 0, summarize elapsed time in a concise, human-friendly form appropriate to the response language.";
 }
 
 export function goalToolResponse(
   goal: ThreadGoal | null,
+  threadId: string,
   includeCompletionBudgetReport = false,
 ): GoalToolResponse {
   return {
-    goal: goal ? toToolGoal(goal) : null,
+    goal: goal ? toToolGoal(goal, threadId) : null,
     remainingTokens: remainingTokens(goal),
     completionBudgetReport: includeCompletionBudgetReport ? completionBudgetReport(goal) : null,
   };
-}
-
-export function toToolText(goal: ThreadGoal | null, includeCompletionBudgetReport = false): string {
-  return JSON.stringify(goalToolResponse(goal, includeCompletionBudgetReport), null, 2);
 }

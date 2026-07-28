@@ -53,12 +53,13 @@ describe("vendored goal lifecycle", () => {
     });
 
     const result = (await harness.runTool("get_goal", {})) as {
-      details: { goal: { goalId: string; objective: string } };
+      details: { goal: { threadId: string; objective: string; goalId?: never } };
     };
     expect(result.details.goal).toMatchObject({
-      goalId: created?.goalId,
+      threadId: "session",
       objective: "ship issue 185",
     });
+    expect(result.details.goal).not.toHaveProperty("goalId");
 
     await harness.runTool("update_goal", { status: "complete" });
     const next = (await harness.runTool("create_goal", { objective: "next goal" })) as {

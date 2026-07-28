@@ -58,14 +58,15 @@ export function validateObjective(objective: string): string | null {
   return null;
 }
 
+export function isPositiveTokenBudget(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 export function validateTokenBudget(tokenBudget: number | null | undefined): string | null {
   if (tokenBudget === null || tokenBudget === undefined) {
     return null;
   }
-  if (!Number.isInteger(tokenBudget) || tokenBudget <= 0) {
-    return "Token budget must be a positive integer.";
-  }
-  return null;
+  return isPositiveTokenBudget(tokenBudget) ? null : "Token budget must be a positive integer.";
 }
 
 export function statusAfterBudgetLimit(
@@ -151,30 +152,42 @@ export function hostOverflowCapResetEntry(active: boolean, at = unixSeconds()): 
   };
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function isGoalEntrySource(source: unknown): source is GoalEntrySource {
+  return source === "command" || source === "tool" || source === "runtime";
+}
+
 export function isGoalCustomEntry(data: unknown): data is GoalCustomEntry {
   if (!data || typeof data !== "object") {
     return false;
   }
   const entry = data as Record<string, unknown>;
-  if (entry.version !== 1 || typeof entry.at !== "number") {
+  if (entry.version !== 1 || !isNonNegativeSafeInteger(entry.at)) {
     return false;
   }
   if (entry.kind === "clear") {
-    return entry.clearedGoalId === null || typeof entry.clearedGoalId === "string";
+    return (
+      isGoalEntrySource(entry.source) &&
+      (entry.clearedGoalId === null || typeof entry.clearedGoalId === "string")
+    );
   }
   if (entry.kind === "usage") {
     return (
       entry.source === "runtime" &&
       typeof entry.goalId === "string" &&
+      entry.goalId.length > 0 &&
       isRuntimeUsageGoalStatus(entry.status) &&
       isGoalUsage(entry.usage) &&
-      typeof entry.updatedAt === "number"
+      isNonNegativeSafeInteger(entry.updatedAt)
     );
   }
   if (entry.kind === "host_overflow_cap_reset") {
     return typeof entry.active === "boolean";
   }
-  return entry.kind === "set" && isThreadGoal(entry.goal);
+  return entry.kind === "set" && isGoalEntrySource(entry.source) && isThreadGoal(entry.goal);
 }
 
 export function isGoalUsage(usage: unknown): usage is GoalUsage {
@@ -182,7 +195,10 @@ export function isGoalUsage(usage: unknown): usage is GoalUsage {
     return false;
   }
   const candidate = usage as GoalUsage;
-  return typeof candidate.tokensUsed === "number" && typeof candidate.activeSeconds === "number";
+  return (
+    isNonNegativeSafeInteger(candidate.tokensUsed) &&
+    isNonNegativeSafeInteger(candidate.activeSeconds)
+  );
 }
 
 export function isRuntimeUsageGoalStatus(status: unknown): status is RuntimeUsageGoalStatus {
@@ -196,11 +212,15 @@ export function isThreadGoal(goal: unknown): goal is ThreadGoal {
   const candidate = goal as ThreadGoal;
   return (
     typeof candidate.goalId === "string" &&
+    candidate.goalId.length > 0 &&
     typeof candidate.objective === "string" &&
+    candidate.objective === candidate.objective.trim() &&
+    validateObjective(candidate.objective) === null &&
     isGoalStatus(candidate.status) &&
-    (candidate.tokenBudget === null || typeof candidate.tokenBudget === "number") &&
-    typeof candidate.createdAt === "number" &&
-    typeof candidate.updatedAt === "number" &&
+    (candidate.tokenBudget === null || isPositiveTokenBudget(candidate.tokenBudget)) &&
+    isNonNegativeSafeInteger(candidate.createdAt) &&
+    isNonNegativeSafeInteger(candidate.updatedAt) &&
+    candidate.updatedAt >= candidate.createdAt &&
     isGoalUsage(candidate.usage)
   );
 }

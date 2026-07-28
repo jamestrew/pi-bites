@@ -17,7 +17,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import goalExtension, { __testHooks } from "../index.js";
-import { CUSTOM_ENTRY_TYPE } from "../types.js";
+import { isGoalCustomEntry } from "../state.js";
+import { CUSTOM_ENTRY_TYPE, type SessionEntryLike } from "../types.js";
 
 function assistantResponse(
   model: Parameters<StreamFunction>[0],
@@ -50,17 +51,18 @@ function assistantResponse(
   return stream;
 }
 
-function goalIdFromToolResult(result: unknown): string {
-  assert.ok(result && typeof result === "object");
-  const details = (result as { details?: unknown }).details;
-  assert.ok(details && typeof details === "object");
-  const goal = (details as { goal?: unknown }).goal;
-  assert.ok(goal && typeof goal === "object");
-  const goalId = (goal as { goalId?: unknown }).goalId;
-  if (typeof goalId !== "string") {
-    assert.fail("Expected tool result goal id.");
+function persistedGoalId(entries: readonly SessionEntryLike[]): string {
+  for (const entry of entries) {
+    if (
+      entry.type === "custom" &&
+      entry.customType === CUSTOM_ENTRY_TYPE &&
+      isGoalCustomEntry(entry.data) &&
+      entry.data.kind === "set"
+    ) {
+      return entry.data.goal.goalId;
+    }
   }
-  return goalId;
+  return assert.fail("Expected persisted internal goal id.");
 }
 
 test("SDK runtime uses Pi settings for the sole persisted threshold compaction", async () => {
@@ -189,7 +191,9 @@ test("SDK runtime emits a continuation after willRetry compaction when no retry 
       undefined,
       runner.createContext(),
     );
-    const goalId = goalIdFromToolResult(result);
+    const publicGoal = (result.details as { goal: object }).goal;
+    assert.equal("goalId" in publicGoal, false);
+    const goalId = persistedGoalId(session.sessionManager.getEntries());
 
     await runner.emit({
       type: "session_compact",

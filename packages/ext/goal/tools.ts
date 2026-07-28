@@ -6,36 +6,36 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { goalToolResponse, toToolText, type GoalToolResponse } from "./format.js";
-import { createGoal, replaceGoal } from "./state.js";
+import { goalToolResponse, type GoalToolResponse } from "./format.js";
+import { createGoal, isPositiveTokenBudget } from "./state.js";
 import { TOOL_PROMPT_GUIDELINES } from "./prompts.js";
 import type { GoalEntrySource, GoalResult, ThreadGoal } from "./types.js";
 
-const EmptyParams = Type.Object({});
+const EmptyParams = Type.Object({}, { additionalProperties: false, required: [] });
 
-const CreateGoalParams = Type.Object({
-  objective: Type.String({
-    description: "Concrete objective to pursue until completion.",
-  }),
-  token_budget: Type.Optional(
-    Type.Integer({
-      description: "Optional positive integer token budget.",
-      minimum: 1,
-    }),
-  ),
-  replace_existing: Type.Optional(
-    Type.Boolean({
+const CreateGoalParams = Type.Object(
+  {
+    objective: Type.String({
       description:
-        "Replace an existing non-complete goal. Use only when the user explicitly asks to set a new goal over the current one.",
+        "Required. The concrete objective to start pursuing. This starts a new active goal when no goal exists or replaces the current goal when it is complete.",
     }),
-  ),
-});
+    token_budget: Type.Optional(
+      Type.Integer({
+        description: "Positive token budget for the new goal. Omit unless explicitly requested.",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-const UpdateGoalParams = Type.Object({
-  status: StringEnum(["complete"] as const, {
-    description: "Only complete is accepted. Do not call this until no required work remains.",
-  }),
-});
+const UpdateGoalParams = Type.Object(
+  {
+    status: StringEnum(["complete"] as const, {
+      description: "Only complete is accepted. Do not call this until no required work remains.",
+    }),
+  },
+  { additionalProperties: false },
+);
 
 export interface ToolHost {
   getGoal(): ThreadGoal | null;
@@ -43,14 +43,15 @@ export interface ToolHost {
   completeGoal(source: GoalEntrySource, ctx: ExtensionContext): GoalResult;
 }
 
-function textResult(
-  text: string,
+function toolResult(
   goal: ThreadGoal | null,
+  threadId: string,
   includeCompletionBudgetReport = false,
-): AgentToolResult<GoalToolResponse & { error: string | null }> {
+): AgentToolResult<GoalToolResponse> {
+  const details = goalToolResponse(goal, threadId, includeCompletionBudgetReport);
   return {
-    content: [{ type: "text", text }],
-    details: { ...goalToolResponse(goal, includeCompletionBudgetReport), error: null },
+    content: [{ type: "text", text: JSON.stringify(details, null, 2) }],
+    details,
   };
 }
 
@@ -58,41 +59,58 @@ function throwToolError(message: string): never {
   throw new Error(message);
 }
 
+function rejectUnknownProperties(params: object, allowed: readonly string[]): void {
+  const unknown = Object.keys(params).filter((key) => !allowed.includes(key));
+  if (unknown.length > 0) {
+    throwToolError(
+      `Unknown goal tool propert${unknown.length === 1 ? "y" : "ies"}: ${unknown.join(", ")}`,
+    );
+  }
+}
+
 export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
   pi.registerTool({
     name: "get_goal",
     label: "Get Goal",
-    description: "Get the current Codex-style goal and usage for this pi session.",
+    description:
+      "Get the current goal for this thread, including status, budgets, token and elapsed-time usage, and remaining token budget.",
     promptSnippet:
       "Inspect the current goal, status, token budget, tokens used, and active elapsed time.",
     promptGuidelines: TOOL_PROMPT_GUIDELINES,
     parameters: EmptyParams,
-    async execute() {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      rejectUnknownProperties(params, []);
       const goal = host.getGoal();
-      return textResult(toToolText(goal), goal);
+      const threadId = ctx.sessionManager.getSessionId();
+      return toolResult(goal, threadId);
     },
   });
 
   pi.registerTool({
     name: "create_goal",
     label: "Create Goal",
-    description: "Create a Codex-style long-running goal for this pi session.",
+    description:
+      "Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks.\nSet token_budget only when an explicit token budget is requested. Fails if an unfinished goal exists; use update_goal only for status.",
     promptSnippet:
-      "Create one goal with an objective and optional positive token budget. Fails when a non-complete goal already exists unless replace_existing is true; replaces a completed goal.",
+      "Create one goal with an objective and optional positive token budget. Fails when a non-complete goal already exists; replaces a completed goal.",
     promptGuidelines: TOOL_PROMPT_GUIDELINES,
     parameters: CreateGoalParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      rejectUnknownProperties(params, ["objective", "token_budget"]);
+      if (typeof params.objective !== "string") {
+        throwToolError("Objective must be a string.");
+      }
+      if (params.token_budget !== undefined && !isPositiveTokenBudget(params.token_budget)) {
+        throwToolError("Token budget must be a positive integer.");
+      }
       const current = host.getGoal();
-      const shouldReplaceExisting =
-        params.replace_existing === true && current !== null && current.status !== "complete";
-      const result = shouldReplaceExisting
-        ? replaceGoal(params.objective, params.token_budget ?? null)
-        : createGoal(current, params.objective, params.token_budget ?? null);
+      const result = createGoal(current, params.objective, params.token_budget ?? null);
       if (!result.ok || !result.goal) {
         throwToolError(result.message);
       }
       host.setGoal(result.goal, "tool", ctx);
-      return textResult(toToolText(result.goal), result.goal);
+      const threadId = ctx.sessionManager.getSessionId();
+      return toolResult(result.goal, threadId);
     },
   });
 
@@ -105,12 +123,14 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
       "Mark the current goal complete only after an evidence-backed completion audit proves no required work remains.",
     promptGuidelines: TOOL_PROMPT_GUIDELINES,
     parameters: UpdateGoalParams,
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      rejectUnknownProperties(params, ["status"]);
       const result = host.completeGoal("tool", ctx);
       if (!result.ok || !result.goal) {
         throwToolError(result.message);
       }
-      return textResult(toToolText(result.goal, true), result.goal, true);
+      const threadId = ctx.sessionManager.getSessionId();
+      return toolResult(result.goal, threadId, true);
     },
   });
 }

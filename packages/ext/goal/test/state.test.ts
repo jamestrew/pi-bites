@@ -121,6 +121,59 @@ test("reconstructGoal ignores orphaned and stale compact usage entries", () => {
   assert.equal(reconstructed.usage.activeSeconds, 13);
 });
 
+test("reconstructGoal keeps the last valid goal across malformed and foreign-incarnation entries", () => {
+  const created = createGoal(null, "finish").goal;
+  assert.ok(created);
+  const foreign = createGoal(null, "foreign").goal;
+  assert.ok(foreign);
+
+  const malformed = {
+    ...created,
+    objective: " ",
+    usage: { tokensUsed: Number.NaN, activeSeconds: -1 },
+  };
+  const foreignUsage = runtimeUsageEntry({
+    ...foreign,
+    usage: { tokensUsed: 99, activeSeconds: 99 },
+    updatedAt: foreign.updatedAt + 1,
+  });
+  const reconstructed = reconstructGoal([
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: setEntry(created, "tool") },
+    {
+      type: "custom",
+      customType: CUSTOM_ENTRY_TYPE,
+      data: { version: 1, kind: "set", source: "runtime", goal: malformed, at: 1 },
+    },
+    {
+      type: "custom",
+      customType: CUSTOM_ENTRY_TYPE,
+      data: {
+        version: 1,
+        kind: "usage",
+        source: "runtime",
+        goalId: created.goalId,
+        status: "active",
+        usage: { tokensUsed: 10, activeSeconds: 10 },
+        updatedAt: Number.POSITIVE_INFINITY,
+        at: 2,
+      },
+    },
+    {
+      type: "custom",
+      customType: CUSTOM_ENTRY_TYPE,
+      data: { ...setEntry(foreign, "tool"), source: "unknown" },
+    },
+    {
+      type: "custom",
+      customType: CUSTOM_ENTRY_TYPE,
+      data: { ...setEntry(foreign, "tool"), at: Number.NaN },
+    },
+    { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: foreignUsage },
+  ]).goal;
+
+  assert.deepEqual(reconstructed, created);
+});
+
 test("reconstructGoal ignores compact usage entries after terminal snapshots", () => {
   const created = createGoal(null, "finish").goal;
   assert.ok(created);
@@ -271,9 +324,9 @@ test("goalWithLiveUsage adds in-progress active time for display", () => {
   assert.equal(created.usage.activeSeconds, 0);
 });
 
-test("maximum goal objective length remains 8000 Unicode scalars in this package", () => {
-  assert.equal(createGoal(null, "x".repeat(8_000)).ok, true);
-  assert.equal(createGoal(null, "x".repeat(8_001)).ok, false);
+test("goal objectives accept 4000 Unicode scalars and reject 4001", () => {
+  assert.equal(createGoal(null, "🦊".repeat(4_000)).ok, true);
+  assert.equal(createGoal(null, "🦊".repeat(4_001)).ok, false);
 });
 
 test("updateGoalStatus rejects pause and resume on completed goals", () => {
@@ -327,6 +380,31 @@ test("createGoal replaces completed goals and rejects non-complete duplicates", 
   assert.equal(limited.status, "budgetLimited");
   assert.equal(createGoal(limited, "next").ok, false);
   assert.match(createGoal(limited, "next").message ?? "", /non-complete goal/);
+});
+
+test("replacement after completion resets identity, usage, and timestamps", () => {
+  const originalNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  try {
+    const first = createGoal(null, "first", 10).goal;
+    assert.ok(first);
+    const used = applyUsage(first, 5, 7).goal;
+    assert.ok(used);
+    const completed = updateGoalStatus(used, "complete").goal;
+    assert.ok(completed);
+
+    now += 2_000;
+    const second = createGoal(completed, "second", 20).goal;
+    assert.ok(second);
+    assert.notEqual(second.goalId, first.goalId);
+    assert.equal(second.status, "active");
+    assert.deepEqual(second.usage, { tokensUsed: 0, activeSeconds: 0 });
+    assert.equal(second.createdAt, 1_002);
+    assert.equal(second.updatedAt, second.createdAt);
+  } finally {
+    Date.now = originalNow;
+  }
 });
 
 test("model-facing create_goal guidance matches create-after-complete semantics", () => {
