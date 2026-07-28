@@ -72,7 +72,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, rollback, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail
+bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, rollback, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view
 ```
 
 You can also edit config directly:

@@ -22,6 +22,7 @@ const registerModules = [
   "./session-tracker/index.js",
   "./subagents/index.js",
   "./ponytail/index.js",
+  "./view/index.js",
 ] as const;
 
 type RegisterModule = (typeof registerModules)[number];

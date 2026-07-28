@@ -33,7 +33,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "cachePadding" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail"
+ *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "cachePadding" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -121,6 +121,7 @@ export const EXTENSION_NAMES = [
   "sessionTracker",
   "ponytail",
   "subagents",
+  "view",
 ] as const;
 
 export type ExtensionName = (typeof EXTENSION_NAMES)[number];
