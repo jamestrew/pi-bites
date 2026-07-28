@@ -161,7 +161,7 @@ When a command matches, pi asks whether to:
 - allow matching commands for the rest of the session
 - deny it
 
-Press `Ctrl+Shift+Y` to toggle the gate for the main agent. The footer shows `🔥 YOLO` while it is disabled; subagent gates remain active.
+Press `Alt+Y` to toggle the gate for the main agent. The footer shows `🔥 YOLO` while it is disabled; subagent gates remain active.
 
 For non-interactive runs, matching commands are blocked by default because there is no UI prompt. Use `--yolo` to bypass every gate:
 

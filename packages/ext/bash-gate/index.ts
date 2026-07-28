@@ -21,7 +21,7 @@
  * }
  * ```
  *
- * Press Ctrl+Shift+Y to toggle the gate for the main agent. Pass `--yolo` on
+ * Press Alt+Y to toggle the gate for the main agent. Pass `--yolo` on
  * the CLI to bypass all gates entirely — useful for non-interactive / scripted
  * runs where no UI is available:
  *
@@ -294,7 +294,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
   let mainAgentYolo = false;
 
   function syncYoloStatus(ctx: ExtensionContext): void {
-    ctx.ui.setStatus("bash-gate-yolo", mainAgentYolo ? "🔥 YOLO" : undefined);
+    ctx.ui.setStatus("bash-gate-yolo", pi.getFlag("yolo") || mainAgentYolo ? "🔥 YOLO" : undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {
@@ -303,7 +303,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
     syncYoloStatus(ctx);
   });
 
-  pi.registerShortcut("ctrl+shift+y", {
+  pi.registerShortcut("alt+y", {
     description: "Toggle bash-gate yolo mode for the main agent",
     handler: async (ctx) => {
       mainAgentYolo = !mainAgentYolo;

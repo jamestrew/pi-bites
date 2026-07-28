@@ -53,7 +53,7 @@ function subagentEntry(data: Record<string, unknown>): SessionEntry {
   };
 }
 
-function createBashGateHarness(entries: SessionEntry[] = []) {
+function createBashGateHarness(entries: SessionEntry[] = [], yolo = false) {
   const handlers = new Map<string, (event: any, ctx: any) => unknown>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
   const emit = vi.fn((event: string, data: any) => {
@@ -65,7 +65,7 @@ function createBashGateHarness(entries: SessionEntry[] = []) {
     registerShortcut: vi.fn((_key: string, options: { handler: (ctx: any) => unknown }) => {
       shortcutHandler = options.handler;
     }),
-    getFlag: vi.fn(() => false),
+    getFlag: vi.fn(() => yolo),
     on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) => {
       handlers.set(event, handler);
     }),
@@ -103,6 +103,12 @@ function createBashGateHarness(entries: SessionEntry[] = []) {
 }
 
 describe("bash gate tool_call", () => {
+  test("shows the footer status when started with --yolo", () => {
+    const { ui } = createBashGateHarness([], true);
+
+    expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
+  });
+
   test("auto-denies gated bash for deny-policy subagents without prompting parent UI", async () => {
     const { pi, ui, toolCall, ctx } = createBashGateHarness([
       subagentEntry({ bashGatePolicy: "deny" }),
@@ -143,7 +149,7 @@ describe("bash gate tool_call", () => {
     ).resolves.toBeUndefined();
 
     expect(pi.registerShortcut).toHaveBeenCalledWith(
-      "ctrl+shift+y",
+      "alt+y",
       expect.objectContaining({ description: expect.any(String) }),
     );
     expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
