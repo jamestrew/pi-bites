@@ -20,6 +20,9 @@ const COMPLETION_AUDIT_TOOL_GUIDELINE_TEMPLATES = [
   `Do not use ${UPDATE_GOAL_REF_PLACEHOLDER} merely because work is stopping, substantial progress was made, tests passed without covering every requirement, or the token budget is nearly exhausted.`,
 ];
 
+const BLOCKED_AUDIT_GUIDANCE =
+  "Mark a goal blocked only when the same genuine blocker has repeated for at least three consecutive goal turns. Ordinary difficulty, a failed attempt, or a blocker that changed does not qualify; keep working.";
+
 const COMPLETION_AUDIT_CHECKLIST_LINES = [
   "- Restate the objective as concrete deliverables or success criteria.",
   "- Build a prompt-to-artifact checklist that maps every explicit requirement, numbered item, named file, command, test, gate, and deliverable to concrete evidence.",
@@ -58,6 +61,7 @@ export const TOOL_PROMPT_GUIDELINES = [
   `Use ${goalToolReference("get_goal")} when you need to inspect the current long-running user objective.`,
   `Use ${goalToolReference("create_goal")} only when the user explicitly asks you to start tracking a concrete goal; do not infer goals from ordinary tasks and do not create a second goal while a non-complete goal already exists. After a goal is complete, ${goalToolReference("create_goal")} replaces it with a new active goal.`,
   ...completionAuditToolGuidelines(),
+  BLOCKED_AUDIT_GUIDANCE,
   "When a goal is active, keep working through clear low-risk next steps instead of stopping at a plan.",
 ];
 
@@ -109,7 +113,10 @@ export function supersededContinuationMessage(goalId: string): string {
   ].join("\n");
 }
 
-export function compactContinuationPrompt(goal: ThreadGoal): string {
+export function compactContinuationPrompt(
+  goal: ThreadGoal,
+  options: { freshBlockedAudit?: boolean } = {},
+): string {
   return [
     `${CONTINUATION_MARKER_PREFIX}${goal.goalId}">`,
     "Continue working toward the active thread goal.",
@@ -121,6 +128,12 @@ export function compactContinuationPrompt(goal: ThreadGoal): string {
     "Avoid repeating work that is already done. Choose the next concrete action toward the objective.",
     "",
     `Before marking the goal complete, audit progress against the objective and call ${goalToolReference("update_goal")} with status "complete" only when every requirement is verified.`,
+    BLOCKED_AUDIT_GUIDANCE,
+    ...(options.freshBlockedAudit
+      ? [
+          "This goal was resumed from blocked. Start a fresh blocked audit now; prior blocked turns do not count toward the three consecutive turns.",
+        ]
+      : []),
     GOAL_TOOL_NAME_GUIDANCE,
     "</pi_goal_continuation>",
   ].join("\n");
@@ -142,6 +155,8 @@ export function continuationPrompt(goal: ThreadGoal): string {
     "Avoid repeating work that is already done. Choose the next concrete action toward the objective.",
     "",
     ...completionAuditContinuationPromptSection(),
+    "",
+    BLOCKED_AUDIT_GUIDANCE,
     "",
     GOAL_TOOL_NAME_GUIDANCE,
     "</pi_goal_continuation>",

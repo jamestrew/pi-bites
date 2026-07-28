@@ -10,6 +10,7 @@ export interface GoalRuntimeState {
   recoveryState: GoalRecoveryMachineState;
   agentRunSequence: number;
   currentTurnIndex: number | null;
+  turnEndAccounted: boolean;
   staleQueuedWorkGuard: StaleQueuedWorkGuard;
 }
 
@@ -19,6 +20,7 @@ export function createGoalRuntimeState(): GoalRuntimeState {
     recoveryState: createGoalRecoveryMachine(),
     agentRunSequence: 0,
     currentTurnIndex: null,
+    turnEndAccounted: false,
     staleQueuedWorkGuard: createStaleQueuedWorkGuard(),
   };
 }

@@ -372,6 +372,33 @@ test("create_goal rejects the removed model-facing replacement option", async ()
   assert.equal(harness.snapshot().goal, null);
 });
 
+test("update_goal accepts only required complete or blocked status", async () => {
+  for (const params of [
+    {},
+    { status: "active" },
+    { status: "paused" },
+    { status: "usageLimited" },
+    { status: "budgetLimited" },
+    { status: "complete", objective: "changed" },
+    { status: "blocked", token_budget: 10 },
+  ]) {
+    const harness = createRuntimeHarness();
+    await harness.runCommand("ship it");
+    await assert.rejects(() => harness.runTool("update_goal", params));
+    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.snapshot().goal?.objective, "ship it");
+    assert.equal(harness.snapshot().goal?.tokenBudget, null);
+  }
+
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  const result = (await harness.runTool("update_goal", { status: "blocked" })) as {
+    details: { goal: { status: string }; completionBudgetReport: string | null };
+  };
+  assert.equal(result.details.goal.status, "blocked");
+  assert.equal(result.details.completionBudgetReport, null);
+});
+
 test("create_goal replaces a completed goal", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");

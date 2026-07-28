@@ -23,7 +23,7 @@ function registeredTools(): Map<string, RegisteredTool> {
   registerGoalTools(pi, {
     getGoal: () => null,
     setGoal: () => {},
-    completeGoal: () => ({ ok: false, message: "unused", goal: null }),
+    updateGoal: () => ({ ok: false, message: "unused", goal: null }),
   });
   return tools;
 }
@@ -61,9 +61,27 @@ const CONTRACT_FIXTURES = [
       additionalProperties: false,
     },
   },
+  {
+    name: "update_goal",
+    description:
+      "Update the current Codex-style goal to complete or blocked. Mark complete only after an evidence-backed audit proves every requirement is achieved. Mark blocked only when the same genuine blocker has repeated for at least three consecutive goal turns; ordinary difficulty or a changed blocker does not qualify. This tool cannot pause, resume, limit usage or budget, or change the objective or budget.",
+    parameters: {
+      type: "object",
+      required: ["status"],
+      properties: {
+        status: {
+          type: "string",
+          enum: ["complete", "blocked"],
+          description:
+            "Required. Mark complete only after verified completion. Mark blocked only after the same genuine blocker repeats for at least three consecutive goal turns.",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
-test(`get_goal and create_goal schemas match Codex ${CODEX_REFERENCE_COMMIT}`, () => {
+test(`goal tool schemas match Codex ${CODEX_REFERENCE_COMMIT}`, () => {
   const tools = registeredTools();
 
   for (const fixture of CONTRACT_FIXTURES) {

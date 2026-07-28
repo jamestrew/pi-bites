@@ -7,21 +7,9 @@ import {
   type RecoveryPhase,
 } from "./recovery-phase.js";
 import {
-  CONTEXT_OVERFLOW_SIGNATURE,
-  countersForFailureSignature,
-  createErrorRecoveryCounters,
-  failureSignature,
-  HOST_OVERFLOW_RECOVERY_REASON,
-  isContextOverflowError,
-  isRetryableTransientError,
   isSuccessfulAssistantTurn,
   MAX_CONTEXT_COMPACTION_RETRIES,
-  createRecoveryPausedAttention,
-  createRecoveryPendingAttention,
-  isRecoveryPendingAttention,
   type AssistantErrorMessage,
-  type ErrorRecoveryCounters,
-  type RecoveryAttention,
 } from "./recovery.js";
 
 export type { GoalStartTurnStrategy, RecoveryPhase } from "./recovery-phase.js";
@@ -31,34 +19,24 @@ export {
   recoveryPhaseNeedsUserStartTurn,
 } from "./recovery-phase.js";
 
-export type RecoveryAction =
-  | { type: "noop" }
-  | { type: "pending"; reason: string }
-  | { type: "pause"; reason: string };
-
 export interface GoalRecoveryMachineState {
-  counters: ErrorRecoveryCounters;
-  attention: RecoveryAttention | null;
+  overflowAttempts: number;
+  overflowPending: boolean;
   phase: RecoveryPhase;
 }
 
 export function createGoalRecoveryMachine(): GoalRecoveryMachineState {
   return {
-    counters: createErrorRecoveryCounters(),
-    attention: null,
+    overflowAttempts: 0,
+    overflowPending: false,
     phase: idleRecoveryPhase,
   };
 }
 
 export function resetRecoveryMachine(state: GoalRecoveryMachineState): void {
-  state.counters = createErrorRecoveryCounters();
-  state.attention = null;
+  state.overflowAttempts = 0;
+  state.overflowPending = false;
   clearActiveHostOverflowRecovery(state);
-}
-
-export function resetRecoveryCounters(state: GoalRecoveryMachineState): void {
-  state.counters = createErrorRecoveryCounters();
-  state.attention = null;
 }
 
 export function onRecoveryUserInput(state: GoalRecoveryMachineState): void {
@@ -72,40 +50,13 @@ export function onRecoverySuccessfulTurn(
   if (!isSuccessfulAssistantTurn(message)) {
     return false;
   }
-  resetRecoveryCounters(state);
+  state.overflowAttempts = 0;
+  state.overflowPending = false;
   return true;
 }
 
 export function onRecoverySessionCompact(state: GoalRecoveryMachineState): void {
-  const attention = state.attention;
-  if (isRecoveryPendingAttention(attention) && attention.reason === HOST_OVERFLOW_RECOVERY_REASON) {
-    state.attention = null;
-  }
-
-  if (state.counters.compactionAttempts > 0) {
-    state.counters = {
-      ...state.counters,
-      transientAttempts: 0,
-    };
-  }
-}
-
-export function setRecoveryPendingAttention(
-  state: GoalRecoveryMachineState,
-  reason: string,
-): RecoveryAttention {
-  const attention = createRecoveryPendingAttention(reason);
-  state.attention = attention;
-  return attention;
-}
-
-export function setRecoveryPausedAttention(
-  state: GoalRecoveryMachineState,
-  reason: string,
-): RecoveryAttention {
-  const attention = createRecoveryPausedAttention(reason);
-  state.attention = attention;
-  return attention;
+  state.overflowPending = false;
 }
 
 export function clearActiveHostOverflowRecovery(state: GoalRecoveryMachineState): void {
@@ -138,70 +89,16 @@ export function requireHostOverflowUserReset(state: GoalRecoveryMachineState): b
 }
 
 export function beginHostOverflowRecovery(state: GoalRecoveryMachineState): {
-  attention: RecoveryAttention;
   persistHostOverflowCapReset: boolean;
 } {
   const persistHostOverflowCapReset = !recoveryPhaseNeedsUserStartTurn(state.phase);
   state.phase = hostOverflowRecoveringNeedsUserStartPhase();
-  const attention = setRecoveryPendingAttention(state, HOST_OVERFLOW_RECOVERY_REASON);
-  return { attention, persistHostOverflowCapReset };
+  state.overflowPending = true;
+  return { persistHostOverflowCapReset };
 }
 
-function incrementOverflowCompactionAttempts(state: GoalRecoveryMachineState): RecoveryAction {
-  state.counters = {
-    ...state.counters,
-    signature: CONTEXT_OVERFLOW_SIGNATURE,
-    compactionAttempts: state.counters.compactionAttempts + 1,
-  };
-  if (state.counters.compactionAttempts > MAX_CONTEXT_COMPACTION_RETRIES) {
-    return {
-      type: "pause",
-      reason: "context window recovery failed after repeated compaction attempts",
-    };
-  }
-  return { type: "noop" };
-}
-
-/**
- * Plans extension recovery only after pi host post-run retry/compaction has finished.
- * Host AgentSession._handlePostAgentRun() owns retry and overflow compaction; this
- * extension tracks persistent failures and pauses with attention when caps are exceeded.
- */
-export function planRecoveryForAssistantError(
-  state: GoalRecoveryMachineState,
-  message: AssistantErrorMessage,
-): RecoveryAction {
-  if (isContextOverflowError(message.errorMessage)) {
-    return incrementOverflowCompactionAttempts(state);
-  }
-
-  const signature = failureSignature(message.errorMessage);
-  state.counters = countersForFailureSignature(state.counters, signature);
-
-  if (!isRetryableTransientError(message.errorMessage)) {
-    return {
-      type: "pause",
-      reason: `non-retryable provider error (${signature})`,
-    };
-  }
-
-  state.counters = {
-    ...state.counters,
-    transientAttempts: state.counters.transientAttempts + 1,
-  };
-  return {
-    type: "pending",
-    reason: `provider error (${signature})`,
-  };
-}
-
-export function planRecoveryForSilentContextOverflow(
-  state: GoalRecoveryMachineState,
-): RecoveryAction {
-  return incrementOverflowCompactionAttempts(state);
-}
-
-/** True when another overflow in this recovery cycle would exceed the compaction cap. */
-export function isRepeatOverflowCompactionDue(state: GoalRecoveryMachineState): boolean {
-  return state.counters.compactionAttempts >= MAX_CONTEXT_COMPACTION_RETRIES;
+/** Returns true once Pi's single host compact-and-retry has already been exhausted. */
+export function recordSilentContextOverflow(state: GoalRecoveryMachineState): boolean {
+  state.overflowAttempts += 1;
+  return state.overflowAttempts > MAX_CONTEXT_COMPACTION_RETRIES;
 }

@@ -8,12 +8,7 @@ import type {
   StaleQueuedWorkEffectContext,
 } from "./goal-runtime-event-handler-types.js";
 import { extensionQueuedGoalWorkMessageIdForRuntime } from "./queued-goal-work.js";
-import {
-  isAssistantContextOverflow,
-  isContextOverflowError,
-  isErrorAssistantMessage,
-  type AssistantErrorMessage,
-} from "./recovery.js";
+import { isAssistantContextOverflow, type AssistantErrorMessage } from "./recovery.js";
 import type { StaleQueuedWorkEffect, StaleQueuedWorkPlan } from "./stale-queued-work-guard.js";
 
 export function applyStaleQueuedWorkEffects(
@@ -73,21 +68,6 @@ export function recordAssistantContextOverflow(
   }
 
   context.stateController.beginOverflowRecovery(ctx);
-  if (isErrorAssistantMessage(message)) {
-    context.recoveryRuntime.handlePersistentAssistantError(message, ctx);
-  } else {
-    context.recoveryRuntime.handleSilentContextOverflow(ctx);
-  }
+  context.recoveryRuntime.handleSilentContextOverflow(ctx);
   return true;
-}
-
-export function handleAgentErrorMessage(
-  message: AssistantErrorMessage,
-  ctx: ExtensionContext,
-  context: GoalRuntimeOverflowRecoveryContext,
-): void {
-  recordAssistantContextOverflow(message, ctx, context);
-  if (!isContextOverflowError(message.errorMessage)) {
-    context.recoveryRuntime.handlePersistentAssistantError(message, ctx);
-  }
 }

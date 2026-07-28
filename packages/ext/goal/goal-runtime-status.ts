@@ -11,17 +11,12 @@ export interface StatusContext {
 interface GoalRuntimeStatusDeps {
   getGoalForDisplay: () => ThreadGoal | null;
   getGoalStatus: () => ThreadGoal["status"] | null;
-  getRecoveryAttention: () => GoalRecoveryMachineState["attention"];
-  isProviderLimitAutoResumeScheduled: (goalId: string) => boolean;
+  isOverflowPending: () => GoalRecoveryMachineState["overflowPending"];
 }
 
 function formatFooterStatusForRuntime(deps: GoalRuntimeStatusDeps): string | undefined {
   const goal = deps.getGoalForDisplay();
-  return formatFooterStatus(
-    goal,
-    deps.getRecoveryAttention(),
-    goal ? deps.isProviderLimitAutoResumeScheduled(goal.goalId) : false,
-  );
+  return formatFooterStatus(goal, deps.isOverflowPending());
 }
 
 export function createGoalRuntimeStatus(deps: GoalRuntimeStatusDeps) {

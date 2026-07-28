@@ -7,6 +7,7 @@ import {
   formatFooterStatus,
   formatGoalSummary,
   formatTokenValue,
+  goalToolResponse,
 } from "../format.js";
 import { budgetLimitPrompt, continuationPrompt, TOOL_PROMPT_GUIDELINES } from "../prompts.js";
 import {
@@ -22,7 +23,7 @@ import {
   setEntry,
   updateGoalStatus,
 } from "../state.js";
-import { CUSTOM_ENTRY_TYPE } from "../types.js";
+import { CUSTOM_ENTRY_TYPE, type ThreadGoal } from "../types.js";
 
 test("createGoal validates objective and positive token budgets", () => {
   assert.equal(createGoal(null, "   ").ok, false);
@@ -34,6 +35,39 @@ test("createGoal validates objective and positive token budgets", () => {
   assert.equal(result.goal?.objective, "ship it");
   assert.equal(result.goal?.status, "active");
   assert.equal(result.goal?.tokenBudget, 123);
+});
+
+test("all public statuses persist, reconstruct, render, and round-trip in camel case", () => {
+  const statuses = [
+    "active",
+    "paused",
+    "blocked",
+    "usageLimited",
+    "budgetLimited",
+    "complete",
+  ] as const;
+
+  for (const status of statuses) {
+    const created = createGoal(null, "finish", 10).goal;
+    assert.ok(created);
+    const goal = {
+      ...created,
+      status,
+      usage: status === "budgetLimited" ? { tokensUsed: 10, activeSeconds: 1 } : created.usage,
+    };
+    const reconstructed = reconstructGoal([
+      { type: "custom", customType: CUSTOM_ENTRY_TYPE, data: setEntry(goal, "runtime") },
+    ]).goal;
+
+    assert.equal(reconstructed?.status, status);
+    assert.match(
+      formatGoalSummary(reconstructed),
+      new RegExp(
+        `Status: ${status === "budgetLimited" ? "limited by budget" : status === "usageLimited" ? "limited by provider usage" : status}`,
+      ),
+    );
+    assert.equal(goalToolResponse(reconstructed, "thread").goal?.status, status);
+  }
 });
 
 test("reconstructGoal follows branch-local set and clear entries", () => {
@@ -358,6 +392,21 @@ test("updateGoalStatus only allows pause from active and resume from paused", ()
   assert.equal(resumed.status, "active");
 
   assert.equal(updateGoalStatus(resumed, "active").ok, false);
+});
+
+test("pause and resume enforce the external status transition matrix", () => {
+  const active = createGoal(null, "finish").goal;
+  assert.ok(active);
+  assert.equal(updateGoalStatus(active, "paused").goal?.status, "paused");
+
+  for (const status of ["paused", "blocked", "usageLimited"] as const) {
+    const stopped: ThreadGoal = { ...active, status };
+    assert.equal(updateGoalStatus(stopped, "active").goal?.status, "active");
+  }
+
+  assert.equal(updateGoalStatus({ ...active, status: "blocked" }, "paused").ok, false);
+  assert.equal(updateGoalStatus({ ...active, status: "usageLimited" }, "paused").ok, false);
+  assert.equal(updateGoalStatus({ ...active, status: "complete" }, "active").ok, false);
 });
 
 test("createGoal replaces completed goals and rejects non-complete duplicates", () => {

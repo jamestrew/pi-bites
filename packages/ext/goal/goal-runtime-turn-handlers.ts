@@ -9,7 +9,11 @@ import {
   isAbortedAssistantMessage,
   isToolUseAssistantMessage,
 } from "./goal-accounting.js";
-import { isAssistantContextOverflow, isErrorAssistantMessage } from "./recovery.js";
+import {
+  isAssistantContextOverflow,
+  isErrorAssistantMessage,
+  terminalFailureStatus,
+} from "./recovery.js";
 import { getContextWindow, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
 import type {
   GoalRuntimeTurnHandlerContext,
@@ -23,6 +27,7 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
   return {
     onTurnStart: (async (event, ctx) => {
       runtimeState.currentTurnIndex = event.turnIndex;
+      runtimeState.turnEndAccounted = false;
       continuation.bindPassthroughContinuationInputToTurn(event.turnIndex);
       runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planTurnStart(), ctx, deps);
       goalAccounting.beginAccounting();
@@ -51,14 +56,21 @@ export function createTurnEventHandlers(deps: GoalRuntimeTurnHandlerContext) {
         return;
       }
 
+      const expectedGoalId = runtimeState.accounting.activeGoalId;
       const completedTurnTokens = assistantTurnTokens(event.message);
       goalAccounting.accountProgress(ctx, true, completedTurnTokens);
+      runtimeState.turnEndAccounted = true;
       stateController.flushGoalPersistence("runtime");
       if (isAbortedAssistantMessage(event.message)) {
-        stateController.pauseForAbort(ctx);
         return;
       }
       if (isErrorAssistantMessage(event.message)) {
+        stateController.updateGoal(
+          terminalFailureStatus(event.message),
+          "runtime",
+          ctx,
+          expectedGoalId,
+        );
         return;
       }
       if (isAssistantContextOverflow(event.message, getContextWindow(ctx))) {

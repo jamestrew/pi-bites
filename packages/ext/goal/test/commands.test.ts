@@ -47,7 +47,6 @@ function createHarness() {
     clearGoal() {
       goal = null;
     },
-    cancelProviderLimitAutoResume() {},
     getGoalStartTurnStrategy: () => "hiddenFollowUp",
     resumeGoalWithContinuation(goalId: string) {
       const result = updateGoalStatus(goal, "active");
@@ -110,7 +109,7 @@ test("/goal objective creates the goal and starts a hidden follow-up turn", asyn
   assert.deepEqual(sentMessage.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
-test("/goal completions include resume cancel", () => {
+test("/goal completions omit removed timed auto-resume controls", () => {
   const harness = createHarness();
   let getArgumentCompletions: ((argumentPrefix: string) => unknown) | undefined;
   const pi: GoalCommandPi = {
@@ -122,13 +121,7 @@ test("/goal completions include resume cancel", () => {
 
   registerGoalCommand(pi, harness.host);
 
-  assert.deepEqual(getArgumentCompletions?.("resume c"), [
-    {
-      value: "resume cancel",
-      label: "resume cancel",
-      description: "goal resume cancel",
-    },
-  ]);
+  assert.deepEqual(getArgumentCompletions?.("resume c"), []);
 });
 
 test("/goal copy copies the current goal objective", async () => {
@@ -215,7 +208,6 @@ test("/goal objective after overflow recovery sends a user start turn", async ()
     clearGoal() {
       harness.setGoal(null);
     },
-    cancelProviderLimitAutoResume() {},
     getGoalStartTurnStrategy: () => startTurnStrategy,
     resumeGoalWithContinuation(goalId: string) {
       const result = updateGoalStatus(harness.goal, "active");
@@ -285,7 +277,10 @@ test("/goal resume rejects completed and ordinarily active goals", async () => {
 
   await handleGoalCommand(harness.pi, harness.host, "resume", harness.ctx);
   assert.equal(harness.goal?.status, "active");
-  assert.match(harness.notifications.at(-1) ?? "", /Only paused goals can be resumed/);
+  assert.match(
+    harness.notifications.at(-1) ?? "",
+    /Only paused, blocked, or usage-limited goals can be resumed/,
+  );
 });
 
 test("/goal resume restarts an active goal waiting for user-start overflow recovery", async () => {
@@ -298,7 +293,6 @@ test("/goal resume restarts an active goal waiting for user-start overflow recov
     clearGoal() {
       harness.setGoal(null);
     },
-    cancelProviderLimitAutoResume() {},
     getGoalStartTurnStrategy: () => "userFollowUp",
     resumeGoalWithContinuation(goalId: string) {
       const result = updateGoalStatus(harness.goal, "active");

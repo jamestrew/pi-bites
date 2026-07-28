@@ -5,7 +5,6 @@ import {
   recoveryPhaseBlocksContinuation,
   type GoalRecoveryMachineState,
 } from "./recovery-machine.js";
-import { isRecoveryPendingAttention } from "./recovery.js";
 import { CONTINUATION_RETRY_MS } from "./runtime-config.js";
 import type { StaleQueuedWorkGuard } from "./stale-queued-work-guard.js";
 import { CUSTOM_ENTRY_TYPE, type ThreadGoal } from "./types.js";
@@ -107,11 +106,9 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     passthroughContinuationInput = { text, turnIndex: null };
   };
 
-  const hasPendingRecoveryAttention = (): boolean => {
+  const hasPendingOverflowRecovery = (): boolean => {
     const goal = deps.getGoal();
-    return Boolean(
-      goal?.status === "active" && isRecoveryPendingAttention(deps.getRecoveryState().attention),
-    );
+    return goal?.status === "active" && deps.getRecoveryState().overflowPending;
   };
 
   const sendContinuation = (goalToContinue: ThreadGoal): void => {
@@ -133,7 +130,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
       goal &&
       goal.status === "active" &&
       continuationQueuedFor !== goal.goalId &&
-      !hasPendingRecoveryAttention() &&
+      !hasPendingOverflowRecovery() &&
       !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase),
     );
   };
@@ -200,7 +197,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
       goal &&
       goal.status === "active" &&
       continuationQueuedFor !== goal.goalId &&
-      !hasPendingRecoveryAttention() &&
+      !hasPendingOverflowRecovery() &&
       (prepareContinuation || !recoveryPhaseBlocksContinuation(deps.getRecoveryState().phase)),
     );
   };

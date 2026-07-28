@@ -47,8 +47,6 @@ function createStateControllerTestHarness(goal: ThreadGoal | null = activeGoal) 
       clearActiveAccounting: () => {},
       resetRecovery: () => {},
       clearBudgetWarning: () => {},
-      clearHostOverflowRecovery: () => {},
-      setRecoveryPausedAttention: () => {},
       markContinuationQueued: () => {},
       stopStatusRefresh: () => {},
     },
@@ -106,7 +104,7 @@ test("beginOverflowRecovery without an active goal records user reset only", () 
 
   harness.stateController.beginOverflowRecovery(harness.ctx);
   assert.equal(harness.recoveryState.phase.kind, "hostOverflowNeedsUserStart");
-  assert.equal(harness.recoveryState.attention, null);
+  assert.equal(harness.recoveryState.overflowPending, false);
   assert.equal(recoveryPhaseNeedsUserStartTurn(harness.recoveryState.phase), true);
   assert.equal(harness.refreshCount, 0);
   assert.equal(harness.entries.length, 1);
@@ -115,13 +113,13 @@ test("beginOverflowRecovery without an active goal records user reset only", () 
   assert.equal(harness.entries.length, 1);
 });
 
-test("beginOverflowRecovery with a paused goal records user reset without pending attention", () => {
+test("beginOverflowRecovery with a paused goal records only the user reset", () => {
   const pausedGoal: ThreadGoal = { ...activeGoal, status: "paused" };
   const harness = createStateControllerTestHarness(pausedGoal);
 
   harness.stateController.beginOverflowRecovery(harness.ctx);
   assert.equal(harness.recoveryState.phase.kind, "hostOverflowNeedsUserStart");
-  assert.equal(harness.recoveryState.attention, null);
+  assert.equal(harness.recoveryState.overflowPending, false);
   assert.equal(harness.refreshCount, 0);
   assert.equal(harness.entries.length, 1);
   const entry = harness.entries[0] as { kind?: string; active?: boolean };
@@ -129,20 +127,52 @@ test("beginOverflowRecovery with a paused goal records user reset without pendin
   assert.equal(entry.active, true);
 });
 
-test("beginOverflowRecovery with an active goal records pending attention and durable reset", () => {
+test("beginOverflowRecovery with an active goal records pending overflow and durable reset", () => {
   const harness = createStateControllerTestHarness(activeGoal);
 
   harness.stateController.beginOverflowRecovery(harness.ctx);
   assert.equal(harness.recoveryState.phase.kind, "hostOverflowRecoveringNeedsUserStart");
-  assert.deepEqual(harness.recoveryState.attention, {
-    kind: "pending",
-    reason: "recovering from context overflow",
-  });
+  assert.equal(harness.recoveryState.overflowPending, true);
   assert.equal(harness.refreshCount, 1);
   assert.equal(harness.entries.length, 1);
   const entry = harness.entries[0] as { kind?: string; active?: boolean };
   assert.equal(entry.kind, "host_overflow_cap_reset");
   assert.equal(entry.active, true);
+});
+
+test("state controller applies and returns the canonical resume result", () => {
+  for (const status of ["paused", "blocked", "usageLimited"] as const) {
+    const goal: ThreadGoal = { ...activeGoal, status };
+    const harness = createStateControllerTestHarness(goal);
+
+    const result = harness.stateController.updateGoal(
+      "active",
+      "command",
+      harness.ctx,
+      goal.goalId,
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(result.goal?.status, "active");
+    assert.deepEqual(harness.stateController.getGoal(), result.goal);
+  }
+
+  const overBudget: ThreadGoal = {
+    ...activeGoal,
+    status: "paused",
+    tokenBudget: 10,
+    usage: { tokensUsed: 10, activeSeconds: 0 },
+  };
+  const harness = createStateControllerTestHarness(overBudget);
+  const result = harness.stateController.updateGoal(
+    "active",
+    "command",
+    harness.ctx,
+    overBudget.goalId,
+  );
+
+  assert.equal(result.goal?.status, "budgetLimited");
+  assert.deepEqual(harness.stateController.getGoal(), result.goal);
 });
 
 test("persistHostOverflowUserReset appends only when phase changes", () => {

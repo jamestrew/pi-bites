@@ -30,8 +30,9 @@ const CreateGoalParams = Type.Object(
 
 const UpdateGoalParams = Type.Object(
   {
-    status: StringEnum(["complete"] as const, {
-      description: "Only complete is accepted. Do not call this until no required work remains.",
+    status: StringEnum(["complete", "blocked"] as const, {
+      description:
+        "Required. Mark complete only after verified completion. Mark blocked only after the same genuine blocker repeats for at least three consecutive goal turns.",
     }),
   },
   { additionalProperties: false },
@@ -40,7 +41,11 @@ const UpdateGoalParams = Type.Object(
 export interface ToolHost {
   getGoal(): ThreadGoal | null;
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: ExtensionContext): void;
-  completeGoal(source: GoalEntrySource, ctx: ExtensionContext): GoalResult;
+  updateGoal(
+    status: "complete" | "blocked",
+    source: GoalEntrySource,
+    ctx: ExtensionContext,
+  ): GoalResult;
 }
 
 function toolResult(
@@ -118,19 +123,23 @@ export function registerGoalTools(pi: ExtensionAPI, host: ToolHost): void {
     name: "update_goal",
     label: "Update Goal",
     description:
-      "Mark the current Codex-style goal complete only after the objective is actually achieved and no required work remains. Do not use this tool just because work is stopping, budget is low, or partial progress looks sufficient.",
+      "Update the current Codex-style goal to complete or blocked. Mark complete only after an evidence-backed audit proves every requirement is achieved. Mark blocked only when the same genuine blocker has repeated for at least three consecutive goal turns; ordinary difficulty or a changed blocker does not qualify. This tool cannot pause, resume, limit usage or budget, or change the objective or budget.",
     promptSnippet:
-      "Mark the current goal complete only after an evidence-backed completion audit proves no required work remains.",
+      "Mark the current goal complete only after verified completion, or blocked only after the same genuine blocker repeats for three consecutive goal turns.",
     promptGuidelines: TOOL_PROMPT_GUIDELINES,
     parameters: UpdateGoalParams,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       rejectUnknownProperties(params, ["status"]);
-      const result = host.completeGoal("tool", ctx);
+      const status: unknown = params.status;
+      if (status !== "complete" && status !== "blocked") {
+        throwToolError("Status must be complete or blocked.");
+      }
+      const result = host.updateGoal(status, "tool", ctx);
       if (!result.ok || !result.goal) {
         throwToolError(result.message);
       }
       const threadId = ctx.sessionManager.getSessionId();
-      return toolResult(result.goal, threadId, true);
+      return toolResult(result.goal, threadId, params.status === "complete");
     },
   });
 }

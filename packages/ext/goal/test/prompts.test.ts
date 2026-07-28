@@ -43,6 +43,7 @@ test("tool prompt guidelines include exposed and namespaced goal tool guidance",
   for (const guideline of completionAuditToolGuidelines()) {
     assert.ok(TOOL_PROMPT_GUIDELINES.includes(guideline));
   }
+  assert.match(combined, /same genuine blocker.*at least three consecutive goal turns/);
 });
 
 test("continuation prompt uses the canonical completion-audit contract", () => {

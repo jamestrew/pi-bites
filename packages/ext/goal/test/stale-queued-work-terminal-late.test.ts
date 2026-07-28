@@ -454,7 +454,7 @@ test("current id-less agent_end error after stale abort release and current cont
     });
 
     assert.equal(harness.snapshot().goal?.goalId, replacement?.goalId);
-    assert.equal(harness.snapshot().goal?.status, "active");
+    assert.equal(harness.snapshot().goal?.status, "blocked");
     assert.equal(harness.sentMessages.length, 0);
 
     now = 6_000;
@@ -462,8 +462,8 @@ test("current id-less agent_end error after stale abort release and current cont
 
     const goal = harness.snapshot().goal;
     assert.equal(goal?.goalId, replacement?.goalId);
-    assert.equal(goal?.status, "paused");
-    assert.match(harness.footerStatuses.at(-1) ?? "", /websocket closed/);
+    assert.equal(goal?.status, "blocked");
+    assert.equal(harness.footerStatuses.at(-1), "Goal blocked (/goal resume)");
   } finally {
     Date.now = originalNow;
   }
@@ -503,7 +503,7 @@ test("current follow-up abort is not swallowed by a pending late stale turn_end"
 
     let goal = harness.snapshot().goal;
     assert.equal(goal?.goalId, replacement?.goalId);
-    assert.equal(goal?.status, "paused");
+    assert.equal(goal?.status, "active");
     assert.equal(goal?.usage.tokensUsed, 42);
     assert.equal(goal?.usage.activeSeconds, 2);
     assert.equal(harness.sentMessages.length, 0);
@@ -518,7 +518,7 @@ test("current follow-up abort is not swallowed by a pending late stale turn_end"
 
     goal = harness.snapshot().goal;
     assert.equal(goal?.goalId, replacement?.goalId);
-    assert.equal(goal?.status, "paused");
+    assert.equal(goal?.status, "active");
     assert.equal(goal?.usage.tokensUsed, 42);
     assert.equal(goal?.usage.activeSeconds, 2);
   } finally {

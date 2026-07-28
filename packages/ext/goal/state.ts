@@ -229,6 +229,8 @@ export function isGoalStatus(status: unknown): status is GoalStatus {
   return (
     status === "active" ||
     status === "paused" ||
+    status === "blocked" ||
+    status === "usageLimited" ||
     status === "budgetLimited" ||
     status === "complete"
   );
@@ -400,20 +402,33 @@ export function updateGoalStatus(current: ThreadGoal | null, status: GoalStatus)
     };
   }
 
-  if (status === "active" && current.status !== "paused") {
+  if (
+    status === "active" &&
+    current.status !== "paused" &&
+    current.status !== "blocked" &&
+    current.status !== "usageLimited"
+  ) {
     return {
       ok: false,
-      message: "Only paused goals can be resumed.",
+      message: "Only paused, blocked, or usage-limited goals can be resumed.",
+      goal: current,
+    };
+  }
+
+  if (
+    status === "usageLimited" &&
+    current.status !== "active" &&
+    current.status !== "budgetLimited"
+  ) {
+    return {
+      ok: false,
+      message: "Only a goal active at failure time can become usage-limited.",
       goal: current,
     };
   }
 
   const goal = cloneGoal(current);
-  if (current.status === "budgetLimited" && (status === "active" || status === "paused")) {
-    goal.status = "budgetLimited";
-  } else {
-    goal.status = statusAfterBudgetLimit(status, goal.usage.tokensUsed, goal.tokenBudget);
-  }
+  goal.status = statusAfterBudgetLimit(status, goal.usage.tokensUsed, goal.tokenBudget);
   goal.updatedAt = unixSeconds();
 
   return {

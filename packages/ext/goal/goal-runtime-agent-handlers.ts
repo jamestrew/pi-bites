@@ -5,9 +5,8 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { assistantTurnTokens, isAbortedAssistantMessage } from "./goal-accounting.js";
-import { isErrorAssistantMessage, type AssistantErrorMessage } from "./recovery.js";
+import { isErrorAssistantMessage, terminalFailureStatus } from "./recovery.js";
 import {
-  handleAgentErrorMessage,
   recordAssistantContextOverflow,
   runStaleQueuedWorkPlan,
 } from "./goal-runtime-event-utils.js";
@@ -19,6 +18,7 @@ export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
   return {
     onAgentStart: (async () => {
       runtimeState.agentRunSequence += 1;
+      runtimeState.turnEndAccounted = false;
     }) satisfies ExtensionHandler<AgentStartEvent>,
 
     onAgentEnd: (async (event, ctx) => {
@@ -33,22 +33,25 @@ export function createAgentEventHandlers(deps: GoalRuntimeAgentHandlerContext) {
         return;
       }
 
+      const expectedGoalId = runtimeState.accounting.activeGoalId;
       const abortedMessages = event.messages.filter(isAbortedAssistantMessage);
-      const abortedTurnTokens = abortedMessages.reduce((sum, message) => {
-        return sum + assistantTurnTokens(message);
-      }, 0);
+      const abortedTurnTokens = runtimeState.turnEndAccounted
+        ? 0
+        : abortedMessages.reduce((sum, message) => sum + assistantTurnTokens(message), 0);
       goalAccounting.accountProgress(ctx, false, abortedTurnTokens, true);
       stateController.flushGoalPersistence("runtime");
       if (abortedMessages.length > 0) {
-        stateController.pauseForAbort(ctx);
         return;
       }
       const errorMessages = event.messages.filter(isErrorAssistantMessage);
-      if (errorMessages.length > 0) {
-        const lastError = errorMessages.at(-1) as AssistantErrorMessage | undefined;
-        if (lastError) {
-          handleAgentErrorMessage(lastError, ctx, deps);
-        }
+      const lastError = errorMessages.at(-1);
+      if (lastError) {
+        stateController.updateGoal(
+          terminalFailureStatus(lastError),
+          "runtime",
+          ctx,
+          expectedGoalId,
+        );
         return;
       }
 

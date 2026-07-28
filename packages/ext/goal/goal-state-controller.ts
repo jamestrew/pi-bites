@@ -41,15 +41,18 @@ interface GoalStateControllerDeps {
 export interface GoalStateController {
   applyGoalTransition: (request: GoalTransitionRequest, ctx: StatusContext | null) => boolean;
   beginOverflowRecovery: (ctx: StatusContext) => void;
-  completeGoal: (source: GoalEntrySource, ctx: ExtensionContext) => GoalResult;
+  updateGoal: (
+    status: "active" | "complete" | "blocked" | "usageLimited",
+    source: GoalEntrySource,
+    ctx: StatusContext,
+    expectedGoalId?: string | null,
+  ) => GoalResult;
   flushGoalPersistence: GoalPersistence["flushGoalPersistence"];
   getGoal: () => ThreadGoal | null;
   isCurrentActiveGoalId: (goalId: string) => boolean;
   maybeFlushRuntimePersistence: GoalPersistence["maybeFlushRuntimePersistence"];
-  pauseForAbort: (ctx: ExtensionContext) => void;
   persistHostOverflowUserReset: (needsReset: boolean) => void;
   reloadFromSession: (ctx: ExtensionContext) => void;
-  resumePausedGoal: (ctx: StatusContext) => void;
 }
 
 export function createGoalStateController(deps: GoalStateControllerDeps) {
@@ -147,27 +150,17 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
     deps.refreshUi(ctx);
   };
 
-  const pauseForAbort = (ctx: ExtensionContext): void => {
+  const updateGoal = (
+    status: "active" | "complete" | "blocked" | "usageLimited",
+    source: GoalEntrySource,
+    ctx: StatusContext,
+    expectedGoalId?: string | null,
+  ): GoalResult => {
     const goal = getGoal();
-    if (!goal || goal.status !== "active") {
-      return;
+    if (expectedGoalId !== undefined && goal?.goalId !== expectedGoalId) {
+      return { ok: false, message: "Goal changed before status update.", goal };
     }
-
-    applyGoalTransition({ kind: "abort_pause" }, ctx);
-  };
-
-  const resumePausedGoal = (ctx: StatusContext): void => {
-    const goal = getGoal();
-    if (!goal || goal.status !== "paused") {
-      return;
-    }
-
-    applyGoalTransition({ kind: "resume_active" }, ctx);
-  };
-
-  const completeGoal = (source: GoalEntrySource, ctx: ExtensionContext): GoalResult => {
-    const goal = getGoal();
-    const result = updateGoalStatus(goal, "complete");
+    const result = updateGoalStatus(goal, status);
     if (!result.ok || !result.goal) {
       return result;
     }
@@ -181,15 +174,13 @@ export function createGoalStateController(deps: GoalStateControllerDeps) {
   const controller: GoalStateController = {
     applyGoalTransition,
     beginOverflowRecovery,
-    completeGoal,
+    updateGoal,
     flushGoalPersistence: deps.persistence.flushGoalPersistence,
     getGoal,
     isCurrentActiveGoalId,
     maybeFlushRuntimePersistence: deps.persistence.maybeFlushRuntimePersistence,
-    pauseForAbort,
     persistHostOverflowUserReset,
     reloadFromSession,
-    resumePausedGoal,
   };
 
   return controller;

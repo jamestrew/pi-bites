@@ -11,7 +11,6 @@ export interface CommandHost {
   getGoal(): ThreadGoal | null;
   setGoal(goal: ThreadGoal, source: GoalEntrySource, ctx: GoalCommandContext): void;
   clearGoal(source: GoalEntrySource, ctx: GoalCommandContext): void;
-  cancelProviderLimitAutoResume(goalId: string, ctx: GoalCommandContext): void;
   getGoalStartTurnStrategy(): GoalStartTurnStrategy;
   resumeGoalWithContinuation(
     goalId: string,
@@ -20,7 +19,7 @@ export interface CommandHost {
   ): { ok: boolean; message: string; goal: ThreadGoal | null };
 }
 
-const COMMANDS = ["pause", "resume", "resume cancel", "clear", "copy"] as const;
+const COMMANDS = ["pause", "resume", "clear", "copy"] as const;
 
 type CopyText = (text: string) => Promise<ClipboardCopyResult>;
 
@@ -106,17 +105,6 @@ export async function handleGoalCommand(
     return;
   }
 
-  if (trimmed === "resume cancel") {
-    const current = host.getGoal();
-    if (!current) {
-      ctx.ui.notify("No goal is set.", "warning");
-      return;
-    }
-    host.cancelProviderLimitAutoResume(current.goalId, ctx);
-    ctx.ui.notify("Provider-limit auto-resume canceled. Use /goal resume when ready.");
-    return;
-  }
-
   if (trimmed === "pause" || trimmed === "resume") {
     const current = host.getGoal();
     if (
@@ -129,7 +117,12 @@ export async function handleGoalCommand(
       return;
     }
 
-    if (trimmed === "resume" && current?.status === "paused") {
+    if (
+      trimmed === "resume" &&
+      (current?.status === "paused" ||
+        current?.status === "blocked" ||
+        current?.status === "usageLimited")
+    ) {
       const result = host.resumeGoalWithContinuation(current.goalId, "command", ctx);
       ctx.ui.notify(result.message, result.ok ? undefined : "warning");
       return;

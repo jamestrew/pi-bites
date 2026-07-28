@@ -8,39 +8,53 @@ import {
   assistantMessage,
   createRuntimeHarness,
   emitPersistentAssistantError,
-  fireProviderLimitAutoResume,
   flushContinuationScheduler,
   queuedCustomMessage,
   sessionCompactEvent,
   sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 
-test("aborted turns pause goals and do not queue continuation", async () => {
+test("aborted turns account usage without changing active status or queuing continuation", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
   harness.sentMessages.length = 0;
 
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  const aborted = assistantMessage("aborted", {
+    input: 40,
+    output: 2,
+    cacheRead: 500,
+    cacheWrite: 600,
+    totalTokens: 1_142,
+  });
   await harness.emit("turn_end", {
     type: "turn_end",
     turnIndex: 0,
-    message: assistantMessage("aborted", {
-      input: 40,
-      output: 2,
-      cacheRead: 500,
-      cacheWrite: 600,
-      totalTokens: 1_142,
-    }),
+    message: aborted,
     toolResults: [],
   });
+  await harness.emit("agent_end", { type: "agent_end", messages: [aborted] });
 
   const goal = harness.snapshot().goal;
-  assert.equal(goal?.status, "paused");
+  assert.equal(goal?.status, "active");
   assert.equal(goal?.usage.tokensUsed, 42);
   assert.equal(harness.sentMessages.length, 0);
 });
 
-test("a new user-driven agent start leaves a paused goal paused", async () => {
+test("agent-end-only aborts use the accounting seam without changing status", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  await harness.emit("agent_start", { type: "agent_start" });
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  const aborted = assistantMessage("aborted", { input: 8, output: 2 });
+
+  await harness.emit("agent_end", { type: "agent_end", messages: [aborted] });
+
+  assert.equal(harness.snapshot().goal?.status, "active");
+  assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
+});
+
+test("a new user-driven agent start leaves an aborted goal active", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
@@ -58,7 +72,7 @@ test("a new user-driven agent start leaves a paused goal paused", async () => {
     systemPromptOptions: {},
   });
 
-  assert.equal(harness.snapshot().goal?.status, "paused");
+  assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.snapshot().goal?.usage.tokensUsed, 10);
 });
 
@@ -95,13 +109,7 @@ test("session resume over-budget paused goal stays budgetLimited without follow-
 test("session resume prompt can reactivate a paused goal", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 0,
-    message: assistantMessage("aborted", { input: 8, output: 2 }),
-    toolResults: [],
-  });
+  await harness.runCommand("pause");
   harness.sentMessages.length = 0;
 
   await harness.emit("session_start", { type: "session_start", reason: "resume" });
@@ -172,32 +180,6 @@ test("tool-use turn ends do not queue continuation before tool execution finishe
 
   assert.equal(harness.snapshot().goal?.status, "active");
   assert.equal(harness.sentMessages.length, 0);
-});
-
-test("successful budget-crossing turn clears stale recovery footer attention", async () => {
-  const harness = createRuntimeHarness();
-  await harness.runTool("create_goal", { objective: "ship it", token_budget: 10 });
-  harness.sentMessages.length = 0;
-  harness.footerStatuses.length = 0;
-
-  await emitPersistentAssistantError(harness, 0, "websocket closed");
-  assert.equal(harness.snapshot().goal?.status, "active");
-  assert.match(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
-
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 1,
-    message: assistantMessage("stop", { input: 8, output: 3 }),
-    toolResults: [],
-  });
-
-  const goal = harness.snapshot().goal;
-  assert.equal(goal?.status, "budgetLimited");
-  assert.equal(goal?.usage.tokensUsed, 13);
-  assert.equal(harness.footerStatuses.at(-1), formatFooterStatus(goal));
-  assert.match(harness.footerStatuses.at(-1) ?? "", /Goal unmet/);
-  assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Goal recovery pending/);
 });
 
 test("budget crossing sends one hidden budget-limit steering message", async () => {
@@ -651,200 +633,51 @@ test("session shutdown cancels deferred session_compact continuations", async ()
   }
 });
 
-test("provider-limit pauses schedule auto-resume", async () => {
+test("provider/account limits become usageLimited and resume only explicitly", async () => {
   vi.useFakeTimers();
   try {
     const harness = createRuntimeHarness();
     await harness.runCommand("ship it");
     harness.sentMessages.length = 0;
-    harness.sentUserMessages.length = 0;
-
-    await emitPersistentAssistantError(harness, 0, "usage limit has been reached");
-
-    const paused = harness.snapshot().goal;
-    assert.equal(paused?.status, "paused");
-    assert.match(harness.footerStatuses.at(-1) ?? "", /Auto-resume will retry in about 5 minutes/);
-    assert.equal(harness.sentUserMessages.length, 0);
-
-    fireProviderLimitAutoResume();
-
-    const resumed = harness.snapshot().goal;
-    assert.equal(resumed?.goalId, paused?.goalId);
-    assert.equal(resumed?.status, "active");
-    assert.equal(harness.sentUserMessages.length, 1);
-    const content = harness.sentUserMessages[0]?.content;
-    assert.equal(typeof content, "string");
-    assert.match(String(content), /<pi_goal_continuation goal_id="/);
-    assert.doesNotMatch(String(content), /<untrusted_objective>/);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("provider-limit auto-resume retries instead of resuming while busy", async () => {
-  vi.useFakeTimers();
-  try {
-    const harness = createRuntimeHarness({ idle: false, pendingMessages: true });
-    await harness.runCommand("ship it");
-    harness.sentMessages.length = 0;
-    harness.sentUserMessages.length = 0;
-
-    await emitPersistentAssistantError(harness, 0, "usage limit has been reached");
-    fireProviderLimitAutoResume();
-
-    assert.equal(harness.snapshot().goal?.status, "paused");
-    assert.equal(harness.sentUserMessages.length, 0);
-    assert.match(harness.footerStatuses.at(-1) ?? "", /Auto-resume will retry/);
-
-    harness.setIdle(true);
-    harness.setPendingMessages(false);
-    flushContinuationScheduler();
-
-    assert.equal(harness.snapshot().goal?.status, "active");
-    assert.equal(harness.sentUserMessages.length, 1);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("non-limit non-retryable pauses do not schedule auto-resume", async () => {
-  vi.useFakeTimers();
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("ship it");
-    harness.sentMessages.length = 0;
-
-    await emitPersistentAssistantError(harness, 0, "invalid api key");
-    fireProviderLimitAutoResume();
-
-    assert.equal(harness.snapshot().goal?.status, "paused");
-    assert.equal(harness.sentUserMessages.length, 0);
-    assert.doesNotMatch(harness.footerStatuses.at(-1) ?? "", /Auto-resume/);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("manual resume clears provider-limit auto-resume", async () => {
-  vi.useFakeTimers();
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("ship it");
-    harness.sentMessages.length = 0;
-    harness.sentUserMessages.length = 0;
 
     await emitPersistentAssistantError(harness, 0, "insufficient_quota 429");
+
+    assert.equal(harness.snapshot().goal?.status, "usageLimited");
+    assert.equal(harness.sentUserMessages.length, 0);
+    vi.advanceTimersByTime(10 * 60_000);
+    assert.equal(harness.snapshot().goal?.status, "usageLimited");
+    assert.equal(harness.sentUserMessages.length, 0);
+
     await harness.runCommand("resume");
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentUserMessages.length, 1);
-
-    fireProviderLimitAutoResume();
-    assert.equal(harness.sentUserMessages.length, 1);
   } finally {
     vi.useRealTimers();
   }
 });
 
-test("/goal resume cancel clears provider-limit auto-resume and leaves the goal paused", async () => {
-  vi.useFakeTimers();
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("ship it");
-    harness.sentMessages.length = 0;
-
-    await emitPersistentAssistantError(harness, 0, "Monthly usage limit reached");
-    await harness.runCommand("resume cancel");
-
-    assert.equal(harness.snapshot().goal?.status, "paused");
-    assert.equal(
-      harness.footerStatuses.at(-1),
-      "Goal needs attention (non-retryable provider error (Monthly usage limit reached)). Use /goal resume to continue.",
-    );
-    assert.equal(harness.sentUserMessages.length, 0);
-    fireProviderLimitAutoResume();
-    assert.equal(harness.sentUserMessages.length, 0);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("user input and session shutdown clear provider-limit auto-resume", async () => {
-  vi.useFakeTimers();
-  try {
-    const userInputHarness = createRuntimeHarness();
-    await userInputHarness.runCommand("ship it");
-    userInputHarness.sentMessages.length = 0;
-    await emitPersistentAssistantError(userInputHarness, 0, "available balance");
-    await userInputHarness.emit("input", {
-      type: "input",
-      text: "I'll handle it",
-      source: "user",
-      streamingBehavior: "normal",
-    });
-    fireProviderLimitAutoResume();
-    assert.equal(userInputHarness.snapshot().goal?.status, "paused");
-    assert.equal(userInputHarness.sentUserMessages.length, 0);
-
-    const shutdownHarness = createRuntimeHarness();
-    await shutdownHarness.runCommand("ship it");
-    shutdownHarness.sentMessages.length = 0;
-    await emitPersistentAssistantError(shutdownHarness, 0, "quota exceeded");
-    await shutdownHarness.emit("session_shutdown", sessionShutdownEvent());
-    fireProviderLimitAutoResume();
-    assert.equal(shutdownHarness.sentUserMessages.length, 0);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("a second provider-limit failure after auto-resume schedules one new retry", async () => {
-  vi.useFakeTimers();
-  try {
-    const harness = createRuntimeHarness();
-    await harness.runCommand("ship it");
-    harness.sentMessages.length = 0;
-    harness.sentUserMessages.length = 0;
-
-    await emitPersistentAssistantError(harness, 0, "FreeUsageLimitError");
-    fireProviderLimitAutoResume();
-    assert.equal(harness.snapshot().goal?.status, "active");
-    assert.equal(harness.sentUserMessages.length, 1);
-
-    harness.sentUserMessages.length = 0;
-    await emitPersistentAssistantError(harness, 1, "FreeUsageLimitError");
-    assert.equal(harness.snapshot().goal?.status, "paused");
-    assert.equal(harness.sentUserMessages.length, 0);
-    fireProviderLimitAutoResume();
-
-    assert.equal(harness.snapshot().goal?.status, "active");
-    assert.equal(harness.sentUserMessages.length, 1);
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("assistant error turns do not immediately queue continuation", async () => {
+test("terminal non-usage failures block the matching active goal", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
-  const queued = harness.sentMessages[0];
-  assert.ok(queued);
-  const queuedMessage = queuedCustomMessage(queued);
   harness.sentMessages.length = 0;
 
-  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("message_start", {
-    type: "message_start",
-    message: queuedMessage,
-  });
-  await harness.emit("turn_end", {
-    type: "turn_end",
-    turnIndex: 0,
-    message: assistantMessage("error", { input: 30, output: 12 }, "websocket closed"),
-    toolResults: [],
-  });
+  await emitPersistentAssistantError(harness, 0, "invalid api key");
 
-  const goal = harness.snapshot().goal;
-  assert.equal(goal?.status, "active");
-  assert.equal(goal?.usage.tokensUsed, 42);
+  assert.equal(harness.snapshot().goal?.status, "blocked");
   assert.equal(harness.sentMessages.length, 0);
+});
+
+test("resuming blocked starts fresh blocked-audit guidance", async () => {
+  const harness = createRuntimeHarness();
+  await harness.runCommand("ship it");
+  await emitPersistentAssistantError(harness, 0, "invalid api key");
+  harness.sentUserMessages.length = 0;
+
+  await harness.runCommand("resume");
+
+  assert.equal(harness.snapshot().goal?.status, "active");
+  const content = harness.sentUserMessages[0]?.content;
+  assert.equal(typeof content, "string");
+  assert.match(String(content), /Start a fresh blocked audit now/);
+  assert.match(String(content), /three consecutive turns/);
 });

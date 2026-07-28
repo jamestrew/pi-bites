@@ -412,10 +412,6 @@ export function flushContinuationScheduler(): void {
   vi.advanceTimersByTime(__testHooks.continuationRetryMs);
 }
 
-export function fireProviderLimitAutoResume(): void {
-  vi.advanceTimersByTime(__testHooks.providerLimitAutoResumeMs);
-}
-
 export function countGoalSetEntries(
   entries: ReturnType<ExtensionCommandContext["sessionManager"]["getBranch"]>,
   goalId?: string,

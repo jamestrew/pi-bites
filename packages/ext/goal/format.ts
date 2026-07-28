@@ -1,4 +1,4 @@
-import { formatRecoveryAttention, type RecoveryAttention } from "./recovery.js";
+import { overflowRecoveryPendingMessage } from "./recovery.js";
 import type { GoalStatus, ThreadGoal } from "./types.js";
 
 const COMPACT_TOKEN_UNITS = [
@@ -85,14 +85,16 @@ export function formatBudget(goal: ThreadGoal): string {
 }
 
 function statusLabel(status: GoalStatus): string {
-  return status === "budgetLimited" ? "limited by budget" : status;
+  if (status === "budgetLimited") return "limited by budget";
+  if (status === "usageLimited") return "limited by provider usage";
+  return status;
 }
 
 function commandHint(status: GoalStatus): string {
   if (status === "active") {
     return "/goal copy, /goal pause, /goal clear";
   }
-  if (status === "paused") {
+  if (status === "paused" || status === "blocked" || status === "usageLimited") {
     return "/goal copy, /goal resume, /goal clear";
   }
   if (status === "complete") {
@@ -130,8 +132,7 @@ function compactBudgetUsage(goal: ThreadGoal): string {
 
 export function formatFooterStatus(
   goal: ThreadGoal | null,
-  recoveryAttention: RecoveryAttention | null = null,
-  providerLimitAutoResumeScheduled = false,
+  overflowPending = false,
 ): string | undefined {
   if (!goal) {
     return undefined;
@@ -144,13 +145,8 @@ export function formatFooterStatus(
     return "Goal abandoned";
   }
 
-  if (goal.status === "paused" && providerLimitAutoResumeScheduled) {
-    return "Goal paused because the provider usage limit was reached. Auto-resume will retry in about 5 minutes. Use /goal resume to resume now or /goal resume cancel to stop auto-resume.";
-  }
-
-  const recoveryAttentionMessage = formatRecoveryAttention(recoveryAttention);
-  if (recoveryAttentionMessage) {
-    return recoveryAttentionMessage;
+  if (goal.status === "active" && overflowPending) {
+    return overflowRecoveryPendingMessage();
   }
 
   if (goal.status === "active") {
@@ -165,6 +161,12 @@ export function formatFooterStatus(
 
   if (goal.status === "paused") {
     return "Goal paused (/goal resume)";
+  }
+  if (goal.status === "blocked") {
+    return "Goal blocked (/goal resume)";
+  }
+  if (goal.status === "usageLimited") {
+    return "Goal usage-limited (/goal resume)";
   }
 
   if (goal.tokenBudget !== null) {

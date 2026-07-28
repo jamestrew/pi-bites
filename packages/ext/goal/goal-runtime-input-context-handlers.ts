@@ -39,7 +39,6 @@ export function createInputContextEventHandlers(
       const continuationGoalId = continuationGoalIdFromPrompt(event.text);
 
       if (event.source !== "extension") {
-        deps.providerLimitAutoResume.clear();
         recoveryRuntime.onUserInput();
         applyStaleQueuedWorkEffects(
           runtimeState.staleQueuedWorkGuard.planUserInputClearAbort().effects,

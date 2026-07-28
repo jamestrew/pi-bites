@@ -12,11 +12,8 @@ import {
   clearActiveHostOverflowRecovery,
   recoveryPhaseBlocksContinuation,
 } from "./recovery-machine.js";
-import { isRecoveryPendingAttention, reasonFromRecoveryPendingAttention } from "./recovery.js";
 import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
 import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.js";
-import type { GoalRecoveryMachineState } from "./recovery-machine.js";
-import type { ThreadGoal } from "./types.js";
 
 export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContext) {
   const {
@@ -59,7 +56,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
   return {
     onSessionStart: (async (event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
-      deps.providerLimitAutoResume.clear();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
       const goal = stateController.getGoal();
@@ -80,7 +76,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
 
     onSessionTree: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
-      deps.providerLimitAutoResume.clear();
       stateController.reloadFromSession(ctx);
       goalAccounting.beginAccounting();
       continuation.maybeContinue(ctx);
@@ -129,7 +124,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
 
     onSessionShutdown: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
-      deps.providerLimitAutoResume.clear();
       continuation.clearPassthroughContinuationInput();
       continuation.clearContinuationTimer();
       applyStaleQueuedWorkEffects(
@@ -140,8 +134,9 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
 
       goalAccounting.accountProgress(ctx, false, 0, true);
       stateController.flushGoalPersistence("runtime");
-      if (hasPendingRecoveryAttention(deps)) {
-        pauseForPendingRecoveryShutdown(ctx, deps);
+      if (hasPendingOverflowRecovery(deps)) {
+        clearActiveHostOverflowRecovery(runtimeState.recoveryState);
+        stateController.updateGoal("blocked", "runtime", ctx);
       } else {
         resetErrorRecovery();
       }
@@ -150,52 +145,11 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
   };
 }
 
-interface PendingRecoveryShutdownContext {
-  recoveryState: Pick<GoalRecoveryMachineState, "attention">;
-  getGoal: () => ThreadGoal | null;
-}
-
-export function pendingRecoveryShutdownReason({
-  recoveryState,
-  getGoal,
-}: PendingRecoveryShutdownContext): string | null {
-  const goal = getGoal();
-  if (goal?.status !== "active" || !isRecoveryPendingAttention(recoveryState.attention)) {
-    return null;
-  }
-  return reasonFromRecoveryPendingAttention(recoveryState.attention);
-}
-
-function hasPendingRecoveryAttention({
+function hasPendingOverflowRecovery({
   runtimeState,
   stateController,
 }: GoalRuntimeSessionHandlerContext): boolean {
   return (
-    pendingRecoveryShutdownReason({
-      recoveryState: runtimeState.recoveryState,
-      getGoal: stateController.getGoal,
-    }) !== null
-  );
-}
-
-function pauseForPendingRecoveryShutdown(
-  ctx: ExtensionContext,
-  deps: GoalRuntimeSessionHandlerContext,
-): void {
-  const { runtimeState, stateController } = deps;
-  const reason = pendingRecoveryShutdownReason({
-    recoveryState: runtimeState.recoveryState,
-    getGoal: stateController.getGoal,
-  });
-  if (!reason) {
-    return;
-  }
-
-  stateController.applyGoalTransition(
-    {
-      kind: "recovery_shutdown_pause",
-      recoveryReason: reason,
-    },
-    ctx,
+    stateController.getGoal()?.status === "active" && runtimeState.recoveryState.overflowPending
   );
 }
