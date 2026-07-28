@@ -4,5 +4,7 @@
   "app.session.togglePath": [],
   "tui.select.down": ["down", "ctrl+n"],
   "tui.select.up": ["up", "ctrl+p"],
-  "tui.select.confirm": ["enter", "ctrl+y"]
+  "tui.select.confirm": ["enter", "ctrl+y"],
+  "tui.editor.yankPop": [],
+  "tui.editor.undo": ["ctrl+r"]
 }
