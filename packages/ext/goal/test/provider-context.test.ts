@@ -1,11 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "vitest";
 
-import {
-  compactContinuationPrompt,
-  continuationGoalIdFromPrompt,
-  continuationPrompt,
-} from "../prompts.js";
+import { continuationGoalIdFromPrompt, continuationPrompt } from "../prompts.js";
 import { userContentFromUnknown } from "../queued-goal-messages.js";
 import {
   assistantMessage,
@@ -29,7 +25,7 @@ test("provider context dedupes many active continuations without refreshing the 
     ...goal,
     usage: { ...goal.usage, tokensUsed: 1, activeSeconds: 1 },
   });
-  const latestContinuation = compactContinuationPrompt({
+  const latestContinuation = continuationPrompt({
     ...goal,
     usage: { ...goal.usage, tokensUsed: 99, activeSeconds: 42 },
   });
@@ -73,7 +69,7 @@ test("provider context dedupes many active continuations without refreshing the 
   assert.match(latestContent, /Tokens used: 99/);
   assert.match(latestContent, /Time spent pursuing goal: 42s/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
-  assert.doesNotMatch(latestContent, /<untrusted_objective>/);
+  assert.match(latestContent, /<untrusted_objective>\nship it\n<\/untrusted_objective>/);
 });
 
 test("active provider-context user marker without passthrough binding remains verbatim", async () => {
@@ -102,7 +98,7 @@ test("active provider-context dedupe preserves historical user marker mixed with
     ...goal,
     usage: { ...goal.usage, tokensUsed: 1, activeSeconds: 1 },
   });
-  const latestContinuation = compactContinuationPrompt({
+  const latestContinuation = continuationPrompt({
     ...goal,
     usage: { ...goal.usage, tokensUsed: 99, activeSeconds: 42 },
   });
@@ -138,7 +134,7 @@ test("active provider-context dedupe preserves historical user marker mixed with
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
   assert.match(latestContent, /Tokens used: 99/);
-  assert.doesNotMatch(latestContent, /<untrusted_objective>/);
+  assert.match(latestContent, /<untrusted_objective>\nship it\n<\/untrusted_objective>/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
 });
 
@@ -181,7 +177,7 @@ test("active goal provider-context dedupe preserves pasted marker input mixed wi
     ...goal,
     usage: { ...goal.usage, tokensUsed: 1, activeSeconds: 1 },
   });
-  const latestContinuation = compactContinuationPrompt({
+  const latestContinuation = continuationPrompt({
     ...goal,
     usage: { ...goal.usage, tokensUsed: 99, activeSeconds: 42 },
   });
@@ -223,7 +219,7 @@ test("active goal provider-context dedupe preserves pasted marker input mixed wi
 
   const latestContent = String(providerContextMessageAt(result, 2).content);
   assert.match(latestContent, /Tokens used: 99/);
-  assert.doesNotMatch(latestContent, /<untrusted_objective>/);
+  assert.match(latestContent, /<untrusted_objective>\nship it\n<\/untrusted_objective>/);
   assert.equal(continuationGoalIdFromPrompt(latestContent), goal.goalId);
 });
 
@@ -234,7 +230,7 @@ test("latest active continuation remains runnable after provider-context dedupe"
   assert.ok(goal);
 
   const staleInBranch = continuationPrompt(goal);
-  const latestInBranch = compactContinuationPrompt(goal);
+  const latestInBranch = continuationPrompt(goal);
   const contextResults = await emitProviderContext(harness, [
     goalCustomContextMessage({
       content: staleInBranch,

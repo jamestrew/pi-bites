@@ -89,7 +89,8 @@ function formatRemainingTokens(goal: ThreadGoal): string {
 
 function budgetPromptLines(goal: ThreadGoal, includeRemaining: boolean): string[] {
   const lines = [
-    "Budget:",
+    "Current goal state:",
+    `- Status: ${goal.status}`,
     `- Time spent pursuing goal: ${formatDuration(goal.usage.activeSeconds)}`,
     `- Tokens used: ${formatTokenValue(goal.usage.tokensUsed)}`,
     `- Token budget: ${formatOptionalTokenBudget(goal)}`,
@@ -113,33 +114,10 @@ export function supersededContinuationMessage(goalId: string): string {
   ].join("\n");
 }
 
-export function compactContinuationPrompt(
+export function continuationPrompt(
   goal: ThreadGoal,
   options: { freshBlockedAudit?: boolean } = {},
 ): string {
-  return [
-    `${CONTINUATION_MARKER_PREFIX}${goal.goalId}">`,
-    "Continue working toward the active thread goal.",
-    "",
-    `Inspect the current objective and status with ${goalToolReference("get_goal")} if needed.`,
-    "",
-    ...budgetPromptLines(goal, true),
-    "",
-    "Avoid repeating work that is already done. Choose the next concrete action toward the objective.",
-    "",
-    `Before marking the goal complete, audit progress against the objective and call ${goalToolReference("update_goal")} with status "complete" only when every requirement is verified.`,
-    BLOCKED_AUDIT_GUIDANCE,
-    ...(options.freshBlockedAudit
-      ? [
-          "This goal was resumed from blocked. Start a fresh blocked audit now; prior blocked turns do not count toward the three consecutive turns.",
-        ]
-      : []),
-    GOAL_TOOL_NAME_GUIDANCE,
-    "</pi_goal_continuation>",
-  ].join("\n");
-}
-
-export function continuationPrompt(goal: ThreadGoal): string {
   return [
     `${CONTINUATION_MARKER_PREFIX}${goal.goalId}">`,
     "Continue working toward the active thread goal.",
@@ -152,11 +130,17 @@ export function continuationPrompt(goal: ThreadGoal): string {
     "",
     ...budgetPromptLines(goal, true),
     "",
+    "Treat the current worktree and external state as authoritative. Verify their actual state before deciding what remains or claiming completion.",
     "Avoid repeating work that is already done. Choose the next concrete action toward the objective.",
     "",
     ...completionAuditContinuationPromptSection(),
     "",
     BLOCKED_AUDIT_GUIDANCE,
+    ...(options.freshBlockedAudit
+      ? [
+          "This goal was resumed from blocked. Start a fresh blocked audit now; prior blocked turns do not count toward the three consecutive turns.",
+        ]
+      : []),
     "",
     GOAL_TOOL_NAME_GUIDANCE,
     "</pi_goal_continuation>",

@@ -11,11 +11,7 @@ import {
   extensionQueuedGoalWorkMessageId,
   extensionQueuedGoalWorkMessageIdForRuntime,
 } from "../queued-goal-work.js";
-import {
-  compactContinuationPrompt,
-  continuationGoalIdFromPrompt,
-  continuationPrompt,
-} from "../prompts.js";
+import { continuationGoalIdFromPrompt, continuationPrompt } from "../prompts.js";
 import type { ThreadGoal } from "../types.js";
 import { goalCustomContextMessage, goalUserContextMessage } from "./support/runtime-harness.js";
 
@@ -92,7 +88,7 @@ test("applyQueuedGoalProviderContextRewrites supersedes older custom continuatio
     timestamp: 1,
   });
   const latest = goalCustomContextMessage({
-    content: compactContinuationPrompt({
+    content: continuationPrompt({
       ...activeGoal,
       usage: { tokensUsed: 99, activeSeconds: 42 },
     }),
@@ -150,7 +146,7 @@ test("applyQueuedGoalProviderContextRewrites leaves an active user marker verbat
     timestamp: 1,
   });
   const latestHidden = goalCustomContextMessage({
-    content: compactContinuationPrompt(activeGoal),
+    content: continuationPrompt(activeGoal),
     details: { kind: "continuation", goalId: activeGoal.goalId },
     timestamp: 3,
   });

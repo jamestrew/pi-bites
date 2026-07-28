@@ -124,8 +124,85 @@ test("session resume prompt can reactivate a paused goal", async () => {
   if (typeof content !== "string") {
     assert.fail("Expected session resume to send a user continuation prompt.");
   }
-  assert.doesNotMatch(content, /<untrusted_objective>/);
+  assert.match(content, /<untrusted_objective>\nship it\n<\/untrusted_objective>/);
   assert.match(content, /<pi_goal_continuation goal_id="/);
+});
+
+test("idle and compaction boundaries continue only active goals", async () => {
+  vi.useFakeTimers();
+  try {
+    const stoppedGoals = [
+      {
+        status: "absent",
+        setup: async () => createRuntimeHarness(),
+      },
+      {
+        status: "paused",
+        setup: async () => {
+          const harness = createRuntimeHarness();
+          await harness.runCommand("ship it");
+          await harness.runCommand("pause");
+          return harness;
+        },
+      },
+      {
+        status: "blocked",
+        setup: async () => {
+          const harness = createRuntimeHarness();
+          await harness.runTool("create_goal", { objective: "ship it" });
+          await harness.runTool("update_goal", { status: "blocked" });
+          return harness;
+        },
+      },
+      {
+        status: "usageLimited",
+        setup: async () => {
+          const harness = createRuntimeHarness();
+          await harness.runCommand("ship it");
+          await emitPersistentAssistantError(harness, 0, "insufficient_quota 429");
+          return harness;
+        },
+      },
+      {
+        status: "budgetLimited",
+        setup: async () => {
+          const harness = createRuntimeHarness();
+          await harness.runTool("create_goal", { objective: "ship it", token_budget: 1 });
+          await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+          await harness.emit("turn_end", {
+            type: "turn_end",
+            turnIndex: 0,
+            message: assistantMessage("stop", { input: 1, output: 0 }),
+            toolResults: [],
+          });
+          return harness;
+        },
+      },
+      {
+        status: "complete",
+        setup: async () => {
+          const harness = createRuntimeHarness();
+          await harness.runTool("create_goal", { objective: "ship it" });
+          await harness.runTool("update_goal", { status: "complete" });
+          return harness;
+        },
+      },
+    ] as const;
+
+    for (const scenario of stoppedGoals) {
+      const harness = await scenario.setup();
+      harness.sentMessages.length = 0;
+      await harness.emit("agent_end", {
+        type: "agent_end",
+        messages: [assistantMessage("stop", { input: 0, output: 0 })],
+      });
+      await harness.emit("session_compact", sessionCompactEvent());
+      vi.runOnlyPendingTimers();
+      assert.equal(harness.sentMessages.length, 0, scenario.status);
+    }
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("completed turns count input plus output and continue active goals", async () => {
@@ -400,13 +477,12 @@ test("goal follow-up guard resets when custom-message continuations start", asyn
   });
 });
 
-test("auto-queued continuations use the compact prompt", async () => {
+test("auto-queued continuations reinject current objective, usage, and steering", async () => {
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
   const commandStart = harness.sentMessages[0];
   assert.ok(commandStart);
   const startPrompt = String(commandStart.message.content);
-  assert.match(startPrompt, /<untrusted_objective>/);
 
   harness.sentMessages.length = 0;
   await harness.emit("before_agent_start", {
@@ -415,17 +491,23 @@ test("auto-queued continuations use the compact prompt", async () => {
     systemPrompt: "",
     systemPromptOptions: {},
   });
-  await harness.emit("agent_end", {
-    type: "agent_end",
-    messages: [assistantMessage("stop", { input: 1, output: 1 })],
+  await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
+  await harness.emit("turn_end", {
+    type: "turn_end",
+    turnIndex: 0,
+    message: assistantMessage("stop", { input: 1, output: 1 }),
+    toolResults: [],
   });
 
   const continuation = harness.sentMessages[0];
   assert.ok(continuation);
   const content = String(continuation.message.content);
-  assert.match(content, /<pi_goal_continuation goal_id="/);
-  assert.doesNotMatch(content, /<untrusted_objective>/);
-  assert.match(content, /get_goal/);
+  assert.match(content, /<untrusted_objective>\nship it\n<\/untrusted_objective>/);
+  assert.match(content, /Status: active/);
+  assert.match(content, /Tokens used: 2/);
+  assert.match(content, /current worktree and external state as authoritative/);
+  assert.match(content, /same genuine blocker.*at least three consecutive goal turns/);
+  assert.deepEqual(continuation.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
 test("extension user continuation accepted before compaction suppresses duplicate compaction continuation", async () => {

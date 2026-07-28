@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { copyTextToClipboard, type ClipboardCopyResult } from "./clipboard.js";
 import { formatGoalSummary } from "./format.js";
 import type { GoalStartTurnStrategy } from "./recovery-machine.js";
-import { compactContinuationPrompt, continuationPrompt } from "./prompts.js";
+import { continuationPrompt } from "./prompts.js";
 import { replaceGoal, updateGoalStatus } from "./state.js";
 import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type ThreadGoal } from "./types.js";
 
@@ -58,7 +58,7 @@ function queueGoalTurn(
 }
 
 function queueGoalUserTurn(pi: GoalCommandPi, goal: ThreadGoal): void {
-  pi.sendUserMessage(compactContinuationPrompt(goal), { deliverAs: "followUp" });
+  pi.sendUserMessage(continuationPrompt(goal), { deliverAs: "followUp" });
 }
 
 export async function handleGoalCommand(

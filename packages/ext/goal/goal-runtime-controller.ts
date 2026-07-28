@@ -12,7 +12,7 @@ import { registerGoalRuntimeEvents } from "./goal-runtime-events.js";
 import { createGoalRuntimeState } from "./goal-runtime-state.js";
 import { createGoalRuntimeStatus, type StatusContext } from "./goal-runtime-status.js";
 import { createGoalStateController } from "./goal-state-controller.js";
-import { compactContinuationPrompt } from "./prompts.js";
+import { continuationPrompt } from "./prompts.js";
 import { createGoalRecoveryRuntime } from "./recovery-runtime.js";
 import {
   goalStartTurnStrategy,
@@ -121,10 +121,9 @@ export function createGoalRuntimeController(pi: ExtensionAPI): GoalRuntimeContro
     if (!result.ok || !result.goal || result.goal.status !== "active") {
       return result;
     }
-    pi.sendUserMessage(
-      compactContinuationPrompt(result.goal, { freshBlockedAudit: resumedFromBlocked }),
-      { deliverAs: "followUp" },
-    );
+    pi.sendUserMessage(continuationPrompt(result.goal, { freshBlockedAudit: resumedFromBlocked }), {
+      deliverAs: "followUp",
+    });
     return result;
   };
 

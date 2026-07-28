@@ -9,7 +9,7 @@ import {
   type GoalCommandPi,
 } from "../commands.js";
 import type { GoalStartTurnStrategy } from "../recovery-machine.js";
-import { compactContinuationPrompt } from "../prompts.js";
+import { continuationPrompt } from "../prompts.js";
 import { applyUsage, updateGoalStatus } from "../state.js";
 import { CUSTOM_ENTRY_TYPE, type GoalEntrySource, type ThreadGoal } from "../types.js";
 
@@ -52,7 +52,7 @@ function createHarness() {
       const result = updateGoalStatus(goal, "active");
       if (result.ok && result.goal?.goalId === goalId) {
         goal = result.goal;
-        pi.sendUserMessage(compactContinuationPrompt(result.goal), { deliverAs: "followUp" });
+        pi.sendUserMessage(continuationPrompt(result.goal), { deliverAs: "followUp" });
       }
       return result;
     },
@@ -193,7 +193,7 @@ test("/goal resume sends a user continuation turn", async () => {
   if (typeof content !== "string") {
     assert.fail("Expected queued goal resume content to be a string.");
   }
-  assert.doesNotMatch(content, /<untrusted_objective>/);
+  assert.match(content, /<untrusted_objective>\nship the feature\n<\/untrusted_objective>/);
   assert.match(content, /<pi_goal_continuation goal_id="/);
 });
 
@@ -213,7 +213,7 @@ test("/goal objective after overflow recovery sends a user start turn", async ()
       const result = updateGoalStatus(harness.goal, "active");
       if (result.ok && result.goal?.goalId === goalId) {
         harness.setGoal(result.goal);
-        harness.pi.sendUserMessage(compactContinuationPrompt(result.goal), {
+        harness.pi.sendUserMessage(continuationPrompt(result.goal), {
           deliverAs: "followUp",
         });
       }
@@ -234,7 +234,7 @@ test("/goal objective after overflow recovery sends a user start turn", async ()
     assert.fail("Expected queued goal start content to be a string.");
   }
   assert.match(content, /<pi_goal_continuation goal_id="/);
-  assert.doesNotMatch(content, /<untrusted_objective>/);
+  assert.match(content, /<untrusted_objective>\nship the feature\n<\/untrusted_objective>/);
 
   startTurnStrategy = "hiddenFollowUp";
   harness.sentUserMessages.length = 0;
@@ -298,7 +298,7 @@ test("/goal resume restarts an active goal waiting for user-start overflow recov
       const result = updateGoalStatus(harness.goal, "active");
       if (result.ok && result.goal?.goalId === goalId) {
         harness.setGoal(result.goal);
-        harness.pi.sendUserMessage(compactContinuationPrompt(result.goal), {
+        harness.pi.sendUserMessage(continuationPrompt(result.goal), {
           deliverAs: "followUp",
         });
       }
@@ -321,7 +321,7 @@ test("/goal resume restarts an active goal waiting for user-start overflow recov
     assert.fail("Expected queued active resume content to be a string.");
   }
   assert.match(content, /<pi_goal_continuation goal_id="/);
-  assert.doesNotMatch(content, /<untrusted_objective>/);
+  assert.match(content, /<untrusted_objective>\nship the feature\n<\/untrusted_objective>/);
 });
 
 test("/goal objective replaces a completed goal without confirmation", async () => {

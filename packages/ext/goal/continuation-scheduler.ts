@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { compactContinuationPrompt, continuationGoalIdFromPrompt } from "./prompts.js";
+import { continuationGoalIdFromPrompt, continuationPrompt } from "./prompts.js";
 import {
   recoveryPhaseBlocksContinuation,
   type GoalRecoveryMachineState,
@@ -116,7 +116,7 @@ export function createContinuationScheduler(deps: ContinuationSchedulerDeps) {
     deps.pi.sendMessage(
       {
         customType: CUSTOM_ENTRY_TYPE,
-        content: compactContinuationPrompt(goalToContinue),
+        content: continuationPrompt(goalToContinue),
         display: false,
         details: { kind: "continuation", goalId: goalToContinue.goalId },
       },

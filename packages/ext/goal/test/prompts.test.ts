@@ -5,7 +5,6 @@ import {
   GOAL_TOOL_NAME_GUIDANCE,
   TOOL_PROMPT_GUIDELINES,
   budgetLimitPrompt,
-  compactContinuationPrompt,
   completionAuditContinuationPromptSection,
   completionAuditToolGuidelines,
   continuationGoalIdFromPrompt,
@@ -64,18 +63,25 @@ test("continuation prompt uses the canonical completion-audit contract", () => {
   assert.ok(continuation.includes(completionAuditContinuationPromptSection().join("\n")));
 });
 
-test("compact continuation keeps marker detection without repeating the full objective", () => {
-  const created = createGoal(null, "ship it", 10).goal;
+test("every continuation directly reinjects the objective and current state", () => {
+  const created = createGoal(null, "ship <issue> & verify", 10).goal;
   assert.ok(created);
+  created.usage = { tokensUsed: 4, activeSeconds: 65 };
 
-  const compact = compactContinuationPrompt(created);
-  const full = continuationPrompt(created);
-
-  assert.equal(continuationGoalIdFromPrompt(compact), created.goalId);
-  assert.match(compact, /<pi_goal_continuation goal_id="/);
-  assert.doesNotMatch(compact, /<untrusted_objective>/);
-  assert.match(compact, /get_goal/);
-  assert.ok(compact.length < full.length);
+  const prompt = continuationPrompt(created);
+  assert.equal(continuationGoalIdFromPrompt(prompt), created.goalId);
+  assert.match(prompt, /<pi_goal_continuation goal_id="/);
+  assert.match(
+    prompt,
+    /<untrusted_objective>\nship &lt;issue&gt; &amp; verify\n<\/untrusted_objective>/,
+  );
+  assert.match(prompt, /Status: active/);
+  assert.match(prompt, /Time spent pursuing goal: 1m/);
+  assert.match(prompt, /Tokens used: 4/);
+  assert.match(prompt, /Token budget: 10/);
+  assert.match(prompt, /Tokens remaining: 6/);
+  assert.match(prompt, /current worktree and external state as authoritative/);
+  assert.match(prompt, /same genuine blocker.*at least three consecutive goal turns/);
 });
 
 test("superseded continuation bookkeeping does not expose a runnable marker", () => {
