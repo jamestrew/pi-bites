@@ -25,12 +25,27 @@ import subagentsExtension from "../index.js";
 function makePi() {
   const tools = new Map<string, any>();
   const lifecycle = new Map<string, any>();
+  const eventHandlers = new Map<string, Array<(data: unknown) => unknown>>();
   const pi = {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((t: any) => tools.set(t.name, t)),
     registerCommand: vi.fn(),
     on: vi.fn((event: string, handler: any) => lifecycle.set(event, handler)),
-    events: { emit: vi.fn(), on: vi.fn(() => vi.fn()) },
+    events: {
+      emit: vi.fn((event: string, data: unknown) => {
+        for (const handler of eventHandlers.get(event) ?? []) void handler(data);
+      }),
+      on: vi.fn((event: string, handler: (data: unknown) => unknown) => {
+        const handlers = eventHandlers.get(event) ?? [];
+        handlers.push(handler);
+        eventHandlers.set(event, handlers);
+        return () =>
+          eventHandlers.set(
+            event,
+            handlers.filter((h) => h !== handler),
+          );
+      }),
+    },
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getThinkingLevel: vi.fn(() => "off"),
@@ -40,13 +55,20 @@ function makePi() {
 
 /** A UI context with the surfaces the widget + fleet touch; setWidget is spied. */
 function uiCtx() {
+  let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined;
   return {
     setStatus: vi.fn(),
     setWidget: vi.fn(),
     notify: vi.fn(),
-    onTerminalInput: vi.fn(() => vi.fn()),
+    onTerminalInput: vi.fn((handler) => {
+      inputHandler = handler;
+      return () => {
+        inputHandler = undefined;
+      };
+    }),
     getEditorText: vi.fn(() => ""),
     custom: vi.fn(),
+    press: (data: string) => inputHandler?.(data),
   };
 }
 
@@ -110,6 +132,37 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ui = uiCtx();
     await lifecycle.get("tool_execution_start")?.({}, ctxWith(ui));
     expect(ui.onTerminalInput).toHaveBeenCalled();
+  });
+
+  it("yields terminal input between bash-gate pending and resolved events", async () => {
+    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    const ui = uiCtx();
+    const ctx = ctxWith(ui);
+    await lifecycle.get("tool_execution_start")?.({}, ctx);
+    await tools.get("Agent").execute(
+      "tc",
+      {
+        prompt: "go",
+        description: "live one",
+        subagent_type: "general-purpose",
+        run_in_background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
+    pi.events.emit("bites:bash_gate", {});
+    expect(ui.press("\r")).toBeUndefined();
+    expect(ui.press("\x1b")).toBeUndefined();
+    expect(ui.custom).not.toHaveBeenCalled();
+
+    pi.events.emit("bites:bash_gate_resolved", {});
+    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
+    await lifecycle.get("session_shutdown")?.({}, ctx);
   });
 
   it("registers the aboveEditor widget once a spawned agent has a session, then clears it on shutdown", async () => {

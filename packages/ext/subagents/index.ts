@@ -180,6 +180,13 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   // Broadcast readiness so extensions loaded after us can discover us
   pi.events.emit("subagents:ready", {});
 
+  // Claude Code-style FleetView: navigable list of main + subagents above the editor.
+  fleet = new FleetList(manager, agentActivity);
+  const unsubBashGateStarted = pi.events.on("bites:bash_gate", () => fleet.bashGateStarted());
+  const unsubBashGateResolved = pi.events.on("bites:bash_gate_resolved", () =>
+    fleet.bashGateResolved(),
+  );
+
   // On shutdown, abort all agents immediately and clean up.
   // If the session is going down, there's nothing left to consume agent results.
   pi.on("session_shutdown", async () => {
@@ -187,6 +194,8 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     unsubStopRpc();
     unsubPingRpc();
     unsubBashGateApproval();
+    unsubBashGateStarted();
+    unsubBashGateResolved();
     currentCtx = undefined;
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
     manager.abortAll();
@@ -194,9 +203,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
     fleet.dispose();
     manager.dispose();
   });
-
-  // Claude Code-style FleetView: navigable list of main + subagents above the editor.
-  fleet = new FleetList(manager, agentActivity);
   let fleetViewEnabled = true;
   function isFleetViewEnabled(): boolean {
     return fleetViewEnabled;

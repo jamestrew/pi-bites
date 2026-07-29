@@ -89,6 +89,8 @@ export class FleetList {
   private active = false;
   /** 0 = `main`, 1..N = subagents. */
   private selectedIndex = 0;
+  /** Number of bash-gate dialogs currently waiting for input. */
+  private pendingBashGates = 0;
   /** Set while a conversation overlay is open; calling it closes the overlay. */
   private viewerClose: (() => void) | undefined;
   private viewingAgentId: string | undefined;
@@ -135,6 +137,18 @@ export class FleetList {
     this.update();
   }
 
+  bashGateStarted(): void {
+    this.pendingBashGates += 1;
+    this.viewerClose?.();
+    this.viewerClose = undefined;
+    this.viewingAgentId = undefined;
+    this.deactivate();
+  }
+
+  bashGateResolved(): void {
+    this.pendingBashGates = Math.max(0, this.pendingBashGates - 1);
+  }
+
   /**
    * Called when an agent finishes. The viewer (if open on it) stays open so the
    * final output remains readable, and the row lingers in the list — just refresh.
@@ -159,6 +173,7 @@ export class FleetList {
     this.widgetRegistered = false;
     this.tui = undefined;
     this.active = false;
+    this.pendingBashGates = 0;
     // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
   }
@@ -249,7 +264,7 @@ export class FleetList {
 
   /** Returns `{consume:true}` to swallow a key, or undefined to let it through. */
   handleKey(data: string): { consume?: boolean; data?: string } | undefined {
-    if (!this.enabled || !this.ui) return undefined;
+    if (!this.enabled || !this.ui || this.pendingBashGates > 0) return undefined;
     // Input listeners receive BOTH key-press and key-release (the kitty protocol
     // emits both, and matchesKey matches either) — act on press only, or every
     // tap would move/fire twice. Repeats still pass through for held-key nav.

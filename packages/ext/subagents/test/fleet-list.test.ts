@@ -233,6 +233,23 @@ describe("FleetList navigation", () => {
     expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
   });
 
+  it("yields input and deactivates while any bash gate is pending", () => {
+    const h = harness([makeRecord()]);
+    h.press(CTRL_UP);
+
+    h.fleet.bashGateStarted();
+    h.fleet.bashGateStarted();
+    expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
+    expect(h.press(ENTER)).toBeUndefined();
+    expect(h.press(ESC)).toBeUndefined();
+    expect(h.overlayOpened()).toBe(false);
+
+    h.fleet.bashGateResolved();
+    expect(h.press(CTRL_UP)).toBeUndefined();
+    h.fleet.bashGateResolved();
+    expect(h.press(CTRL_UP)).toEqual({ consume: true });
+  });
+
   it("passes non-nav keys through and cancels navigation", () => {
     const h = harness([makeRecord()]);
     h.press(CTRL_UP);
@@ -385,6 +402,18 @@ describe("FleetList rendering", () => {
 });
 
 describe("FleetList overlay lifecycle", () => {
+  it("closes an open viewer before yielding to a bash gate", async () => {
+    const h = harness([makeRecord()]);
+    h.press(CTRL_UP);
+    h.press(ENTER);
+
+    h.fleet.bashGateStarted();
+    expect(h.overlayClosed()).toBe(true);
+    h.fleet.bashGateResolved();
+    await Promise.resolve();
+    expect(h.press(CTRL_UP)).toEqual({ consume: true });
+  });
+
   it("Enter on 'main' just deactivates (no overlay)", () => {
     const h = harness([makeRecord()]);
     h.press(CTRL_UP); // active at agent
