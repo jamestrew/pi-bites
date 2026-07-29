@@ -249,7 +249,8 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
       return;
     }
 
-    const { ConversationViewer } = await import("./ui/conversation-viewer.js");
+    const { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } =
+      await import("./ui/conversation-viewer.js");
     const session = record.session;
     const activity = agentActivity.get(record.id);
 
@@ -274,7 +275,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           }
         },
       );
-    });
+    }, CONVERSATION_OVERLAY_OPTIONS);
   }
 
   async function showAgentDetail(ctx: ExtensionCommandContext, name: string) {

@@ -25,7 +25,7 @@ import { type ToolDescriptionMode } from "./settings.js";
 import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
-import { ConversationViewer } from "./ui/conversation-viewer.js";
+import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
 import { onSubagentApprovalRequest } from "../bash-gate/events.js";
 
 // ---- Shared helpers ----
@@ -153,6 +153,7 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
                 undefined,
                 keybindings,
               ),
+            CONVERSATION_OVERLAY_OPTIONS,
           );
           continue;
         }

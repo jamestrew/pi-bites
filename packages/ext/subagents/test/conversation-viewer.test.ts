@@ -47,6 +47,7 @@ function mockRecord(overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "test-1",
     type: "general-purpose",
+    prompt: "Investigate the failure.",
     description: "test agent",
     status: "running",
     toolUses: 0,
@@ -478,6 +479,108 @@ describe("ConversationViewer", () => {
         vi.fn(),
       );
       assertAllLinesFit(callBuildContentLines(viewer, w), w);
+    });
+  });
+
+  describe("conversation readability", () => {
+    it("renders the original prompt, distinct prose and tool calls, and only errored results", () => {
+      const viewer = new ConversationViewer(
+        mockTui(40, 80),
+        mockSession([
+          { role: "user", content: `Inherited context\n${"Investigate the failure."}` },
+          {
+            role: "assistant",
+            content: [
+              { type: "text", text: "I found the cause." },
+              { type: "toolCall", id: "read-1", name: "read", arguments: { path: "a.ts" } },
+              { type: "toolCall", id: "edit-1", name: "edit", arguments: { path: "b.ts" } },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "read-1",
+            content: [{ type: "text", text: "successful output must be hidden" }],
+            isError: false,
+          },
+          {
+            role: "toolResult",
+            toolCallId: "edit-1",
+            content: [{ type: "text", text: "file not found\nstack trace" }],
+            isError: true,
+          },
+          { role: "user", content: "also check\ttabs" },
+        ]),
+        mockRecord({ status: "completed" }),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+      );
+
+      const output = viewer.render(80).join("\n");
+      expect(output).toContain("Investigate the failure.");
+      expect(output).toContain("---");
+      expect(output).not.toContain("Inherited context");
+      expect(output).toContain("I found the cause.");
+      expect(output).toContain("→ Read(a.ts)");
+      expect(output).toContain('→ Edit({"path":"b.ts"})');
+      expect(output).toContain("error: file not found");
+      expect(output.indexOf("error: file not found")).toBeGreaterThan(
+        output.indexOf('→ Edit({"path":"b.ts"})'),
+      );
+      expect(output).not.toContain("successful output must be hidden");
+      expect(output).toContain("> also check  tabs");
+      expect(output).not.toContain("[Assistant]");
+      expect(output).not.toContain("[Result]");
+      expect(output).not.toContain("───");
+    });
+
+    it("strips terminal control sequences before wrapping", () => {
+      const viewer = new ConversationViewer(
+        mockTui(30, 40),
+        mockSession([
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "text",
+                text: "\x1b[31mred\x1b[0m\u0001 text \u009b32mgreen\u009b0m \u009dtitle\u0007",
+              },
+            ],
+          },
+        ]),
+        mockRecord({ status: "completed" }),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+      );
+
+      const output = viewer.render(40).join("\n");
+      expect(output).toContain("red text green title");
+      expect(output).not.toContain("\u0001");
+      expect(output).not.toContain("\u009b");
+      expect(output).not.toContain("\u009d");
+      expect(output.includes("\x1b[31m")).toBe(false);
+    });
+
+    it("renders edge-to-edge without borders or padded content rows", () => {
+      const plainTheme = {
+        fg: (_color: string, text: string) => text,
+        bold: (text: string) => text,
+      } as any;
+      const viewer = new ConversationViewer(
+        mockTui(20, 40),
+        mockSession([{ role: "assistant", content: [{ type: "text", text: "answer" }] }]),
+        mockRecord({ status: "completed", prompt: "task" }),
+        undefined,
+        plainTheme,
+        vi.fn(),
+      );
+
+      const lines = viewer.render(40);
+      expect(lines).toHaveLength(20);
+      expect(lines).toContain("task");
+      expect(lines).toContain("answer");
+      expect(lines.some((line) => line.includes("─") || line.startsWith(" "))).toBe(false);
     });
   });
 

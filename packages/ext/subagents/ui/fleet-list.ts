@@ -29,7 +29,7 @@ import {
   getDisplayName,
   type Theme,
 } from "./agent-format.js";
-import { ConversationViewer } from "./conversation-viewer.js";
+import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./conversation-viewer.js";
 
 /** Widget key for the FleetView list. */
 const FLEET_KEY = "fleet";
@@ -363,7 +363,7 @@ export class FleetList {
               this.ui?.notify(`Canceled current operation for "${record.description}".`, "info");
           },
         );
-      })
+      }, CONVERSATION_OVERLAY_OPTIONS)
       .then(
         () => this.clearViewer(),
         () => this.clearViewer(),

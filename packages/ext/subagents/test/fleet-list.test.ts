@@ -31,6 +31,7 @@ function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "a1",
     type: "general-purpose",
+    prompt: "Sleep then report",
     description: "Sleep then report 1",
     status: "running",
     toolUses: 0,
@@ -75,6 +76,7 @@ interface Harness {
   setEditorText: (t: string) => void;
   /** Whether an overlay has been opened. */
   overlayOpened: () => boolean;
+  overlayOptions: () => unknown;
   /** Whether the most recently opened overlay's `done` was invoked (closed). */
   overlayClosed: () => boolean;
   /** Simulate the viewer closing itself (Esc → done); flushes the close microtask. */
@@ -89,6 +91,7 @@ function harness(agents: AgentRecord[]): Harness {
   let closed = false;
   let overlayDone: ((r: undefined) => void) | undefined;
   let overlayComponent: { handleInput(data: string): void } | undefined;
+  let overlayOptions: unknown;
   const fakeTui = { requestRender: () => {}, terminal: { columns: 120, rows: 40 } };
 
   const ui: FleetUICtx = {
@@ -103,8 +106,9 @@ function harness(agents: AgentRecord[]): Harness {
     },
     getEditorText: () => editorText,
     notify: () => {},
-    custom: ((factory: any) => {
+    custom: ((factory: any, options: unknown) => {
       opened = true;
+      overlayOptions = options;
       return new Promise<undefined>((resolve) => {
         const done = (r: undefined) => {
           closed = true;
@@ -136,6 +140,7 @@ function harness(agents: AgentRecord[]): Harness {
       editorText = t;
     },
     overlayOpened: () => opened,
+    overlayOptions: () => overlayOptions,
     overlayClosed: () => closed,
     closeOverlay: async () => {
       overlayDone?.(undefined);
@@ -402,6 +407,17 @@ describe("FleetList rendering", () => {
 });
 
 describe("FleetList overlay lifecycle", () => {
+  it("opens conversations as a full-window edge-to-edge overlay", () => {
+    const h = harness([makeRecord()]);
+    h.press(CTRL_UP);
+    h.press(ENTER);
+
+    expect(h.overlayOptions()).toEqual({
+      overlay: true,
+      overlayOptions: { width: "100%", maxHeight: "100%", margin: 0 },
+    });
+  });
+
   it("closes an open viewer before yielding to a bash gate", async () => {
     const h = harness([makeRecord()]);
     h.press(CTRL_UP);

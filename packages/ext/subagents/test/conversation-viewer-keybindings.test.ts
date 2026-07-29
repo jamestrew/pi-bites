@@ -37,6 +37,7 @@ function createViewer(keybindings?: ViewerKeybindings) {
   const record = {
     id: "test-1",
     type: "general-purpose",
+    prompt: "task",
     description: "test agent",
     status: "completed",
     toolUses: 0,

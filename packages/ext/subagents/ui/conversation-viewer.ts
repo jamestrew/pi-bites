@@ -5,6 +5,7 @@
  * Subscribes to session events for real-time streaming updates.
  */
 
+import { stripVTControlCharacters } from "node:util";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
@@ -12,7 +13,6 @@ import {
   matchesKey,
   type TUI,
   truncateToWidth,
-  visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import { extractText } from "../context.js";
@@ -30,15 +30,29 @@ import {
 } from "./agent-format.js";
 import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./viewer-keys.js";
 
-/** Base lines consumed by chrome: top border + header + header sep + footer sep + footer + bottom border. */
-const CHROME_LINES_BASE = 6;
+/** Base lines consumed by chrome: header + two blank separators + footer. */
+const CHROME_LINES_BASE = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
+
+/** Keep raw terminal escapes and control characters out of copyable transcript text. */
+export function sanitizeText(text: string): string {
+  return (
+    stripVTControlCharacters(text)
+      .replaceAll("\t", "  ")
+      // eslint-disable-next-line no-control-regex -- control characters are what this removes.
+      .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
+  );
+}
+
+export const CONVERSATION_OVERLAY_OPTIONS = {
+  overlay: true,
+  overlayOptions: { width: "100%", maxHeight: "100%", margin: 0 },
+} as const;
+
 const MIN_VIEWPORT = 3;
-/** Give the lower subagent pane 70% of the terminal, leaving 30% for the main agent. */
-const VIEWPORT_HEIGHT_PCT = 70;
 
 export class ConversationViewer implements Component {
   private scrollOffset = 0;
@@ -151,23 +165,11 @@ export class ConversationViewer implements Component {
   }
 
   render(width: number): string[] {
-    if (width < 4) return []; // too narrow for any meaningful rendering
+    if (width < 4) return [];
     const th = this.theme;
-    const innerW = width - 2; // horizontal padding
-    this.lastInnerW = innerW;
+    this.lastInnerW = width;
     const lines: string[] = [];
 
-    const pad = (s: string, len: number) => {
-      const vis = visibleWidth(s);
-      return s + " ".repeat(Math.max(0, len - vis));
-    };
-    const row = (content: string) => " " + truncateToWidth(pad(content, innerW), innerW) + " ";
-    const hrTop = th.fg("border", "─".repeat(width));
-    const hrBot = th.fg("border", "─".repeat(width));
-    const hrMid = row(th.fg("dim", "─".repeat(innerW)));
-
-    // Header
-    lines.push(hrTop);
     const name = getDisplayName(this.record.type);
     const statusIcon =
       this.record.status === "running"
@@ -178,7 +180,6 @@ export class ConversationViewer implements Component {
             ? th.fg("error", "✗")
             : th.fg("dim", "○");
     const duration = formatDuration(this.record.startedAt, this.record.completedAt);
-
     const headerParts: string[] = [duration];
     const toolUses = this.activity?.toolUses ?? this.record.toolUses;
     if (toolUses > 0) headerParts.unshift(`${toolUses} tool${toolUses === 1 ? "" : "s"}`);
@@ -189,75 +190,49 @@ export class ConversationViewer implements Component {
     }
 
     lines.push(
-      row(
+      truncateToWidth(
         `${statusIcon} ${th.bold(name)}  ${th.fg("muted", this.record.description)} ${th.fg("dim", "·")} ${th.fg("dim", headerParts.join(" · "))}`,
+        width,
       ),
     );
     const invocationLine = this.invocationLine();
-    if (invocationLine) lines.push(row(invocationLine));
-    lines.push(hrMid);
+    if (invocationLine) lines.push(truncateToWidth(invocationLine, width));
+    lines.push("");
 
-    // Content area — rebuild every render (live data, no cache needed)
-    const contentLines = this.buildContentLines(innerW);
+    const contentLines = this.buildContentLines(width);
     const viewportHeight = this.viewportHeight();
     const maxScroll = Math.max(0, contentLines.length - viewportHeight);
-
-    if (this.autoScroll) {
-      this.scrollOffset = maxScroll;
-    }
+    if (this.autoScroll) this.scrollOffset = maxScroll;
 
     const visibleStart = Math.min(this.scrollOffset, maxScroll);
     const visible = contentLines.slice(visibleStart, visibleStart + viewportHeight);
+    for (let i = 0; i < viewportHeight; i++) lines.push(visible[i] ?? "");
 
-    for (let i = 0; i < viewportHeight; i++) {
-      lines.push(row(visible[i] ?? ""));
-    }
-
-    // Footer
-    lines.push(hrMid);
+    lines.push("");
     if (this.composer) {
-      // Composer row: the Input renders its own `> ` prompt and cursor.
-      lines.push(row(this.composer.render(innerW)[0] ?? ""));
-      const composeHint = th.fg("dim", "Enter send · Esc cancel");
-      const composeLeft = th.fg(
+      lines.push(truncateToWidth(this.composer.render(width)[0] ?? "", width));
+      const composeLeft = this.theme.fg(
         "accent",
         this.composerMode === "cancel" ? "✎ cancel + steer" : "✎ steer",
       );
-      const composeGap = Math.max(
-        1,
-        innerW - visibleWidth(composeLeft) - visibleWidth(composeHint),
+      lines.push(
+        truncateToWidth(`${composeLeft} ${th.fg("dim", "Enter send · Esc cancel")}`, width),
       );
-      lines.push(row(composeLeft + " ".repeat(composeGap) + composeHint));
     } else {
-      // Actions on the left, navigation on the right. The scroll hint keeps its
-      // full key list so the less-obvious bindings stay discoverable; it leads
-      // the right group so "Esc close" is the only part that truncates first.
-      const sep = th.fg("dim", " · ");
-      const actions: string[] = [];
-      if (this.canSteer()) actions.push(th.fg("dim", "Enter steer"));
-      if (this.canCancel()) actions.push(th.fg("dim", "c cancel"));
-      if (this.isStoppable()) {
-        actions.push(this.stopArmed ? th.fg("error", "x again to STOP") : th.fg("dim", "x stop"));
-      }
-      const footerRight = th.fg("dim", "↑↓ scroll · PgUp/PgDn or Shift+↑↓ · Esc close");
-
-      // Prepend the line-count/scroll-% readout only when there's spare width —
-      // it's the first thing dropped so it never crowds out the hints.
-      const scrollPct =
-        contentLines.length <= viewportHeight
-          ? "100%"
-          : `${Math.round(((visibleStart + viewportHeight) / contentLines.length) * 100)}%`;
-      const count = th.fg("dim", `${contentLines.length} lines · ${scrollPct}`);
-      const withCount = [count, ...actions].join(sep);
-      const footerLeft =
-        visibleWidth(withCount) + visibleWidth(footerRight) + 1 <= innerW
-          ? withCount
-          : actions.join(sep);
-
-      const footerGap = Math.max(1, innerW - visibleWidth(footerLeft) - visibleWidth(footerRight));
-      lines.push(row(footerLeft + " ".repeat(footerGap) + footerRight));
+      const hints: string[] = [];
+      if (this.canSteer()) hints.push("Enter steer");
+      if (this.canCancel()) hints.push("c cancel");
+      if (this.isStoppable()) hints.push(this.stopArmed ? "x again to STOP" : "x stop");
+      hints.push("Home top", "↑↓ scroll", "PgUp/PgDn or Shift+↑↓", "Esc close");
+      lines.push(
+        truncateToWidth(
+          hints
+            .map((hint) => (hint === "x again to STOP" ? th.fg("error", hint) : th.fg("dim", hint)))
+            .join(th.fg("dim", " · ")),
+          width,
+        ),
+      );
     }
-    lines.push(hrBot);
 
     return lines;
   }
@@ -315,9 +290,7 @@ export class ConversationViewer implements Component {
   // ---- Private ----
 
   private viewportHeight(): number {
-    // Keep the lower pane to 70% so the main-agent transcript remains visible.
-    const maxRows = Math.floor((this.tui.terminal.rows * VIEWPORT_HEIGHT_PCT) / 100);
-    return Math.max(MIN_VIEWPORT, maxRows - this.chromeLines());
+    return Math.max(MIN_VIEWPORT, this.tui.terminal.rows - this.chromeLines());
   }
 
   private chromeLines(): number {
@@ -333,11 +306,11 @@ export class ConversationViewer implements Component {
   }
 
   private formatToolCall(call: unknown): string {
-    if (!isRecord(call)) return `  ${formatToolCall("unknown", {})}`;
+    if (!isRecord(call)) return `→ ${formatToolCall("unknown", {})}`;
 
     const name = typeof call.name === "string" ? call.name : "unknown";
     const rawArgs = call.arguments ?? call.input;
-    return `  ${formatToolCall(name, isRecord(rawArgs) ? rawArgs : {})}`;
+    return `→ ${formatToolCall(name, isRecord(rawArgs) ? rawArgs : {})}`;
   }
 
   private buildContentLines(width: number): string[] {
@@ -346,75 +319,77 @@ export class ConversationViewer implements Component {
     const th = this.theme;
     const messages = this.session.messages;
     const lines: string[] = [];
+    const appendBlock = (block: string[]) => {
+      if (block.length === 0) return;
+      if (lines.length > 0) lines.push("");
+      lines.push(...block);
+    };
+    const wrap = (text: string, wrapWidth = width) =>
+      wrapTextWithAnsi(sanitizeText(text).trim(), Math.max(1, wrapWidth));
 
-    if (messages.length === 0) {
-      lines.push(th.fg("dim", "(waiting for first message...)"));
-      return lines;
+    const errors = new Map<string, string>();
+    for (const msg of messages) {
+      if (msg.role !== "toolResult" || !msg.isError) continue;
+      const firstLine = sanitizeText(extractText(msg.content)).split("\n").at(0) ?? "";
+      errors.set(msg.toolCallId, firstLine.trim() || "(no output)");
     }
 
-    let needsSeparator = false;
+    const prompt = sanitizeText(this.record.prompt).trim();
+    if (prompt) {
+      appendBlock([
+        ...wrap(prompt).map((line) => th.fg("userMessageText", line)),
+        th.fg("userMessageText", "---"),
+      ]);
+    }
+
+    let firstUserSeen = false;
     for (const msg of messages) {
       if (msg.role === "user") {
         const text = typeof msg.content === "string" ? msg.content : extractText(msg.content);
-        if (!text.trim()) continue;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(th.fg("accent", "[User]"));
-        for (const line of wrapTextWithAnsi(text.trim(), width)) {
-          lines.push(line);
+        const clean = sanitizeText(text).trim();
+        if (!clean) continue;
+        if (!firstUserSeen) {
+          firstUserSeen = true;
+          if (prompt && clean.endsWith(prompt)) continue;
         }
+        const wrapped = wrap(clean, width - 2);
+        appendBlock(
+          wrapped.map((line, index) =>
+            th.fg("userMessageText", `${index === 0 ? "> " : "  "}${line}`),
+          ),
+        );
       } else if (msg.role === "assistant") {
-        const textParts: string[] = [];
-        const toolCalls: string[] = [];
-        for (const c of msg.content) {
-          if (c.type === "text" && c.text) textParts.push(c.text);
-          else if (c.type === "toolCall") {
-            toolCalls.push(this.formatToolCall(c));
+        let tools: string[] = [];
+        const flushTools = () => {
+          appendBlock(tools);
+          tools = [];
+        };
+        for (const content of msg.content) {
+          if (content.type === "text" && content.text.trim()) {
+            flushTools();
+            appendBlock(wrap(content.text));
+          } else if (content.type === "toolCall") {
+            const callLines = wrap(this.formatToolCall(content)).map((line) =>
+              th.fg("muted", line),
+            );
+            tools.push(...callLines);
+            const error = errors.get(content.id);
+            if (error) tools.push(th.fg("error", `    error: ${error}`));
           }
         }
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(th.bold("[Assistant]"));
-        if (textParts.length > 0) {
-          for (const line of wrapTextWithAnsi(textParts.join("\n").trim(), width)) {
-            lines.push(line);
-          }
-        }
-        for (const call of toolCalls) {
-          for (const line of wrapTextWithAnsi(call, width)) {
-            lines.push(th.fg("muted", line));
-          }
-        }
-      } else if (msg.role === "toolResult") {
-        const text = extractText(msg.content);
-        const truncated = text.length > 500 ? text.slice(0, 500) + "... (truncated)" : text;
-        if (!truncated.trim()) continue;
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(th.fg("dim", "[Result]"));
-        for (const line of wrapTextWithAnsi(truncated.trim(), width)) {
-          lines.push(th.fg("dim", line));
-        }
+        flushTools();
       } else if (msg.role === "bashExecution") {
-        if (needsSeparator) lines.push(th.fg("dim", "───"));
-        lines.push(truncateToWidth(th.fg("muted", `  $ ${msg.command}`), width));
-        if (msg.output.trim()) {
-          const out =
-            msg.output.length > 500 ? msg.output.slice(0, 500) + "... (truncated)" : msg.output;
-          for (const line of wrapTextWithAnsi(out.trim(), width)) {
-            lines.push(th.fg("dim", line));
-          }
-        }
-      } else {
-        continue;
+        appendBlock(wrap(`$ ${msg.command}`).map((line) => th.fg("muted", line)));
       }
-      needsSeparator = true;
     }
 
-    // Streaming indicator for running agents
+    if (lines.length === 0) lines.push(th.fg("dim", "(waiting for first message...)"));
+
     if (this.record.status === "running" && this.activity) {
       const act = describeActivity(this.activity.activeTools, this.activity.responseText);
-      lines.push("");
-      lines.push(truncateToWidth(th.fg("accent", "▍ ") + th.fg("dim", act), width));
+      appendBlock([th.fg("accent", "▍ ") + th.fg("dim", sanitizeText(act))]);
     }
 
-    return lines.map((l) => truncateToWidth(l, width));
+    return lines.map((line) => truncateToWidth(line, width));
   }
 }

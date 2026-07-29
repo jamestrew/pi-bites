@@ -190,6 +190,7 @@ export class AgentManager {
       id,
       type,
       parentSessionId,
+      prompt,
       description: options.description,
       status: options.isBackground ? "queued" : "running",
       toolUses: 0,

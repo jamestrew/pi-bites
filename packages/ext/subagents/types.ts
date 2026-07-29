@@ -85,6 +85,8 @@ export interface AgentRecord {
   id: string;
   type: SubagentType;
   parentSessionId: string;
+  /** Raw task supplied by the caller, without inherited parent context. */
+  prompt: string;
   description: string;
   status: "queued" | "running" | "completed" | "stopped" | "error";
   result?: string;

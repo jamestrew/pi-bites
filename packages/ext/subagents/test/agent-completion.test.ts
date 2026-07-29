@@ -7,6 +7,7 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
     id,
     type: "general-purpose",
     parentSessionId: "parent-session",
+    prompt: `task ${id}`,
     description: `agent ${id}`,
     status: "completed",
     result: `result ${id}`,

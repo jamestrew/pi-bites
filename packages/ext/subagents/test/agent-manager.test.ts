@@ -64,6 +64,18 @@ describe("AgentManager — detached lifecycle", () => {
   let manager: AgentManager;
   afterEach(() => manager.dispose());
 
+  it("keeps the raw spawn prompt on the agent record", () => {
+    manager = new AgentManager();
+    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "raw task", {
+      description: "task",
+      inheritContext: true,
+    });
+
+    expect(manager.getRecord(id)?.prompt).toBe("raw task");
+  });
+
   it("emits created for detached spawns but not foreground agents", async () => {
     const pi = { events: { emit: vi.fn() } } as any;
     manager = new AgentManager();
