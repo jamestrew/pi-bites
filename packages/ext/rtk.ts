@@ -17,14 +17,37 @@ export function createRtkNoHookWarningDataFilter(
   onData: (data: Buffer) => void,
 ): (data: Buffer) => void {
   let pending = "";
+  let warningTerminator: "none" | "newline" | "line-feed" = "none";
 
   return (data) => {
-    pending += data.toString();
+    let chunk = data.toString();
+    if (warningTerminator === "line-feed" && chunk.startsWith("\n")) {
+      chunk = chunk.slice(1);
+      warningTerminator = "none";
+    }
+
+    if (warningTerminator === "newline" && chunk.startsWith("\r\n")) {
+      chunk = chunk.slice(2);
+      warningTerminator = "none";
+    } else if (warningTerminator === "newline" && chunk === "\r") {
+      warningTerminator = "line-feed";
+      return;
+    } else if (warningTerminator === "newline" && chunk.startsWith("\n")) {
+      chunk = chunk.slice(1);
+      warningTerminator = "none";
+    }
+
+    pending += chunk;
     const lines = pending.split(/(?<=\n)/);
     pending = pending.endsWith("\n") ? "" : (lines.pop() ?? "");
 
     for (const line of lines) {
       if (line.replace(/\r?\n$/, "") !== RTK_NO_HOOK_WARNING) onData(Buffer.from(line));
+    }
+
+    if (pending === RTK_NO_HOOK_WARNING) {
+      pending = "";
+      warningTerminator = "newline";
     }
 
     if (pending.length > RTK_NO_HOOK_WARNING.length + 2) {
