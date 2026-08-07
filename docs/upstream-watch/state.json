@@ -1,5 +1,5 @@
 {
-  "lastCheckedVersion": "0.80.3",
-  "lastCheckedAt": "2026-07-09",
-  "reports": []
+  "lastCheckedVersion": "0.84.0",
+  "lastCheckedAt": "2026-08-07",
+  "reports": ["docs/upstream-watch/latest.md"]
 }
