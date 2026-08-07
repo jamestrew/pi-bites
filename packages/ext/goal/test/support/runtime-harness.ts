@@ -179,6 +179,9 @@ export function createRuntimeHarness(
     registerFlag() {
       unsupportedHarnessMethod("pi.registerFlag");
     },
+    registerMarkdownTransformer() {
+      unsupportedHarnessMethod("pi.registerMarkdownTransformer");
+    },
     registerMessageRenderer() {
       unsupportedHarnessMethod("pi.registerMessageRenderer");
     },
@@ -319,6 +322,7 @@ export function createRuntimeHarness(
     navigateTree: async () => ({ cancelled: false }),
     newSession: async () => ({ cancelled: false }),
     reload: async () => {},
+    scopedModels: [],
     sessionManager,
     shutdown() {},
     signal: undefined,

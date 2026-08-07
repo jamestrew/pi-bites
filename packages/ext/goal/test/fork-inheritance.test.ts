@@ -393,7 +393,7 @@ describe("goal fork inheritance through Pi runtime", () => {
     expect(countKind(reloaded.session.sessionManager, "fork_deferral")).toBe(1);
 
     let streamCalls = 0;
-    reloaded.session.agent.streamFn = (model) => {
+    reloaded.session.agent.streamFunction = (model) => {
       streamCalls += 1;
       return response(
         model,
@@ -467,7 +467,7 @@ describe("goal fork inheritance through Pi runtime", () => {
       ).goal.objective,
     ).toBe("mutated while deferred");
     let streamCalls = 0;
-    runtime.session.agent.streamFn = (model) => {
+    runtime.session.agent.streamFunction = (model) => {
       streamCalls += 1;
       return response(
         model,
@@ -525,7 +525,7 @@ describe("goal fork inheritance through Pi runtime", () => {
     });
     await executeGoalTool(reloaded.session, "create_goal", { objective: "created after fork" });
     let streamCalls = 0;
-    reloaded.session.agent.streamFn = (model) => {
+    reloaded.session.agent.streamFunction = (model) => {
       streamCalls += 1;
       return response(
         model,
@@ -616,7 +616,7 @@ describe("goal fork inheritance through Pi runtime", () => {
     assert.ok(childFile);
     expect(reconstructGoal(runtime.session.sessionManager.getBranch()).goal).toEqual(source);
     let stoppedStreamCalls = 0;
-    runtime.session.agent.streamFn = (model) => {
+    runtime.session.agent.streamFunction = (model) => {
       stoppedStreamCalls += 1;
       return response(model, assistantMessage(model));
     };

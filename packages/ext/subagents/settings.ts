@@ -14,6 +14,11 @@ export const SubagentsSettingsSchema = Type.Object({
   defaultJoinMode: Type.Optional(
     Type.Union([Type.Literal("async"), Type.Literal("group"), Type.Literal("smart")]),
   ),
+  /**
+   * Validate runtime subagent model choices against pi's resolved session scope from
+   * CLI `--models` and global/project `enabledModels`. Empty scope is unrestricted.
+   * Caller-selected violations fail; frontmatter and inherited violations warn and proceed.
+   */
   scopeModels: Type.Optional(Type.Boolean()),
   disableDefaultAgents: Type.Optional(Type.Boolean()),
   toolDescriptionMode: Type.Optional(
