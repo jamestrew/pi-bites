@@ -122,39 +122,42 @@ export const AGENT_PROMPT_GUIDELINES = [
 ];
 
 export function getAgentToolParameters() {
-  return Type.Object({
-    subagent_type: Type.String({
-      description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
-    }),
-    description: Type.String({
-      description: "A short (3-5 word) description of the task (shown in UI).",
-    }),
-    prompt: Type.String({ description: "The task for the agent to perform." }),
-    model: Type.Optional(
-      Type.String({
-        description:
-          'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+  return Type.Object(
+    {
+      subagent_type: Type.String({
+        description: `The type of specialized agent to use. Available types: ${getAvailableTypes().join(", ")}. Custom agents from .pi/agents/*.md (project) or ${getAgentDir()}/agents/*.md (global) are also available.`,
       }),
-    ),
-    thinking: Type.Optional(
-      Type.String({
-        description:
-          "Thinking level: off, minimal, low, medium, high, xhigh, max. Overrides agent default.",
+      description: Type.String({
+        description: "A short (3-5 word) description of the task (shown in UI).",
       }),
-    ),
-    run_in_background: Type.Optional(
-      Type.Boolean({
-        description:
-          "Defaults to the agent's configured mode, otherwise background. Set to false when you need the result before continuing.",
-      }),
-    ),
-    isolation: Type.Optional(
-      Type.Literal("worktree", {
-        description:
-          'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
-      }),
-    ),
-  });
+      prompt: Type.String({ description: "The task for the agent to perform." }),
+      model: Type.Optional(
+        Type.String({
+          description:
+            'Optional model override. Accepts "provider/modelId" or fuzzy name (e.g. "haiku", "sonnet"). Omit to use the agent type\'s default.',
+        }),
+      ),
+      thinking: Type.Optional(
+        Type.String({
+          description:
+            "Thinking level: off, minimal, low, medium, high, xhigh, max. Overrides agent default.",
+        }),
+      ),
+      run_in_background: Type.Optional(
+        Type.Boolean({
+          description:
+            "Defaults to the agent's configured mode, otherwise background. Set to false when you need the result before continuing.",
+        }),
+      ),
+      isolation: Type.Optional(
+        Type.Literal("worktree", {
+          description:
+            'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
+        }),
+      ),
+    },
+    { additionalProperties: false },
+  );
 }
 
 function formatTools(cfg: { builtinToolNames?: string[] } | undefined): string {
