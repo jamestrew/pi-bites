@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getAgentToolParameters } from "../agent-tool-description.js";
 import { getAgentConfig, registerAgents, resolveType } from "../agent-types.js";
 import { resolveAgentInvocationConfig } from "../invocation-config.js";
 import { registerAgentTool } from "../register-agent-tool.js";
@@ -50,6 +51,24 @@ function captureAgentTool() {
 
 describe("Agent call rendering", () => {
   beforeEach(() => registerAgents(new Map()));
+
+  it("prefers constrained sampling with the existing parameter schema", () => {
+    const tool = captureAgentTool();
+
+    expect(tool.constrainedSampling).toEqual({ type: "json_schema", strict: "prefer" });
+    expect(tool.parameters).toEqual(getAgentToolParameters());
+    expect(tool.parameters.additionalProperties).toBe(false);
+    expect(tool.parameters.required).toEqual(["subagent_type", "description", "prompt"]);
+    expect(Object.keys(tool.parameters.properties)).toEqual([
+      "subagent_type",
+      "description",
+      "prompt",
+      "model",
+      "thinking",
+      "run_in_background",
+      "isolation",
+    ]);
+  });
 
   it.each([
     ["omitted mode", undefined, true],
