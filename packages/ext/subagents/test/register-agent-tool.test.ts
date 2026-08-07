@@ -52,10 +52,10 @@ function captureAgentTool() {
 describe("Agent call rendering", () => {
   beforeEach(() => registerAgents(new Map()));
 
-  it("prefers constrained sampling with the existing parameter schema", () => {
+  it("does not request strict sampling for its optional parameter schema", () => {
     const tool = captureAgentTool();
 
-    expect(tool.constrainedSampling).toEqual({ type: "json_schema", strict: "prefer" });
+    expect(tool.constrainedSampling).toBeUndefined();
     expect(tool.parameters).toEqual(getAgentToolParameters());
     expect(tool.parameters.additionalProperties).toBe(false);
     expect(tool.parameters.required).toEqual(["subagent_type", "description", "prompt"]);

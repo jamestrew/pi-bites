@@ -81,7 +81,6 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
       promptSnippet: "Launch autonomous sub-agents when delegation has a concrete benefit",
       promptGuidelines: AGENT_PROMPT_GUIDELINES,
       parameters: getAgentToolParameters(),
-      constrainedSampling: { type: "json_schema", strict: "prefer" },
 
       // ---- Custom rendering: Claude Code style ----
 
