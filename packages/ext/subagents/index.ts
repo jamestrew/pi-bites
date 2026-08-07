@@ -27,10 +27,19 @@ import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
 import { onSubagentApprovalRequest } from "../bash-gate/events.js";
+import {
+  buildReviewerTranscript,
+  type AutoModeController,
+  type ReviewerMessage,
+} from "../automode/index.js";
 
 // ---- Shared helpers ----
 
-export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } = { current: {} }) {
+export default function (
+  pi: ExtensionAPI,
+  configRef: { current: BitesConfig } = { current: {} },
+  autoMode?: AutoModeController,
+) {
   // ---- Register custom notification renderer ----
   registerNotificationRenderer(pi);
 
@@ -117,12 +126,43 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   });
 
   const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
-    const ui = currentCtx?.ui;
-    if (!currentCtx?.hasUI || !ui) return "deny";
+    const ctx = currentCtx;
+    if (!ctx) return { outcome: "failure", message: "parent approval context unavailable" };
 
     if (request.agentId)
       fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
     try {
+      if (autoMode?.isEnabled()) {
+        try {
+          const session = request.agentId ? manager.getRecord(request.agentId)?.session : undefined;
+          const decision = await autoMode.review(
+            {
+              command: request.command,
+              labels: request.labels,
+              reasons: request.reasons,
+              subagentContext: session
+                ? buildReviewerTranscript(session.messages as ReviewerMessage[])
+                : "<subagent context unavailable>",
+            },
+            ctx,
+          );
+          return decision.outcome === "allow"
+            ? { outcome: "allow" }
+            : {
+                outcome: "deny",
+                source: "automode",
+                ...(decision.rationale ? { rationale: decision.rationale } : {}),
+              };
+        } catch (error) {
+          return {
+            outcome: "failure",
+            message: `Automode reviewer failed: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+      }
+
+      const ui = ctx.ui;
+      if (!ctx.hasUI) return { outcome: "deny", source: "manual" };
       const labels = request.labels.join(", ") || "unknown rule";
       const reasons = request.reasons.filter(Boolean).join("; ");
       const prompt = reasons
@@ -158,10 +198,17 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
           continue;
         }
 
-        return choice === allowSession ? "allow-session" : choice === "Allow" ? "allow" : "deny";
+        return choice === allowSession
+          ? { outcome: "allow-session" }
+          : choice === "Allow"
+            ? { outcome: "allow" }
+            : { outcome: "deny", source: "manual" };
       }
-    } catch {
-      return "deny";
+    } catch (error) {
+      return {
+        outcome: "failure",
+        message: error instanceof Error ? error.message : String(error),
+      };
     } finally {
       if (request.agentId) fleet.setWaitingForBashApproval(request.agentId, request.requestId);
     }

@@ -45,6 +45,7 @@ import {
   type SubagentMetadata,
 } from "../subagents/agent-runner.js";
 import { requestSubagentApproval } from "./events.js";
+import type { AutoModeController } from "../automode/index.js";
 
 export type { ApprovalRequest } from "./events.js";
 type BashGatePolicy = "deny" | "prompt";
@@ -283,7 +284,11 @@ export async function findMatchedPattern(
   return (await findMatchedPatterns(command, rulesOrConfig))[0];
 }
 
-export default function registerBashGate(pi: ExtensionAPI, configRef: { current: BitesConfig }) {
+export default function registerBashGate(
+  pi: ExtensionAPI,
+  configRef: { current: BitesConfig },
+  autoMode?: AutoModeController,
+) {
   pi.registerFlag("yolo", {
     description: "Bypass all bash-gate confirmations (useful for non-interactive / scripted runs)",
     type: "boolean",
@@ -365,7 +370,7 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
         const reasons = matchedPatterns.flatMap((match) =>
           match.reason === undefined ? [] : [match.reason],
         );
-        const decision = await requestSubagentApproval(pi, {
+        const result = await requestSubagentApproval(pi, {
           agentId: metadata.agentId,
           title: metadata.title,
           command,
@@ -378,18 +383,62 @@ export default function registerBashGate(pi: ExtensionAPI, configRef: { current:
           return { block: true, reason: "Bash gate: subagent finished before approval." };
         }
 
-        if (decision === "allow-session") {
+        if (result.outcome === "allow-session") {
           sessionAllowed.add(effectiveSessionAllowKey);
           compensateTimeout(event.input, gateStartMs);
           return undefined;
         }
 
-        if (decision === "allow") {
+        if (result.outcome === "allow") {
           compensateTimeout(event.input, gateStartMs);
           return undefined;
         }
 
+        if (result.outcome === "failure") {
+          return {
+            block: true,
+            reason: `Bash gate: parent approval failed closed: ${result.message}`,
+          };
+        }
+
+        if (result.source === "automode") {
+          return {
+            block: true,
+            reason: `Automode denied this command${result.rationale ? `: ${result.rationale}` : "."} Do not pursue the same outcome through a workaround or indirect execution; use a materially safer alternative or ask the user.`,
+          };
+        }
+
         return { block: true, reason: "Bash gate: command was denied by parent approval." };
+      } finally {
+        pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+      }
+    }
+
+    if (autoMode?.isEnabled()) {
+      const gateStartMs = Date.now();
+      pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
+      try {
+        const decision = await autoMode.review(
+          {
+            command,
+            labels: matchedPatternLabels,
+            reasons: matchedPatterns.flatMap((match) =>
+              match.reason === undefined ? [] : [match.reason],
+            ),
+          },
+          ctx,
+        );
+        if (decision.outcome === "allow") {
+          compensateTimeout(event.input, gateStartMs);
+          return undefined;
+        }
+        return {
+          block: true,
+          reason: `Automode denied this command${decision.rationale ? `: ${decision.rationale}` : "."} Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.`,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { block: true, reason: `Automode review failed closed: ${message}` };
       } finally {
         pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
       }

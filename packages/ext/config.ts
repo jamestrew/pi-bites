@@ -36,7 +36,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "cachePadding" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "goal"
+ *   "bashGate" | "autoMode" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "cachePadding" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "goal"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -68,6 +68,17 @@ export interface CheckpointsConfig {
 export interface AutoCompactionConfig {
   /** Compact once the active context reaches this many tokens. Defaults to 150,000. */
   thresholdTokens?: number;
+}
+
+export interface AutoModeConfig {
+  /** Route bash-gate prompts to a reviewer model by default. */
+  enabled?: boolean;
+  /** Reviewer model. Defaults to the active model. */
+  model?: string;
+  /** Reviewer thinking level. Defaults to low. */
+  thinking?: ThinkingLevel;
+  /** Reviewer policy. Defaults to the bundled safety policy. */
+  policy?: string;
 }
 
 export const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
@@ -122,6 +133,7 @@ export const EXTENSION_NAMES = [
   "notifications",
   "checkpoints",
   "autoCompaction",
+  "autoMode",
   "spotme",
   "inlineReferences",
   "slashSkillAutocomplete",
@@ -143,6 +155,7 @@ export interface BitesConfig {
   notifications?: NotificationsConfig;
   checkpoints?: CheckpointsConfig;
   autoCompaction?: AutoCompactionConfig;
+  autoMode?: AutoModeConfig;
   ponytail?: PonytailConfig;
   subagents?: SubagentsConfig;
   /** Extension names disabled globally or for this project. */
@@ -201,6 +214,16 @@ function isAutoCompactionConfig(value: unknown): value is AutoCompactionConfig {
   );
 }
 
+function isAutoModeConfig(value: unknown): value is AutoModeConfig {
+  return (
+    isRecord(value) &&
+    isOptional(value, "enabled", (field) => typeof field === "boolean") &&
+    isOptional(value, "model", (field) => typeof field === "string") &&
+    isOptional(value, "thinking", (field) => THINKING_LEVELS.some((level) => level === field)) &&
+    isOptional(value, "policy", (field) => typeof field === "string")
+  );
+}
+
 function isPonytailConfig(value: unknown): value is PonytailConfig {
   return isRecord(value) && isOptional(value, "defaultMode", isPonytailMode);
 }
@@ -252,6 +275,7 @@ function isBitesConfig(value: unknown): value is BitesConfig {
     isOptional(value, "notifications", isNotificationsConfig) &&
     isOptional(value, "checkpoints", isCheckpointsConfig) &&
     isOptional(value, "autoCompaction", isAutoCompactionConfig) &&
+    isOptional(value, "autoMode", isAutoModeConfig) &&
     isOptional(value, "ponytail", isPonytailConfig) &&
     isOptional(value, "subagents", isSubagentsConfig) &&
     isOptional(value, "disable", (field) => Array.isArray(field) && field.every(isExtensionName))
@@ -297,6 +321,7 @@ export function loadConfig(cwd: string): BitesConfig {
     notifications: { ...global.notifications, ...project.notifications },
     checkpoints: { ...global.checkpoints, ...project.checkpoints },
     autoCompaction: { ...global.autoCompaction, ...project.autoCompaction },
+    autoMode: { ...global.autoMode, ...project.autoMode },
     ponytail: { ...global.ponytail, ...project.ponytail },
     subagents: { ...global.subagents, ...project.subagents },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),

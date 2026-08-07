@@ -134,6 +134,131 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(ui.onTerminalInput).toHaveBeenCalled();
   });
 
+  it("routes subagent bash approvals through automode without UI", async () => {
+    const { pi, lifecycle } = makePi();
+    const review = vi.fn().mockResolvedValue({ outcome: "allow" });
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ctx = { ...ctxWith(uiCtx()), hasUI: false };
+    await lifecycle.get("session_start")?.({}, ctx);
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r1", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r1",
+      title: "general",
+      command: "git commit -m test",
+      labels: ["git commit"],
+      reasons: [],
+      sessionAllowKey: "git commit",
+    });
+    await flush();
+
+    expect(review).toHaveBeenCalledWith(
+      {
+        command: "git commit -m test",
+        labels: ["git commit"],
+        reasons: [],
+        subagentContext: "<subagent context unavailable>",
+      },
+      ctx,
+    );
+    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+  });
+
+  it("returns a distinct failure reply when no-UI automode review throws", async () => {
+    const { pi, lifecycle } = makePi();
+    const review = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error("request aborted"), { name: "AbortError" }));
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ctx = { ...ctxWith(uiCtx()), hasUI: false };
+    await lifecycle.get("session_start")?.({}, ctx);
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-failure", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-failure",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "failure", message: "Automode reviewer failed: request aborted" },
+    });
+  });
+
+  it("forwards bounded surfaced subagent context to automode", async () => {
+    vi.mocked(runAgent).mockResolvedValue({
+      responseText: "done",
+      session: {
+        messages: [
+          { role: "user", content: "inspect generated files" },
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "hidden plan" },
+              { type: "text", text: "build.txt is generated" },
+            ],
+          },
+          ...Array.from({ length: 7 }, (_, index) => ({
+            role: "assistant",
+            content: `older surfaced output ${index} ${"x".repeat(8_000)}`,
+          })),
+          { role: "user", content: "only remove generated build.txt" },
+        ],
+        dispose: vi.fn(),
+      } as any,
+    });
+    const { pi, tools, lifecycle } = makePi();
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ctx = ctxWith(uiCtx());
+    await lifecycle.get("session_start")?.({}, ctx);
+    const spawn = await tools.get("Agent").execute(
+      "tc",
+      {
+        prompt: "go",
+        description: "review context",
+        subagent_type: "general-purpose",
+        run_in_background: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    await flush();
+    const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r2", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r2",
+      agentId,
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    const request = review.mock.calls[0]?.[0];
+    expect(request.command).toBe("rm build.txt");
+    expect(request.subagentContext).toContain("user: inspect generated files");
+    expect(request.subagentContext).toContain("assistant: build.txt is generated");
+    expect(request.subagentContext).toContain("user: only remove generated build.txt");
+    expect(request.subagentContext).toContain("<... transcript entries omitted ...>");
+    expect(request.subagentContext.length).toBeLessThanOrEqual(40_000);
+    expect(request.subagentContext).not.toContain("hidden plan");
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "deny", source: "automode", rationale: "not authorized" },
+    });
+  });
+
   it("yields terminal input between bash-gate pending and resolved events", async () => {
     vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
     const { pi, tools, lifecycle } = makePi();

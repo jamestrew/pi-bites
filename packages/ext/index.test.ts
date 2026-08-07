@@ -19,6 +19,7 @@ const registerModules = [
   "./notifications.js",
   "./checkpoints.js",
   "./auto-compaction.js",
+  "./automode/index.js",
   "./prompt-normalization/index.js",
   "./spotme/index.js",
   "./inline-references/index.js",

@@ -53,7 +53,12 @@ function subagentEntry(data: Record<string, unknown>): SessionEntry {
   };
 }
 
-function createBashGateHarness(entries: SessionEntry[] = [], yolo = false) {
+function createBashGateHarness(
+  entries: SessionEntry[] = [],
+  yolo = false,
+  autoMode?: Parameters<typeof registerBashGate>[2],
+  hasUI = true,
+) {
   const handlers = new Map<string, (event: any, ctx: any) => unknown>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
   const emit = vi.fn((event: string, data: any) => {
@@ -84,12 +89,12 @@ function createBashGateHarness(entries: SessionEntry[] = [], yolo = false) {
   };
   const ctx = {
     cwd: "/repo",
-    hasUI: true,
+    hasUI,
     ui,
     sessionManager: { getEntries: () => entries },
   };
 
-  registerBashGate(pi as any, { current: {} });
+  registerBashGate(pi as any, { current: {} }, autoMode);
   handlers.get("session_start")?.({}, ctx);
 
   return {
@@ -109,10 +114,13 @@ describe("bash gate tool_call", () => {
     expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
   });
 
-  test("auto-denies gated bash for deny-policy subagents without prompting parent UI", async () => {
-    const { pi, ui, toolCall, ctx } = createBashGateHarness([
-      subagentEntry({ bashGatePolicy: "deny" }),
-    ]);
+  test("auto-denies gated bash for deny-policy subagents without reaching UI or automode", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "allow" });
+    const { pi, ui, toolCall, ctx } = createBashGateHarness(
+      [subagentEntry({ bashGatePolicy: "deny" })],
+      false,
+      { isEnabled: () => true, review },
+    );
 
     const result = await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
 
@@ -120,6 +128,7 @@ describe("bash gate tool_call", () => {
       block: true,
       reason: "Bash gate: gated command not allowed for this subagent.",
     });
+    expect(review).not.toHaveBeenCalled();
     expect(ui.select).not.toHaveBeenCalled();
     expect(pi.events.emit).not.toHaveBeenCalledWith("bites:bash_gate", expect.anything());
   });
@@ -138,6 +147,98 @@ describe("bash gate tool_call", () => {
       cwd: "/repo",
       command: "rm -rf tmp",
     });
+  });
+
+  test("routes no-UI gated commands through automode and fails closed on reviewer failure", async () => {
+    const review = vi
+      .fn()
+      .mockResolvedValueOnce({ outcome: "allow" })
+      .mockRejectedValueOnce(new Error("timeout"));
+    const autoMode = { isEnabled: () => true, review };
+    const { toolCall, ctx, ui } = createBashGateHarness([], false, autoMode, false);
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm other.txt" } }, ctx),
+    ).resolves.toEqual({ block: true, reason: "Automode review failed closed: timeout" });
+
+    expect(review).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "rm build.txt", labels: ["rm"] }),
+      ctx,
+    );
+    expect(ui.select).not.toHaveBeenCalled();
+  });
+
+  test("preserves explicit main-agent automode denial rationale and guidance", async () => {
+    const review = vi.fn().mockResolvedValue({
+      outcome: "deny",
+      rationale: "removes files outside the requested build directory",
+    });
+    const { toolCall, ctx } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason:
+        "Automode denied this command: removes files outside the requested build directory Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.",
+    });
+  });
+
+  test("does not invoke automode until a bash command actually matches the gate", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "allow" });
+    const { toolCall, ctx } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rg needle ." } }, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      toolCall({ toolName: "read", input: { command: "rm file" } }, ctx),
+    ).resolves.toBeUndefined();
+
+    expect(review).not.toHaveBeenCalled();
+  });
+
+  test("--yolo bypasses automode review", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "deny" });
+    const { toolCall, ctx } = createBashGateHarness(
+      [],
+      true,
+      { isEnabled: () => true, review },
+      false,
+    );
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toBeUndefined();
+    expect(review).not.toHaveBeenCalled();
+  });
+
+  test("an existing session allowance bypasses later automode review", async () => {
+    let enabled = false;
+    const review = vi.fn().mockResolvedValue({ outcome: "deny" });
+    const { toolCall, ctx, ui } = createBashGateHarness([], false, {
+      isEnabled: () => enabled,
+      review,
+    });
+    ui.select.mockResolvedValue('Allow for session ("rm")');
+
+    await toolCall({ toolName: "bash", input: { command: "rm first.txt" } }, ctx);
+    enabled = true;
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm second.txt" } }, ctx),
+    ).resolves.toBeUndefined();
+
+    expect(review).not.toHaveBeenCalled();
+    expect(ui.select).toHaveBeenCalledTimes(1);
   });
 
   test("shortcut toggles the main-agent gate and footer status", async () => {
@@ -198,7 +299,7 @@ describe("bash gate tool_call", () => {
       approvals++;
       eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
       eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
-        decision: "allow",
+        result: { outcome: "allow" },
       });
     });
 
@@ -226,7 +327,7 @@ describe("bash gate tool_call", () => {
       approvals++;
       eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
       eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
-        decision: "allow-session",
+        result: { outcome: "allow-session" },
       });
     });
 
@@ -250,7 +351,7 @@ describe("bash gate tool_call", () => {
         approvals++;
         eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
         eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
-          decision: "allow-session",
+          result: { outcome: "allow-session" },
         });
       });
 
@@ -277,7 +378,9 @@ describe("bash gate tool_call", () => {
       eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
         eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
         pi.events.emit("subagents:failed", { id: "agent-1", status: "stopped" });
-        eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({ decision });
+        eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+          result: { outcome: decision },
+        });
       });
 
       await expect(
@@ -289,7 +392,65 @@ describe("bash gate tool_call", () => {
     },
   );
 
-  test("prompt-policy subagents deny when no broker answers", async () => {
+  test("preserves automode denial rationale and anti-circumvention guidance", async () => {
+    const { toolCall, ctx, eventHandlers } = createBashGateHarness([
+      subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
+    ]);
+    eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+      eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+      eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+        result: { outcome: "deny", source: "automode", rationale: "deletes user data" },
+      });
+    });
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason:
+        "Automode denied this command: deletes user data Do not pursue the same outcome through a workaround or indirect execution; use a materially safer alternative or ask the user.",
+    });
+  });
+
+  test("distinguishes reviewer failure from an explicit denial", async () => {
+    const { toolCall, ctx, eventHandlers } = createBashGateHarness([
+      subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
+    ]);
+    eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+      eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+      eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+        result: { outcome: "failure", message: "Automode reviewer failed: timeout" },
+      });
+    });
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: parent approval failed closed: Automode reviewer failed: timeout",
+    });
+  });
+
+  test("prompt-policy subagents fail closed on malformed parent replies", async () => {
+    const { toolCall, ctx, eventHandlers } = createBashGateHarness([
+      subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
+    ]);
+    eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+      eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+      eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+        result: { outcome: "deny", source: "unknown" },
+      });
+    });
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: parent approval failed closed: malformed parent approval reply",
+    });
+  });
+
+  test("prompt-policy subagents fail closed when no broker answers", async () => {
     const { toolCall, ctx } = createBashGateHarness([
       subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
     ]);
@@ -298,7 +459,7 @@ describe("bash gate tool_call", () => {
       toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
     ).resolves.toEqual({
       block: true,
-      reason: "Bash gate: command was denied by parent approval.",
+      reason: "Bash gate: parent approval failed closed: parent approval broker unavailable",
     });
   });
 });
