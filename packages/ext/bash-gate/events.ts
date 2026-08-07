@@ -1,6 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export type BashGateDecision = "allow" | "allow-session" | "deny";
+export type BashGateApprovalResult =
+  | { outcome: "allow" }
+  | { outcome: "allow-session" }
+  | { outcome: "deny"; source: "manual" | "automode"; rationale?: string }
+  | { outcome: "failure"; message: string };
 
 export interface ApprovalRequest {
   requestId: string;
@@ -22,43 +26,65 @@ export interface BitesBashGatePayload {
   command: string;
 }
 
+function approvalResult(value: unknown): BashGateApprovalResult | undefined {
+  if (!value || typeof value !== "object" || !("outcome" in value)) return undefined;
+  const result = value as Record<string, unknown>;
+  if (result.outcome === "allow" || result.outcome === "allow-session") {
+    return { outcome: result.outcome };
+  }
+  if (
+    result.outcome === "deny" &&
+    (result.source === "manual" || result.source === "automode") &&
+    (result.rationale === undefined || typeof result.rationale === "string")
+  ) {
+    return {
+      outcome: "deny",
+      source: result.source,
+      ...(typeof result.rationale === "string" ? { rationale: result.rationale } : {}),
+    };
+  }
+  if (result.outcome === "failure" && typeof result.message === "string") {
+    return { outcome: "failure", message: result.message };
+  }
+  return undefined;
+}
+
 export async function requestSubagentApproval(
   pi: ExtensionAPI,
   request: Omit<ApprovalRequest, "requestId">,
-): Promise<BashGateDecision> {
+): Promise<BashGateApprovalResult> {
   const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const channel = "subagents:bash_gate:approval";
   const ackChannel = `${channel}:ack:${requestId}`;
   const replyChannel = `${channel}:reply:${requestId}`;
 
-  return await new Promise<BashGateDecision>((resolve) => {
+  return await new Promise<BashGateApprovalResult>((resolve) => {
     let settled = false;
     let acked = false;
     let unsubAck = () => {};
     let unsubReply = () => {};
-    const settle = (decision: BashGateDecision) => {
+    const settle = (result: BashGateApprovalResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(ackTimer);
       unsubAck();
       unsubReply();
-      resolve(decision);
+      resolve(result);
     };
 
     unsubAck = pi.events.on(ackChannel, () => {
       acked = true;
     });
     unsubReply = pi.events.on(replyChannel, (reply) => {
-      if (typeof reply !== "object" || reply === null || !("decision" in reply)) {
-        settle("deny");
-        return;
-      }
-      const { decision } = reply;
-      settle(decision === "allow" || decision === "allow-session" ? decision : "deny");
+      const result =
+        reply && typeof reply === "object" && "result" in reply
+          ? approvalResult(reply.result)
+          : undefined;
+      settle(result ?? { outcome: "failure", message: "malformed parent approval reply" });
     });
 
     const ackTimer = setTimeout(() => {
-      if (!acked) settle("deny");
+      if (!acked) settle({ outcome: "failure", message: "parent approval broker unavailable" });
     }, 250);
 
     pi.events.emit(channel, { requestId, ...request });
@@ -67,17 +93,21 @@ export async function requestSubagentApproval(
 
 export function onSubagentApprovalRequest(
   pi: ExtensionAPI,
-  handler: (request: ApprovalRequest) => Promise<BashGateDecision>,
+  handler: (request: ApprovalRequest) => Promise<BashGateApprovalResult>,
 ): () => void {
   return pi.events.on("subagents:bash_gate:approval", async (data) => {
     const request = data as ApprovalRequest;
     const channel = "subagents:bash_gate:approval";
     pi.events.emit(`${channel}:ack:${request.requestId}`, {});
-    let decision: BashGateDecision = "deny";
+    let result: BashGateApprovalResult;
     try {
-      decision = await handler(request);
-    } finally {
-      pi.events.emit(`${channel}:reply:${request.requestId}`, { decision });
+      result = await handler(request);
+    } catch (error) {
+      result = {
+        outcome: "failure",
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
+    pi.events.emit(`${channel}:reply:${request.requestId}`, { result });
   });
 }

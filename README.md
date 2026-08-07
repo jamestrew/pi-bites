@@ -8,6 +8,7 @@ A small collection of personal extensions for the pi coding agent.
 - Less noisy `read` tool output
 - Tweaked `read` tool description/output to keep file reads less noisy
 - Configurable bash command gate
+- Optional model-reviewed automode for bash-gate approvals
 - RTK command rewriting for assistant `bash` tool calls and user `!` shell commands
 - Better fuzzy finding for `@` file mentions powered by `fff`
 - Script-driven statusline
@@ -60,6 +61,9 @@ Example:
   "bashGate": {
     "rules": [{ "cmd": "bun", "subcommands": ["check", "test"] }, { "cmd": "pytest" }]
   },
+  "autoMode": {
+    "enabled": false
+  },
   "disable": ["tokenCount"]
 }
 ```
@@ -79,7 +83,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, checkpoints, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal
+bashGate, autoMode, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, checkpoints, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal
 ```
 
 You can also edit config directly:
@@ -144,6 +148,25 @@ SpotMe is a coding gym mode: every N code-writing actions, the agent scaffolds t
 ```
 
 Default difficulty is `medium`, every 2 code writes.
+
+## Automode
+
+Run `/automode on` to replace bash-gate prompts with a separate model review. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded parent transcript with hidden thinking removed plus the exact command request. Denials and reviewer failures block the command. `/automode off` restores manual prompts when UI is available.
+
+Automode uses the active model by default. It can be enabled at startup and given a separate model, thinking level, or policy:
+
+```json
+{
+  "autoMode": {
+    "enabled": true,
+    "model": "anthropic/claude-sonnet-4-5",
+    "thinking": "low",
+    "policy": "Approve only actions authorized by the user and deny secret exposure or destructive actions."
+  }
+}
+```
+
+Automode reviews only commands that already reach an approval-producing bash gate; it does not expand Pi's permissions, override deny-policy subagents, or gate routine allowed tools. Without UI, gated commands fail closed unless Automode is enabled in configuration.
 
 ## Bash gate
 

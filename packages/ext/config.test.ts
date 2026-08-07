@@ -43,7 +43,8 @@ describe("loadConfig", () => {
     expect(
       parseBitesConfig({
         ponytail: { defaultMode: "full" },
-        disable: ["checkpoints", "goal"],
+        autoMode: { enabled: true, thinking: "low" },
+        disable: ["checkpoints", "goal", "autoMode"],
       }),
     ).toBeDefined();
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
@@ -76,6 +77,7 @@ describe("loadConfig", () => {
         notifications: {},
         checkpoints: {},
         autoCompaction: {},
+        autoMode: {},
         ponytail: {},
         subagents: {},
       });
