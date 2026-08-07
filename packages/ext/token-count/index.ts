@@ -309,8 +309,8 @@ async function resolveCodexSource(ctx: ExtensionContext): Promise<AccountUsageSo
   const model = ctx.model as Model<Api>;
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) return undefined;
-  const headers: Record<string, string> = { ...auth.headers };
-  if (!hasHeader(headers, "Authorization") && auth.apiKey)
+  const headers = mergeHeaders(auth.headers, {});
+  if (!getHeader(headers, "Authorization") && auth.apiKey)
     headers.Authorization = `Bearer ${auth.apiKey}`;
   const authorization = getHeader(headers, "Authorization");
   if (!authorization) return undefined;
@@ -346,10 +346,6 @@ async function fetchWithTimeout(
 function getHeader(headers: Record<string, string>, name: string): string | undefined {
   const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase());
   return entry?.[1];
-}
-
-function hasHeader(headers: Record<string, string>, name: string): boolean {
-  return getHeader(headers, name) !== undefined;
 }
 
 export default function registerTokenCount(

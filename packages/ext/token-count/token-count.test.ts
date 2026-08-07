@@ -1,4 +1,5 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import registerTokenCount, {
   createCopilotSource,
@@ -10,6 +11,8 @@ import registerTokenCount, {
 } from "./index.js";
 
 const NOW = Date.parse("2026-07-06T00:00:00Z");
+
+afterEach(() => vi.unstubAllGlobals());
 
 const tokenBillingPayload = {
   token_based_billing: { enabled: true },
@@ -60,6 +63,55 @@ test("normalizeCodexUsage preserves Codex rate limit window fields", () => {
     { usedPercent: 16, limitWindowSeconds: 604_800, resetAfterSeconds: 86_063 },
   ]);
 });
+
+test.each([
+  [
+    "resolved authorization",
+    {
+      ok: true,
+      apiKey: "fallback-key",
+      headers: {
+        authorization: "Bearer resolved",
+        "X-Keep": "yes",
+        "X-Delete": null,
+      },
+    },
+    { authorization: "Bearer resolved", "X-Keep": "yes" },
+  ],
+  [
+    "API-key fallback for a null authorization marker",
+    {
+      ok: true,
+      apiKey: "fallback-key",
+      headers: { Authorization: null, "X-Keep": "yes" },
+    },
+    { Authorization: "Bearer fallback-key", "X-Keep": "yes" },
+  ],
+])(
+  "Codex direct fetch filters nullable headers and preserves %s",
+  async (_name, auth, expected) => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ rate_limit: {} })));
+    vi.stubGlobal("fetch", fetchMock);
+    const pi = {
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    };
+    const ctx = {
+      model: { provider: "openai-codex", id: "codex", api: "openai-responses" },
+      modelRegistry: { getApiKeyAndHeaders: async () => auth },
+      ui: { setStatus: vi.fn(), theme: { fg: (_color: string, text: string) => text } },
+    } as unknown as ExtensionContext;
+    registerTokenCount(pi as never);
+
+    await handlers.get("session_start")!({}, ctx);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://chatgpt.com/backend-api/wham/usage",
+      expect.objectContaining({ headers: expected }),
+    );
+  },
+);
 
 test.each([
   [

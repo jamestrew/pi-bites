@@ -114,7 +114,7 @@ test("SDK runtime uses Pi settings for the sole persisted threshold compaction",
 
   let nextContextTokens = 247_783;
   let streamCalls = 0;
-  session.agent.streamFn = (activeModel) => {
+  session.agent.streamFunction = (activeModel) => {
     streamCalls += 1;
     return assistantResponse(
       activeModel,

@@ -7,9 +7,8 @@ import {
 import { createActivityTracker } from "./activity-tracker.js";
 import { type AgentManager } from "./agent-manager.js";
 import { getAgentConfig, resolveType } from "./agent-types.js";
-import { isModelInScope, readEnabledModels, resolveEnabledModels } from "./enabled-models.js";
 import { resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
-import { resolveModel } from "./model-resolver.js";
+import { modelKey, resolveModel } from "./model-resolver.js";
 import { createOutputFilePath, streamToOutputFile, writeInitialEntry } from "./output-file.js";
 import { getStatusNote } from "./status-note.js";
 import { buildDetails, formatLifetimeTokens, textResult } from "./tool-result.js";
@@ -348,18 +347,9 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       }
     }
 
-    // Scope validation: the effective resolved model is checked against the
-    // user's enabledModels list (read in `enabled-models.ts`).
-    //
-    // Design: scopeModels guards against *runtime* LLM choices, not user-level config.
-    //   - Caller-supplied out-of-scope → hard error (the orchestrator made an explicit
-    //     out-of-scope choice; surface it so it picks differently).
-    //   - Frontmatter-pinned or parent-inherited out-of-scope → warn but proceed (the
-    //     user authored/installed this agent or chose the parent's model; trust it).
-    // See SubagentsSettings.scopeModels docstring for the full policy.
     if (isScopeModelsEnabled() && model) {
-      const allowed = resolveEnabledModels(readEnabledModels(ctx.cwd), ctx.modelRegistry, ctx.cwd);
-      if (allowed && !isModelInScope(model, allowed)) {
+      const allowed = new Set(ctx.scopedModels.map(({ model }) => modelKey(model)));
+      if (allowed.size > 0 && !allowed.has(modelKey(model))) {
         if (resolvedConfig.modelFromParams) {
           const list = [...allowed]
             .sort()
@@ -367,7 +357,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
             .join("\n");
           return textResult(
             `Model not in scope: "${resolvedConfig.modelInput}".\n\n` +
-              `Allowed models (from enabledModels):\n${list}`,
+              `Allowed models (from session scope):\n${list}`,
           );
         }
         // Frontmatter-pinned or parent-inherited: warn + proceed.

@@ -223,12 +223,6 @@ export default function (pi: ExtensionAPI, configRef: { current: BitesConfig } =
   }
 
   // ---- Scope models configuration ----
-  // When enabled, subagent model choices are validated against `enabledModels`
-  // from pi's settings — both global `<agentDir>/settings.json` and
-  // project-local `<cwd>/.pi/settings.json` (project overrides global).
-  // Off by default; opt-in via `/agents → Settings`. See docstring on
-  // SubagentsSettings.scopeModels for the hard-error vs warn-and-proceed
-  // policy and its rationale.
   let scopeModelsEnabled = false;
   function isScopeModelsEnabled(): boolean {
     return scopeModelsEnabled;

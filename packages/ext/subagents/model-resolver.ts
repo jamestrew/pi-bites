@@ -9,6 +9,11 @@ export type ModelEntry = Pick<Model<Api>, "id" | "name" | "provider">;
 export type ModelRegistry = Pick<PiModelRegistry, "find" | "getAll"> &
   Partial<Pick<PiModelRegistry, "getAvailable">>;
 
+/** Canonical provider/model identity used for exact comparisons. */
+export function modelKey(model: Pick<ModelEntry, "provider" | "id">): string {
+  return `${model.provider}/${model.id}`.toLowerCase();
+}
+
 /** Derive a short display label from a configured model string. */
 export function getModelLabelFromConfig(model: string): string {
   const name = model.slice(model.lastIndexOf("/") + 1);
@@ -23,7 +28,7 @@ export function getModelLabelFromConfig(model: string): string {
 export function resolveModel(input: string, registry: ModelRegistry): Model<Api> | string {
   // Available models (those with auth configured)
   const all = registry.getAvailable?.() ?? registry.getAll();
-  const availableSet = new Set(all.map((m) => `${m.provider}/${m.id}`.toLowerCase()));
+  const availableSet = new Set(all.map(modelKey));
 
   // 1. Exact match: "provider/modelId" — only if available (has auth)
   const slashIdx = input.indexOf("/");
