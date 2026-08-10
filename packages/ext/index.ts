@@ -66,7 +66,8 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("atMentionContext")) registerAtMentionContext(pi);
   if (!isNonInteractive && !disabled.has("todo")) registerTodo(pi);
   if (!isNonInteractive && !disabled.has("question")) registerQuestion(pi);
-  if (!isNonInteractive && !disabled.has("notifications")) registerNotifications(pi, configRef);
+  if (!isNonInteractive && !disabled.has("notifications"))
+    registerNotifications(pi, configRef, autoMode);
   if (!disabled.has("checkpoints")) registerCheckpoints(pi, configRef);
   if (!isNonInteractive && !disabled.has("spotme")) registerSpotme(pi);
   if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))

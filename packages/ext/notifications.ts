@@ -28,6 +28,7 @@
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { extractLastAssistantText } from "./utils.ts";
+import type { AutoModeController } from "./automode/index.js";
 import type { BitesConfig } from "./config.js";
 import type { BitesBashGatePayload, BitesNotifyPayload } from "./bash-gate/events.js";
 
@@ -63,6 +64,7 @@ function runCommand(command: string, payload: BitesNotifyPayload): void {
 export default function registerNotifications(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
+  autoMode?: AutoModeController,
 ): void {
   function notify(payload: BitesNotifyPayload): void {
     const command = configRef.current.notifications?.command;
@@ -83,6 +85,7 @@ export default function registerNotifications(
   });
 
   pi.on("agent_end", (event, ctx) => {
+    if (autoMode?.isEnabled()) return;
     notify({
       cwd: ctx.cwd,
       message: extractLastAssistantText(event.messages) ?? "Agent finished",
