@@ -116,6 +116,25 @@ describe("automode reviewer model and completion", () => {
     );
   });
 
+  test("applies a credential-specific base URL to the reviewer model", async () => {
+    const { controller, ctx, registry } = createAutoModeHarness();
+    registry.getApiKeyAndHeaders.mockResolvedValue({
+      ok: true,
+      apiKey: "copilot-token",
+      baseUrl: "https://api.individual.githubcopilot.com",
+    } as any);
+    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+
+    await controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any);
+
+    expect(completeSimple).toHaveBeenCalledWith(
+      { ...model, baseUrl: "https://api.individual.githubcopilot.com" },
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(model).not.toHaveProperty("baseUrl");
+  });
+
   test("resolves and uses a configured authenticated reviewer model", async () => {
     const { controller, ctx, registry } = createAutoModeHarness({
       autoMode: { model: "reviewer/safe", thinking: "high", policy: "custom policy" },

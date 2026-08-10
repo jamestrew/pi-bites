@@ -189,11 +189,12 @@ export default function registerAutoMode(
       const model = resolved as Model<Api>;
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
       if (!auth.ok) throw new Error(auth.error);
+      const requestModel = auth.baseUrl ? { ...model, baseUrl: auth.baseUrl } : model;
 
       const transcript = buildReviewerTranscript(sessionMessages(ctx));
       const { subagentContext, ...approvalRequest } = request;
       const response = await completeSimple(
-        model,
+        requestModel,
         {
           systemPrompt: `${configRef.current.autoMode?.policy ?? DEFAULT_POLICY}\n\nReturn only JSON: {"outcome":"allow"|"deny","rationale":"short reason"}.`,
           messages: [
