@@ -70,8 +70,8 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 
-/** Path to the pi-subagents extension entrypoint (repo `src/index.ts`). */
-const EXTENSION_PATH = fileURLToPath(new URL("../../index.ts", import.meta.url));
+/** Path to the pi-bites root extension entrypoint used by the CLI. */
+const EXTENSION_PATH = fileURLToPath(new URL("../../../index.ts", import.meta.url));
 
 /** The cross-package handle the extension publishes on a global Symbol. */
 const MANAGER_KEY = Symbol.for("pi-subagents:manager");
@@ -273,7 +273,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   // is only spawnable if process.cwd() points at the dir holding it. Restored on
   // dispose. (Vitest isolates test files per process, so this doesn't race.)
   const prevCwd = process.cwd();
+  const prevArgv = process.argv;
   process.chdir(cwd);
+  process.argv = [...process.argv, "--print"];
 
   // --- isolate global discovery so the dev env can't bleed in ---
   const prevAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -476,6 +478,7 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     } catch {
       /* ignore */
     }
+    process.argv = prevArgv;
     if (isolateGlobals) {
       if (prevAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
       else process.env.PI_CODING_AGENT_DIR = prevAgentDir;

@@ -152,8 +152,18 @@ describe("extension entrypoint", () => {
     }
   });
 
+  test.each(["--print", "-p"])("registers subagents in %s mode", async (flag) => {
+    const loaded = await loadExtension({ argv: [flag] });
+    try {
+      expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./footer/index.js")).not.toHaveBeenCalled();
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
   test("can disable subagents without disabling unrelated extensions", async () => {
-    const loaded = await loadExtension({ disable: ["subagents"] });
+    const loaded = await loadExtension({ disable: ["subagents"], argv: ["--print"] });
     try {
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
