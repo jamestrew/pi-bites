@@ -16,14 +16,15 @@ export default function registerAutoCompaction(
     if (compactionPending || tokens == null || tokens < threshold) return;
 
     compactionPending = true;
-    if (ctx.hasUI) ctx.ui.notify(`Compacting at ${tokens.toLocaleString()} tokens`, "info");
+    const ui = ctx.hasUI ? ctx.ui : undefined;
+    ui?.notify(`Compacting at ${tokens.toLocaleString()} tokens`, "info");
     ctx.compact({
       onComplete: () => {
         compactionPending = false;
       },
       onError: (error) => {
         compactionPending = false;
-        if (ctx.hasUI) ctx.ui.notify(`Compaction failed: ${error.message}`, "error");
+        ui?.notify(`Compaction failed: ${error.message}`, "error");
       },
     });
   });

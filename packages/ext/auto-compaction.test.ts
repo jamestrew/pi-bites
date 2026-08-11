@@ -12,15 +12,25 @@ function setup(thresholdTokens?: number) {
     current: thresholdTokens === undefined ? {} : { autoCompaction: { thresholdTokens } },
   };
   registerAutoCompaction(pi as never, configRef);
+  let contextIsStale = false;
+  const notify = vi.fn();
   const ctx = {
     getContextUsage: () => (tokens == null ? undefined : { tokens }),
     compact,
-    hasUI: true,
-    ui: { notify: vi.fn() },
+    get hasUI() {
+      if (contextIsStale) throw new Error("stale extension ctx");
+      return true;
+    },
+    get ui() {
+      if (contextIsStale) throw new Error("stale extension ctx");
+      return { notify };
+    },
   };
 
   return {
     compact,
+    notify,
+    invalidateContext: () => (contextIsStale = true),
     setTokens: (value: number | null) => (tokens = value),
     agentSettled: () => handlers.get("agent_settled")?.({} as never, ctx as never),
   };
@@ -65,5 +75,16 @@ describe("auto compaction", () => {
     compact.mock.calls[0]?.[0].onError(new Error("failed"));
     agentSettled();
     expect(compact).toHaveBeenCalledTimes(2);
+  });
+
+  test("handles compaction failure after its extension context becomes stale", () => {
+    const { compact, notify, invalidateContext, setTokens, agentSettled } = setup(42_000);
+
+    setTokens(42_000);
+    agentSettled();
+    invalidateContext();
+
+    expect(() => compact.mock.calls[0]?.[0].onError(new Error("failed"))).not.toThrow();
+    expect(notify).toHaveBeenLastCalledWith("Compaction failed: failed", "error");
   });
 });

@@ -1,2 +1,3 @@
 - run `bun check` for final validations
 - using `jj` with `git` backend
+- Treat pi extension `ctx` as ephemeral: deferred callbacks, promise continuations, and timers must not dereference a captured ctx because session replacement or reload makes its getters throw. Snapshot stable dependencies while ctx is active, reacquire ctx from lifecycle events, or use replacement APIs' `withSession` ctx; model stale ctx with throwing getters in regression tests.
