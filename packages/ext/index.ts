@@ -54,7 +54,8 @@ export default function (pi: ExtensionAPI) {
 
   if (!disabled.has("goal")) registerGoal(pi);
   if (!disabled.has("view")) registerView(pi);
-  if (!isNonInteractive && !disabled.has("sessionTracker")) registerSessionTracker(pi, configRef);
+  if (!isNonInteractive && !disabled.has("sessionTracker"))
+    registerSessionTracker(pi, configRef, autoMode);
   if (!disabled.has("subagents")) registerSubagents(pi, configRef, autoMode);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);

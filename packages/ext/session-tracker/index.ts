@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { basename } from "node:path";
 import { extractLastAssistantText } from "../utils.ts";
+import type { AutoModeController } from "../automode/index.js";
 import type { BitesConfig } from "../config.js";
 import { getSmallModel } from "../small-model.js";
 import {
@@ -579,6 +580,7 @@ export function createNeedsInputLifecycle(
 export default function registerSessionTracker(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig } = { current: {} },
+  autoMode?: AutoModeController,
 ): void {
   const runtimeId = randomUUID();
   const socketPath = getTrackerSocketPath();
@@ -610,7 +612,9 @@ export default function registerSessionTracker(
     (error) => logTrackerFailure(defaultCallOptions, "needs-input inference", error),
   );
   pi.on("agent_start", () => needsInputLifecycle.agentStart());
-  pi.events.on("bites:bash_gate", async () => runtime.setState("needs-permission"));
+  pi.events.on("bites:bash_gate", async () => {
+    if (!autoMode?.isEnabled()) await runtime.setState("needs-permission");
+  });
   pi.events.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
   pi.events.on("subagents:created", (data) =>
     needsInputLifecycle.backgroundAgentStarted((data as { id: string }).id),

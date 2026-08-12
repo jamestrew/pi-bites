@@ -41,6 +41,7 @@ async function loadExtension(
   const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
   const previewCacheSystemPrompt = vi.fn((prompt: string) => `cache:${prompt}`);
   const previewCacheTools = vi.fn((tools: unknown[]) => tools);
+  const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
   if (options.realGoal) vi.doUnmock("./goal/index.js");
   for (const modulePath of registerModules) {
     if (modulePath === "./goal/index.js" && options.realGoal) continue;
@@ -48,6 +49,7 @@ async function loadExtension(
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
     if (modulePath === "./cache-padding/index.js")
       spy.mockReturnValue({ systemPrompt: previewCacheSystemPrompt, tools: previewCacheTools });
+    if (modulePath === "./automode/index.js") spy.mockReturnValue(autoMode);
     registerSpies.set(modulePath, spy);
     vi.doMock(modulePath, () => ({ default: spy }));
   }
@@ -111,7 +113,11 @@ describe("extension entrypoint", () => {
     try {
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledWith(
+        loaded.pi,
+        expect.any(Object),
+        expect.objectContaining({ isEnabled: expect.any(Function) }),
+      );
       expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./goal/index.js")).toHaveBeenCalledTimes(1);
