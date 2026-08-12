@@ -19,6 +19,11 @@ describe("extractBashFacts", () => {
     expect(facts.commands[0]?.flags).toEqual([]);
     expect(facts.redirects).toContainEqual({ operator: ">", target: "out.txt" });
     expect(facts.pathCandidates).toContain("./log.txt");
+    expect(facts.hasVariableAssignment).toBe(false);
+  });
+
+  test("detects environment assignments", async () => {
+    expect((await extractBashFacts("PATH=. cat README.md")).hasVariableAssignment).toBe(true);
   });
 });
 
@@ -102,6 +107,7 @@ function createBashGateHarness(
     ctx,
     ui,
     eventHandlers,
+    sessionStart: () => handlers.get("session_start")?.({}, ctx),
     toggleYolo: () => shortcutHandler?.(ctx),
     toolCall: handlers.get("tool_call")!,
   };
@@ -198,7 +204,7 @@ describe("bash gate tool_call", () => {
     });
 
     await expect(
-      toolCall({ toolName: "bash", input: { command: "rg needle ." } }, ctx),
+      toolCall({ toolName: "bash", input: { command: "cat README.md" } }, ctx),
     ).resolves.toBeUndefined();
     await expect(
       toolCall({ toolName: "read", input: { command: "rm file" } }, ctx),
@@ -239,6 +245,27 @@ describe("bash gate tool_call", () => {
 
     expect(review).not.toHaveBeenCalled();
     expect(ui.select).toHaveBeenCalledTimes(1);
+  });
+
+  test("scopes unlisted session allowances to the exact command", async () => {
+    const { toolCall, ctx, ui } = createBashGateHarness();
+    ui.select.mockResolvedValue('Allow for session ("unlisted")');
+
+    await toolCall({ toolName: "bash", input: { command: "FOO=1 cat README.md" } }, ctx);
+    await toolCall({ toolName: "bash", input: { command: "PATH=. cat README.md" } }, ctx);
+
+    expect(ui.select).toHaveBeenCalledTimes(2);
+  });
+
+  test("clears session allowances when the session is replaced", async () => {
+    const { toolCall, ctx, ui, sessionStart } = createBashGateHarness();
+    ui.select.mockResolvedValue('Allow for session ("rm")');
+
+    await toolCall({ toolName: "bash", input: { command: "rm first.txt" } }, ctx);
+    sessionStart();
+    await toolCall({ toolName: "bash", input: { command: "rm second.txt" } }, ctx);
+
+    expect(ui.select).toHaveBeenCalledTimes(2);
   });
 
   test("shortcut toggles the main-agent gate and footer status", async () => {
@@ -283,7 +310,7 @@ describe("bash gate tool_call", () => {
       subagentEntry({ bashGatePolicy: "deny" }),
     ]);
 
-    const result = await toolCall({ toolName: "bash", input: { command: "rg foo ." } }, ctx);
+    const result = await toolCall({ toolName: "bash", input: { command: "cat README.md" } }, ctx);
 
     expect(result).toBeUndefined();
     expect(ui.select).not.toHaveBeenCalled();
@@ -466,15 +493,35 @@ describe("bash gate tool_call", () => {
 
 describe("findMatchedPattern", () => {
   test.each([
-    "rg foo . 2>&1",
-    "rg foo . 1>&2",
-    "rg foo . 2>/dev/null",
-    "rg foo . >/dev/null",
-    "rg foo . >>/dev/null",
-    "make build >/dev/null 2>&1",
-    "python3 scripts/planner.py lisst --mode all | rg 'block-big-tables|sync-servers-code-refactor' -n -C 2",
+    "cat README.md 2>&1",
+    "cat README.md 1>&2",
+    "cat README.md 2>/dev/null",
+    "cat README.md >/dev/null",
+    "cat README.md >>/dev/null",
+    "printf build 2>/dev/null | wc -c",
     "printf '%s\n' code-refactor",
-  ])("allows safe redirect case: %s", async (command: string) => {
+    "grep -R needle packages",
+    "rg needle .",
+    "find packages -name '*.ts' -print",
+    "gh auth status",
+    "gh issue list --repo owner/repo",
+    "gh issue view 42",
+    "gh pr checks 42",
+    "gh pr diff 42",
+    "gh pr view 42 --json title,state",
+    "gh run list --limit 10",
+    "gh workflow view ci.yml",
+    "jj status",
+    "jj st",
+    "jj log -r @",
+    "jj diff --summary",
+    "jj bookmark list",
+    "jj b list",
+    "jj operation show",
+    "jj op log",
+    "jj file show README.md",
+    "jj workspace list",
+  ])("allows allowlisted command: %s", async (command: string) => {
     expect(await findMatchedPattern(command)).toBeUndefined();
   });
 
@@ -484,6 +531,22 @@ describe("findMatchedPattern", () => {
     ["make build >/tmp/build.log 2>&1", "redirect:>"],
     ["echo hi >> out.txt", "redirect:>>"],
     ["rm -rf tmp", "rm"],
+    ["find . -delete", "find -delete"],
+    ["find . -exec rm {} +", "find -exec"],
+    ["find . -fprint matches.txt", "find -fprint"],
+    ["rg --pre cat needle .", "rg --pre"],
+    ["rg --pre=cat needle .", "rg --pre"],
+    ["rg --hostname-bin=./script needle .", "rg --hostname-bin"],
+    ["printf -v PATH .", "printf -v"],
+    ["printf -vPATH .", "printf -v"],
+    ["printf -v PATH .; cat README.md", "printf -v"],
+    ["sort -o result.txt README.md", "sort -o"],
+    ["sort --output=result.txt README.md", "sort --output"],
+    ["sort --compress-program=./evil README.md", "sort --compress-program"],
+    ["file -C -m magic", "file -c"],
+    ["ssh prod 'rm -rf /data'", "ssh"],
+    ["scp artifact.tar prod:/srv", "scp"],
+    ["sftp prod", "sftp"],
     ["git push origin main", "git push"],
     ["git branch -D old-branch", "git branch -d"],
     ["bun add zod", "bun add"],
@@ -493,6 +556,31 @@ describe("findMatchedPattern", () => {
 
     expect(matched).toBeDefined();
     expect(matched?.label).toBe(label);
+  });
+
+  test.each([
+    [
+      "python3 -c 'import shutil; shutil.rmtree(\"tmp\")'",
+      "unlisted: python3 -c 'import shutil; shutil.rmtree(\"tmp\")'",
+    ],
+    ["./cat README.md", "unlisted: ./cat README.md"],
+    ["PATH=. cat README.md", "unlisted: PATH=. cat README.md"],
+    ["CAT README.md", "unlisted: CAT README.md"],
+    ["gh issue close 42", "unlisted: gh issue close 42"],
+    ["gh pr merge 42", "unlisted: gh pr merge 42"],
+    [
+      "gh api --method DELETE repos/o/r/issues/1",
+      "unlisted: gh api --method DELETE repos/o/r/issues/1",
+    ],
+    ["jj bookmark delete old", "unlisted: jj bookmark delete old"],
+    ["jj operation restore abc", "unlisted: jj operation restore abc"],
+    ["jj file chmod +x script", "unlisted: jj file chmod +x script"],
+  ])("gates commands outside the allowlist: %s", async (command: string, label: string) => {
+    const matched = await findMatchedPattern(command);
+
+    expect(matched?.label).toBe(label);
+    expect(matched?.source).toBe("builtin");
+    expect(matched?.reason).toContain("not on the bash-gate allowlist");
   });
 
   test("matches every gated command in a compound command", async () => {

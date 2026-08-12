@@ -1,8 +1,8 @@
 /**
  * Bash Gate Extension
  *
- * Prompts for confirmation before running bash commands that match protected
- * structured rules. Presents three choices:
+ * Prompts for confirmation before running bash commands outside the conservative
+ * built-in allowlist or matching protected structured rules. Presents three choices:
  *   - Allow             → run this command once
  *   - Allow for session → run all future commands matching the same rule automatically
  *   - Deny              → block this command and tell the model why
@@ -69,10 +69,121 @@ export function subagentBashGatePolicy(entries: SessionEntry[]): BashGatePolicy 
   return policy === "deny" || policy === "prompt" ? policy : "deny";
 }
 
+const DEFAULT_BASH_GATE_ALLOWLIST: BashGateRule[] = [
+  {
+    cmd: [
+      "[",
+      "basename",
+      "cat",
+      "cmp",
+      "comm",
+      "cut",
+      "df",
+      "diff",
+      "dirname",
+      "du",
+      "echo",
+      "false",
+      "file",
+      "fold",
+      "grep",
+      "head",
+      "id",
+      "jq",
+      "ls",
+      "nl",
+      "od",
+      "paste",
+      "printenv",
+      "printf",
+      "pwd",
+      "readlink",
+      "realpath",
+      "sort",
+      "stat",
+      "tail",
+      "test",
+      "tr",
+      "true",
+      "uname",
+      "uniq",
+      "wc",
+      "whoami",
+      "which",
+    ],
+  },
+  { cmd: ["find", "rg"] },
+];
+
+const DEFAULT_BASH_GATE_ALLOW_PREFIXES = [
+  ["gh", "auth", "status"],
+  ["gh", "gist", "list"],
+  ["gh", "gist", "view"],
+  ["gh", "issue", "list"],
+  ["gh", "issue", "status"],
+  ["gh", "issue", "view"],
+  ["gh", "pr", "checks"],
+  ["gh", "pr", "diff"],
+  ["gh", "pr", "list"],
+  ["gh", "pr", "status"],
+  ["gh", "pr", "view"],
+  ["gh", "release", "list"],
+  ["gh", "release", "view"],
+  ["gh", "repo", "list"],
+  ["gh", "repo", "view"],
+  ["gh", "run", "list"],
+  ["gh", "run", "view"],
+  ["gh", "workflow", "list"],
+  ["gh", "workflow", "view"],
+  ["jj", "b", "list"],
+  ["jj", "bookmark", "list"],
+  ["jj", "config", "get"],
+  ["jj", "config", "list"],
+  ["jj", "config", "path"],
+  ["jj", "diff"],
+  ["jj", "evolog"],
+  ["jj", "evolution-log"],
+  ["jj", "file", "list"],
+  ["jj", "file", "show"],
+  ["jj", "interdiff"],
+  ["jj", "log"],
+  ["jj", "op", "log"],
+  ["jj", "op", "show"],
+  ["jj", "operation", "log"],
+  ["jj", "operation", "show"],
+  ["jj", "root"],
+  ["jj", "show"],
+  ["jj", "st"],
+  ["jj", "status"],
+  ["jj", "tag", "list"],
+  ["jj", "version"],
+  ["jj", "workspace", "list"],
+  ["jj", "workspace", "root"],
+];
+
 export const DEFAULT_BASH_GATE_RULES: BashGateRule[] = [
   { cmd: ["rm", "rmdir"] },
   { cmd: ["chmod", "chown", "chgrp", "ln", "tee", "truncate", "dd", "shred"] },
   { cmd: ["sudo", "su", "kill", "pkill", "killall", "reboot", "shutdown"] },
+  { cmd: ["ssh", "scp", "sftp"] },
+  {
+    cmd: "find",
+    flagAny: [
+      "-delete",
+      "-exec",
+      "-execdir",
+      "-fls",
+      "-fprint",
+      "-fprint0",
+      "-fprintf",
+      "-ok",
+      "-okdir",
+    ],
+  },
+  { cmd: "file", flagAny: ["-C", "--compile"] },
+  { cmd: "printf", flagAny: "-v" },
+  { cmd: "rg", flagAny: ["--hostname-bin", "--pre"] },
+  { cmd: "sort", flagAny: ["-o", "--output", "--compress-program"] },
   {
     cmd: "git",
     subcommands: [
@@ -179,8 +290,16 @@ function matchCommandRule(
   const subcommand = normalizeToken(command.subcommand);
   const cmdOptions = asArray(rule.cmd).map(normalizeToken).filter(Boolean);
   const subcommandOptions = asArray(rule.subcommands).map(normalizeToken).filter(Boolean);
-  const flagOptions = asArray(rule.flagAny).map(normalizeToken).filter(Boolean);
-  const commandFlags = command.flags.map((flag) => normalizeToken(flag)).filter(Boolean);
+  const flagOptions = asArray(rule.flagAny).flatMap((flag) => {
+    const normalized = normalizeToken(flag);
+    return normalized ? [normalized] : [];
+  });
+  const commandFlags = command.flags.flatMap((flag) => {
+    const normalized = normalizeToken(flag);
+    if (!normalized) return [];
+    const equalsIndex = normalized.indexOf("=");
+    return equalsIndex === -1 ? [normalized] : [normalized, normalized.slice(0, equalsIndex)];
+  });
 
   if (cmdOptions.length > 0 && (!name || !cmdOptions.includes(name))) return undefined;
 
@@ -197,7 +316,13 @@ function matchCommandRule(
   }
 
   const matchedFlag =
-    flagOptions.length > 0 ? commandFlags.find((flag) => flagOptions.includes(flag)) : undefined;
+    flagOptions.length > 0
+      ? flagOptions.find((option) =>
+          commandFlags.some(
+            (flag) => flag === option || (option.length === 2 && flag.startsWith(option)),
+          ),
+        )
+      : undefined;
   if (flagOptions.length > 0 && !matchedFlag) return undefined;
 
   if (name === "git" && matchedSubcommand === "branch" && matchedFlag) {
@@ -249,6 +374,44 @@ function pushMatches(
   }
 }
 
+function pushUnlistedCommands(
+  matches: BashGateMatch[],
+  facts: BashFacts,
+  rules: BashGateRule[],
+  rawCommand: string,
+): void {
+  for (const command of facts.commands) {
+    const name = command.name;
+    const invokedAs = command.argv[0];
+    const isAllowlisted =
+      name !== undefined &&
+      name === normalizeToken(name) &&
+      invokedAs === name &&
+      !facts.hasVariableAssignment &&
+      (DEFAULT_BASH_GATE_ALLOWLIST.some((rule) => matchCommandRule(command, rule)) ||
+        DEFAULT_BASH_GATE_ALLOW_PREFIXES.some((prefix) =>
+          prefix.every((token, index) => normalizeToken(command.argv[index]) === token),
+        ));
+    if (!name || isAllowlisted) continue;
+    const matchedExplicitRule = rules.some(
+      (rule) =>
+        (rule.cmd !== undefined || rule.subcommands !== undefined || rule.flagAny !== undefined) &&
+        (!rule.redirects || matchesRedirectRule(facts, rule.redirects)) &&
+        matchCommandRule(command, rule),
+    );
+    if (matchedExplicitRule) continue;
+
+    const label = `unlisted: ${rawCommand}`;
+    if (matches.some((match) => match.label === label && match.source === "builtin")) continue;
+    matches.push({
+      label,
+      source: "builtin",
+      rule: { cmd: name },
+      reason: `${name} is not on the bash-gate allowlist`,
+    });
+  }
+}
+
 export async function findMatchedPatterns(
   command: string,
   rulesOrConfig: BashGateRule[] | BashGateConfig | BitesConfig = {},
@@ -274,6 +437,7 @@ export async function findMatchedPatterns(
     pushMatches(matches, matchRuleAgainstFacts(facts, rule), "builtin", rule);
   }
 
+  pushUnlistedCommands(matches, facts, [...configuredRules, ...builtinRules], command);
   return matches;
 }
 
@@ -297,6 +461,8 @@ export default function registerBashGate(
 
   let rules: BashGateRule[] = [];
   let mainAgentYolo = false;
+  const sessionAllowed = new Set<string>();
+  const finishedSubagents = new Set<string>();
 
   function syncYoloStatus(ctx: ExtensionContext): void {
     ctx.ui.setStatus("bash-gate-yolo", pi.getFlag("yolo") || mainAgentYolo ? "🔥 YOLO" : undefined);
@@ -305,6 +471,8 @@ export default function registerBashGate(
   pi.on("session_start", (_event, ctx) => {
     rules = resolveEffectiveRules(configRef.current);
     mainAgentYolo = false;
+    sessionAllowed.clear();
+    finishedSubagents.clear();
     syncYoloStatus(ctx);
   });
 
@@ -316,9 +484,6 @@ export default function registerBashGate(
       ctx.ui.notify(`Bash gate ${mainAgentYolo ? "disabled" : "enabled"}.`, "info");
     },
   });
-
-  const sessionAllowed = new Set<string>();
-  const finishedSubagents = new Set<string>();
 
   function clearSubagentAllowances(eventData: { id: string }): void {
     const agentId = eventData.id;

@@ -18,6 +18,7 @@ export interface BashFacts {
   redirects: BashRedirect[];
   pathCandidates: string[];
   hasPipe: boolean;
+  hasVariableAssignment: boolean;
 }
 
 interface TSNode {
@@ -188,6 +189,10 @@ function walk(node: TSNode, facts: BashFacts): void {
     facts.hasPipe = true;
   }
 
+  if (node.type === "variable_assignment") {
+    facts.hasVariableAssignment = true;
+  }
+
   if (node.type === "command") {
     const argv = extractArgv(node);
     facts.commands.push({
@@ -222,7 +227,13 @@ export async function extractBashFacts(command: string): Promise<BashFacts> {
   const parser = await getParser();
   const tree = parser.parse(command);
   if (!tree) {
-    return { commands: [], redirects: [], pathCandidates: [], hasPipe: false };
+    return {
+      commands: [],
+      redirects: [],
+      pathCandidates: [],
+      hasPipe: false,
+      hasVariableAssignment: false,
+    };
   }
 
   const facts: BashFacts = {
@@ -230,6 +241,7 @@ export async function extractBashFacts(command: string): Promise<BashFacts> {
     redirects: [],
     pathCandidates: [],
     hasPipe: false,
+    hasVariableAssignment: false,
   };
 
   try {

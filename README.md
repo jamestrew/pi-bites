@@ -170,7 +170,7 @@ Automode reviews only commands that already reach an approval-producing bash gat
 
 ## Bash gate
 
-The bash gate prompts before running `bash` tool commands that match one of the built-in destructive rules or one of your configured structured rules.
+The bash gate allows a conservative set of read-only command patterns without prompting. Everything else requires approval, as does any allowlisted command that matches a built-in destructive rule or one of your configured structured rules. Common searches such as `grep`, `rg`, and non-mutating `find` expressions are allowed; execution and write variants such as `rg --pre`, `find -exec`, `find -delete`, and `find -fprint` require approval. Read-only GitHub CLI and Jujutsu command paths such as `gh pr view`, `gh issue list`, `jj status`, and `jj log` are also allowed, while mutating sibling commands remain gated. Language runtimes, package scripts, and other network clients intentionally fall through to approval.
 
 ```json
 {
