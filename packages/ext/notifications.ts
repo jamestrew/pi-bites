@@ -80,6 +80,7 @@ export default function registerNotifications(
   pi.events.on("bites:notify", (data) => notify(data as BitesNotifyPayload));
 
   pi.events.on("bites:bash_gate", (data) => {
+    if (autoMode?.isEnabled()) return;
     const { cwd, command } = data as BitesBashGatePayload;
     notify({ cwd, message: `Waiting for bash approval: ${command}` });
   });
