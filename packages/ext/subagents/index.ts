@@ -27,6 +27,7 @@ import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
 import { onSubagentApprovalRequest } from "../bash-gate/events.js";
+import { promptAutoModeEscalation } from "../bash-gate/automode-escalation.js";
 import {
   buildReviewerTranscript,
   type AutoModeController,
@@ -128,14 +129,18 @@ export default function (
   const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
     const ctx = currentCtx;
     if (!ctx) return { outcome: "failure", message: "parent approval context unavailable" };
+    const ui = ctx.ui;
+    const hasUI = ctx.hasUI;
 
     if (request.agentId)
       fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
     try {
       if (autoMode?.isEnabled()) {
+        const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
+        const session = record?.session;
+        let decision;
         try {
-          const session = request.agentId ? manager.getRecord(request.agentId)?.session : undefined;
-          const decision = await autoMode.review(
+          decision = await autoMode.review(
             {
               command: request.command,
               labels: request.labels,
@@ -146,23 +151,60 @@ export default function (
             },
             ctx,
           );
-          return decision.outcome === "allow"
-            ? { outcome: "allow" }
-            : {
-                outcome: "deny",
-                source: "automode",
-                ...(decision.rationale ? { rationale: decision.rationale } : {}),
-              };
         } catch (error) {
           return {
             outcome: "failure",
             message: `Automode reviewer failed: ${error instanceof Error ? error.message : String(error)}`,
           };
         }
+
+        if (decision.outcome === "allow") return { outcome: "allow" };
+        if (!hasUI) {
+          return {
+            outcome: "deny",
+            source: "automode",
+            ...(decision.rationale ? { rationale: decision.rationale } : {}),
+          };
+        }
+
+        const escalation = await promptAutoModeEscalation({
+          pi,
+          ui,
+          command: request.command,
+          ...(decision.rationale ? { rationale: decision.rationale } : {}),
+          ...(record?.session
+            ? {
+                viewConversation: async () => {
+                  const activeSession = record.session;
+                  if (!activeSession) return;
+                  await ui.custom<undefined>(
+                    (tui, theme, keybindings, done) =>
+                      new ConversationViewer(
+                        tui,
+                        activeSession,
+                        record,
+                        agentActivity.get(record.id),
+                        theme,
+                        done,
+                        undefined,
+                        keybindings,
+                      ),
+                    CONVERSATION_OVERLAY_OPTIONS,
+                  );
+                },
+              }
+            : {}),
+        });
+        return escalation === "allow"
+          ? { outcome: "allow" }
+          : {
+              outcome: "deny",
+              source: "automode",
+              ...(decision.rationale ? { rationale: decision.rationale } : {}),
+            };
       }
 
-      const ui = ctx.ui;
-      if (!ctx.hasUI) return { outcome: "deny", source: "manual" };
+      if (!hasUI) return { outcome: "deny", source: "manual" };
       const labels = request.labels.join(", ") || "unknown rule";
       const reasons = request.reasons.filter(Boolean).join("; ");
       const prompt = reasons

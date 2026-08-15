@@ -151,7 +151,7 @@ Default difficulty is `medium`, every 2 code writes.
 
 ## Automode
 
-Run `/automode on` to replace bash-gate prompts with a separate model review. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded parent transcript with hidden thinking removed plus the exact command request. Denials and reviewer failures block the command. `/automode off` restores manual prompts when UI is available.
+Run `/automode on` to review gated commands with a separate model. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded parent transcript with hidden thinking removed plus the exact command request. With an interactive UI, an explicit denial shows the rationale and lets the human allow once, allow with a remembered reason, export the exact command to a private temporary file, or keep it denied. Remembered reasons are bounded session history supplied as authorization evidence to later reviews; they never approve commands automatically. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt. `/automode off` restores manual prompts when UI is available.
 
 Automode uses the active model by default. It can be enabled at startup and given a separate model, thinking level, or policy:
 

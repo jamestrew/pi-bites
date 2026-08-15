@@ -45,6 +45,7 @@ import {
   type SubagentMetadata,
 } from "../subagents/agent-runner.js";
 import { requestSubagentApproval } from "./events.js";
+import { promptAutoModeEscalation } from "./automode-escalation.js";
 import type { AutoModeController } from "../automode/index.js";
 
 export type { ApprovalRequest } from "./events.js";
@@ -516,12 +517,15 @@ export default function registerBashGate(
     const { command } = event.input;
     if (typeof command !== "string") return undefined;
 
+    const cwd = ctx.cwd;
+    const hasUI = ctx.hasUI;
+    const ui = ctx.ui;
+    const entries = ctx.sessionManager.getEntries();
     const matchedPatterns = await findMatchedPatterns(command, rules);
     if (matchedPatterns.length === 0) return undefined;
 
     const matchedPatternLabels = matchedPatterns.map((match) => match.label);
     const sessionAllowKey = matchedPatternLabels.join(" && ");
-    const entries = ctx.sessionManager.getEntries();
     const metadata = subagentMetadata(entries);
     const subagentPolicy = subagentBashGatePolicy(entries);
     const effectiveSessionAllowKey = metadata?.agentId
@@ -543,7 +547,7 @@ export default function registerBashGate(
       }
 
       const gateStartMs = Date.now();
-      pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
+      pi.events.emit("bites:bash_gate", { cwd, command });
       try {
         const reasons = matchedPatterns.flatMap((match) =>
           match.reason === undefined ? [] : [match.reason],
@@ -588,41 +592,59 @@ export default function registerBashGate(
 
         return { block: true, reason: "Bash gate: command was denied by parent approval." };
       } finally {
-        pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+        pi.events.emit("bites:bash_gate_resolved", { cwd, command });
       }
     }
 
     if (autoMode?.isEnabled()) {
       const gateStartMs = Date.now();
-      pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
+      pi.events.emit("bites:bash_gate", { cwd, command });
       try {
-        const decision = await autoMode.review(
-          {
-            command,
-            labels: matchedPatternLabels,
-            reasons: matchedPatterns.flatMap((match) =>
-              match.reason === undefined ? [] : [match.reason],
-            ),
-          },
-          ctx,
-        );
+        let decision;
+        try {
+          decision = await autoMode.review(
+            {
+              command,
+              labels: matchedPatternLabels,
+              reasons: matchedPatterns.flatMap((match) =>
+                match.reason === undefined ? [] : [match.reason],
+              ),
+            },
+            ctx,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return { block: true, reason: `Automode review failed closed: ${message}` };
+        }
+
         if (decision.outcome === "allow") {
           compensateTimeout(event.input, gateStartMs);
           return undefined;
         }
-        return {
-          block: true,
+
+        const denied = {
+          block: true as const,
           reason: `Automode denied this command${decision.rationale ? `: ${decision.rationale}` : "."} Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.`,
         };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { block: true, reason: `Automode review failed closed: ${message}` };
+        if (!hasUI) return denied;
+
+        const escalation = await promptAutoModeEscalation({
+          pi,
+          ui,
+          command,
+          rationale: decision.rationale,
+        });
+        if (escalation === "allow") {
+          compensateTimeout(event.input, gateStartMs);
+          return undefined;
+        }
+        return denied;
       } finally {
-        pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+        pi.events.emit("bites:bash_gate_resolved", { cwd, command });
       }
     }
 
-    if (!ctx.hasUI) {
+    if (!hasUI) {
       // Non-interactive mode (e.g. `pi -p`) — block by default.
       return { block: true, reason: "Bash gate: no UI available for confirmation." };
     }
@@ -634,7 +656,7 @@ export default function registerBashGate(
     // still gets its full intended timeout.
     const gateStartMs = Date.now();
 
-    pi.events.emit("bites:bash_gate", { cwd: ctx.cwd, command });
+    pi.events.emit("bites:bash_gate", { cwd, command });
 
     const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
     const prompt =
@@ -642,7 +664,7 @@ export default function registerBashGate(
         ? `🔒 Bash gate — ${reasons.join("; ")} (${matchedPatternLabels.join(", ")})`
         : `🔒 Bash gate — command requires approval (${matchedPatternLabels.join(", ")})`;
     try {
-      const choice = await ctx.ui.select(prompt, [
+      const choice = await ui.select(prompt, [
         "Allow",
         `Allow for session ("${sessionAllowKey}")`,
         "Deny",
@@ -661,7 +683,7 @@ export default function registerBashGate(
 
       return { block: true, reason: "Bash gate: command was denied by the user." };
     } finally {
-      pi.events.emit("bites:bash_gate_resolved", { cwd: ctx.cwd, command });
+      pi.events.emit("bites:bash_gate_resolved", { cwd, command });
     }
   });
 }

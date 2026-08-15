@@ -1,3 +1,5 @@
+import { readFile, rm, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test, vi } from "vitest";
 import { extractBashFacts } from "./bash-command-facts.js";
@@ -76,6 +78,7 @@ function createBashGateHarness(
       shortcutHandler = options.handler;
     }),
     getFlag: vi.fn(() => yolo),
+    appendEntry: vi.fn(),
     on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) => {
       handlers.set(event, handler);
     }),
@@ -88,6 +91,7 @@ function createBashGateHarness(
     },
   };
   const ui = {
+    input: vi.fn(async () => undefined as string | undefined),
     notify: vi.fn(),
     select: vi.fn(async () => "Deny"),
     setStatus: vi.fn(),
@@ -177,12 +181,12 @@ describe("bash gate tool_call", () => {
     expect(ui.select).not.toHaveBeenCalled();
   });
 
-  test("preserves explicit main-agent automode denial rationale and guidance", async () => {
+  test("escalates an explicit main-agent automode denial and preserves denial guidance", async () => {
     const review = vi.fn().mockResolvedValue({
       outcome: "deny",
       rationale: "removes files outside the requested build directory",
     });
-    const { toolCall, ctx } = createBashGateHarness([], false, {
+    const { toolCall, ctx, ui } = createBashGateHarness([], false, {
       isEnabled: () => true,
       review,
     });
@@ -194,6 +198,138 @@ describe("bash gate tool_call", () => {
       reason:
         "Automode denied this command: removes files outside the requested build directory Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.",
     });
+    expect(ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("removes files outside the requested build directory"),
+      ["Allow once", "Allow with reason…", "Export command", "Deny"],
+    );
+  });
+
+  test("allows an automode-denied main-agent command once without recording history", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "too broad" });
+    const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+    ui.select.mockResolvedValue("Allow once");
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
+    ).resolves.toBeUndefined();
+
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+  });
+
+  test("allows with a non-empty reason and records trusted session history", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+    ui.select.mockResolvedValue("Allow with reason…");
+    ui.input.mockResolvedValueOnce("   ").mockResolvedValueOnce("Generated test output");
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
+    ).resolves.toBeUndefined();
+
+    expect(ui.input).toHaveBeenCalledTimes(2);
+    expect(pi.appendEntry).toHaveBeenCalledWith("pi-bites:automode-override", {
+      version: 1,
+      command: "rm build.txt",
+      reason: "Generated test output",
+    });
+  });
+
+  test("exports the exact denied command to a private non-executable file and stays blocked", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    const { toolCall, ctx, ui } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+    ui.select.mockResolvedValue("Export command");
+
+    const result = await toolCall(
+      { toolName: "bash", input: { command: "rm 'file with spaces.txt'" } },
+      ctx,
+    );
+    const path = ui.notify.mock.calls.find(
+      ([message, level]) => level === "info" && typeof message === "string",
+    )?.[0] as string;
+
+    try {
+      expect(result).toEqual(expect.objectContaining({ block: true }));
+      expect(await readFile(path, "utf8")).toBe("rm 'file with spaces.txt'\n");
+      expect((await stat(path)).mode & 0o777).toBe(0o600);
+      expect((await stat(dirname(path))).mode & 0o777).toBe(0o700);
+    } finally {
+      if (path) await rm(dirname(path), { recursive: true, force: true });
+    }
+  });
+
+  test("keeps an automode denial fail-closed without UI", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    const { toolCall, ctx, ui } = createBashGateHarness(
+      [],
+      false,
+      { isEnabled: () => true, review },
+      false,
+    );
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason:
+        "Automode denied this command: not authorized Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.",
+    });
+    expect(ui.select).not.toHaveBeenCalled();
+  });
+
+  test("does not offer escalation when the reviewer fails in an interactive session", async () => {
+    const review = vi.fn().mockRejectedValue(new Error("provider unavailable"));
+    const { toolCall, ctx, ui } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Automode review failed closed: provider unavailable",
+    });
+    expect(ui.select).not.toHaveBeenCalled();
+  });
+
+  test("uses snapshotted UI and event data when ctx becomes stale during review", async () => {
+    let stale = false;
+    const review = vi.fn().mockImplementation(async () => {
+      stale = true;
+      return { outcome: "deny", rationale: "not authorized" };
+    });
+    const { toolCall, ctx, ui } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+    ui.select.mockResolvedValue("Allow once");
+    const values = {
+      cwd: ctx.cwd,
+      hasUI: ctx.hasUI,
+      ui: ctx.ui,
+      sessionManager: ctx.sessionManager,
+    };
+    for (const key of ["cwd", "hasUI", "ui", "sessionManager"] as const) {
+      Object.defineProperty(ctx, key, {
+        get: () => {
+          if (stale) throw new Error("stale ctx");
+          return values[key];
+        },
+      });
+    }
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
+    ).resolves.toBeUndefined();
   });
 
   test("does not invoke automode until a bash command actually matches the gate", async () => {

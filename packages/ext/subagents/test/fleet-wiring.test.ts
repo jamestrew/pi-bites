@@ -67,6 +67,8 @@ function uiCtx() {
       };
     }),
     getEditorText: vi.fn(() => ""),
+    input: vi.fn(async () => undefined as string | undefined),
+    select: vi.fn(async () => "Deny"),
     custom: vi.fn(),
     press: (data: string) => inputHandler?.(data),
   };
@@ -165,6 +167,32 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
   });
 
+  it("keeps a no-UI subagent Automode denial fail-closed", async () => {
+    const { pi, lifecycle } = makePi();
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ui = uiCtx();
+    const ctx = { ...ctxWith(ui), hasUI: false };
+    await lifecycle.get("session_start")?.({}, ctx);
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-deny", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-deny",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "deny", source: "automode", rationale: "not authorized" },
+    });
+    expect(ui.select).not.toHaveBeenCalled();
+  });
+
   it("returns a distinct failure reply when no-UI automode review throws", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi
@@ -188,6 +216,87 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     expect(reply).toHaveBeenCalledWith({
       result: { outcome: "failure", message: "Automode reviewer failed: request aborted" },
+    });
+  });
+
+  it("lets the interactive human allow a subagent Automode denial with a remembered reason", async () => {
+    const { pi, lifecycle } = makePi();
+    let stale = false;
+    const review = vi.fn().mockImplementation(async () => {
+      stale = true;
+      return { outcome: "deny", rationale: "not authorized" };
+    });
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ui = uiCtx();
+    ui.select.mockResolvedValue("Allow with reason…");
+    ui.input.mockResolvedValue("Generated test output");
+    const ctx = ctxWith(ui);
+    for (const [key, value] of [
+      ["ui", ui],
+      ["hasUI", true],
+    ] as const) {
+      Object.defineProperty(ctx, key, {
+        get: () => {
+          if (stale) throw new Error("stale ctx");
+          return value;
+        },
+      });
+    }
+    await lifecycle.get("session_start")?.({}, ctx);
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-override", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-override",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(ui.select).toHaveBeenCalledWith(expect.stringContaining("not authorized"), [
+      "Allow once",
+      "Allow with reason…",
+      "Export command",
+      "Deny",
+    ]);
+    expect(pi.appendEntry).toHaveBeenCalledWith("pi-bites:automode-override", {
+      version: 1,
+      command: "rm build.txt",
+      reason: "Generated test output",
+    });
+    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+  });
+
+  it("keeps the original subagent denial when interactive escalation fails", async () => {
+    const { pi, lifecycle } = makePi();
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ui = uiCtx();
+    ui.select.mockRejectedValue(new Error("UI unavailable"));
+    const ctx = ctxWith(ui);
+    await lifecycle.get("session_start")?.({}, ctx);
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-ui-failure", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-ui-failure",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(ui.notify).toHaveBeenCalledWith(
+      "Automode escalation failed closed: Error: UI unavailable",
+      "error",
+    );
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "deny", source: "automode", rationale: "not authorized" },
     });
   });
 
@@ -216,7 +325,8 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const { pi, tools, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
     subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
-    const ctx = ctxWith(uiCtx());
+    const ui = uiCtx();
+    const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
     const spawn = await tools.get("Agent").execute(
       "tc",
@@ -232,6 +342,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     );
     await flush();
     const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
+    ui.select.mockResolvedValueOnce("View conversation").mockResolvedValueOnce("Deny");
 
     const reply = vi.fn();
     pi.events.on("subagents:bash_gate:approval:reply:r2", reply);
@@ -254,6 +365,12 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(request.subagentContext).toContain("<... transcript entries omitted ...>");
     expect(request.subagentContext.length).toBeLessThanOrEqual(40_000);
     expect(request.subagentContext).not.toContain("hidden plan");
+    expect(ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("not authorized"),
+      expect.arrayContaining(["View conversation"]),
+    );
+    expect(ui.select).toHaveBeenCalledTimes(2);
+    expect(ui.custom).toHaveBeenCalledOnce();
     expect(reply).toHaveBeenCalledWith({
       result: { outcome: "deny", source: "automode", rationale: "not authorized" },
     });
