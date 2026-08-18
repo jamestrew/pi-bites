@@ -131,6 +131,7 @@ export default function (
     if (!ctx) return { outcome: "failure", message: "parent approval context unavailable" };
     const ui = ctx.ui;
     const hasUI = ctx.hasUI;
+    const cwd = ctx.cwd;
 
     if (request.agentId)
       fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
@@ -170,6 +171,7 @@ export default function (
         const escalation = await promptAutoModeEscalation({
           pi,
           ui,
+          cwd,
           command: request.command,
           ...(decision.rationale ? { rationale: decision.rationale } : {}),
           ...(record?.session

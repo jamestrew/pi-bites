@@ -149,14 +149,24 @@ describe("bash gate tool_call", () => {
     await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
 
     expect(ui.select).toHaveBeenCalled();
-    expect(pi.events.emit).toHaveBeenCalledWith("bites:bash_gate", {
-      cwd: "/repo",
-      command: "rm -rf tmp",
-    });
-    expect(pi.events.emit).toHaveBeenCalledWith("bites:bash_gate_resolved", {
-      cwd: "/repo",
-      command: "rm -rf tmp",
-    });
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate",
+      expect.objectContaining({
+        cwd: "/repo",
+        command: "rm -rf tmp",
+        requiresHuman: true,
+        waitId: expect.any(String),
+      }),
+    );
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate_resolved",
+      expect.objectContaining({
+        cwd: "/repo",
+        command: "rm -rf tmp",
+        requiresHuman: true,
+        waitId: expect.any(String),
+      }),
+    );
   });
 
   test("routes no-UI gated commands through automode and fails closed on reviewer failure", async () => {

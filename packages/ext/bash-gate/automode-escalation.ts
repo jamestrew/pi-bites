@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,8 +13,9 @@ export async function exportBlockedCommand(command: string): Promise<string> {
 }
 
 interface AutoModeEscalationOptions {
-  pi: Pick<ExtensionAPI, "appendEntry">;
+  pi: Pick<ExtensionAPI, "appendEntry" | "events">;
   ui: ExtensionContext["ui"];
+  cwd: string;
   command: string;
   rationale?: string;
   viewConversation?: () => Promise<void>;
@@ -22,10 +24,13 @@ interface AutoModeEscalationOptions {
 export async function promptAutoModeEscalation({
   pi,
   ui,
+  cwd,
   command,
   rationale,
   viewConversation,
 }: AutoModeEscalationOptions): Promise<"allow" | "deny"> {
+  const waitId = randomUUID();
+  pi.events.emit("bites:bash_gate", { cwd, command, requiresHuman: true, waitId });
   try {
     const prompt = `🤖 Automode denied this command${rationale ? `: ${rationale}` : "."}\n${command}`;
 
@@ -72,5 +77,7 @@ export async function promptAutoModeEscalation({
       ui.notify(`Automode escalation failed closed: ${String(error)}`, "error");
     } catch {}
     return "deny";
+  } finally {
+    pi.events.emit("bites:bash_gate_resolved", { cwd, command, requiresHuman: true, waitId });
   }
 }

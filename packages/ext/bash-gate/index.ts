@@ -30,6 +30,7 @@
  * ```
  */
 
+import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
 import type {
@@ -600,7 +601,8 @@ export default function registerBashGate(
 
     if (autoMode?.isEnabled()) {
       const gateStartMs = Date.now();
-      pi.events.emit("bites:bash_gate", { cwd, command });
+      const autoGate = { cwd, command, requiresHuman: false } as const;
+      pi.events.emit("bites:bash_gate", autoGate);
       try {
         let decision;
         try {
@@ -633,6 +635,7 @@ export default function registerBashGate(
         const escalation = await promptAutoModeEscalation({
           pi,
           ui,
+          cwd,
           command,
           rationale: decision.rationale,
         });
@@ -642,7 +645,7 @@ export default function registerBashGate(
         }
         return denied;
       } finally {
-        pi.events.emit("bites:bash_gate_resolved", { cwd, command });
+        pi.events.emit("bites:bash_gate_resolved", autoGate);
       }
     }
 
@@ -657,8 +660,9 @@ export default function registerBashGate(
     // the gate wait duration to `event.input.timeout` so the spawned process
     // still gets its full intended timeout.
     const gateStartMs = Date.now();
+    const manualGate = { cwd, command, requiresHuman: true, waitId: randomUUID() } as const;
 
-    pi.events.emit("bites:bash_gate", { cwd, command });
+    pi.events.emit("bites:bash_gate", manualGate);
 
     const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
     const prompt =
@@ -685,7 +689,7 @@ export default function registerBashGate(
 
       return { block: true, reason: "Bash gate: command was denied by the user." };
     } finally {
-      pi.events.emit("bites:bash_gate_resolved", { cwd, command });
+      pi.events.emit("bites:bash_gate_resolved", manualGate);
     }
   });
 }

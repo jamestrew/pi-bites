@@ -21,10 +21,10 @@ export interface BitesNotifyPayload {
   message: string;
 }
 
-export interface BitesBashGatePayload {
+export type BitesBashGatePayload = {
   cwd: string;
   command: string;
-}
+} & ({ requiresHuman: true; waitId: string } | { requiresHuman?: false; waitId?: never });
 
 function approvalResult(value: unknown): BashGateApprovalResult | undefined {
   if (!value || typeof value !== "object" || !("outcome" in value)) return undefined;

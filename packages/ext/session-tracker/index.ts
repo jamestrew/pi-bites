@@ -9,6 +9,7 @@ import type {
 import { basename } from "node:path";
 import { extractLastAssistantText } from "../utils.ts";
 import type { AutoModeController } from "../automode/index.js";
+import type { BitesBashGatePayload } from "../bash-gate/events.js";
 import type { BitesConfig } from "../config.js";
 import { getSmallModel } from "../small-model.js";
 import {
@@ -495,9 +496,10 @@ export function createSessionTrackerRuntime(options: TrackerRuntimeOptions) {
   };
 
   return {
-    async start(startCtx: TrackerContext) {
+    async start(startCtx: TrackerContext, initialState?: TrackerState) {
       if (timer) options.clearInterval(timer);
       timer = undefined;
+      if (initialState) state = initialState;
       ctx = startCtx;
       await report("report");
       // stop() or a newer start() may have run while the first report was in
@@ -542,6 +544,13 @@ export function createNeedsInputLifecycle(
   const reportSettledState = () => setState(backgroundAgents.size > 0 ? "working" : settledState);
 
   return {
+    reset() {
+      backgroundAgents.clear();
+      pendingText = undefined;
+      settledState = "idle";
+      agentRunning = false;
+      generation++;
+    },
     async agentStart() {
       generation++;
       agentRunning = true;
@@ -601,21 +610,46 @@ export default function registerSessionTracker(
   let currentCtx:
     | (TrackerContext & { ui: { setStatus(id: string, text: string | undefined): void } })
     | undefined;
-  pi.on("session_start", async (_event, ctx) => {
-    currentCtx = ctx;
-    await runtime.start(ctx);
-    footerRuntime.start(ctx);
-  });
+  let baseState: TrackerState = "idle";
+  const activeHumanBashGates = new Set<string>();
+  const reportState = () =>
+    runtime.setState(activeHumanBashGates.size > 0 ? "needs-permission" : baseState);
+  const setBaseState = (state: TrackerState) => {
+    baseState = state;
+    return reportState();
+  };
   const needsInputLifecycle = createNeedsInputLifecycle(
-    (state) => runtime.setState(state),
+    setBaseState,
     (text, ctx) => inferNeedsInputFromAssistantText(text, ctx, configRef.current),
     (error) => logTrackerFailure(defaultCallOptions, "needs-input inference", error),
   );
-  pi.on("agent_start", () => needsInputLifecycle.agentStart());
-  pi.events.on("bites:bash_gate", async () => {
-    if (!autoMode?.isEnabled()) await runtime.setState("needs-permission");
+  pi.on("session_start", async (_event, ctx) => {
+    activeHumanBashGates.clear();
+    baseState = "idle";
+    needsInputLifecycle.reset();
+    currentCtx = ctx;
+    await runtime.start(ctx, "idle");
+    footerRuntime.start(ctx);
   });
-  pi.events.on("bites:bash_gate_resolved", async () => runtime.setState("working"));
+  pi.on("agent_start", () => needsInputLifecycle.agentStart());
+  pi.events.on("bites:bash_gate", async (data) => {
+    const gate = data as BitesBashGatePayload;
+    if (gate.requiresHuman) {
+      activeHumanBashGates.add(gate.waitId);
+      await reportState();
+    } else if (gate.requiresHuman !== false && !autoMode?.isEnabled()) {
+      await setBaseState("needs-permission");
+    }
+  });
+  pi.events.on("bites:bash_gate_resolved", async (data) => {
+    const gate = data as BitesBashGatePayload;
+    if (gate.requiresHuman) {
+      if (!activeHumanBashGates.delete(gate.waitId)) return;
+      await reportState();
+    } else if (gate.requiresHuman !== false) {
+      await setBaseState("working");
+    }
+  });
   pi.events.on("subagents:created", (data) =>
     needsInputLifecycle.backgroundAgentStarted((data as { id: string }).id),
   );

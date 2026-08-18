@@ -234,6 +234,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     for (const [key, value] of [
       ["ui", ui],
       ["hasUI", true],
+      ["cwd", process.cwd()],
     ] as const) {
       Object.defineProperty(ctx, key, {
         get: () => {
@@ -262,6 +263,24 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       "Export command",
       "Deny",
     ]);
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate",
+      expect.objectContaining({
+        cwd: process.cwd(),
+        command: "rm build.txt",
+        requiresHuman: true,
+        waitId: expect.any(String),
+      }),
+    );
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate_resolved",
+      expect.objectContaining({
+        cwd: process.cwd(),
+        command: "rm build.txt",
+        requiresHuman: true,
+        waitId: expect.any(String),
+      }),
+    );
     expect(pi.appendEntry).toHaveBeenCalledWith("pi-bites:automode-override", {
       version: 1,
       command: "rm build.txt",

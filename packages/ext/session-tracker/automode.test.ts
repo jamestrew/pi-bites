@@ -28,7 +28,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-test("only manual bash reviews report the session as blocked", async () => {
+test("only human bash reviews report the session as blocked", async () => {
   process.env.TMUX_PANE = "%1";
   const lifecycle = new Map<string, ((...args: any[]) => unknown)[]>();
   const events = new Map<string, Set<(data: unknown) => unknown>>();
@@ -53,12 +53,17 @@ test("only manual bash reviews report the session as blocked", async () => {
     registerShortcut() {},
     appendEntry() {},
   };
-  const review = deferred<{ outcome: "allow" }>();
+  const allowedReview = deferred<{ outcome: "allow" }>();
+  const deniedReview = deferred<{ outcome: "deny"; rationale: string }>();
   let autoModeEnabled = true;
   const autoMode = {
     isEnabled: () => autoModeEnabled,
-    review: vi.fn(() => review.promise),
+    review: vi
+      .fn()
+      .mockImplementationOnce(() => allowedReview.promise)
+      .mockImplementationOnce(() => deniedReview.promise),
   };
+  const escalationReview = deferred<string>();
   const manualReview = deferred<string>();
   const ctx = {
     cwd: "/repo",
@@ -70,7 +75,10 @@ test("only manual bash reviews report the session as blocked", async () => {
     ui: {
       input: async () => undefined,
       notify() {},
-      select: vi.fn(() => manualReview.promise),
+      select: vi
+        .fn()
+        .mockImplementationOnce(() => escalationReview.promise)
+        .mockImplementationOnce(() => manualReview.promise),
       setStatus() {},
     },
   };
@@ -91,8 +99,77 @@ test("only manual bash reviews report the session as blocked", async () => {
         ([, request]) => request.type === "report" && request.record.state === "needs-permission",
       ),
     ).toBe(false);
-    review.resolve({ outcome: "allow" });
+    allowedReview.resolve({ outcome: "allow" });
     await automated;
+
+    send.mockClear();
+    const escalated = toolCall?.({ toolName: "bash", input: { command: "rm denied-file" } }, ctx);
+    await vi.waitFor(() => expect(autoMode.review).toHaveBeenCalledTimes(2));
+    expect(
+      send.mock.calls.some(
+        ([, request]) => request.type === "report" && request.record.state === "needs-permission",
+      ),
+    ).toBe(false);
+    deniedReview.resolve({ outcome: "deny", rationale: "not authorized" });
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          type: "report",
+          record: expect.objectContaining({ state: "needs-permission" }),
+        }),
+      ),
+    );
+
+    send.mockClear();
+    for (const handler of lifecycle.get("agent_start") ?? []) await handler();
+    pi.events.emit("subagents:created", { id: "concurrent-agent" });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(
+      send.mock.calls.some(
+        ([, request]) => request.type === "report" && request.record.state === "working",
+      ),
+    ).toBe(false);
+
+    send.mockClear();
+    pi.events.emit("bites:bash_gate", {
+      cwd: "/repo",
+      command: "rm concurrently-denied-file",
+      requiresHuman: true,
+      waitId: "concurrent-human-gate",
+    });
+    pi.events.emit("bites:bash_gate_resolved", { cwd: "/repo", command: "automated-review" });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(
+      send.mock.calls.some(
+        ([, request]) => request.type === "report" && request.record.state === "working",
+      ),
+    ).toBe(false);
+
+    escalationReview.resolve("Allow once");
+    await escalated;
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(
+      send.mock.calls.some(
+        ([, request]) => request.type === "report" && request.record.state === "working",
+      ),
+    ).toBe(false);
+
+    pi.events.emit("bites:bash_gate_resolved", {
+      cwd: "/repo",
+      command: "rm concurrently-denied-file",
+      requiresHuman: true,
+      waitId: "concurrent-human-gate",
+    });
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          type: "report",
+          record: expect.objectContaining({ state: "working" }),
+        }),
+      ),
+    );
 
     autoModeEnabled = false;
     send.mockClear();
@@ -118,6 +195,46 @@ test("only manual bash reviews report the session as blocked", async () => {
         }),
       ),
     );
+
+    pi.events.emit("bites:bash_gate", {
+      cwd: "/repo",
+      command: "old-session-prompt",
+      requiresHuman: true,
+      waitId: "old-session-gate",
+    });
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          type: "report",
+          record: expect.objectContaining({ state: "needs-permission" }),
+        }),
+      ),
+    );
+
+    send.mockClear();
+    for (const handler of lifecycle.get("session_start") ?? []) await handler({}, ctx);
+    expect(send).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        type: "report",
+        record: expect.objectContaining({ state: "idle" }),
+      }),
+    );
+
+    send.mockClear();
+    pi.events.emit("bites:bash_gate_resolved", {
+      cwd: "/repo",
+      command: "old-session-prompt",
+      requiresHuman: true,
+      waitId: "old-session-gate",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(
+      send.mock.calls.some(
+        ([, request]) => request.type === "report" && request.record.state === "working",
+      ),
+    ).toBe(false);
   } finally {
     for (const handler of lifecycle.get("session_shutdown") ?? [])
       await handler({ reason: "quit" });

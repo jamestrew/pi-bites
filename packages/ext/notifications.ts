@@ -80,9 +80,9 @@ export default function registerNotifications(
   pi.events.on("bites:notify", (data) => notify(data as BitesNotifyPayload));
 
   pi.events.on("bites:bash_gate", (data) => {
-    if (autoMode?.isEnabled()) return;
-    const { cwd, command } = data as BitesBashGatePayload;
-    notify({ cwd, message: `Waiting for bash approval: ${command}` });
+    const gate = data as BitesBashGatePayload;
+    if (autoMode?.isEnabled() && !gate.requiresHuman) return;
+    notify({ cwd: gate.cwd, message: `Waiting for bash approval: ${gate.command}` });
   });
 
   pi.on("agent_end", (event, ctx) => {
