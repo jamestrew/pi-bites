@@ -125,6 +125,19 @@ describe("automode reviewer model and completion", () => {
     );
   });
 
+  test("uses an allow-by-default policy for ordinary development work", async () => {
+    const { controller, ctx } = createAutoModeHarness();
+    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+
+    await controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any);
+
+    const request = vi.mocked(completeSimple).mock.calls[0]?.[1] as any;
+    expect(request.systemPrompt).toContain("By default, allow");
+    expect(request.systemPrompt).toContain("ordinary steps implied by the user's request");
+    expect(request.systemPrompt).toContain("Do not deny merely because");
+    expect(request.systemPrompt).toContain("Deny only when");
+  });
+
   test("applies a credential-specific base URL to the reviewer model", async () => {
     const { controller, ctx, registry } = createAutoModeHarness();
     registry.getApiKeyAndHeaders.mockResolvedValue({
