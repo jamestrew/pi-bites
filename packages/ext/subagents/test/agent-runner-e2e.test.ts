@@ -28,7 +28,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { onSubagentApprovalRequest } from "../../bash-gate/events.js";
 import { extensionCanonicalName, runAgent } from "../agent-runner.js";
 import { registerAgents } from "../agent-types.js";
 import type { AgentConfig } from "../types.js";
@@ -40,13 +42,17 @@ import type { AgentConfig } from "../types.js";
 vi.setConfig({ testTimeout: 30_000 });
 
 const FIXTURE = resolve(fileURLToPath(new URL("./fixtures/e2e-probe-ext.mjs", import.meta.url)));
+const BITES_EXTENSION = resolve(fileURLToPath(new URL("../../index.ts", import.meta.url)));
 /** The fixture registers exactly this tool. */
 const EXT_TOOL = "e2e_probe";
 const BUILTINS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
-/** Minimal `pi` stub — `detectEnv` only needs `exec` (returns non-git). */
+/** Minimal parent API: environment probing plus the event bus shared with child gates. */
 function makePi() {
-  return { exec: async () => ({ code: 1, stdout: "", stderr: "" }) } as any;
+  return {
+    exec: async () => ({ code: 1, stdout: "", stderr: "" }),
+    events: createEventBus(),
+  } as any;
 }
 
 describe("agent-runner end-to-end (real pi-mono session + real extension)", () => {
@@ -71,7 +77,10 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
    * Register `cfg` as agent type "e2e", run it through the REAL runAgent, and
    * return the real session's active tool names captured at construction time.
    */
-  async function activeToolsFor(cfg: Partial<AgentConfig>): Promise<string[]> {
+  async function activeToolsFor(
+    cfg: Partial<AgentConfig>,
+    options: { pi?: ReturnType<typeof makePi>; capture?: (session: any) => void } = {},
+  ): Promise<string[]> {
     registerAgents(
       new Map([
         [
@@ -109,10 +118,12 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
     let active: string[] = [];
     try {
       await runAgent(ctx, "e2e", "go", {
-        pi: makePi(),
+        pi: options.pi ?? makePi(),
+        agentId: "e2e-agent",
         model,
         onSessionCreated: (s) => {
           active = s.getActiveToolNames();
+          options.capture?.(s);
         },
       });
     } catch {
@@ -165,5 +176,36 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
     expect(active).toContain(EXT_TOOL); // selected → surfaces despite the flip
     expect(active).toContain("read");
     expect(active).not.toContain("bash"); // builtinToolNames: ["read"] only
+  });
+
+  it("routes a real child bash gate to the parent approval broker", async () => {
+    const pi = makePi();
+    const approve = vi.fn(async () => ({ outcome: "allow" as const }));
+    const unsubscribe = onSubagentApprovalRequest(pi, approve);
+    let session: any;
+
+    try {
+      await activeToolsFor(
+        {
+          extensions: [BITES_EXTENSION],
+          bashGatePolicy: "prompt",
+        },
+        { pi, capture: (created) => (session = created) },
+      );
+
+      const result = await session._extensionRunner.emitToolCall({
+        type: "tool_call",
+        toolName: "bash",
+        toolCallId: "gate-e2e",
+        input: { command: "rm -rf tmp" },
+      });
+
+      expect(result).toBeUndefined();
+      expect(approve).toHaveBeenCalledWith(
+        expect.objectContaining({ agentId: "e2e-agent", command: "rm -rf tmp" }),
+      );
+    } finally {
+      unsubscribe();
+    }
   });
 });

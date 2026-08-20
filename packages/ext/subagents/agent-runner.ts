@@ -37,6 +37,8 @@ import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
 import { preloadSkills } from "./skill-loader.js";
+import { runAsSubagent } from "./subagent-context.js";
+import { createSubagentEventBus } from "./subagent-event-bus.js";
 import { isThinkingLevel, type SubagentType, type ThinkingLevel } from "./types.js";
 import type { AssistantUsage } from "./usage.js";
 
@@ -477,6 +479,7 @@ export async function runAgent(
     noExtensions,
     additionalExtensionPaths,
     extensionsOverride,
+    eventBus: createSubagentEventBus(options.pi.events),
     noSkills,
     noPromptTemplates: true,
     noThemes: true,
@@ -485,14 +488,7 @@ export async function runAgent(
     appendSystemPromptOverride: () => [],
   });
 
-  const previousSubagentEnv = process.env.PI_BITES_SUBAGENT;
-  process.env.PI_BITES_SUBAGENT = type;
-  try {
-    await loader.reload();
-  } finally {
-    if (previousSubagentEnv === undefined) delete process.env.PI_BITES_SUBAGENT;
-    else process.env.PI_BITES_SUBAGENT = previousSubagentEnv;
-  }
+  await runAsSubagent(type, () => loader.reload());
 
   // Plain entries in `tools:` are expected to be built-in names (extension tools
   // go through `ext:`), so an unknown name there is unambiguously a typo. Previously

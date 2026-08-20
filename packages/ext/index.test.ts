@@ -42,10 +42,12 @@ async function loadExtension(
   const previewCacheSystemPrompt = vi.fn((prompt: string) => `cache:${prompt}`);
   const previewCacheTools = vi.fn((tools: unknown[]) => tools);
   const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
+  const bashGate = { isYolo: vi.fn(() => false) };
   if (options.realGoal) vi.doUnmock("./goal/index.js");
   for (const modulePath of registerModules) {
     if (modulePath === "./goal/index.js" && options.realGoal) continue;
     const spy = vi.fn();
+    if (modulePath === "./bash-gate/index.js") spy.mockReturnValue(bashGate);
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
     if (modulePath === "./cache-padding/index.js")
       spy.mockReturnValue({ systemPrompt: previewCacheSystemPrompt, tools: previewCacheTools });
@@ -66,10 +68,6 @@ async function loadExtension(
   const originalArgv = process.argv;
   process.argv = [originalArgv[0] ?? "bun", originalArgv[1] ?? "pi", ...(options.argv ?? [])];
 
-  const originalSubagent = process.env.PI_BITES_SUBAGENT;
-  if (options.subagent) process.env.PI_BITES_SUBAGENT = options.subagent;
-  else delete process.env.PI_BITES_SUBAGENT;
-
   const { default: registerExtension } = await import("./index.js");
   const pi = {
     on: vi.fn(),
@@ -77,7 +75,12 @@ async function loadExtension(
     registerTool: vi.fn(),
     sendMessage: vi.fn(),
   };
-  registerExtension(pi as never);
+  if (options.subagent) {
+    const { runAsSubagent } = await import("./subagents/subagent-context.js");
+    runAsSubagent(options.subagent, () => registerExtension(pi as never));
+  } else {
+    registerExtension(pi as never);
+  }
 
   return {
     pi,
@@ -85,12 +88,11 @@ async function loadExtension(
     previewPonytailPrompt,
     previewCacheSystemPrompt,
     previewCacheTools,
+    bashGate,
     loadConfig,
     registerBitesCommands,
     restoreArgv: () => {
       process.argv = originalArgv;
-      if (originalSubagent === undefined) delete process.env.PI_BITES_SUBAGENT;
-      else process.env.PI_BITES_SUBAGENT = originalSubagent;
     },
   };
 }
@@ -118,7 +120,12 @@ describe("extension entrypoint", () => {
         expect.any(Object),
         expect.objectContaining({ isEnabled: expect.any(Function) }),
       );
-      expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledWith(
+        loaded.pi,
+        expect.any(Object),
+        expect.objectContaining({ isEnabled: expect.any(Function) }),
+        loaded.bashGate,
+      );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./goal/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./cache-padding/index.js")).toHaveBeenCalledWith(loaded.pi);

@@ -168,7 +168,12 @@ const ctx = {
   sessionManager: { getBranch: vi.fn(() => []) },
 } as any;
 
-const pi = {} as any;
+const pi = {
+  events: {
+    emit: vi.fn(),
+    on: vi.fn(),
+  },
+} as any;
 
 describe("subagent metadata parsing", () => {
   it("accepts metadata written by the agent runner", () => {
@@ -233,7 +238,7 @@ describe("agent-runner final output capture", () => {
     expect(bindOrder).toBeLessThan(promptOrder);
   });
 
-  it("passes effective cwd and agentDir to the loader and settings manager", async () => {
+  it("passes effective cwd, agentDir, and a parent event bridge to the loader", async () => {
     const { session } = createSession("CONFIGURED");
     createAgentSession.mockResolvedValue({ session });
 
@@ -244,8 +249,10 @@ describe("agent-runner final output capture", () => {
       expect.objectContaining({
         cwd: "/tmp/worktree",
         agentDir: "/mock/agent-dir",
+        eventBus: expect.objectContaining({ emit: expect.any(Function), on: expect.any(Function) }),
       }),
     );
+    expect(defaultResourceLoaderCtor.mock.calls[0]?.[0].eventBus).not.toBe(pi.events);
     expect(settingsManagerCreate).toHaveBeenCalledWith("/tmp/worktree", "/mock/agent-dir");
     expect(sessionManagerInMemory).toHaveBeenCalledWith("/tmp/worktree");
     expect(modelRuntimeCreate).toHaveBeenCalledWith({

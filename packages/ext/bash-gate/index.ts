@@ -21,8 +21,8 @@
  * }
  * ```
  *
- * Press Alt+Y to toggle the gate for the main agent. Pass `--yolo` on
- * the CLI to bypass all gates entirely — useful for non-interactive / scripted
+ * Press Alt+Y to toggle YOLO mode for the main agent and default subagents.
+ * Pass `--yolo` on the CLI to bypass all gates entirely — useful for non-interactive / scripted
  * runs where no UI is available:
  *
  * ```bash
@@ -52,6 +52,10 @@ import type { AutoModeController } from "../automode/index.js";
 export type { ApprovalRequest } from "./events.js";
 type BashGatePolicy = "deny" | "prompt";
 
+export interface BashGateController {
+  isYolo(): boolean;
+}
+
 function subagentMetadata(entries: SessionEntry[]): SubagentMetadata | null | undefined {
   const entry = [...entries]
     .reverse()
@@ -68,7 +72,7 @@ export function subagentBashGatePolicy(entries: SessionEntry[]): BashGatePolicy 
   if (metadata === undefined) return undefined;
   if (metadata === null) return "deny";
   const policy = metadata.bashGatePolicy;
-  return policy === "deny" || policy === "prompt" ? policy : "deny";
+  return policy === "deny" || policy === "prompt" ? policy : "prompt";
 }
 
 const DEFAULT_BASH_GATE_ALLOWLIST: BashGateRule[] = [
@@ -139,6 +143,7 @@ const DEFAULT_BASH_GATE_ALLOW_PREFIXES = [
   ["gh", "workflow", "view"],
   ["git", "add"],
   ["git", "commit"],
+  ["git", "diff"],
   ["git", "log"],
   ["git", "pull"],
   ["git", "rebase"],
@@ -469,7 +474,7 @@ export default function registerBashGate(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
   autoMode?: AutoModeController,
-) {
+): BashGateController {
   pi.registerFlag("yolo", {
     description: "Bypass all bash-gate confirmations (useful for non-interactive / scripted runs)",
     type: "boolean",
@@ -535,7 +540,7 @@ export default function registerBashGate(
       ? `subagent:${metadata.agentId}:${sessionAllowKey}`
       : sessionAllowKey;
 
-    // --yolo bypasses every gate; the shortcut only bypasses the main agent.
+    // --yolo bypasses every gate; shortcut YOLO reaches default subagents via the parent broker.
     if (pi.getFlag("yolo") || (mainAgentYolo && metadata === undefined)) return undefined;
 
     // Pattern was already approved for this session — run silently.
@@ -692,4 +697,6 @@ export default function registerBashGate(
       pi.events.emit("bites:bash_gate_resolved", manualGate);
     }
   });
+
+  return { isYolo: () => pi.getFlag("yolo") === true || mainAgentYolo };
 }

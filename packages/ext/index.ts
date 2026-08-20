@@ -21,6 +21,7 @@ import registerInlineReferences from "./inline-references/index.js";
 import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
 import registerSubagents from "./subagents/index.js";
+import { getActiveSubagent } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
 import registerGoal from "./goal/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -28,7 +29,7 @@ import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js
 
 export default function (pi: ExtensionAPI) {
   const configRef: { current: BitesConfig } = { current: {} };
-  const isSubagent = process.env.PI_BITES_SUBAGENT != null;
+  const isSubagent = getActiveSubagent() != null;
   const isNonInteractive = process.argv.some((arg) => arg === "--print" || arg === "-p");
 
   // Load config eagerly at startup to resolve the disable list.
@@ -45,7 +46,7 @@ export default function (pi: ExtensionAPI) {
 
   const autoMode =
     isSubagent || disabled.has("autoMode") ? undefined : registerAutoMode(pi, configRef);
-  if (!disabled.has("bashGate")) registerBashGate(pi, configRef, autoMode);
+  const bashGate = disabled.has("bashGate") ? undefined : registerBashGate(pi, configRef, autoMode);
   if (!disabled.has("rtk")) registerRtk(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);
   if (!disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
@@ -56,7 +57,7 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("view")) registerView(pi);
   if (!isNonInteractive && !disabled.has("sessionTracker"))
     registerSessionTracker(pi, configRef, autoMode);
-  if (!disabled.has("subagents")) registerSubagents(pi, configRef, autoMode);
+  if (!disabled.has("subagents")) registerSubagents(pi, configRef, autoMode, bashGate);
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);

@@ -56,6 +56,7 @@ describe("agent type registry", () => {
     expect(agent?.description).toContain("Do not delegate code review");
     expect(agent?.description).toContain("root-cause analysis");
     expect(agent?.systemPrompt).toContain("Do not perform code review");
+    expect(agent?.bashGatePolicy).toBe("prompt");
   });
 
   describe("user agents", () => {

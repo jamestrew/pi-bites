@@ -30,7 +30,7 @@ describe("extractBashFacts", () => {
 });
 
 describe("subagentBashGatePolicy", () => {
-  test("reads prompt policy and fails invalid or missing policy closed", () => {
+  test("defaults valid subagents to parent prompting and fails invalid metadata closed", () => {
     const entry = (data: unknown): SessionEntry => ({
       type: "custom",
       id: "id",
@@ -45,7 +45,7 @@ describe("subagentBashGatePolicy", () => {
       "prompt",
     );
     expect(subagentBashGatePolicy([entry({ ...metadata, bashGatePolicy: "wat" })])).toBe("deny");
-    expect(subagentBashGatePolicy([entry(metadata)])).toBe("deny");
+    expect(subagentBashGatePolicy([entry(metadata)])).toBe("prompt");
   });
 });
 
@@ -436,7 +436,7 @@ describe("bash gate tool_call", () => {
     expect(ui.select).toHaveBeenCalled();
   });
 
-  test("main-agent yolo mode does not bypass subagent gates", async () => {
+  test("main-agent yolo mode does not bypass explicit deny-policy subagent gates", async () => {
     const { toggleYolo, toolCall, ctx } = createBashGateHarness([
       subagentEntry({ bashGatePolicy: "deny" }),
     ]);
@@ -659,6 +659,7 @@ describe("findMatchedPattern", () => {
     "gh workflow view ci.yml",
     "git add packages/ext/bash-gate/index.ts",
     "git commit -m 'relax bash gate'",
+    "git diff --stat",
     "git log -5 --oneline",
     "git pull --rebase",
     "git rebase main",

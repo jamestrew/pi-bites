@@ -136,6 +136,87 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(ui.onTerminalInput).toHaveBeenCalled();
   });
 
+  it("inherits parent yolo mode without prompting or automode review", async () => {
+    const { pi, lifecycle } = makePi();
+    const review = vi.fn().mockResolvedValue({ outcome: "deny" });
+    subagentsExtension(
+      pi,
+      { current: {} },
+      { isEnabled: () => true, review },
+      { isYolo: () => true },
+    );
+    await lifecycle.get("session_start")?.({}, { ...ctxWith(uiCtx()), hasUI: false });
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-yolo", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-yolo",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+    expect(review).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without dereferencing stale context during a session switch", async () => {
+    const { pi, lifecycle } = makePi();
+    subagentsExtension(pi, { current: {} }, undefined, { isYolo: () => false });
+    const ctx = ctxWith(uiCtx());
+    await lifecycle.get("session_start")?.({}, ctx);
+    await lifecycle.get("session_before_switch")?.({}, ctx);
+    for (const key of ["ui", "hasUI", "cwd"] as const) {
+      Object.defineProperty(ctx, key, {
+        get: () => {
+          throw new Error("stale ctx");
+        },
+      });
+    }
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-switch", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-switch",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "failure", message: "parent approval context unavailable" },
+    });
+  });
+
+  it("prompts for subagent approval when parent yolo and automode are off", async () => {
+    const { pi, lifecycle } = makePi();
+    const ui = uiCtx();
+    ui.select.mockResolvedValue("Allow");
+    subagentsExtension(pi, { current: {} }, undefined, { isYolo: () => false });
+    await lifecycle.get("session_start")?.({}, ctxWith(ui));
+
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-manual", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-manual",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(ui.select).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+  });
+
   it("routes subagent bash approvals through automode without UI", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });

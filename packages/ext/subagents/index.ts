@@ -27,6 +27,7 @@ import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
 import { onSubagentApprovalRequest } from "../bash-gate/events.js";
+import type { BashGateController } from "../bash-gate/index.js";
 import { promptAutoModeEscalation } from "../bash-gate/automode-escalation.js";
 import {
   buildReviewerTranscript,
@@ -40,6 +41,7 @@ export default function (
   pi: ExtensionAPI,
   configRef: { current: BitesConfig } = { current: {} },
   autoMode?: AutoModeController,
+  bashGate?: BashGateController,
 ) {
   // ---- Register custom notification renderer ----
   registerNotificationRenderer(pi);
@@ -123,10 +125,13 @@ export default function (
   });
 
   pi.on("session_before_switch", () => {
+    currentCtx = undefined;
     manager.clearCompleted();
   });
 
   const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
+    if (bashGate?.isYolo()) return { outcome: "allow" };
+
     const ctx = currentCtx;
     if (!ctx) return { outcome: "failure", message: "parent approval context unavailable" };
     const ui = ctx.ui;
