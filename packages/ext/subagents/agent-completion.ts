@@ -15,7 +15,7 @@ function isTerminal(record: AgentRecord): boolean {
   return TERMINAL_STATUSES.has(record.status);
 }
 
-function waitResult(record: AgentRecord, includeOutput: boolean): WaitAgentResult {
+export function buildWaitAgentResult(record: AgentRecord, includeOutput: boolean): WaitAgentResult {
   return {
     id: record.id,
     type: record.type,
@@ -26,6 +26,7 @@ function waitResult(record: AgentRecord, includeOutput: boolean): WaitAgentResul
     tool_uses: record.toolUses,
     duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
     total_tokens: getLifetimeTotal(record.lifetimeUsage),
+    lifetime_usage: { ...record.lifetimeUsage },
   };
 }
 
@@ -71,23 +72,29 @@ export function createAgentCompletionHandler({
     waiter.resolve(outcome);
   }
 
-  function terminalOutcome(records: AgentRecord[]): WaitAgentOutcome {
-    for (const record of records) owners.set(record, "wait");
+  function terminalOutcome(
+    records: AgentRecord[],
+    terminal = records.filter(isTerminal),
+  ): WaitAgentOutcome {
+    for (const record of terminal) owners.set(record, "wait");
+    const terminalIds = new Set(terminal.map((record) => record.id));
     return {
       outcome: "terminal",
       timed_out: false,
-      agents: records.map((record) => waitResult(record, true)),
+      agents: records.map((record) => buildWaitAgentResult(record, terminalIds.has(record.id))),
     };
   }
 
   function resolveWaiter(waiterId: number): void {
     const waiter = waiters.get(waiterId);
     if (!waiter) return;
-    const terminal = waiter.agentIds
+    const records = waiter.agentIds
       .map(getRecord)
-      .filter((record): record is AgentRecord => Boolean(record && isTerminal(record)))
+      .filter((record): record is AgentRecord => Boolean(record));
+    const terminal = records
+      .filter(isTerminal)
       .filter((record) => owners.get(record) !== "automatic");
-    if (terminal.length > 0) finish(waiter, terminalOutcome(terminal));
+    if (terminal.length > 0) finish(waiter, terminalOutcome(records, terminal));
   }
 
   function emitAutomatic(record: AgentRecord): void {
@@ -149,7 +156,7 @@ export function createAgentCompletionHandler({
         message: `Agent not found: ${missing.join(", ")}`,
         agents: records
           .filter((record): record is AgentRecord => Boolean(record))
-          .map((record) => waitResult(record, false)),
+          .map((record) => buildWaitAgentResult(record, false)),
       });
     }
 
@@ -159,7 +166,7 @@ export function createAgentCompletionHandler({
         outcome: "error",
         timed_out: false,
         message: `Agent already has an active waiter: ${claimed.join(", ")}`,
-        agents: (records as AgentRecord[]).map((record) => waitResult(record, false)),
+        agents: (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false)),
       });
     }
 
@@ -171,18 +178,19 @@ export function createAgentCompletionHandler({
         outcome: "error",
         timed_out: false,
         message: `Agent result already delivered: ${delivered.join(", ")}`,
-        agents: (records as AgentRecord[]).map((record) => waitResult(record, false)),
+        agents: (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false)),
       });
     }
 
     const terminal = (records as AgentRecord[]).filter(isTerminal);
-    if (terminal.length > 0) return Promise.resolve(terminalOutcome(terminal));
+    if (terminal.length > 0)
+      return Promise.resolve(terminalOutcome(records as AgentRecord[], terminal));
 
     if (signal?.aborted) {
       return Promise.resolve({
         outcome: "cancelled",
         timed_out: false,
-        agents: (records as AgentRecord[]).map((record) => waitResult(record, false)),
+        agents: (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false)),
       });
     }
 
@@ -202,7 +210,7 @@ export function createAgentCompletionHandler({
           agents: waiter.agentIds
             .map(getRecord)
             .filter((record): record is AgentRecord => Boolean(record))
-            .map((record) => waitResult(record, false)),
+            .map((record) => buildWaitAgentResult(record, false)),
         });
       }, timeoutMs);
       if (signal) {
@@ -213,7 +221,7 @@ export function createAgentCompletionHandler({
             agents: waiter.agentIds
               .map(getRecord)
               .filter((record): record is AgentRecord => Boolean(record))
-              .map((record) => waitResult(record, false)),
+              .map((record) => buildWaitAgentResult(record, false)),
           });
         };
         signal.addEventListener("abort", waiter.onAbort, { once: true });
@@ -233,7 +241,7 @@ export function createAgentCompletionHandler({
           agents: waiter.agentIds
             .map(getRecord)
             .filter((record): record is AgentRecord => Boolean(record))
-            .map((record) => waitResult(record, false)),
+            .map((record) => buildWaitAgentResult(record, false)),
         });
       }
       claims.clear();

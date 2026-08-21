@@ -1,5 +1,5 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { Container, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { AgentManager } from "./agent-manager.js";
 import {
   AGENT_PROMPT_GUIDELINES,
@@ -10,10 +10,7 @@ import { createAgentToolExecute } from "./agent-tool-execute.js";
 import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { getAgentConfig, resolveType } from "./agent-types.js";
 import { applyAndEmitLoaded, type ToolDescriptionMode } from "./settings.js";
-import { buildDetails } from "./tool-result.js";
-import type { AgentRecord } from "./types.js";
-import { type AgentActivity, getDisplayName } from "./ui/agent-format.js";
-import { renderAgentToolResult } from "./ui/agent-tool-render.js";
+import { type AgentActivity } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
 
 type RegisterAgentToolDeps = {
@@ -30,15 +27,6 @@ type RegisterAgentToolDeps = {
 };
 
 export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
-  const terminalRecords = new Map<string, AgentRecord>();
-  const rememberTerminalRecord = (event: { id: string }) => {
-    if (!event.id) return;
-    const record = deps.manager.getRecord(event.id);
-    if (record) terminalRecords.set(event.id, record);
-  };
-  pi.events.on("subagents:completed", (data) => rememberTerminalRecord(data as { id: string }));
-  pi.events.on("subagents:failed", (data) => rememberTerminalRecord(data as { id: string }));
-
   applyAndEmitLoaded(
     {
       setMaxConcurrent: (n) => deps.manager.setMaxConcurrent(n),
@@ -64,38 +52,38 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
       renderCall(args, theme, context) {
         const subagentType = args.subagent_type
           ? (resolveType(args.subagent_type) ?? "general")
-          : undefined;
-        const displayName = subagentType ? getDisplayName(subagentType) : "Agent";
-        const preview =
-          args.description ||
-          String(args.prompt).replace(/\s+/g, " ").trim().slice(0, 80) ||
-          "no prompt";
-        const config = subagentType ? getAgentConfig(subagentType) : undefined;
+          : "general";
+        const description = args.description || "no description";
+        const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+        const config = getAgentConfig(subagentType);
         const effective = renderMetadata.get(context.toolCallId);
         const model = effective?.model ?? args.model ?? config?.model;
         const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
         const metadata = [model, thinking && `thinking: ${thinking}`].filter(Boolean).join(" · ");
-        const suffix = metadata ? theme.fg("dim", `: ${metadata}`) : "";
-        return new Text(
-          theme.fg("toolTitle", theme.bold(displayName)) + theme.fg("dim", `(${preview})`) + suffix,
-          0,
-          0,
-        );
+
+        return {
+          render(width: number): string[] {
+            const title =
+              theme.fg("toolTitle", theme.bold(subagentType)) +
+              theme.fg("dim", `(${description})`) +
+              (metadata ? theme.fg("dim", `: ${metadata}`) : "");
+            const lines = [truncateToWidth(title, width, "…")];
+            const promptWidth = Math.max(1, width - 3);
+            const promptLines = prompt
+              .split("\n")
+              .flatMap((line) => wrapTextWithAnsi(line, promptWidth));
+            for (const line of context.expanded ? promptLines : promptLines.slice(0, 3)) {
+              lines.push(theme.fg("dim", " │ ") + truncateToWidth(line, promptWidth, "…"));
+            }
+            if (!context.expanded) lines.push(theme.fg("dim", " (ctrl+o to expand)"));
+            return lines;
+          },
+          invalidate() {},
+        };
       },
 
-      renderResult(result, options, theme, context) {
-        const details = result.details;
-        const record = details?.agentId
-          ? (terminalRecords.get(details.agentId) ?? deps.manager.getRecord(details.agentId))
-          : undefined;
-        const currentResult =
-          details && record && ["completed", "error", "stopped"].includes(record.status)
-            ? {
-                ...result,
-                details: buildDetails(details, record, deps.agentActivity.get(record.id)),
-              }
-            : result;
-        return renderAgentToolResult(currentResult, options, theme, context);
+      renderResult() {
+        return new Container();
       },
       execute: createAgentToolExecute({
         pi,

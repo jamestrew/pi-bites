@@ -265,7 +265,12 @@ describe("spawn-and-wait orchestration", () => {
     const result = await waiting;
 
     expect(result.details.agents).toEqual([
-      expect.objectContaining({ id: agentId(secondSpawn), result: "second done" }),
+      expect.objectContaining({ id: agentId(firstSpawn), status: "running" }),
+      expect.objectContaining({
+        id: agentId(secondSpawn),
+        status: "completed",
+        result: "second done",
+      }),
     ]);
     expect(harness.pi.sendMessage).not.toHaveBeenCalled();
 

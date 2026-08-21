@@ -363,7 +363,10 @@ export default function (
   });
 
   // ---- WaitAgent and MessageAgent tools ----
-  registerWaitAgent(pi, completion);
+  registerWaitAgent(pi, {
+    waitFor: completion.waitFor,
+    getRecord: (id) => manager.getRecord(id),
+  });
   registerMessageAgent(pi, manager);
 
   // ---- /agents interactive menu ----

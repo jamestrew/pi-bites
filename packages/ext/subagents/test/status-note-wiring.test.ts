@@ -61,7 +61,7 @@ const plainTheme = {
 describe("status note reaches the parent through the real handlers", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders compact running state without an empty spinner or thinking line", () => {
+  it("keeps launch result details out of the prompt-focused Agent renderer", () => {
     const { pi, tools } = makePi();
     subagentsExtension(pi);
 
@@ -78,7 +78,7 @@ describe("status note reaches the parent through the real handlers", () => {
       )
       .render(80);
 
-    expect(lines).toEqual(["⎿  Running… (ctrl+o to expand)"]);
+    expect(lines).toEqual([]);
   });
 
   it("asynchronous execution publishes the full final response without creating a transcript", async () => {

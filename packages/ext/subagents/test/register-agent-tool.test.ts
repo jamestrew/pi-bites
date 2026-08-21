@@ -1,3 +1,4 @@
+import { Container } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAgentToolParameters } from "../agent-tool-description.js";
 import { registerAgents } from "../agent-types.js";
@@ -50,18 +51,31 @@ describe("Agent call rendering", () => {
     ]);
   });
 
-  it("renders the agent type without foreground/background mode", () => {
+  it("previews three prompt lines and expands to the full prompt", () => {
     const tool = captureAgentTool();
-    const rendered = tool
-      .renderCall({ subagent_type: "general", description: "test", prompt: "do it" }, theme, {
-        toolCallId: "call-1",
-      })
+    const args = {
+      subagent_type: "general",
+      description: "test agent",
+      prompt: "line one\nline two\nline three\nline four",
+      model: "openai/gpt-5",
+      thinking: "high",
+    };
+    const collapsed = tool
+      .renderCall(args, theme, { toolCallId: "call-1", expanded: false })
+      .render(200)
+      .join("\n");
+    const expanded = tool
+      .renderCall(args, theme, { toolCallId: "call-1", expanded: true })
       .render(200)
       .join("\n");
 
-    expect(rendered).toContain("general");
-    expect(rendered).not.toContain("background");
-    expect(rendered).not.toContain("foreground");
+    expect(collapsed).toBe(
+      "general(test agent): openai/gpt-5 · thinking: high\n" +
+        " │ line one\n │ line two\n │ line three\n (ctrl+o to expand)",
+    );
+    expect(collapsed).not.toContain("line four");
+    expect(expanded).toContain(" │ line four");
+    expect(tool.renderResult()).toBeInstanceOf(Container);
   });
 
   it("uses the general fallback display for an unknown type", () => {
