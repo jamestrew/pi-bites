@@ -108,10 +108,16 @@ async function spawn(tools: Map<string, any>, ctx: any, description = "test agen
 
 const agentId = (result: any): string => result.details.agentId;
 
-const waitFor = (tools: Map<string, any>, ctx: any, ids: string[], timeoutMs = 30_000) =>
+const waitFor = (
+  tools: Map<string, any>,
+  ctx: any,
+  ids: string[],
+  timeoutMs = 30_000,
+  signal?: AbortSignal,
+) =>
   tools
     .get("WaitAgent")
-    .execute("wait-call", { agent_ids: ids, timeout_ms: timeoutMs }, undefined, undefined, ctx);
+    .execute("wait-call", { agent_ids: ids, timeout_ms: timeoutMs }, signal, undefined, ctx);
 
 describe("spawn-and-wait orchestration", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -127,7 +133,7 @@ describe("spawn-and-wait orchestration", () => {
     );
     expect(harness.tools.get("WaitAgent").parameters.properties.timeout_ms).toMatchObject({
       minimum: 10_000,
-      maximum: 3_600_000,
+      maximum: 240_000,
     });
 
     const result = await spawn(harness.tools, harness.ctx);
@@ -240,6 +246,35 @@ describe("spawn-and-wait orchestration", () => {
       agents: [expect.objectContaining({ id, status: "running" })],
     });
     expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+
+    child.resolve({ responseText: "late result", session: { dispose: vi.fn() } });
+    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledOnce());
+    expect(harness.pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("late result") }),
+      { deliverAs: "steer", triggerTurn: true },
+    );
+    harness.shutdown();
+  });
+
+  it("cancels only the wait and automatically delivers the eventual result once", async () => {
+    const child = deferredRun();
+    const harness = makeHarness();
+    const spawned = await spawn(harness.tools, harness.ctx);
+    const controller = new AbortController();
+    const waiting = waitFor(
+      harness.tools,
+      harness.ctx,
+      [agentId(spawned)],
+      30_000,
+      controller.signal,
+    );
+
+    controller.abort();
+    const cancelled = await waiting;
+    expect(cancelled.details).toMatchObject({
+      outcome: "cancelled",
+      agents: [expect.objectContaining({ status: "running" })],
+    });
 
     child.resolve({ responseText: "late result", session: { dispose: vi.fn() } });
     await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledOnce());

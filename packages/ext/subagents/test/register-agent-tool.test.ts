@@ -56,26 +56,52 @@ describe("Agent call rendering", () => {
     const args = {
       subagent_type: "general",
       description: "test agent",
-      prompt: "line one\nline two\nline three\nline four",
+      prompt: "line one\n\nline three\nline four\n",
       model: "openai/gpt-5",
       thinking: "high",
     };
+    const dimTheme = {
+      ...theme,
+      fg: (color: string, text: string) => (color === "dim" ? `<dim>${text}</dim>` : text),
+    };
     const collapsed = tool
-      .renderCall(args, theme, { toolCallId: "call-1", expanded: false })
+      .renderCall(args, dimTheme, { toolCallId: "call-1", expanded: false })
       .render(200)
       .join("\n");
     const expanded = tool
-      .renderCall(args, theme, { toolCallId: "call-1", expanded: true })
+      .renderCall(args, dimTheme, { toolCallId: "call-1", expanded: true })
       .render(200)
       .join("\n");
 
     expect(collapsed).toBe(
-      "general(test agent): openai/gpt-5 · thinking: high\n" +
-        " │ line one\n │ line two\n │ line three\n (ctrl+o to expand)",
+      "general<dim>(test agent)</dim><dim>: openai/gpt-5 · thinking: high</dim>\n" +
+        "<dim> │ line one</dim>\n<dim> │ </dim>\n<dim> │ line three</dim>\n" +
+        "<dim> (ctrl+o to expand)</dim>",
     );
     expect(collapsed).not.toContain("line four");
-    expect(expanded).toContain(" │ line four");
+    expect(expanded).toContain("<dim> │ line four</dim>");
+    expect(expanded.endsWith("<dim> │ </dim>")).toBe(true);
     expect(tool.renderResult()).toBeInstanceOf(Container);
+  });
+
+  it("strips terminal controls from model-controlled text", () => {
+    const tool = captureAgentTool();
+    const rendered = tool
+      .renderCall(
+        {
+          subagent_type: "general",
+          description: "unsafe\u001b]52;c;Y29weQ==\u0007 description",
+          prompt: "hello\u001b[31m red",
+        },
+        theme,
+        { toolCallId: "call-1", expanded: true },
+      )
+      .render(200)
+      .join("\n");
+
+    expect(rendered).not.toContain("\u001b");
+    expect(rendered).toContain("unsafe description");
+    expect(rendered).toContain("hello red");
   });
 
   it("uses the general fallback display for an unknown type", () => {

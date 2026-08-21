@@ -5,7 +5,6 @@
  * Subscribes to session events for real-time streaming updates.
  */
 
-import { stripVTControlCharacters } from "node:util";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
@@ -17,6 +16,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { extractText } from "../context.js";
 import { formatToolCall } from "./tool-call-format.js";
+import { sanitizeText } from "./text-lines.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal, getSessionContextPercent } from "../usage.js";
 import type { Theme } from "./agent-format.js";
@@ -35,16 +35,6 @@ const CHROME_LINES_BASE = 4;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-/** Keep raw terminal escapes and control characters out of copyable transcript text. */
-export function sanitizeText(text: string): string {
-  return (
-    stripVTControlCharacters(text)
-      .replaceAll("\t", "  ")
-      // eslint-disable-next-line no-control-regex -- control characters are what this removes.
-      .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "")
-  );
 }
 
 export const CONVERSATION_OVERLAY_OPTIONS = {

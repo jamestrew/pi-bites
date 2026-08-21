@@ -1,5 +1,5 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Container, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { Container, truncateToWidth } from "@earendil-works/pi-tui";
 import type { AgentManager } from "./agent-manager.js";
 import {
   AGENT_PROMPT_GUIDELINES,
@@ -12,6 +12,7 @@ import { getAgentConfig, resolveType } from "./agent-types.js";
 import { applyAndEmitLoaded, type ToolDescriptionMode } from "./settings.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
+import { sanitizeText, wrapDisplayLines } from "./ui/text-lines.js";
 
 type RegisterAgentToolDeps = {
   manager: AgentManager;
@@ -53,29 +54,30 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
         const subagentType = args.subagent_type
           ? (resolveType(args.subagent_type) ?? "general")
           : "general";
-        const description = args.description || "no description";
-        const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+        const description = sanitizeText(args.description || "no description");
+        const prompt = typeof args.prompt === "string" ? args.prompt : "";
         const config = getAgentConfig(subagentType);
         const effective = renderMetadata.get(context.toolCallId);
         const model = effective?.model ?? args.model ?? config?.model;
         const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
-        const metadata = [model, thinking && `thinking: ${thinking}`].filter(Boolean).join(" · ");
+        const metadata = sanitizeText(
+          [model, thinking && `thinking: ${thinking}`].filter(Boolean).join(" · "),
+        );
 
         return {
           render(width: number): string[] {
             const title =
-              theme.fg("toolTitle", theme.bold(subagentType)) +
+              theme.fg("toolTitle", theme.bold(sanitizeText(subagentType))) +
               theme.fg("dim", `(${description})`) +
               (metadata ? theme.fg("dim", `: ${metadata}`) : "");
             const lines = [truncateToWidth(title, width, "…")];
             const promptWidth = Math.max(1, width - 3);
-            const promptLines = prompt
-              .split("\n")
-              .flatMap((line) => wrapTextWithAnsi(line, promptWidth));
+            const promptLines = wrapDisplayLines(prompt, promptWidth);
             for (const line of context.expanded ? promptLines : promptLines.slice(0, 3)) {
-              lines.push(theme.fg("dim", " │ ") + truncateToWidth(line, promptWidth, "…"));
+              lines.push(theme.fg("dim", " │ " + truncateToWidth(line, promptWidth, "…")));
             }
-            if (!context.expanded) lines.push(theme.fg("dim", " (ctrl+o to expand)"));
+            if (!context.expanded)
+              lines.push(truncateToWidth(theme.fg("dim", " (ctrl+o to expand)"), width, "…"));
             return lines;
           },
           invalidate() {},

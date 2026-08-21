@@ -134,7 +134,7 @@ export interface WaitAgentResult {
   tool_uses: number;
   duration_ms: number;
   total_tokens: number;
-  lifetime_usage: LifetimeUsage;
+  lifetime_usage?: LifetimeUsage;
 }
 
 export interface WaitAgentOutcome {
@@ -146,7 +146,7 @@ export interface WaitAgentOutcome {
 
 export interface WaitAgentDetails extends Omit<WaitAgentOutcome, "outcome"> {
   outcome: WaitAgentOutcome["outcome"] | "waiting";
-  wait_started_at: number;
+  wait_started_at?: number;
   wait_ended_at?: number;
   /** Only present when the caller explicitly configured a timeout. */
   timeout_ms?: number;

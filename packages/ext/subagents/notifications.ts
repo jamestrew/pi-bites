@@ -1,8 +1,9 @@
-import { Text } from "@earendil-works/pi-tui";
+import { truncateToWidth } from "@earendil-works/pi-tui";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSessionContextPercent, getLifetimeTotal } from "./usage.js";
 import { getStatusNote } from "./status-note.js";
 import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
+import { sanitizeText, wrapDisplayLines } from "./ui/text-lines.js";
 import { type AgentRecord, type NotificationDetails } from "./types.js";
 
 /** Human-readable status label for agent completion. */
@@ -79,11 +80,17 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
       const d = message.details;
       if (!d) return undefined;
 
-      function renderOne(d: NotificationDetails): string {
+      function renderOne(d: NotificationDetails, width: number): string[] {
         const isError = d.status === "error" || d.status === "stopped";
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
         const statusText = isError ? d.status : "completed";
-        let text = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
+        const lines = [
+          truncateToWidth(
+            `${icon} ${theme.bold(sanitizeText(d.description))} ${theme.fg("dim", statusText)}`,
+            width,
+            "…",
+          ),
+        ];
 
         const parts: string[] = [];
         if (d.turnCount > 0) parts.push(formatTurns(d.turnCount));
@@ -91,19 +98,26 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
         if (d.totalTokens > 0)
           parts.push(`${formatTokens(d.totalTokens).replace(/ token$/, "")} tokens`);
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
-        if (parts.length) text += `\n  ${theme.fg("dim", parts.join(" · "))}`;
+        if (parts.length)
+          lines.push(truncateToWidth(`  ${theme.fg("dim", parts.join(" · "))}`, width, "…"));
 
         const result = d.result ?? d.resultPreview ?? "No output.";
-        const lines = result.split("\n");
-        for (const line of expanded ? lines : lines.slice(0, 3)) {
-          text += `\n${theme.fg("dim", " │ ")}${line}`;
+        const gutter = " │ ";
+        const contentWidth = Math.max(1, width - gutter.length);
+        const resultLines = wrapDisplayLines(result, contentWidth);
+        for (const line of expanded ? resultLines : resultLines.slice(0, 3)) {
+          lines.push(theme.fg("dim", gutter) + truncateToWidth(line, contentWidth, "…"));
         }
-        if (!expanded) text += `\n${theme.fg("dim", " (ctrl+o to expand)")}`;
-        return text;
+        if (!expanded)
+          lines.push(truncateToWidth(theme.fg("dim", " (ctrl+o to expand)"), width, "…"));
+        return lines;
       }
 
       const all = [d, ...(d.others ?? [])];
-      return new Text(all.map(renderOne).join("\n"), 0, 0);
+      return {
+        render: (width: number) => all.flatMap((details) => renderOne(details, width)),
+        invalidate() {},
+      };
     },
   );
 }

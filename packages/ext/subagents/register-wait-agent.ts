@@ -8,7 +8,7 @@ import { renderWaitAgent } from "./ui/wait-agent-render.js";
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 export const MIN_WAIT_TIMEOUT_MS = 10_000;
-export const MAX_WAIT_TIMEOUT_MS = 60 * 60_000;
+export const MAX_WAIT_TIMEOUT_MS = 4 * 60_000;
 
 type WaitAgentDeps = {
   waitFor: (
@@ -93,7 +93,8 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
       },
       renderResult(result, { expanded }, theme) {
         const details = result.details as WaitAgentDetails | undefined;
-        if (!details) return { render: () => [], invalidate() {} };
+        if (!details || !Array.isArray(details.agents))
+          return { render: () => [], invalidate() {} };
         return renderWaitAgent(details, expanded, theme);
       },
     }),

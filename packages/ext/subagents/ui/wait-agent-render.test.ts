@@ -1,3 +1,4 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { WaitAgentDetails, WaitAgentResult } from "../types.js";
 import type { Theme } from "./agent-format.js";
@@ -33,6 +34,20 @@ function details(overrides: Partial<WaitAgentDetails>): WaitAgentDetails {
 }
 
 describe("WaitAgent rendering", () => {
+  it("uses whole seconds for short waits and minutes for long timeouts", () => {
+    vi.spyOn(Date, "now").mockReturnValue(10_500);
+    const output = renderWaitAgent(
+      details({ timeout_ms: 240_000, agents: [agent({})] }),
+      false,
+      theme,
+    )
+      .render(120)
+      .join("\n");
+
+    expect(output).toContain("WaitAgent · waiting 0s / timeout 4m");
+    vi.restoreAllMocks();
+  });
+
   it("shows live elapsed time, configured timeout, and all selected agents", () => {
     vi.spyOn(Date, "now").mockReturnValue(17_000);
     const output = renderWaitAgent(
@@ -85,6 +100,74 @@ describe("WaitAgent rendering", () => {
     expect(output).not.toContain("response four");
     expect(output).toContain("└─ ◷ Trace completion delivery · still running");
     expect(output).toContain("(ctrl+o to expand)");
+  });
+
+  it("caps collapsed output to three physical lines and strips terminal controls", () => {
+    const output = renderWaitAgent(
+      details({
+        outcome: "terminal",
+        wait_ended_at: 11_000,
+        message: "error ".repeat(40),
+        agents: [
+          agent({
+            status: "completed",
+            result: `safe\u001b]52;c;Y29weQ==\u0007 ${"x".repeat(100)}`,
+          }),
+        ],
+      }),
+      false,
+      theme,
+    ).render(20);
+
+    expect(output).toHaveLength(7);
+    expect(output.every((line) => visibleWidth(line) <= 20)).toBe(true);
+    expect(output.join("\n")).not.toContain("]52;");
+  });
+
+  it("renders legacy persisted details without raw JSON or invalid durations", () => {
+    const output = renderWaitAgent(
+      {
+        outcome: "terminal",
+        timed_out: false,
+        agents: [
+          {
+            id: "legacy",
+            type: "general",
+            description: "Legacy agent",
+            status: "completed",
+            result: "legacy result",
+            tool_uses: 1,
+            duration_ms: 1_000,
+            total_tokens: 20,
+          },
+        ],
+      },
+      false,
+      theme,
+    )
+      .render(80)
+      .join("\n");
+
+    expect(output).toContain("Legacy agent · Done");
+    expect(output).toContain("legacy result");
+    expect(output).not.toContain("NaN");
+    expect(output).not.toContain('"outcome"');
+  });
+
+  it("shows statistics for stopped agents", () => {
+    const output = renderWaitAgent(
+      details({
+        outcome: "terminal",
+        wait_ended_at: 11_000,
+        agents: [agent({ status: "stopped", tool_uses: 2 })],
+      }),
+      true,
+      theme,
+    )
+      .render(120)
+      .join("\n");
+
+    expect(output).toContain("Stopped (2 tool uses");
   });
 
   it("shows full responses when expanded and background continuation after cancellation", () => {

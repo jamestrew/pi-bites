@@ -1,3 +1,4 @@
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { registerNotificationRenderer } from "../notifications.js";
 import type { NotificationDetails } from "../types.js";
@@ -52,6 +53,20 @@ describe("asynchronous completion notification rendering", () => {
 
     expect(output).toContain(" │ response four");
     expect(output).not.toContain("ctrl+o");
+  });
+
+  it("caps narrow collapsed previews to three physical lines and strips terminal controls", () => {
+    const unsafe = {
+      ...details(),
+      description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent",
+      result: `safe\u001b[31m ${"x".repeat(100)}`,
+    };
+    const output = renderer()({ details: unsafe }, { expanded: false }, theme).render(20);
+
+    expect(output).toHaveLength(6);
+    expect(output.every((line: string) => visibleWidth(line) <= 20)).toBe(true);
+    expect(output.join("\n")).not.toContain("]52;");
+    expect(output.join("\n")).not.toContain("[31m");
   });
 
   it("still renders legacy preview details restored from older sessions", () => {

@@ -85,11 +85,11 @@ describe("agent completion delivery", () => {
     completion.onAgentComplete(record);
 
     expect(pi.sendMessage).toHaveBeenCalledOnce();
-    expect(pi.appendEntry).toHaveBeenCalledOnce();
+    expect(pi.appendEntry).not.toHaveBeenCalled();
     completion.dispose();
   });
 
-  it("emits and persists a failed lifecycle record", () => {
+  it("emits a failed lifecycle event without duplicating its persisted response", () => {
     const record = makeRecord("a", { status: "error", error: "boom" });
     const { completion, pi } = makeHarness([record]);
 
@@ -99,10 +99,7 @@ describe("agent completion delivery", () => {
       "subagents:failed",
       expect.objectContaining({ id: "a", error: "boom" }),
     );
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "subagents:record",
-      expect.objectContaining({ id: "a", error: "boom" }),
-    );
+    expect(pi.appendEntry).not.toHaveBeenCalled();
     completion.dispose();
   });
 });

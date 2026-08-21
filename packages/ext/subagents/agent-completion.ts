@@ -115,16 +115,6 @@ export function createAgentCompletionHandler({
     if (disposed || owners.has(record)) return;
     const failed = record.status === "error" || record.status === "stopped";
     pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
-    pi.appendEntry("subagents:record", {
-      id: record.id,
-      type: record.type,
-      description: record.description,
-      status: record.status,
-      result: record.result,
-      error: record.error,
-      startedAt: record.startedAt,
-      completedAt: record.completedAt,
-    });
     onAgentFinishedUI(record.id);
 
     const waiterId = claims.get(record.id);
