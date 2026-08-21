@@ -51,7 +51,7 @@ export interface AgentDetails {
   toolUses: number;
   tokens: string;
   durationMs: number;
-  status: "queued" | "running" | "completed" | "stopped" | "error" | "background";
+  status: "queued" | "running" | "completed" | "stopped" | "error";
   /** Human-readable description of what the agent is currently doing. */
   activity?: string;
   /** Command blocked pending a parent bash-gate decision. */
@@ -140,7 +140,6 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): {
   if (invocation.isolated) tags.push("isolated");
   if (invocation.isolation === "worktree") tags.push("worktree");
   if (invocation.inheritContext) tags.push("inherit context");
-  if (invocation.runInBackground) tags.push("background");
   return { modelName: invocation.modelName, tags };
 }
 

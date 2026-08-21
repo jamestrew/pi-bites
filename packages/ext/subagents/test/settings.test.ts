@@ -73,17 +73,16 @@ describe("settings persistence", () => {
   });
 
   it("loads from project when no global file", () => {
-    writeProject({ maxConcurrent: 8, defaultJoinMode: "group" });
-    expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 8, defaultJoinMode: "group" });
+    writeProject({ maxConcurrent: 8 });
+    expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 8 });
   });
 
   it("merges global + project with project winning on conflicts", () => {
-    writeGlobal({ maxConcurrent: 16, scopeModels: true, defaultJoinMode: "async" });
+    writeGlobal({ maxConcurrent: 16, scopeModels: true });
     writeProject({ maxConcurrent: 4, fleetView: false });
     expect(loadSettings(projectDir)).toEqual({
       maxConcurrent: 4, // project wins
       scopeModels: true, // from global
-      defaultJoinMode: "async", // from global
       fleetView: false, // from project only
     });
   });
@@ -91,7 +90,6 @@ describe("settings persistence", () => {
   it("round-trips values: saveSettings then loadSettings", () => {
     const settings = {
       maxConcurrent: 7,
-      defaultJoinMode: "smart" as const,
       toolDescriptionMode: "compact" as const,
     };
     saveSettings(settings, projectDir);
@@ -157,20 +155,9 @@ describe("settings persistence", () => {
       expect(loadSettings(projectDir).maxConcurrent).toBeUndefined();
     });
 
-    it("drops invalid defaultJoinMode values", () => {
-      writeProject({ defaultJoinMode: "invalid" });
+    it("drops the retired defaultJoinMode setting", () => {
+      writeProject({ defaultJoinMode: "smart" });
       expect(loadSettings(projectDir)).toEqual({});
-      writeProject({ defaultJoinMode: 42 });
-      expect(loadSettings(projectDir)).toEqual({});
-      writeProject({ defaultJoinMode: "" });
-      expect(loadSettings(projectDir)).toEqual({});
-    });
-
-    it("accepts all three valid join modes", () => {
-      for (const mode of ["async", "group", "smart"] as const) {
-        writeProject({ defaultJoinMode: mode });
-        expect(loadSettings(projectDir)).toEqual({ defaultJoinMode: mode });
-      }
     });
 
     it("accepts scopeModels boolean (true and false)", () => {
@@ -304,7 +291,6 @@ describe("settings persistence", () => {
     beforeEach(() => {
       appliers = {
         setMaxConcurrent: vi.fn(),
-        setDefaultJoinMode: vi.fn(),
         setScopeModels: vi.fn(),
         setDisableDefaultAgents: vi.fn(),
         setToolDescriptionMode: vi.fn(),
@@ -315,7 +301,6 @@ describe("settings persistence", () => {
     it("is a no-op on an empty settings object", () => {
       applySettings({}, appliers);
       expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
-      expect(appliers.setDefaultJoinMode).not.toHaveBeenCalled();
       expect(appliers.setScopeModels).not.toHaveBeenCalled();
       expect(appliers.setDisableDefaultAgents).not.toHaveBeenCalled();
       expect(appliers.setToolDescriptionMode).not.toHaveBeenCalled();
@@ -324,7 +309,6 @@ describe("settings persistence", () => {
     it("applies only the fields that are present", () => {
       applySettings({ maxConcurrent: 4 }, appliers);
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(4);
-      expect(appliers.setDefaultJoinMode).not.toHaveBeenCalled();
       expect(appliers.setScopeModels).not.toHaveBeenCalled();
     });
 
@@ -332,7 +316,6 @@ describe("settings persistence", () => {
       applySettings(
         {
           maxConcurrent: 8,
-          defaultJoinMode: "group",
           scopeModels: true,
           disableDefaultAgents: true,
           toolDescriptionMode: "compact",
@@ -341,7 +324,6 @@ describe("settings persistence", () => {
         appliers,
       );
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(8);
-      expect(appliers.setDefaultJoinMode).toHaveBeenCalledWith("group");
       expect(appliers.setScopeModels).toHaveBeenCalledWith(true);
       expect(appliers.setDisableDefaultAgents).toHaveBeenCalledWith(true);
       expect(appliers.setToolDescriptionMode).toHaveBeenCalledWith("compact");
@@ -393,7 +375,6 @@ describe("settings persistence", () => {
     beforeEach(() => {
       appliers = {
         setMaxConcurrent: vi.fn(),
-        setDefaultJoinMode: vi.fn(),
         setScopeModels: vi.fn(),
         setDisableDefaultAgents: vi.fn(),
         setToolDescriptionMode: vi.fn(),
@@ -410,7 +391,6 @@ describe("settings persistence", () => {
 
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(16);
       expect(appliers.setScopeModels).toHaveBeenCalledWith(true);
-      expect(appliers.setDefaultJoinMode).not.toHaveBeenCalled();
 
       expect(emit).toHaveBeenCalledTimes(1);
       expect(emit).toHaveBeenCalledWith("subagents:settings_loaded", {
@@ -428,7 +408,6 @@ describe("settings persistence", () => {
       expect(result).toEqual({});
       // No setters fired — defaults preserved
       expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
-      expect(appliers.setDefaultJoinMode).not.toHaveBeenCalled();
     });
   });
 

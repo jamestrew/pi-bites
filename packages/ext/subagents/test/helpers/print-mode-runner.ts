@@ -6,20 +6,12 @@
  * ---------------
  * The other e2e suites (agent-runner-e2e, ext-templates-e2e) assert on the
  * *gated tool set captured at construction* — they never drive a turn, so they
- * never actually spawn a subagent or exercise the background hold condition.
+ * never actually spawn a subagent or exercise asynchronous completion delivery.
  * This runner closes that gap: it boots a real headless pi session with the
  * pi-subagents extension loaded, drives a real assistant turn that calls the
  * `Agent` tool, and lets the extension spawn a real child session through the
- * real `runAgent` path — then waits for it to finish exactly like a production
- * print-mode host does.
- *
- * It is the pi-subagents analogue of pi-chonky-step's `src/agent.ts` headless
- * runner: same shape (DefaultResourceLoader → createAgentSession → prompt loop),
- * and crucially it replicates pi-chonky-step's SUBAGENT HOLD CONDITION — the
- * `dequeueFollowUpMessages` monkey-patch that blocks the parent agent loop until
- * background subagents complete (via the `Symbol.for("pi-subagents:manager")`
- * global the extension publishes). Without that patch, `session.prompt()`
- * resolves and the parent finishes before background children report back.
+ * real `runAgent` path. Tests can then await children and completion-triggered
+ * parent turns without changing production orchestration.
  *
  * MODEL BACKEND (faux default, real opt-in)
  * -----------------------------------------
@@ -134,10 +126,7 @@ export interface RunPrintModeOptions {
   steps?: FauxResponseStep[];
   /** Faux mode: how many model calls to pad the queue for. Default 16. */
   maxModelCalls?: number;
-  /**
-   * Honor the subagent hold condition — block the parent agent loop until
-   * background subagents finish (the pi-chonky-step monkey-patch). Default true.
-   */
+  /** Test-only: await spawned agents and completion-triggered parent turns. Default true. */
   hold?: boolean;
   /**
    * Run before the parent turn, after globals are isolated — e.g.
@@ -195,7 +184,6 @@ export function agentCall(
     prompt: string;
     description: string;
     subagent_type?: string;
-    run_in_background?: boolean;
     [k: string]: unknown;
   },
   opts?: { id?: string },
@@ -212,7 +200,7 @@ function resolveReply(reply: FauxReply | ((ctx: Context) => FauxReply), ctx: Con
  * session's own context:
  *   - PARENT  (its tool set includes `Agent`):
  *       · `parentInitial` until an `Agent` tool result is in history (the spawn),
- *       · then `parentFinal` (the answer after the child reports back).
+ *       · then `parentFinal` for later parent turns, including automatic completion.
  *   - SUBAGENT (no `Agent` tool): `subagent`.
  * Each route may be a value or a `(ctx) => value` function.
  */
@@ -381,27 +369,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
 
   const manager = (globalThis as Record<symbol, unknown>)[MANAGER_KEY] as ManagerHandle | undefined;
 
-  // --- subagent hold condition (the pi-chonky-step monkey-patch) ---
-  // Block the parent agent loop while background subagents are still running, so
-  // their completion nudges land before the parent's final turn.
+  // Tests may wait for spawned children and any completion-triggered parent turn.
+  // Production does not hold the parent loop; Agent always returns immediately.
   const hold = options.hold ?? true;
-  if (hold && manager) {
-    // dequeueFollowUpMessages is internal — reach through with a cast.
-    const agent = (session as any).agent;
-    if (agent?.dequeueFollowUpMessages) {
-      const original = agent.dequeueFollowUpMessages.bind(agent);
-      agent.dequeueFollowUpMessages = function patched() {
-        const messages = original();
-        if (messages.length > 0) return messages;
-        if (manager.hasRunning()) {
-          // Returning a Promise is auto-unwrapped by the async loop config —
-          // the loop blocks here until all subagents finish and queue nudges.
-          return manager.waitForAll().then(() => original());
-        }
-        return messages;
-      };
-    }
-  }
 
   // --- collect the parent's last assistant text ---
   let responseText = "";
@@ -428,13 +398,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     await Promise.race([
       (async () => {
         await session.prompt(options.prompt);
-        // Fallback for when the hold patch is unavailable: catch any subagents
-        // still running after prompt() returns and process their results.
         if (hold) {
-          while (manager?.hasRunning()) {
-            await manager.waitForAll();
-            await session.prompt("Background agents have completed. Process their results.");
-          }
+          await manager?.waitForAll();
+          await session.waitForIdle();
         }
       })(),
       timeout,
@@ -500,9 +466,9 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
 }
 
 /**
- * Extract the text of every `Agent` tool result in a session's history. This is
- * the real end-to-end observable: for a foreground spawn it contains the child's
- * own output; for a background spawn it's the "started in background" envelope.
+ * Extract the text of every `Agent` tool result in a session's history. Agent
+ * results are immediate spawn envelopes; terminal output arrives through
+ * WaitAgent or an automatic completion message.
  */
 export function agentToolResults(session: AgentSession): string[] {
   const out: string[] = [];
@@ -520,13 +486,17 @@ export function agentToolResults(session: AgentSession): string[] {
 /**
  * All text across the whole conversation — assistant turns, user/nudge messages,
  * and every tool result. Use this to assert a child's output *materialized
- * somewhere* (a foreground tool result or an automatic completion message),
+ * somewhere* (a WaitAgent result or an automatic completion message),
  * rather than only in the parent's final message which may summarize it.
  */
 export function conversationText(session: AgentSession): string {
   const parts: string[] = [];
   for (const msg of session.messages) {
     const content = (msg as { content?: unknown }).content;
+    if (typeof content === "string") {
+      parts.push(content);
+      continue;
+    }
     if (!Array.isArray(content)) continue;
     for (const block of content as Array<{ type?: string; text?: string }>) {
       if (block.type === "text" && block.text) parts.push(block.text);
@@ -549,8 +519,8 @@ export function invokedToolNames(session: AgentSession): string[] {
 
 /**
  * The arguments of every `Agent` tool call the model actually made — lets a live
- * smoke assert which feature was exercised (e.g. `run_in_background`,
- * `subagent_type`) rather than just that *some* spawn happened.
+ * smoke assert which feature was exercised (for example `subagent_type`)
+ * rather than just that *some* spawn happened.
  */
 export function agentToolCalls(session: AgentSession): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [];

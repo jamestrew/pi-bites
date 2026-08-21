@@ -47,12 +47,8 @@ function renderStatus(details: AgentDetails, theme: Theme, stats: string): strin
       theme.fg("dim", details.activity ?? "thinking…"),
     ];
   }
-  if (details.status === "background" || details.status === "queued") {
-    const action = details.status === "queued" ? "Queued" : "Started";
-    return [
-      theme.fg("accent", "●") +
-        theme.fg("dim", ` ${action} in background (ID: ${details.agentId})`),
-    ];
+  if (details.status === "queued") {
+    return [theme.fg("accent", "●") + theme.fg("dim", ` Queued (ID: ${details.agentId})`)];
   }
   if (details.status === "error")
     return [theme.fg("error", `Error: ${details.error ?? "unknown"}`)];
@@ -110,13 +106,8 @@ export function renderAgentToolResult(
         lines.push("");
         if (details.status === "running" || options.isPartial) {
           lines.push(theme.fg("muted", "Running…"));
-        } else if (details.status === "background" || details.status === "queued") {
-          lines.push(
-            theme.fg(
-              "muted",
-              details.status === "queued" ? "Queued in background." : "Started in background.",
-            ),
-          );
+        } else if (details.status === "queued") {
+          lines.push(theme.fg("muted", "Queued."));
         } else {
           const isDone = details.status === "completed";
           lines.push(

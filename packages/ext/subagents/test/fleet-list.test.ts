@@ -39,7 +39,6 @@ function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
     session: FAKE_SESSION as any,
     lifetimeUsage: { input: 13100, output: 0, cacheWrite: 0 },
     compactionCount: 0,
-    isBackground: true,
     ...over,
   } as AgentRecord;
 }
@@ -349,12 +348,7 @@ describe("FleetList rendering", () => {
     expect(oldIdx).toBeLessThan(newIdx); // earliest sits above the later one
   });
 
-  it("hides foreground agents", () => {
-    const lines = harness([makeRecord({ isBackground: false })]).render();
-    expect(lines).toEqual([]);
-  });
-
-  it("shows queued background agents even before they have a session", () => {
+  it("shows queued agents even before they have a session", () => {
     const agents = [
       makeRecord({ id: "live", description: "running one" }),
       makeRecord({

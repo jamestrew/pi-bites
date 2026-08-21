@@ -27,7 +27,6 @@ const RPC_SPAWN_OPTION_KEYS = new Set([
   "isolated",
   "inheritContext",
   "thinkingLevel",
-  "isBackground",
   "isolation",
   "cwd",
 ]);
@@ -71,7 +70,7 @@ export function decodeSpawnOptions(raw: unknown, registry?: ModelRegistry): Spaw
     if (typeof model === "string") throw new Error(model);
     options.model = model;
   }
-  for (const key of ["isolated", "inheritContext", "isBackground"] as const) {
+  for (const key of ["isolated", "inheritContext"] as const) {
     if (input[key] === undefined) continue;
     if (typeof input[key] !== "boolean") {
       throw new Error(`Spawn RPC option ${key} must be a boolean`);
@@ -105,7 +104,7 @@ export interface EventBus {
 export type RpcReply<T = void> = { success: true; data?: T } | { success: false; error: string };
 
 /** RPC protocol version — bumped when the envelope or method contracts change. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Minimal AgentManager interface needed by the spawn/stop RPCs. */
 export interface SpawnCapable {

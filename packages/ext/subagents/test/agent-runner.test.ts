@@ -96,7 +96,6 @@ vi.mock("../agent-types.js", () => ({
     systemPrompt: "You are Explore.",
     promptMode: "replace",
     inheritContext: false,
-    runInBackground: false,
     isolated: false,
   })),
   getMemoryToolNames: vi.fn(() => []),
@@ -165,7 +164,7 @@ const ctx = {
     getRegisteredProviderConfig: vi.fn(),
   },
   getSystemPrompt: vi.fn(() => "parent prompt"),
-  sessionManager: { getBranch: vi.fn(() => []) },
+  sessionManager: { getBranch: vi.fn(() => []), getSessionId: vi.fn(() => "parent") },
 } as any;
 
 const pi = {
@@ -220,6 +219,17 @@ describe("agent-runner final output capture", () => {
     const result = await runAgent(ctx, "Explore", "Say LOCKED", { pi });
 
     expect(result.responseText).toBe("LOCKED");
+  });
+
+  it("aborts a session when its signal was cancelled before session creation", async () => {
+    const { session } = createSession("ABORTED");
+    createAgentSession.mockResolvedValue({ session });
+    const controller = new AbortController();
+    controller.abort();
+
+    await runAgent(ctx, "Explore", "stop", { pi, signal: controller.signal });
+
+    expect(session.abort).toHaveBeenCalledOnce();
   });
 
   it("binds extensions before prompting", async () => {
@@ -583,7 +593,6 @@ function makeAgentConfig(overrides: Record<string, unknown> = {}) {
     systemPrompt: "Test.",
     promptMode: "replace" as const,
     inheritContext: false,
-    runInBackground: false,
     isolated: false,
     ...overrides,
   };

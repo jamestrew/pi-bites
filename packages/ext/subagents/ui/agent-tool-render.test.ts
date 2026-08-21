@@ -90,35 +90,7 @@ test("collapsed running result shows pending bash approval", () => {
   expect(lines.join("\n")).toContain("Running… (ctrl+o to expand)");
 });
 
-test.each([false, true])(
-  "background launch uses completed-action wording when expanded=%s",
-  (expanded) => {
-    const details: AgentDetails = {
-      displayName: "Explore",
-      description: "Investigate failure",
-      subagentType: "explore",
-      toolUses: 0,
-      tokens: "",
-      durationMs: 10,
-      status: "background",
-      agentId: "208b6769-fd6b-4c1",
-    };
-    const result = {
-      content: [{ type: "text", text: "" }],
-      details,
-    } as AgentToolResult<AgentDetails>;
-
-    const output = renderAgentToolResult(result, { expanded, isPartial: false }, theme, context)
-      .render(80)
-      .join("\n");
-
-    expect(output).toContain("Started in background (ID: 208b6769-fd6b-4c1)");
-    if (expanded) expect(output).toContain("Started in background.");
-    expect(output).not.toMatch(/running in background|background agent running/i);
-  },
-);
-
-test("queued background launch renders its actual state", async () => {
+test("queued launch renders its actual state", async () => {
   const manager = new AgentManager(undefined, 1);
   const execute = createAgentToolExecute({
     pi: { events: { emit: vi.fn() }, getThinkingLevel: () => "off" } as any,
@@ -127,20 +99,23 @@ test("queued background launch renders its actual state", async () => {
     fleet: { ensureTimer: vi.fn(), update: vi.fn() } as any,
     reloadCustomAgents: vi.fn(),
     isScopeModelsEnabled: () => false,
-    getDefaultJoinMode: () => "async",
-    trackSpawned: vi.fn(),
   });
   const ctx = {
     cwd: "/tmp",
     model: undefined,
-    modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
-    sessionManager: { getSessionId: () => "queued-render-test" },
+    modelRegistry: {
+      find: vi.fn(),
+      getAvailable: vi.fn(() => []),
+      getRegisteredProviderIds: vi.fn(() => []),
+      getRegisteredProviderConfig: vi.fn(),
+    },
+    sessionManager: { getSessionId: () => "queued-render-test", getBranch: () => [] },
+    getSystemPrompt: () => "parent",
   } as any;
   const params = {
     subagent_type: "general-purpose",
     description: "Investigate failure",
     prompt: "Investigate the failure",
-    run_in_background: true,
   };
 
   try {
@@ -152,8 +127,8 @@ test("queued background launch renders its actual state", async () => {
       const output = renderAgentToolResult(result, { expanded, isPartial: false }, theme, context)
         .render(80)
         .join("\n");
-      expect(output).toContain(`Queued in background (ID: ${result.details?.agentId})`);
-      if (expanded) expect(output).toContain("Queued in background.");
+      expect(output).toContain(`Queued (ID: ${result.details?.agentId})`);
+      if (expanded) expect(output).toContain("Queued.");
       expect(output).not.toContain("Started in background");
     }
   } finally {

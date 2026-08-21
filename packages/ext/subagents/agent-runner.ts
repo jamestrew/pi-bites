@@ -5,11 +5,7 @@
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import type {
-  ExtensionContext,
-  LoadExtensionsResult,
-  ModelRegistry,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
   type AgentSession,
   type AgentSessionEvent,
@@ -29,10 +25,11 @@ import {
   getReadOnlyMemoryToolNames,
   getToolNamesForType,
 } from "./agent-types.js";
-import { buildParentContext, extractText } from "./context.js";
+import { extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
+import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
 import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
@@ -50,6 +47,7 @@ import type { AssistantUsage } from "./usage.js";
  */
 export const SUBAGENT_TOOL_NAMES = {
   AGENT: "Agent",
+  WAIT_AGENT: "WaitAgent",
   MESSAGE_AGENT: "MessageAgent",
 } as const;
 
@@ -157,7 +155,7 @@ export function parseExtSelectors(entries: string[]): {
  */
 function resolveDefaultModel(
   parentModel: Model<Api> | undefined,
-  registry: Pick<ModelRegistry, "find" | "getAvailable">,
+  availableModels: Model<Api>[],
   configModel?: string,
 ): Model<Api> | undefined {
   if (configModel) {
@@ -165,16 +163,12 @@ function resolveDefaultModel(
     if (slashIdx !== -1) {
       const provider = configModel.slice(0, slashIdx);
       const modelId = configModel.slice(slashIdx + 1);
-
-      // Build a set of available model keys for fast lookup
-      const availableKeys = new Set(registry.getAvailable().map((m) => `${m.provider}/${m.id}`));
-      const isAvailable = (p: string, id: string) => availableKeys.has(`${p}/${id}`);
-
-      const found = registry.find(provider, modelId);
-      if (found && isAvailable(provider, modelId)) return found;
+      const found = availableModels.find(
+        (candidate) => candidate.provider === provider && candidate.id === modelId,
+      );
+      if (found) return found;
     }
   }
-
   return parentModel;
 }
 
@@ -312,6 +306,10 @@ function getLastAssistantText(session: AgentSession): string {
  */
 function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
   if (!signal) return () => {};
+  if (signal.aborted) {
+    void session.abort();
+    return () => {};
+  }
   const onAbort = () => session.abort();
   signal.addEventListener("abort", onAbort, { once: true });
   return () => signal.removeEventListener("abort", onAbort);
@@ -329,16 +327,20 @@ function resolveConfiguredSessionDir(
 }
 
 export async function runAgent(
-  ctx: ExtensionContext,
+  parentContext: ParentSnapshot | ExtensionContext,
   type: SubagentType,
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
+  const parent =
+    "systemPrompt" in parentContext
+      ? parentContext
+      : snapshotParent(parentContext, options.inheritContext === true);
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
 
   // Resolve working directory: worktree override > parent cwd
-  const effectiveCwd = options.cwd ?? ctx.cwd;
+  const effectiveCwd = options.cwd ?? parent.cwd;
   // Filesystem work happens in effectiveCwd; config discovery in configCwd.
   // They differ only for SpawnOptions.cwd spawns (config stays with the parent).
   const configCwd = options.configCwd ?? effectiveCwd;
@@ -346,7 +348,7 @@ export async function runAgent(
   const env = await detectEnv(options.pi, effectiveCwd);
 
   // Get parent system prompt for append-mode agents
-  const parentSystemPrompt = ctx.getSystemPrompt();
+  const parentSystemPrompt = parent.systemPrompt;
 
   // Build prompt extras (memory, skill preloading)
   const extras: PromptExtras = {};
@@ -561,7 +563,7 @@ export async function runAgent(
 
   // Resolve model: explicit option > config.model > parent model
   const model =
-    options.model ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
+    options.model ?? resolveDefaultModel(parent.model, parent.availableModels, agentConfig?.model);
 
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
   const configuredThinking = options.thinkingLevel ?? agentConfig?.thinking;
@@ -619,9 +621,8 @@ export async function runAgent(
     authPath: join(agentDir, "auth.json"),
     modelsPath: join(agentDir, "models.json"),
   });
-  for (const providerId of ctx.modelRegistry.getRegisteredProviderIds()) {
-    const provider = ctx.modelRegistry.getRegisteredProviderConfig(providerId);
-    if (provider) modelRuntime.registerProvider(providerId, provider);
+  for (const [providerId, provider] of parent.providers) {
+    modelRuntime.registerProvider(providerId, provider);
   }
 
   const sessionOpts: NonNullable<Parameters<typeof createAgentSession>[0]> = {
@@ -710,11 +711,8 @@ export async function runAgent(
 
   // Build the effective prompt: optionally prepend parent context
   let effectivePrompt = prompt;
-  if (options.inheritContext) {
-    const parentContext = buildParentContext(ctx);
-    if (parentContext) {
-      effectivePrompt = parentContext + prompt;
-    }
+  if (options.inheritContext && parent.parentContext) {
+    effectivePrompt = parent.parentContext + prompt;
   }
 
   try {

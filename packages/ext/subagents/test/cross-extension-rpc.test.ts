@@ -101,13 +101,12 @@ describe("cross-extension RPC", () => {
         requestId: "req-s2",
         type: "Explore",
         prompt: "find it",
-        options: { description: "search", isBackground: true, thinkingLevel: "max" },
+        options: { description: "search", thinkingLevel: "max" },
       });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "Explore", "find it", {
         description: "search",
-        isBackground: true,
         thinkingLevel: "max",
       });
     });
@@ -116,6 +115,7 @@ describe("cross-extension RPC", () => {
       ["cwd", { cwd: 42 }],
       ["isolation", { isolation: "container" }],
       ["isolated", { isolated: "yes" }],
+      ["retired execution mode", { isBackground: true }],
       ["callbacks", { onTextDelta: () => {} }],
       ["unknown fields", { futureOption: true }],
     ])("rejects invalid or non-serializable %s options", async (_label, options) => {

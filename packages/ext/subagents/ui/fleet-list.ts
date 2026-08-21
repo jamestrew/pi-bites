@@ -1,7 +1,7 @@
 /**
  * fleet-list.ts — Claude Code-style "FleetView" list rendered above the editor.
  *
- * Shows `main` + each running/queued background subagent as a navigable list. Pressing
+ * Shows `main` + each running/queued subagent as a navigable list. Pressing
  * Ctrl+↑ activates the list; ↑/↓ move the selection, Enter opens the selected agent's
  * live conversation overlay, Esc returns to the prompt. A viewer stays open when its
  * agent finishes; finished agents linger briefly in the list.
@@ -229,7 +229,6 @@ export class FleetList {
    * started sooner sit at the top. Every row is openable (has a session), so Enter
    * never dead-ends. Included: running/queued, plus the agent currently being
    * viewed, plus recently-finished ones (they linger briefly before dropping out).
-   * Foreground agents are hidden because their inline tool result is already visible.
    * (`listAgents()` is newest-first, so we re-sort.)
    */
   private agentRecords(): AgentRecord[] {
@@ -238,11 +237,10 @@ export class FleetList {
       .listAgents()
       .filter(
         (a) =>
-          a.isBackground !== false &&
-          (a.status === "running" ||
-            a.status === "queued" ||
-            a.id === this.viewingAgentId ||
-            (a.session && a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS)),
+          a.status === "running" ||
+          a.status === "queued" ||
+          a.id === this.viewingAgentId ||
+          Boolean(a.session && a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS),
       )
       .sort((a, b) => a.startedAt - b.startedAt);
   }

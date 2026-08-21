@@ -61,8 +61,6 @@ export interface AgentConfig {
   promptMode: "replace" | "append";
   /** Default for spawn: fork parent conversation. undefined = caller decides. */
   inheritContext?: boolean;
-  /** Default for spawn: run in background. undefined = caller decides. */
-  runInBackground?: boolean;
   /** Default for spawn: no extension tools. undefined = caller decides. */
   isolated?: boolean;
   /** Gated bash policy for this subagent. */
@@ -78,8 +76,6 @@ export interface AgentConfig {
   /** Where this agent was loaded from */
   source?: "default" | "project" | "global";
 }
-
-export type JoinMode = "async" | "group" | "smart";
 
 export interface AgentRecord {
   id: string;
@@ -97,8 +93,6 @@ export interface AgentRecord {
   session?: AgentSession;
   abortController?: AbortController;
   promise?: Promise<string>;
-  groupId?: string;
-  joinMode?: JoinMode;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: string[];
   /** Message to resume with after cancelling the current operation. */
@@ -109,10 +103,6 @@ export interface AgentRecord {
   worktreeResult?: { hasChanges: boolean; branch?: string };
   /** The tool_use_id from the original Agent tool call. */
   toolCallId?: string;
-  /** Path to the streaming output transcript file. */
-  outputFile?: string;
-  /** Cleanup function for the output file stream subscription. */
-  outputCleanup?: () => void;
   /**
    * Lifetime usage breakdown, accumulated via `message_end` events. Survives
    * compaction. Total = input + output + cacheWrite (cacheRead deliberately
@@ -121,14 +111,6 @@ export interface AgentRecord {
   lifetimeUsage: LifetimeUsage;
   /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
   compactionCount: number;
-  /**
-   * Whether this agent was spawned to run in the background. Tri-state, set at
-   * spawn from `SpawnOptions.isBackground`: `true` = background, `false` =
-   * foreground (has an inline Agent tool-result surface), `undefined` = the
-   * caller never declared it (e.g. a cross-extension RPC spawn, which is detached
-   * and has no inline surface).
-   */
-  isBackground?: boolean;
   /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
   invocation?: AgentInvocation;
 }
@@ -139,8 +121,26 @@ export interface AgentInvocation {
   thinking?: ThinkingLevel;
   isolated?: boolean;
   inheritContext?: boolean;
-  runInBackground?: boolean;
   isolation?: IsolationMode;
+}
+
+export interface WaitAgentResult {
+  id: string;
+  type: string;
+  description: string;
+  status: AgentRecord["status"];
+  result?: string;
+  error?: string;
+  tool_uses: number;
+  duration_ms: number;
+  total_tokens: number;
+}
+
+export interface WaitAgentOutcome {
+  outcome: "terminal" | "timeout" | "cancelled" | "error";
+  timed_out: boolean;
+  message?: string;
+  agents: WaitAgentResult[];
 }
 
 /** Details attached to custom notification messages for visual rendering. */

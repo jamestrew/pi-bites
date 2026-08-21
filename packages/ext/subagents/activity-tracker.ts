@@ -5,7 +5,7 @@ import { type AgentActivity } from "./ui/agent-format.js";
 
 /**
  * Create an AgentActivity state and spawn callbacks for tracking tool usage.
- * Used by both foreground and background paths to avoid duplication.
+ * Used by concurrent agent runs and their UI surfaces.
  */
 export function createActivityTracker(onStreamUpdate?: () => void) {
   const state: AgentActivity = {

@@ -3,6 +3,7 @@
  *
  * Tools:
  *   Agent         — LLM-callable: spawn a sub-agent
+ *   WaitAgent     — LLM-callable: wait for selected sub-agents
  *   MessageAgent  — LLM-callable: send a message to a running agent
  *
  * Commands:
@@ -21,8 +22,8 @@ import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerAgentTool } from "./register-agent-tool.js";
 import { registerMessageAgent } from "./register-message-agent.js";
+import { registerWaitAgent } from "./register-wait-agent.js";
 import { type ToolDescriptionMode } from "./settings.js";
-import { type JoinMode } from "./types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
@@ -309,15 +310,6 @@ export default function (
     fleet.setEnabled(b);
   }
 
-  // ---- Join mode configuration ----
-  let defaultJoinMode: JoinMode = "smart";
-  function getDefaultJoinMode(): JoinMode {
-    return defaultJoinMode;
-  }
-  function setDefaultJoinMode(mode: JoinMode) {
-    defaultJoinMode = mode;
-  }
-
   // ---- Scope models configuration ----
   let scopeModelsEnabled = false;
   function isScopeModelsEnabled(): boolean {
@@ -364,16 +356,14 @@ export default function (
     reloadCustomAgents,
     isScopeModelsEnabled,
     getToolDescriptionMode,
-    setDefaultJoinMode,
     setScopeModelsEnabled,
     setDisableDefaultAgents,
     setToolDescriptionMode,
     setFleetViewEnabled,
-    getDefaultJoinMode,
-    trackSpawned: completion.trackSpawned,
   });
 
-  // ---- MessageAgent tool ----
+  // ---- WaitAgent and MessageAgent tools ----
+  registerWaitAgent(pi, completion);
   registerMessageAgent(pi, manager);
 
   // ---- /agents interactive menu ----
@@ -382,8 +372,6 @@ export default function (
     agentActivity,
     reloadCustomAgents,
     getModelLabelFromConfig,
-    getDefaultJoinMode,
-    setDefaultJoinMode,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
     setDisableDefaultAgents,

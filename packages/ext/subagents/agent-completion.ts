@@ -1,8 +1,33 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildEventData } from "./event-data.js";
-import { GroupJoinManager } from "./group-join.js";
 import { buildNotificationDetails, formatTaskNotification } from "./notifications.js";
-import type { AgentRecord, JoinMode, NotificationDetails } from "./types.js";
+import type {
+  AgentRecord,
+  NotificationDetails,
+  WaitAgentOutcome,
+  WaitAgentResult,
+} from "./types.js";
+import { getLifetimeTotal } from "./usage.js";
+
+const TERMINAL_STATUSES = new Set(["completed", "error", "stopped"]);
+
+function isTerminal(record: AgentRecord): boolean {
+  return TERMINAL_STATUSES.has(record.status);
+}
+
+function waitResult(record: AgentRecord, includeOutput: boolean): WaitAgentResult {
+  return {
+    id: record.id,
+    type: record.type,
+    description: record.description,
+    status: record.status,
+    ...(includeOutput && record.result !== undefined ? { result: record.result } : {}),
+    ...(includeOutput && record.error !== undefined ? { error: record.error } : {}),
+    tool_uses: record.toolUses,
+    duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
+    total_tokens: getLifetimeTotal(record.lifetimeUsage),
+  };
+}
 
 type AgentCompletionDeps = {
   pi: ExtensionAPI;
@@ -10,115 +35,77 @@ type AgentCompletionDeps = {
   onAgentFinishedUI: (id: string) => void;
 };
 
+type Waiter = {
+  id: number;
+  agentIds: string[];
+  resolve: (outcome: WaitAgentOutcome) => void;
+  timer?: ReturnType<typeof setTimeout>;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+};
+
 export function createAgentCompletionHandler({
   pi,
   getRecord,
   onAgentFinishedUI,
 }: AgentCompletionDeps) {
-  const pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
-  const NUDGE_HOLD_MS = 200;
-  let currentBatchAgents: string[] = [];
-  let batchFinalizeTimer: ReturnType<typeof setTimeout> | undefined;
-  let batchCounter = 0;
+  const owners = new WeakMap<AgentRecord, "automatic" | "wait">();
+  const claims = new Map<string, number>();
+  const waiters = new Map<number, Waiter>();
+  let nextWaiterId = 1;
+  let disposed = false;
 
-  function cancelNudge(key: string): void {
-    const timer = pendingNudges.get(key);
-    if (timer === undefined) return;
-    clearTimeout(timer);
-    pendingNudges.delete(key);
+  function release(waiter: Waiter): void {
+    waiters.delete(waiter.id);
+    for (const id of waiter.agentIds) {
+      if (claims.get(id) === waiter.id) claims.delete(id);
+    }
+    if (waiter.timer) clearTimeout(waiter.timer);
+    if (waiter.signal && waiter.onAbort) {
+      waiter.signal.removeEventListener("abort", waiter.onAbort);
+    }
   }
 
-  function scheduleNudge(key: string, send: () => void, delay = NUDGE_HOLD_MS): void {
-    cancelNudge(key);
-    pendingNudges.set(
-      key,
-      setTimeout(() => {
-        pendingNudges.delete(key);
-        try {
-          send();
-        } catch {
-          // The extension context may have gone stale while this notification was held.
-        }
-      }, delay),
-    );
+  function finish(waiter: Waiter, outcome: WaitAgentOutcome): void {
+    release(waiter);
+    waiter.resolve(outcome);
   }
 
-  function emitIndividualNudge(record: AgentRecord): void {
+  function terminalOutcome(records: AgentRecord[]): WaitAgentOutcome {
+    for (const record of records) owners.set(record, "wait");
+    return {
+      outcome: "terminal",
+      timed_out: false,
+      agents: records.map((record) => waitResult(record, true)),
+    };
+  }
+
+  function resolveWaiter(waiterId: number): void {
+    const waiter = waiters.get(waiterId);
+    if (!waiter) return;
+    const terminal = waiter.agentIds
+      .map(getRecord)
+      .filter((record): record is AgentRecord => Boolean(record && isTerminal(record)))
+      .filter((record) => owners.get(record) !== "automatic");
+    if (terminal.length > 0) finish(waiter, terminalOutcome(terminal));
+  }
+
+  function emitAutomatic(record: AgentRecord): void {
+    const details = buildNotificationDetails(record, 500, undefined);
     pi.sendMessage<NotificationDetails>(
       {
         customType: "subagent-notification",
         content: formatTaskNotification(record),
         display: true,
-        details: buildNotificationDetails(record, 500, undefined),
+        details,
       },
-      { deliverAs: "followUp", triggerTurn: true },
+      { deliverAs: "steer", triggerTurn: true },
     );
-  }
-
-  function sendIndividualNudge(record: AgentRecord): void {
-    onAgentFinishedUI(record.id);
-    scheduleNudge(record.id, () => emitIndividualNudge(record));
-  }
-
-  const groupJoin = new GroupJoinManager((records, partial) => {
-    for (const record of records) onAgentFinishedUI(record.id);
-
-    const groupKey = `group:${records.map((record) => record.id).join(",")}`;
-    scheduleNudge(groupKey, () => {
-      const notifications = records.map(formatTaskNotification).join("\n\n");
-      const label = partial
-        ? `${records.length} agent(s) finished (partial — others still running)`
-        : `${records.length} agent(s) finished`;
-      const [first, ...rest] = records;
-      if (!first) return;
-      const details = buildNotificationDetails(first, 300, undefined);
-      if (rest.length > 0) {
-        details.others = rest.map((record) => buildNotificationDetails(record, 300, undefined));
-      }
-
-      pi.sendMessage<NotificationDetails>(
-        {
-          customType: "subagent-notification",
-          content: `Background agent group completed: ${label}\n\n${notifications}`,
-          display: true,
-          details,
-        },
-        { deliverAs: "followUp", triggerTurn: true },
-      );
-    });
-  }, 30_000);
-
-  function finalizeBatch(): void {
-    batchFinalizeTimer = undefined;
-    const batchAgents = [...currentBatchAgents];
-    currentBatchAgents = [];
-
-    if (batchAgents.length >= 2) {
-      const groupId = `batch-${++batchCounter}`;
-      groupJoin.registerGroup(groupId, batchAgents);
-      for (const id of batchAgents) {
-        const record = getRecord(id);
-        if (!record) continue;
-        record.groupId = groupId;
-        if (record.completedAt != null) groupJoin.onAgentComplete(record);
-      }
-      return;
-    }
-
-    for (const id of batchAgents) {
-      const record = getRecord(id);
-      if (record?.completedAt != null) sendIndividualNudge(record);
-    }
-  }
-
-  function trackSpawned(id: string, joinMode: JoinMode): void {
-    if (joinMode === "async") return;
-    currentBatchAgents.push(id);
-    if (batchFinalizeTimer) clearTimeout(batchFinalizeTimer);
-    batchFinalizeTimer = setTimeout(finalizeBatch, 100);
+    owners.set(record, "automatic");
   }
 
   function onAgentComplete(record: AgentRecord): void {
+    if (disposed || owners.has(record)) return;
     const failed = record.status === "error" || record.status === "stopped";
     pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
     pi.appendEntry("subagents:record", {
@@ -131,27 +118,125 @@ export function createAgentCompletionHandler({
       startedAt: record.startedAt,
       completedAt: record.completedAt,
     });
+    onAgentFinishedUI(record.id);
 
-    if (record.isBackground === false) {
-      onAgentFinishedUI(record.id);
-      return;
+    const waiterId = claims.get(record.id);
+    if (waiterId !== undefined) resolveWaiter(waiterId);
+    else emitAutomatic(record);
+  }
+
+  function waitFor(
+    agentIds: string[],
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<WaitAgentOutcome> {
+    const uniqueIds = [...new Set(agentIds)];
+    if (uniqueIds.length !== agentIds.length) {
+      return Promise.resolve({
+        outcome: "error",
+        timed_out: false,
+        message: "agent_ids must not contain duplicates",
+        agents: [],
+      });
     }
 
-    if (currentBatchAgents.includes(record.id)) return;
+    const records = uniqueIds.map(getRecord);
+    const missing = uniqueIds.filter((_id, index) => !records[index]);
+    if (missing.length > 0) {
+      return Promise.resolve({
+        outcome: "error",
+        timed_out: false,
+        message: `Agent not found: ${missing.join(", ")}`,
+        agents: records
+          .filter((record): record is AgentRecord => Boolean(record))
+          .map((record) => waitResult(record, false)),
+      });
+    }
 
-    if (groupJoin.onAgentComplete(record) === "pass") sendIndividualNudge(record);
+    const claimed = uniqueIds.filter((id) => claims.has(id));
+    if (claimed.length > 0) {
+      return Promise.resolve({
+        outcome: "error",
+        timed_out: false,
+        message: `Agent already has an active waiter: ${claimed.join(", ")}`,
+        agents: (records as AgentRecord[]).map((record) => waitResult(record, false)),
+      });
+    }
+
+    const delivered = (records as AgentRecord[])
+      .filter((record) => owners.has(record))
+      .map((record) => record.id);
+    if (delivered.length > 0) {
+      return Promise.resolve({
+        outcome: "error",
+        timed_out: false,
+        message: `Agent result already delivered: ${delivered.join(", ")}`,
+        agents: (records as AgentRecord[]).map((record) => waitResult(record, false)),
+      });
+    }
+
+    const terminal = (records as AgentRecord[]).filter(isTerminal);
+    if (terminal.length > 0) return Promise.resolve(terminalOutcome(terminal));
+
+    if (signal?.aborted) {
+      return Promise.resolve({
+        outcome: "cancelled",
+        timed_out: false,
+        agents: (records as AgentRecord[]).map((record) => waitResult(record, false)),
+      });
+    }
+
+    return new Promise((resolve) => {
+      const waiter: Waiter = {
+        id: nextWaiterId++,
+        agentIds: uniqueIds,
+        resolve,
+        signal,
+      };
+      for (const id of uniqueIds) claims.set(id, waiter.id);
+      waiters.set(waiter.id, waiter);
+      waiter.timer = setTimeout(() => {
+        finish(waiter, {
+          outcome: "timeout",
+          timed_out: true,
+          agents: waiter.agentIds
+            .map(getRecord)
+            .filter((record): record is AgentRecord => Boolean(record))
+            .map((record) => waitResult(record, false)),
+        });
+      }, timeoutMs);
+      if (signal) {
+        waiter.onAbort = () => {
+          finish(waiter, {
+            outcome: "cancelled",
+            timed_out: false,
+            agents: waiter.agentIds
+              .map(getRecord)
+              .filter((record): record is AgentRecord => Boolean(record))
+              .map((record) => waitResult(record, false)),
+          });
+        };
+        signal.addEventListener("abort", waiter.onAbort, { once: true });
+      }
+    });
   }
 
   return {
-    trackSpawned,
+    waitFor,
     onAgentComplete,
     dispose(): void {
-      if (batchFinalizeTimer) clearTimeout(batchFinalizeTimer);
-      batchFinalizeTimer = undefined;
-      currentBatchAgents = [];
-      for (const timer of pendingNudges.values()) clearTimeout(timer);
-      pendingNudges.clear();
-      groupJoin.dispose();
+      disposed = true;
+      for (const waiter of waiters.values()) {
+        finish(waiter, {
+          outcome: "cancelled",
+          timed_out: false,
+          agents: waiter.agentIds
+            .map(getRecord)
+            .filter((record): record is AgentRecord => Boolean(record))
+            .map((record) => waitResult(record, false)),
+        });
+      }
+      claims.clear();
     },
   };
 }

@@ -127,6 +127,7 @@ describe("ext: / tools: scoping — template-driven e2e (real pi-mono, headless)
       getSystemPrompt: () => PARENT_PROMPT,
       model,
       modelRegistry,
+      sessionManager: { getSessionId: () => "parent", getBranch: () => [] },
     };
     const pi: any = { exec: async () => ({ code: 1, stdout: "", stderr: "" }) };
 
