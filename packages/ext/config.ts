@@ -36,7 +36,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "autoMode" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "cachePadding" | "tools" | "explore" | "fzf" | "todo" | "question" | "notifications" | "checkpoints" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "goal"
+ *   "bashGate" | "autoMode" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "goal"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -58,11 +58,6 @@ export interface SmallModelConfig {
 export interface StatuslineConfig {
   /** Shell command whose trimmed stdout is shown in the statusline. */
   command?: string;
-}
-
-export interface CheckpointsConfig {
-  /** Set to false to disable checkpoint tracking and /rewind. */
-  enabled?: boolean;
 }
 
 export interface AutoCompactionConfig {
@@ -124,14 +119,10 @@ export const EXTENSION_NAMES = [
   "tokenCount",
   "usageDashboard",
   "context",
-  "cachePadding",
   "tools",
   "explore",
   "fzf",
-  "todo",
-  "question",
   "notifications",
-  "checkpoints",
   "autoCompaction",
   "autoMode",
   "spotme",
@@ -153,7 +144,6 @@ export interface BitesConfig {
   statusline?: StatuslineConfig;
   bashGate?: BashGateConfig;
   notifications?: NotificationsConfig;
-  checkpoints?: CheckpointsConfig;
   autoCompaction?: AutoCompactionConfig;
   autoMode?: AutoModeConfig;
   ponytail?: PonytailConfig;
@@ -197,10 +187,6 @@ function isSmallModelConfig(value: unknown): value is SmallModelConfig {
 
 function isStatuslineConfig(value: unknown): value is StatuslineConfig {
   return isRecord(value) && isOptional(value, "command", (field) => typeof field === "string");
-}
-
-function isCheckpointsConfig(value: unknown): value is CheckpointsConfig {
-  return isRecord(value) && isOptional(value, "enabled", (field) => typeof field === "boolean");
 }
 
 function isAutoCompactionConfig(value: unknown): value is AutoCompactionConfig {
@@ -273,7 +259,6 @@ function isBitesConfig(value: unknown): value is BitesConfig {
     isOptional(value, "statusline", isStatuslineConfig) &&
     isOptional(value, "bashGate", isBashGateConfig) &&
     isOptional(value, "notifications", isNotificationsConfig) &&
-    isOptional(value, "checkpoints", isCheckpointsConfig) &&
     isOptional(value, "autoCompaction", isAutoCompactionConfig) &&
     isOptional(value, "autoMode", isAutoModeConfig) &&
     isOptional(value, "ponytail", isPonytailConfig) &&
@@ -319,7 +304,6 @@ export function loadConfig(cwd: string): BitesConfig {
     statusline: { ...global.statusline, ...project.statusline },
     bashGate: { ...global.bashGate, ...project.bashGate },
     notifications: { ...global.notifications, ...project.notifications },
-    checkpoints: { ...global.checkpoints, ...project.checkpoints },
     autoCompaction: { ...global.autoCompaction, ...project.autoCompaction },
     autoMode: { ...global.autoMode, ...project.autoMode },
     ponytail: { ...global.ponytail, ...project.ponytail },

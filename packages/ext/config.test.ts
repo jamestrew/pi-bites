@@ -44,7 +44,7 @@ describe("loadConfig", () => {
       parseBitesConfig({
         ponytail: { defaultMode: "full" },
         autoMode: { enabled: true, thinking: "low" },
-        disable: ["checkpoints", "goal", "autoMode"],
+        disable: ["notifications", "goal", "autoMode"],
       }),
     ).toBeDefined();
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
@@ -75,7 +75,6 @@ describe("loadConfig", () => {
         statusline: {},
         bashGate: {},
         notifications: {},
-        checkpoints: {},
         autoCompaction: {},
         autoMode: {},
         ponytail: {},
