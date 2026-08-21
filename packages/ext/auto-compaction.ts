@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BitesConfig } from "./config.js";
 
 export const DEFAULT_AUTO_COMPACTION_THRESHOLD = 150_000;
@@ -9,7 +9,7 @@ export default function registerAutoCompaction(
 ): void {
   let compactionPending = false;
 
-  pi.on("agent_settled", (_event, ctx) => {
+  const compactAtThreshold = (ctx: ExtensionContext, resume: boolean) => {
     const threshold =
       configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD;
     const tokens = ctx.getContextUsage()?.tokens;
@@ -21,11 +21,30 @@ export default function registerAutoCompaction(
     ctx.compact({
       onComplete: () => {
         compactionPending = false;
+        if (resume) {
+          pi.sendMessage(
+            {
+              customType: "auto-compaction-continuation",
+              content: "Continue the previous task after compaction.",
+              display: false,
+            },
+            { triggerTurn: true, deliverAs: "followUp" },
+          );
+        }
       },
       onError: (error) => {
         compactionPending = false;
         ui?.notify(`Compaction failed: ${error.message}`, "error");
       },
     });
+  };
+
+  pi.on("turn_end", (event, ctx) => {
+    const resume =
+      ctx.hasPendingMessages() ||
+      (event.message.role === "assistant" &&
+        event.message.content.some((block) => block.type === "toolCall"));
+    compactAtThreshold(ctx, resume);
   });
+  pi.on("agent_settled", (_event, ctx) => compactAtThreshold(ctx, false));
 }
