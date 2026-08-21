@@ -75,12 +75,12 @@ describe("Agent call rendering", () => {
 
     expect(collapsed).toBe(
       "general<dim>(test agent)</dim><dim>: openai/gpt-5 · thinking: high</dim>\n" +
-        "<dim>   line one</dim>\n<dim>   line three</dim>\n" +
+        "<dim> line one</dim>\n<dim> line three</dim>\n" +
         "<dim> (ctrl+o to expand)</dim>",
     );
     expect(collapsed).not.toContain("line four");
-    expect(expanded).toContain("<dim>   line four</dim>");
-    expect(expanded.endsWith("<dim>   </dim>")).toBe(true);
+    expect(expanded).toContain("<dim> line four</dim>");
+    expect(expanded.endsWith("<dim> </dim>")).toBe(true);
     expect(
       tool.renderResult(
         { content: [], details: undefined },
