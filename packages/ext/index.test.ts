@@ -10,14 +10,10 @@ const registerModules = [
   "./token-count/index.js",
   "./usage-dashboard.js",
   "./context.js",
-  "./cache-padding/index.js",
   "./tools.js",
   "./file-search/index.js",
   "./at-mention-context/index.js",
-  "./todo/index.js",
-  "./question/index.js",
   "./notifications.js",
-  "./checkpoints.js",
   "./auto-compaction.js",
   "./automode/index.js",
   "./prompt-normalization/index.js",
@@ -39,8 +35,6 @@ async function loadExtension(
 
   const registerSpies = new Map<RegisterModule, ReturnType<typeof vi.fn>>();
   const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
-  const previewCacheSystemPrompt = vi.fn((prompt: string) => `cache:${prompt}`);
-  const previewCacheTools = vi.fn((tools: unknown[]) => tools);
   const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
   const bashGate = { isYolo: vi.fn(() => false) };
   if (options.realGoal) vi.doUnmock("./goal/index.js");
@@ -49,8 +43,6 @@ async function loadExtension(
     const spy = vi.fn();
     if (modulePath === "./bash-gate/index.js") spy.mockReturnValue(bashGate);
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
-    if (modulePath === "./cache-padding/index.js")
-      spy.mockReturnValue({ systemPrompt: previewCacheSystemPrompt, tools: previewCacheTools });
     if (modulePath === "./automode/index.js") spy.mockReturnValue(autoMode);
     registerSpies.set(modulePath, spy);
     vi.doMock(modulePath, () => ({ default: spy }));
@@ -86,8 +78,6 @@ async function loadExtension(
     pi,
     registerSpies,
     previewPonytailPrompt,
-    previewCacheSystemPrompt,
-    previewCacheTools,
     bashGate,
     loadConfig,
     registerBitesCommands,
@@ -128,14 +118,12 @@ describe("extension entrypoint", () => {
       );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./goal/index.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./cache-padding/index.js")).toHaveBeenCalledWith(loaded.pi);
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,
-        expect.any(Function),
-        loaded.previewCacheTools,
+        loaded.previewPonytailPrompt,
       );
       const preview = loaded.registerSpies.get("./context.js")?.mock.calls[0]?.[1];
-      expect(preview("base")).toBe("cache:ponytail:base");
+      expect(preview("base")).toBe("ponytail:base");
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();

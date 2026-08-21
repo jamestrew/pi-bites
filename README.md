@@ -16,9 +16,7 @@ A small collection of personal extensions for the pi coding agent.
 - Fixed-token auto-compaction (150k tokens by default)
 - `/usage` dashboard for session cost/token statistics
 - `/context [all]` breakdown of the active context window
-- Custom todo and question tools
 - Optional notifications
-- Session-scoped `/rollback` checkpoints for Pi-authored `edit`/`write` changes
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
 - Inline `$skill:name` / `$prompt:name` references with hidden context injection
 - Codex-style `/goal` workflow with persisted goals and automatic continuation
@@ -83,7 +81,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, autoMode, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, todo, question, notifications, checkpoints, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal
+bashGate, autoMode, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal
 ```
 
 You can also edit config directly:
@@ -103,24 +101,6 @@ PI_GOAL_SMOKE_MODEL=provider/model bun run smoke:goal-model
 ```
 
 It creates, works, inspects, verifies, completes, and reports usage for a temporary goal. It requires configured model/network access and leaves no repository files behind.
-
-## Rollback checkpoints
-
-Run `/rollback` inside pi to restore files Pi changed with tracked `edit` and `write` tool calls back to an earlier checkpoint in the current session.
-
-Rollback snapshots are stored outside the project repository under pi's agent directory and use an internal Git object store. They do not touch your project's `.git`, stash stack, branches, commits, or index. Checkpoints are scoped by both cwd and Pi session ID, so multiple Pi agents in the same directory do not share rollback history.
-
-Before restoring, `/rollback` shows the files that will be affected and asks for confirmation. Only files Pi touched through tracked mutation tools are eligible.
-
-To disable checkpoint tracking:
-
-```json
-{
-  "checkpoints": { "enabled": false }
-}
-```
-
-Or disable the extension entirely with `/bites:off checkpoints`.
 
 ## Usage dashboard
 

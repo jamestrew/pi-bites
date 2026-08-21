@@ -198,7 +198,6 @@ function estimateMessages(ctx: ExtensionCommandContext): number {
 export default function registerContext(
   pi: ExtensionAPI,
   previewPrompt?: PonytailPromptPreview,
-  previewTools?: (tools: ToolInfo[], activeNames: string[]) => ToolInfo[],
 ): void {
   pi.registerCommand("context", {
     description: "Show estimated context window usage",
@@ -223,7 +222,7 @@ export default function registerContext(
         window: usage?.contextWindow ?? ctx.model.contextWindow,
         systemPrompt,
         options: ctx.getSystemPromptOptions(),
-        tools: previewTools?.(tools, activeTools) ?? tools,
+        tools,
         activeTools,
         messageTokens: estimateMessages(ctx),
       });

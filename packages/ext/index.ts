@@ -5,14 +5,10 @@ import registerFooter from "./footer/index.js";
 import registerTokenCount from "./token-count/index.js";
 import registerUsageDashboard from "./usage-dashboard.js";
 import registerContext from "./context.js";
-import registerCachePadding from "./cache-padding/index.js";
 import registerCustomTools from "./tools.js";
 import registerFzfFileSearch from "./file-search/index.js";
 import registerAtMentionContext from "./at-mention-context/index.js";
-import registerTodo from "./todo/index.js";
-import registerQuestion from "./question/index.js";
 import registerNotifications from "./notifications.js";
-import registerCheckpoints from "./checkpoints.js";
 import registerAutoCompaction from "./auto-compaction.js";
 import registerAutoMode from "./automode/index.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
@@ -66,23 +62,14 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("fzf")) registerFzfFileSearch(pi);
   if (!disabled.has("promptNormalization")) registerPromptNormalization(pi);
   if (!disabled.has("atMentionContext")) registerAtMentionContext(pi);
-  if (!isNonInteractive && !disabled.has("todo")) registerTodo(pi);
-  if (!isNonInteractive && !disabled.has("question")) registerQuestion(pi);
   if (!isNonInteractive && !disabled.has("notifications"))
     registerNotifications(pi, configRef, autoMode);
-  if (!disabled.has("checkpoints")) registerCheckpoints(pi, configRef);
   if (!isNonInteractive && !disabled.has("spotme")) registerSpotme(pi);
   if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
     registerInlineReferences(pi);
   const previewPonytailPrompt = disabled.has("ponytail")
     ? undefined
     : registerPonytail(pi, configRef);
-  const cachePadding = disabled.has("cachePadding") ? undefined : registerCachePadding(pi);
-  const previewSystemPrompt = (prompt: string) => {
-    const withPonytail = previewPonytailPrompt?.(prompt) ?? prompt;
-    return cachePadding?.systemPrompt(withPonytail) ?? withPonytail;
-  };
-  if (!isNonInteractive && !disabled.has("context"))
-    registerContext(pi, previewSystemPrompt, cachePadding?.tools);
+  if (!isNonInteractive && !disabled.has("context")) registerContext(pi, previewPonytailPrompt);
   registerBitesCommands(pi);
 }
