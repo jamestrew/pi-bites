@@ -82,7 +82,7 @@ export function getAgentConfig(name: string): AgentConfig | undefined {
 /** Get all enabled type names (for spawning and tool descriptions). */
 export function getAvailableTypes(): string[] {
   return [...agents.entries()]
-    .filter(([_, config]) => config.enabled !== false)
+    .filter(([, config]) => config.enabled !== false)
     .map(([name]) => name);
 }
 
@@ -94,14 +94,14 @@ export function getAllTypes(): string[] {
 /** Get names of default agents currently in the registry. */
 export function getDefaultAgentNames(): string[] {
   return [...agents.entries()]
-    .filter(([_, config]) => config.isDefault === true)
+    .filter(([, config]) => config.isDefault === true)
     .map(([name]) => name);
 }
 
 /** Get names of user-defined agents (non-defaults) currently in the registry. */
 export function getUserAgentNames(): string[] {
   return [...agents.entries()]
-    .filter(([_, config]) => config.isDefault !== true)
+    .filter(([, config]) => config.isDefault !== true)
     .map(([name]) => name);
 }
 
