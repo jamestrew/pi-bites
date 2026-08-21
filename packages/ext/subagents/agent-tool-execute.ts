@@ -141,6 +141,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
         description: params.description,
         subagentType,
         modelName: agentInvocation.modelName,
+        thinking,
         tags: tags.length > 0 ? tags : undefined,
         toolUses: 0,
         tokens: "",

@@ -39,7 +39,7 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
     (event, payload) => pi.events.emit(event, payload),
   );
 
-  const renderMetadata = new Map<string, { model: string; thinking: string }>();
+  const renderMetadata = new Map<string, { model?: string; thinking?: string }>();
 
   pi.registerTool(
     defineTool({
@@ -56,16 +56,16 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
           : "general";
         const description = sanitizeSingleLine(args.description || "no description");
         const prompt = typeof args.prompt === "string" ? args.prompt : "";
-        const config = getAgentConfig(subagentType);
-        const effective = renderMetadata.get(context.toolCallId);
-        const model = effective?.model ?? args.model ?? config?.model;
-        const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
-        const metadata = sanitizeSingleLine(
-          [model, thinking && `thinking: ${thinking}`].filter(Boolean).join(" · "),
-        );
 
         return {
           render(width: number): string[] {
+            const config = getAgentConfig(subagentType);
+            const effective = renderMetadata.get(context.toolCallId);
+            const model = effective?.model ?? args.model ?? config?.model;
+            const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
+            const metadata = sanitizeSingleLine(
+              [model, thinking && `thinking: ${thinking}`].filter(Boolean).join(" · "),
+            );
             const title =
               theme.fg("toolTitle", theme.bold(sanitizeSingleLine(subagentType))) +
               theme.fg("dim", `(${description})`) +
@@ -87,7 +87,17 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
         };
       },
 
-      renderResult() {
+      renderResult(result, _options, _theme, context) {
+        const details = result.details;
+        const thinking =
+          details?.thinking ??
+          details?.tags?.find((tag) => tag.startsWith("thinking: "))?.slice("thinking: ".length);
+        if (details?.modelName || thinking) {
+          renderMetadata.set(context.toolCallId, {
+            model: details?.modelName,
+            thinking,
+          });
+        }
         return new Container();
       },
       execute: createAgentToolExecute({

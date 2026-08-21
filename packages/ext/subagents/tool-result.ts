@@ -16,7 +16,10 @@ export function formatLifetimeTokens(o: { lifetimeUsage: LifetimeUsage }): strin
 
 /** Build AgentDetails from a base + record-specific fields. */
 export function buildDetails(
-  base: Pick<AgentDetails, "displayName" | "description" | "subagentType" | "modelName" | "tags">,
+  base: Pick<
+    AgentDetails,
+    "displayName" | "description" | "subagentType" | "modelName" | "thinking" | "tags"
+  >,
   record: AgentRecord,
   activity?: { turnCount?: number; toolCalls?: string[] },
   overrides?: Partial<AgentDetails>,

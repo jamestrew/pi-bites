@@ -81,7 +81,14 @@ describe("Agent call rendering", () => {
     expect(collapsed).not.toContain("line four");
     expect(expanded).toContain("<dim>   line four</dim>");
     expect(expanded.endsWith("<dim>   </dim>")).toBe(true);
-    expect(tool.renderResult()).toBeInstanceOf(Container);
+    expect(
+      tool.renderResult(
+        { content: [], details: undefined },
+        { expanded: false, isPartial: false },
+        theme,
+        { toolCallId: "call-1" },
+      ),
+    ).toBeInstanceOf(Container);
   });
 
   it("strips terminal controls from model-controlled text", () => {
@@ -102,6 +109,32 @@ describe("Agent call rendering", () => {
     expect(rendered).not.toContain("\u001b");
     expect(lines[0]).toContain("unsafe description INJECTED");
     expect(rendered).toContain("hello red");
+  });
+
+  it("restores effective model metadata from persisted result details", () => {
+    const tool = captureAgentTool();
+    const call = tool.renderCall(
+      { subagent_type: "general", description: "test", prompt: "do it" },
+      theme,
+      { toolCallId: "restored-call", expanded: false },
+    );
+
+    tool.renderResult(
+      {
+        content: [{ type: "text", text: "persisted result" }],
+        details: {
+          modelName: "openai/gpt-5.6",
+          thinking: "xhigh",
+          tags: ["isolated"],
+        },
+      },
+      { expanded: false, isPartial: false },
+      theme,
+      { toolCallId: "restored-call" },
+    );
+
+    expect(call.render(200)[0]).toContain("openai/gpt-5.6 · thinking: xhigh");
+    expect(call.render(200)[0]).not.toContain("isolated");
   });
 
   it("fits every rendered line at narrow widths", () => {

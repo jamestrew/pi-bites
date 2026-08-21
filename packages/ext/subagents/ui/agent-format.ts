@@ -1,7 +1,7 @@
 /** Shared formatting/types for subagent inline results, FleetView, and notifications. */
 
 import { getConfig } from "../agent-types.js";
-import type { AgentInvocation, SubagentType } from "../types.js";
+import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.js";
 import { type LifetimeUsage, type SessionLike } from "../usage.js";
 
 // ---- Constants ----
@@ -60,6 +60,8 @@ export interface AgentDetails {
   spinnerFrame?: number;
   /** Full effective provider/model identifier. */
   modelName?: string;
+  /** Effective reasoning level persisted for restored call rendering. */
+  thinking?: ThinkingLevel;
   /** Notable config tags (e.g. ["thinking: high", "isolated"]). */
   tags?: string[];
   /** Current turn count. */
