@@ -77,6 +77,22 @@ describe("agent completion delivery", () => {
     completion.dispose();
   });
 
+  it("removes terminal controls from persisted notification content and details", () => {
+    const record = makeRecord("a", {
+      description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent",
+      result: "safe\u001b[31m result",
+    });
+    const { completion, pi } = makeHarness([record]);
+
+    completion.onAgentComplete(record);
+
+    const notification = pi.sendMessage.mock.calls[0]?.[0];
+    expect(notification.content).not.toContain("\u001b");
+    expect(notification.details.description).toBe("unsafe agent");
+    expect(notification.details.result).toBe("safe result");
+    completion.dispose();
+  });
+
   it("delivers the same terminal transition exactly once", () => {
     const record = makeRecord("a");
     const { completion, pi } = makeHarness([record]);

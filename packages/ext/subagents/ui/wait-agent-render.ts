@@ -1,16 +1,15 @@
 import type { Component } from "@earendil-works/pi-tui";
-import { truncateToWidth } from "@earendil-works/pi-tui";
 import { doneStats } from "../tool-result.js";
 import type { WaitAgentDetails, WaitAgentResult } from "../types.js";
-import type { Theme } from "./agent-format.js";
-import { sanitizeText, wrapDisplayLines } from "./text-lines.js";
+import { formatTokens, type Theme } from "./agent-format.js";
+import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
 
 function formatTime(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
 }
 
-function header(details: WaitAgentDetails, now: number): string {
+function header(details: WaitAgentDetails, now: number, theme: Theme): string {
   const endedAt = details.wait_ended_at ?? now;
   const elapsed = formatTime(endedAt - (details.wait_started_at ?? endedAt));
   const action =
@@ -27,26 +26,27 @@ function header(details: WaitAgentDetails, now: number): string {
     details.timeout_ms !== undefined && details.outcome !== "timeout"
       ? ` / timeout ${formatTime(details.timeout_ms)}`
       : "";
-  return `WaitAgent · ${action}${timeout}`;
+  return `WaitAgent${theme.fg("dim", ` · ${action}${timeout}`)}`;
 }
 
-function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"], theme: Theme) {
-  const description = sanitizeText(agent.description || agent.id);
-  const lifetimeUsage = agent.lifetime_usage ?? {
-    input: agent.total_tokens,
-    output: 0,
-    cacheWrite: 0,
-  };
-  const stats = doneStats(agent.tool_uses, lifetimeUsage, agent.duration_ms);
-  if (agent.status === "completed") {
-    return theme.fg("success", "✓") + ` ${description} · ` + theme.fg("muted", `Done (${stats})`);
-  }
+function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]) {
+  const description = sanitizeSingleLine(agent.description || agent.id);
+  const stats = agent.lifetime_usage
+    ? doneStats(agent.tool_uses, agent.lifetime_usage, agent.duration_ms)
+    : [
+        `${agent.tool_uses} tool use${agent.tool_uses === 1 ? "" : "s"}`,
+        agent.total_tokens > 0
+          ? `${formatTokens(agent.total_tokens)}${agent.total_tokens === 1 ? "" : "s"}`
+          : undefined,
+        agent.duration_ms > 0 ? `${(agent.duration_ms / 1000).toFixed(1)}s` : undefined,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+  if (agent.status === "completed") return `✓ ${description} · Done (${stats})`;
   if (agent.status === "error") {
-    return `${theme.fg("error", "✗")} ${description} · ${theme.fg("error", `Error: ${sanitizeText(agent.error ?? "unknown")}`)}${stats ? theme.fg("muted", ` (${stats})`) : ""}`;
+    return `✗ ${description} · Error: ${sanitizeSingleLine(agent.error ?? "unknown")}${stats ? ` (${stats})` : ""}`;
   }
-  if (agent.status === "stopped") {
-    return `${theme.fg("muted", "■")} ${description} · ${theme.fg("muted", `Stopped (${stats})`)}`;
-  }
+  if (agent.status === "stopped") return `■ ${description} · Stopped (${stats})`;
 
   const suffix =
     outcome === "terminal"
@@ -54,7 +54,7 @@ function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]
       : outcome === "timeout" || outcome === "cancelled"
         ? " · continues in background"
         : "";
-  return `${theme.fg("accent", "◷")} ${description}${theme.fg("dim", suffix)}`;
+  return `◷ ${description}${suffix}`;
 }
 
 export function renderWaitAgent(
@@ -64,17 +64,13 @@ export function renderWaitAgent(
 ): Component {
   return {
     render(width: number): string[] {
-      const lines = [truncateToWidth(header(details, Date.now()), width, "…")];
+      const lines = [fitLine(header(details, Date.now(), theme), width)];
 
       details.agents.forEach((agent, index) => {
         const last = index === details.agents.length - 1;
         const branch = last ? "└─ " : "├─ ";
         lines.push(
-          truncateToWidth(
-            theme.fg("dim", ` ${branch}`) + statusLine(agent, details.outcome, theme),
-            width,
-            "…",
-          ),
+          fitLine(theme.fg("dim", ` ${branch}${statusLine(agent, details.outcome)}`), width),
         );
 
         const output = agent.result;
@@ -83,16 +79,14 @@ export function renderWaitAgent(
         const contentWidth = Math.max(1, width - gutter.length);
         const outputLines = wrapDisplayLines(output, contentWidth);
         for (const line of expanded ? outputLines : outputLines.slice(0, 3)) {
-          lines.push(theme.fg("dim", gutter) + truncateToWidth(line, contentWidth, "…"));
+          lines.push(fitLine(theme.fg("dim", `${gutter}${line}`), width));
         }
       });
 
       if (!expanded && details.agents.some((agent) => agent.result))
-        lines.push(truncateToWidth(theme.fg("dim", " (ctrl+o to expand)"), width, "…"));
+        lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
       if (details.message)
-        lines.push(
-          truncateToWidth(theme.fg("error", ` ${sanitizeText(details.message)}`), width, "…"),
-        );
+        lines.push(fitLine(theme.fg("dim", ` ${sanitizeSingleLine(details.message)}`), width));
       return lines;
     },
     invalidate() {},

@@ -1,6 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import { registerNotificationRenderer } from "../notifications.js";
+import { formatTaskNotification, registerNotificationRenderer } from "../notifications.js";
 import type { NotificationDetails } from "../types.js";
 
 const theme = {
@@ -55,18 +55,42 @@ describe("asynchronous completion notification rendering", () => {
     expect(output).not.toContain("ctrl+o");
   });
 
-  it("caps narrow collapsed previews to three physical lines and strips terminal controls", () => {
+  it("caps narrow collapsed previews and single-line metadata", () => {
     const unsafe = {
       ...details(),
-      description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent",
+      description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent\nINJECTED",
       result: `safe\u001b[31m ${"x".repeat(100)}`,
     };
-    const output = renderer()({ details: unsafe }, { expanded: false }, theme).render(20);
 
-    expect(output).toHaveLength(6);
-    expect(output.every((line: string) => visibleWidth(line) <= 20)).toBe(true);
-    expect(output.join("\n")).not.toContain("]52;");
-    expect(output.join("\n")).not.toContain("[31m");
+    for (const width of [1, 2, 3, 20]) {
+      const output = renderer()({ details: unsafe }, { expanded: false }, theme).render(width);
+      expect(output).toHaveLength(6);
+      expect(output.every((line: string) => visibleWidth(line) <= width)).toBe(true);
+      expect(output.every((line: string) => !line.includes("\n"))).toBe(true);
+      expect(output.join("\n")).not.toContain("]52;");
+      expect(output.join("\n")).not.toContain("[31m");
+    }
+  });
+
+  it("strips terminal controls from the persisted notification payload", () => {
+    const payload = formatTaskNotification({
+      id: "agent-1",
+      type: "general",
+      parentSessionId: "parent",
+      prompt: "prompt",
+      description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent",
+      status: "completed",
+      result: "safe\u001b[31m result",
+      toolUses: 0,
+      startedAt: 0,
+      completedAt: 1,
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+      compactionCount: 0,
+    });
+
+    expect(payload).not.toContain("\u001b");
+    expect(payload).toContain("unsafe agent");
+    expect(payload).toContain("safe result");
   });
 
   it("still renders legacy preview details restored from older sessions", () => {

@@ -1,4 +1,4 @@
-import { Container } from "@earendil-works/pi-tui";
+import { Container, visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getAgentToolParameters } from "../agent-tool-description.js";
 import { registerAgents } from "../agent-types.js";
@@ -75,33 +75,45 @@ describe("Agent call rendering", () => {
 
     expect(collapsed).toBe(
       "general<dim>(test agent)</dim><dim>: openai/gpt-5 · thinking: high</dim>\n" +
-        "<dim> │ line one</dim>\n<dim> │ </dim>\n<dim> │ line three</dim>\n" +
+        "<dim>   line one</dim>\n<dim>   line three</dim>\n" +
         "<dim> (ctrl+o to expand)</dim>",
     );
     expect(collapsed).not.toContain("line four");
-    expect(expanded).toContain("<dim> │ line four</dim>");
-    expect(expanded.endsWith("<dim> │ </dim>")).toBe(true);
+    expect(expanded).toContain("<dim>   line four</dim>");
+    expect(expanded.endsWith("<dim>   </dim>")).toBe(true);
     expect(tool.renderResult()).toBeInstanceOf(Container);
   });
 
   it("strips terminal controls from model-controlled text", () => {
     const tool = captureAgentTool();
-    const rendered = tool
+    const lines = tool
       .renderCall(
         {
           subagent_type: "general",
-          description: "unsafe\u001b]52;c;Y29weQ==\u0007 description",
+          description: "unsafe\u001b]52;c;Y29weQ==\u0007 description\nINJECTED",
           prompt: "hello\u001b[31m red",
         },
         theme,
         { toolCallId: "call-1", expanded: true },
       )
-      .render(200)
-      .join("\n");
+      .render(200);
+    const rendered = lines.join("\n");
 
     expect(rendered).not.toContain("\u001b");
-    expect(rendered).toContain("unsafe description");
+    expect(lines[0]).toContain("unsafe description INJECTED");
     expect(rendered).toContain("hello red");
+  });
+
+  it("fits every rendered line at narrow widths", () => {
+    const tool = captureAgentTool();
+    const lines = tool
+      .renderCall({ subagent_type: "general", description: "test", prompt: "long prompt" }, theme, {
+        toolCallId: "call-1",
+        expanded: false,
+      })
+      .render(2);
+
+    expect(lines.every((line: string) => visibleWidth(line) <= 2)).toBe(true);
   });
 
   it("uses the general fallback display for an unknown type", () => {

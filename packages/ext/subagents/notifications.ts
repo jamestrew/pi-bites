@@ -1,9 +1,8 @@
-import { truncateToWidth } from "@earendil-works/pi-tui";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSessionContextPercent, getLifetimeTotal } from "./usage.js";
 import { getStatusNote } from "./status-note.js";
 import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
-import { sanitizeText, wrapDisplayLines } from "./ui/text-lines.js";
+import { fitLine, sanitizeSingleLine, sanitizeText, wrapDisplayLines } from "./ui/text-lines.js";
 import { type AgentRecord, type NotificationDetails } from "./types.js";
 
 /** Human-readable status label for agent completion. */
@@ -20,7 +19,7 @@ function getStatusLabel(status: string, error?: string): string {
 
 /** Escape XML special characters to prevent injection in structured notifications. */
 function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return sanitizeText(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** Format a structured task notification matching Claude Code's <task-notification> XML. */
@@ -62,14 +61,14 @@ export function buildNotificationDetails(
 
   return {
     id: record.id,
-    description: record.description,
+    description: sanitizeSingleLine(record.description),
     status: record.status,
     toolUses: record.toolUses,
     turnCount: activity?.turnCount ?? 0,
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
-    error: record.error,
-    result: record.result || "No output.",
+    error: record.error ? sanitizeSingleLine(record.error) : undefined,
+    result: sanitizeText(record.result || "No output."),
   };
 }
 
@@ -85,10 +84,9 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
         const statusText = isError ? d.status : "completed";
         const lines = [
-          truncateToWidth(
-            `${icon} ${theme.bold(sanitizeText(d.description))} ${theme.fg("dim", statusText)}`,
+          fitLine(
+            `${icon} ${theme.bold(sanitizeSingleLine(d.description))} ${theme.fg("dim", statusText)}`,
             width,
-            "…",
           ),
         ];
 
@@ -98,18 +96,16 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
         if (d.totalTokens > 0)
           parts.push(`${formatTokens(d.totalTokens).replace(/ token$/, "")} tokens`);
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
-        if (parts.length)
-          lines.push(truncateToWidth(`  ${theme.fg("dim", parts.join(" · "))}`, width, "…"));
+        if (parts.length) lines.push(fitLine(`  ${theme.fg("dim", parts.join(" · "))}`, width));
 
         const result = d.result ?? d.resultPreview ?? "No output.";
         const gutter = " │ ";
         const contentWidth = Math.max(1, width - gutter.length);
         const resultLines = wrapDisplayLines(result, contentWidth);
         for (const line of expanded ? resultLines : resultLines.slice(0, 3)) {
-          lines.push(theme.fg("dim", gutter) + truncateToWidth(line, contentWidth, "…"));
+          lines.push(fitLine(`${theme.fg("dim", gutter)}${line}`, width));
         }
-        if (!expanded)
-          lines.push(truncateToWidth(theme.fg("dim", " (ctrl+o to expand)"), width, "…"));
+        if (!expanded) lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
         return lines;
       }
 

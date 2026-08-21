@@ -34,17 +34,26 @@ function details(overrides: Partial<WaitAgentDetails>): WaitAgentDetails {
 }
 
 describe("WaitAgent rendering", () => {
-  it("uses whole seconds for short waits and minutes for long timeouts", () => {
+  it("dims wait status while using whole seconds and minute timeouts", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_500);
+    const dimTheme: Theme = {
+      ...theme,
+      fg: (color, text) => (color === "dim" ? `<dim>${text}</dim>` : text),
+    };
     const output = renderWaitAgent(
-      details({ timeout_ms: 240_000, agents: [agent({})] }),
+      details({
+        timeout_ms: 240_000,
+        agents: [agent({ status: "completed", result: "answer" })],
+      }),
       false,
-      theme,
+      dimTheme,
     )
       .render(120)
       .join("\n");
 
-    expect(output).toContain("WaitAgent · waiting 0s / timeout 4m");
+    expect(output).toContain("WaitAgent<dim> · waiting 0s / timeout 4m</dim>");
+    expect(output).toContain("<dim> └─ ✓ Explore subagent UI flow · Done");
+    expect(output).toContain("<dim>    │ answer</dim>");
     vi.restoreAllMocks();
   });
 
@@ -102,26 +111,32 @@ describe("WaitAgent rendering", () => {
     expect(output).toContain("(ctrl+o to expand)");
   });
 
-  it("caps collapsed output to three physical lines and strips terminal controls", () => {
-    const output = renderWaitAgent(
-      details({
-        outcome: "terminal",
-        wait_ended_at: 11_000,
-        message: "error ".repeat(40),
-        agents: [
-          agent({
-            status: "completed",
-            result: `safe\u001b]52;c;Y29weQ==\u0007 ${"x".repeat(100)}`,
-          }),
-        ],
-      }),
-      false,
-      theme,
-    ).render(20);
+  it("caps collapsed output and metadata at every narrow width", () => {
+    const rendered = (width: number) =>
+      renderWaitAgent(
+        details({
+          outcome: "terminal",
+          wait_ended_at: 11_000,
+          message: "error\nINJECTED ".repeat(40),
+          agents: [
+            agent({
+              description: "safe\nINJECTED",
+              status: "completed",
+              result: `safe\u001b]52;c;Y29weQ==\u0007 ${"x".repeat(100)}`,
+            }),
+          ],
+        }),
+        false,
+        theme,
+      ).render(width);
 
-    expect(output).toHaveLength(7);
-    expect(output.every((line) => visibleWidth(line) <= 20)).toBe(true);
-    expect(output.join("\n")).not.toContain("]52;");
+    for (const width of [1, 2, 3, 4, 5, 6, 20]) {
+      const output = rendered(width);
+      expect(output).toHaveLength(7);
+      expect(output.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(output.every((line) => !line.includes("\n"))).toBe(true);
+      expect(output.join("\n")).not.toContain("]52;");
+    }
   });
 
   it("renders legacy persisted details without raw JSON or invalid durations", () => {
@@ -149,6 +164,8 @@ describe("WaitAgent rendering", () => {
       .join("\n");
 
     expect(output).toContain("Legacy agent · Done");
+    expect(output).toContain("20 tokens");
+    expect(output).not.toContain("↑20");
     expect(output).toContain("legacy result");
     expect(output).not.toContain("NaN");
     expect(output).not.toContain('"outcome"');
