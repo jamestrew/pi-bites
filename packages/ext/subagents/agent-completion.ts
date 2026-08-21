@@ -98,7 +98,7 @@ export function createAgentCompletionHandler({
   }
 
   function emitAutomatic(record: AgentRecord): void {
-    const details = buildNotificationDetails(record, 500, undefined);
+    const details = buildNotificationDetails(record);
     pi.sendMessage<NotificationDetails>(
       {
         customType: "subagent-notification",

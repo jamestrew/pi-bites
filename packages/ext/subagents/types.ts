@@ -162,7 +162,9 @@ export interface NotificationDetails {
   totalTokens: number;
   durationMs: number;
   error?: string;
-  resultPreview: string;
+  result?: string;
+  /** Legacy details restored from sessions created before expandable notifications. */
+  resultPreview?: string;
   /** Additional agents in a group notification. */
   others?: NotificationDetails[];
 }

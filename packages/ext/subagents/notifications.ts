@@ -55,7 +55,6 @@ export function formatTaskNotification(record: AgentRecord): string {
 /** Build notification details for the custom message renderer. */
 export function buildNotificationDetails(
   record: AgentRecord,
-  resultMaxLen: number,
   activity?: AgentActivity,
 ): NotificationDetails {
   const totalTokens = getLifetimeTotal(record.lifetimeUsage);
@@ -69,11 +68,7 @@ export function buildNotificationDetails(
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
     error: record.error,
-    resultPreview: record.result
-      ? record.result.length > resultMaxLen
-        ? record.result.slice(0, resultMaxLen) + "…"
-        : record.result
-      : "No output.",
+    result: record.result || "No output.",
   };
 }
 
@@ -88,28 +83,23 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
         const isError = d.status === "error" || d.status === "stopped";
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
         const statusText = isError ? d.status : "completed";
-
-        let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
+        let text = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
 
         const parts: string[] = [];
         if (d.turnCount > 0) parts.push(formatTurns(d.turnCount));
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
-        if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
+        if (d.totalTokens > 0)
+          parts.push(`${formatTokens(d.totalTokens).replace(/ token$/, "")} tokens`);
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
-        if (parts.length) {
-          line +=
-            "\n  " + parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
-        }
+        if (parts.length) text += `\n  ${theme.fg("dim", parts.join(" · "))}`;
 
-        if (expanded) {
-          const lines = d.resultPreview.split("\n").slice(0, 30);
-          for (const l of lines) line += "\n" + theme.fg("dim", `  ${l}`);
-        } else {
-          const preview = d.resultPreview.split("\n")[0]?.slice(0, 80) ?? "";
-          line += "\n  " + theme.fg("dim", `⎿  ${preview}`);
+        const result = d.result ?? d.resultPreview ?? "No output.";
+        const lines = result.split("\n");
+        for (const line of expanded ? lines : lines.slice(0, 3)) {
+          text += `\n${theme.fg("dim", " │ ")}${line}`;
         }
-
-        return line;
+        if (!expanded) text += `\n${theme.fg("dim", " (ctrl+o to expand)")}`;
+        return text;
       }
 
       const all = [d, ...(d.others ?? [])];

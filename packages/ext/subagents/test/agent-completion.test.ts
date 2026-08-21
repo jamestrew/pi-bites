@@ -64,7 +64,7 @@ describe("agent completion delivery", () => {
     completion.dispose();
   });
 
-  it("sends the full final response while keeping display details concise", () => {
+  it("sends the full final response to both the agent and expandable renderer", () => {
     const result = "x".repeat(1_000) + "final marker";
     const record = makeRecord("a", { result });
     const { completion, pi } = makeHarness([record]);
@@ -73,7 +73,7 @@ describe("agent completion delivery", () => {
 
     const notification = pi.sendMessage.mock.calls[0]?.[0];
     expect(notification.content).toContain(`<result>${result}</result>`);
-    expect(notification.details.resultPreview).toBe("x".repeat(500) + "…");
+    expect(notification.details.result).toBe(result);
     completion.dispose();
   });
 
