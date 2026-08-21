@@ -38,11 +38,27 @@ describe("asynchronous completion notification rendering", () => {
 
     expect(output).toBe(
       "✓ Demo delayed background task completed\n" +
-        "  1 tool use · 5.9k tokens · 36.6s\n" +
-        " │ response one\n │ response two\n │ response three\n" +
+        "  (1 tool use · 5.9k tokens · 36.6s)\n" +
+        "  response one\n  response two\n  response three\n" +
         " (ctrl+o to expand)",
     );
     expect(output).not.toContain("response four");
+  });
+
+  it("dims every notification line below the heading", () => {
+    const dimTheme = {
+      ...theme,
+      fg: (color: string, text: string) => (color === "dim" ? `<dim>${text}</dim>` : text),
+    };
+    const output = renderer()({ details: details() }, { expanded: false }, dimTheme).render(120);
+
+    expect(output.slice(1)).toEqual([
+      "<dim>  (1 tool use · 5.9k tokens · 36.6s)</dim>",
+      "<dim>  response one</dim>",
+      "<dim>  response two</dim>",
+      "<dim>  response three</dim>",
+      "<dim> (ctrl+o to expand)</dim>",
+    ]);
   });
 
   it("shows the complete response when expanded", () => {
@@ -51,7 +67,7 @@ describe("asynchronous completion notification rendering", () => {
       .map((line: string) => line.trimEnd())
       .join("\n");
 
-    expect(output).toContain(" │ response four");
+    expect(output).toContain("  response four");
     expect(output).not.toContain("ctrl+o");
   });
 
@@ -100,6 +116,6 @@ describe("asynchronous completion notification rendering", () => {
       .map((line: string) => line.trimEnd())
       .join("\n");
 
-    expect(output).toContain(" │ legacy response");
+    expect(output).toContain("  legacy response");
   });
 });

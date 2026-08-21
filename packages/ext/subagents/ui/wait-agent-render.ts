@@ -75,7 +75,7 @@ export function renderWaitAgent(
 
         const output = agent.result;
         if (!output || (agent.status !== "completed" && agent.status !== "error")) return;
-        const gutter = last ? "    │ " : " │  │ ";
+        const gutter = last ? "      " : " │    ";
         const contentWidth = Math.max(1, width - gutter.length);
         const outputLines = wrapDisplayLines(output, contentWidth);
         for (const line of expanded ? outputLines : outputLines.slice(0, 3)) {

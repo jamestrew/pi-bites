@@ -96,14 +96,14 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
         if (d.totalTokens > 0)
           parts.push(`${formatTokens(d.totalTokens).replace(/ token$/, "")} tokens`);
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
-        if (parts.length) lines.push(fitLine(`  ${theme.fg("dim", parts.join(" · "))}`, width));
+        if (parts.length) lines.push(fitLine(theme.fg("dim", `  (${parts.join(" · ")})`), width));
 
         const result = d.result ?? d.resultPreview ?? "No output.";
-        const gutter = " │ ";
+        const gutter = "  ";
         const contentWidth = Math.max(1, width - gutter.length);
         const resultLines = wrapDisplayLines(result, contentWidth);
         for (const line of expanded ? resultLines : resultLines.slice(0, 3)) {
-          lines.push(fitLine(`${theme.fg("dim", gutter)}${line}`, width));
+          lines.push(fitLine(theme.fg("dim", `${gutter}${line}`), width));
         }
         if (!expanded) lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
         return lines;

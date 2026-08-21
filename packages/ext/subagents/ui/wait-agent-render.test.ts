@@ -53,7 +53,7 @@ describe("WaitAgent rendering", () => {
 
     expect(output).toContain("WaitAgent<dim> · waiting 0s / timeout 4m</dim>");
     expect(output).toContain("<dim> └─ ✓ Explore subagent UI flow · Done");
-    expect(output).toContain("<dim>    │ answer</dim>");
+    expect(output).toContain("<dim>      answer</dim>");
     vi.restoreAllMocks();
   });
 
@@ -105,7 +105,7 @@ describe("WaitAgent rendering", () => {
     expect(output).toContain(
       "├─ ✓ Explore subagent UI flow · Done (2 tool uses · ↑5.9k ↓900 · 12.5s)",
     );
-    expect(output).toContain("│  │ response three");
+    expect(output).toContain("│    response three");
     expect(output).not.toContain("response four");
     expect(output).toContain("└─ ◷ Trace completion delivery · still running");
     expect(output).toContain("(ctrl+o to expand)");
@@ -204,7 +204,7 @@ describe("WaitAgent rendering", () => {
       .join("\n");
 
     expect(output).toContain("WaitAgent · cancelled after 7s");
-    expect(output).toContain("│  │ four");
+    expect(output).toContain("│    four");
     expect(output).toContain("continues in background");
     expect(output).not.toContain("ctrl+o");
   });
