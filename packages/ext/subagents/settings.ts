@@ -5,15 +5,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { JoinMode } from "./types.js";
 import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
 
 export const SubagentsSettingsSchema = Type.Object({
   maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
-  defaultJoinMode: Type.Optional(
-    Type.Union([Type.Literal("async"), Type.Literal("group"), Type.Literal("smart")]),
-  ),
   /**
    * Validate runtime subagent model choices against pi's resolved session scope from
    * CLI `--models` and global/project `enabledModels`. Empty scope is unrestricted.
@@ -33,7 +29,6 @@ export type ToolDescriptionMode = NonNullable<SubagentsSettings["toolDescription
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
   setMaxConcurrent: (n: number) => void;
-  setDefaultJoinMode: (mode: JoinMode) => void;
   setScopeModels: (enabled: boolean) => void;
   setDisableDefaultAgents: (b: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
@@ -61,13 +56,6 @@ export function parseSubagentsSettings(value: unknown): SubagentsSettings | unde
     value.maxConcurrent <= 1024
   )
     settings.maxConcurrent = value.maxConcurrent;
-  if (
-    "defaultJoinMode" in value &&
-    (value.defaultJoinMode === "async" ||
-      value.defaultJoinMode === "group" ||
-      value.defaultJoinMode === "smart")
-  )
-    settings.defaultJoinMode = value.defaultJoinMode;
   if ("scopeModels" in value && typeof value.scopeModels === "boolean")
     settings.scopeModels = value.scopeModels;
   if ("disableDefaultAgents" in value && typeof value.disableDefaultAgents === "boolean")
@@ -132,7 +120,6 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
-  if (s.defaultJoinMode) appliers.setDefaultJoinMode(s.defaultJoinMode);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
   if (typeof s.disableDefaultAgents === "boolean")
     appliers.setDisableDefaultAgents(s.disableDefaultAgents);

@@ -1,10 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_AGENTS } from "../default-agents.js";
-import {
-  resolveAgentInvocationConfig,
-  resolveJoinMode,
-  resolveRunInBackground,
-} from "../invocation-config.js";
+import { resolveAgentInvocationConfig } from "../invocation-config.js";
 import type { AgentConfig } from "../types.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
@@ -17,26 +12,10 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     systemPrompt: "Test agent",
     promptMode: "replace",
     inheritContext: false,
-    runInBackground: false,
     isolated: false,
     ...overrides,
   };
 }
-
-describe("resolveRunInBackground", () => {
-  it("applies caller, config, then background-default precedence", () => {
-    expect(resolveRunInBackground(undefined, undefined)).toBe(true);
-    expect(resolveRunInBackground(makeConfig({ runInBackground: true }), false)).toBe(false);
-    expect(resolveRunInBackground(makeConfig({ runInBackground: false }), undefined)).toBe(false);
-  });
-
-  it("runs the built-in Explore agent in the foreground unless overridden", () => {
-    const explore = DEFAULT_AGENTS.get("explore");
-
-    expect(resolveRunInBackground(explore, undefined)).toBe(false);
-    expect(resolveRunInBackground(explore, true)).toBe(true);
-  });
-});
 
 describe("resolveAgentInvocationConfig", () => {
   it("prefers public tool-call params over agent defaults", () => {
@@ -45,7 +24,6 @@ describe("resolveAgentInvocationConfig", () => {
         model: "provider/config-model",
         thinking: "high",
         inheritContext: false,
-        runInBackground: false,
         isolated: false,
         isolation: "worktree",
       }),
@@ -53,19 +31,19 @@ describe("resolveAgentInvocationConfig", () => {
         model: "provider/param-model",
         thinking: "minimal",
         inherit_context: true,
-        run_in_background: true,
         isolated: true,
         isolation: "worktree",
       },
     );
 
-    expect(resolved.modelInput).toBe("provider/param-model");
-    expect(resolved.modelFromParams).toBe(true);
-    expect(resolved.thinking).toBe("minimal");
-    expect(resolved.inheritContext).toBe(true);
-    expect(resolved.runInBackground).toBe(true);
-    expect(resolved.isolated).toBe(false);
-    expect(resolved.isolation).toBe("worktree");
+    expect(resolved).toMatchObject({
+      modelInput: "provider/param-model",
+      modelFromParams: true,
+      thinking: "minimal",
+      inheritContext: true,
+      isolated: false,
+      isolation: "worktree",
+    });
   });
 
   it("uses tool-call params when no agent config is available", () => {
@@ -73,63 +51,27 @@ describe("resolveAgentInvocationConfig", () => {
       model: "provider/param-model",
       thinking: "minimal",
       inherit_context: true,
-      run_in_background: true,
       isolated: true,
       isolation: "worktree",
     });
 
-    expect(resolved.modelInput).toBe("provider/param-model");
-    expect(resolved.modelFromParams).toBe(true);
-    expect(resolved.thinking).toBe("minimal");
-    expect(resolved.inheritContext).toBe(true);
-    expect(resolved.runInBackground).toBe(true);
-    expect(resolved.isolated).toBe(true);
-    expect(resolved.isolation).toBe("worktree");
+    expect(resolved).toMatchObject({
+      modelInput: "provider/param-model",
+      modelFromParams: true,
+      thinking: "minimal",
+      inheritContext: true,
+      isolated: true,
+      isolation: "worktree",
+    });
   });
 
-  it("lets parent fill in booleans when config leaves them undefined", () => {
+  it("defaults boolean options when config and params omit them", () => {
     const resolved = resolveAgentInvocationConfig(
-      makeConfig({
-        inheritContext: undefined,
-        runInBackground: undefined,
-        isolated: undefined,
-      }),
-      {
-        inherit_context: true,
-        run_in_background: true,
-        isolated: true,
-      },
-    );
-
-    expect(resolved.inheritContext).toBe(true);
-    expect(resolved.runInBackground).toBe(true);
-    expect(resolved.isolated).toBe(true);
-  });
-
-  it("defaults agents to background when config and params leave it unset", () => {
-    const resolved = resolveAgentInvocationConfig(
-      makeConfig({
-        inheritContext: undefined,
-        runInBackground: undefined,
-        isolated: undefined,
-      }),
+      makeConfig({ inheritContext: undefined, isolated: undefined }),
       {},
     );
 
     expect(resolved.inheritContext).toBe(false);
-    expect(resolved.runInBackground).toBe(true);
     expect(resolved.isolated).toBe(false);
-  });
-});
-
-describe("resolveJoinMode", () => {
-  it("returns the global default for background agents", () => {
-    expect(resolveJoinMode("smart", true)).toBe("smart");
-    expect(resolveJoinMode("async", true)).toBe("async");
-  });
-
-  it("ignores join mode for foreground agents", () => {
-    expect(resolveJoinMode("smart", false)).toBeUndefined();
-    expect(resolveJoinMode("group", false)).toBeUndefined();
   });
 });

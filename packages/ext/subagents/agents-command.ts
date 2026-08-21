@@ -24,7 +24,7 @@ import {
   saveAndEmitChanged,
   type ToolDescriptionMode,
 } from "./settings.js";
-import { type AgentConfig, type AgentRecord, type JoinMode } from "./types.js";
+import { type AgentConfig, type AgentRecord } from "./types.js";
 import { type AgentActivity, formatDuration, getDisplayName } from "./ui/agent-format.js";
 
 type AgentsCommandDeps = {
@@ -32,8 +32,6 @@ type AgentsCommandDeps = {
   agentActivity: Map<string, AgentActivity>;
   reloadCustomAgents: () => void;
   getModelLabelFromConfig: (model: string) => string;
-  getDefaultJoinMode: () => JoinMode;
-  setDefaultJoinMode: (mode: JoinMode) => void;
   isScopeModelsEnabled: () => boolean;
   setScopeModelsEnabled: (enabled: boolean) => void;
   setDisableDefaultAgents: (disabled: boolean) => void;
@@ -49,8 +47,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     agentActivity,
     reloadCustomAgents,
     getModelLabelFromConfig,
-    getDefaultJoinMode,
-    setDefaultJoinMode,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
     setDisableDefaultAgents,
@@ -387,7 +383,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     if (cfg.disallowedTools?.length)
       fmFields.push(`disallowed_tools: ${cfg.disallowedTools.join(", ")}`);
     if (cfg.inheritContext) fmFields.push("inherit_context: true");
-    if (cfg.runInBackground) fmFields.push("run_in_background: true");
     if (cfg.isolated) fmFields.push("isolated: true");
     if (cfg.memory) fmFields.push(`memory: ${cfg.memory}`);
     if (cfg.isolation) fmFields.push(`isolation: ${cfg.isolation}`);
@@ -459,7 +454,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
   function snapshotSettings(): SubagentsSettings {
     return {
       maxConcurrent: manager.getMaxConcurrent(),
-      defaultJoinMode: getDefaultJoinMode(),
       scopeModels: isScopeModelsEnabled(),
       disableDefaultAgents: isDefaultsDisabled(),
       toolDescriptionMode: getToolDescriptionMode(),
@@ -477,16 +471,9 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
         {
           id: "maxConcurrent",
           label: "Max concurrency",
-          description: "Max concurrent background agents (Enter to type)",
+          description: "Max concurrent agents (Enter to type)",
           currentValue: String(mc),
           values: [String(mc)],
-        },
-        {
-          id: "joinMode",
-          label: "Join mode",
-          description: "Default join mode for background agents",
-          currentValue: getDefaultJoinMode(),
-          values: ["smart", "async", "group"],
         },
         {
           id: "scopeModels",
@@ -529,10 +516,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           manager.setMaxConcurrent(n);
           notifyApplied(ctx, `Max concurrency set to ${n}`);
         }
-      } else if (id === "joinMode") {
-        if (value !== "async" && value !== "group" && value !== "smart") return;
-        setDefaultJoinMode(value);
-        notifyApplied(ctx, `Default join mode set to ${value}`);
       } else if (id === "scopeModels") {
         const enabled = value === "on";
         setScopeModelsEnabled(enabled);

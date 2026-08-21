@@ -15,18 +15,16 @@ Notes:
 - description: 3-5 words (shown in UI). Prompts must be self-contained — the agent has not seen this
   conversation.
 - Handle ordinary implementation requests directly. Use general when the user requests it, independent work
-  can run in parallel, or delegation has another concrete stated benefit; do not spawn it foreground just because
-  work is complex or multi-step.
+  can run in parallel, or delegation has another concrete stated benefit; complexity alone is not a reason.
 - Start bounded lookups with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader retrieval
   is needed; include what was already checked. Use Explore immediately for clearly high-fanout searches or
   explicit requests to locate, trace, or factually map code. Do not delegate code review, design or plan evaluation,
   cross-file consistency audits, root-cause analysis, or other judgment-heavy work; synthesize the evidence yourself.
-- Use foreground when you need the agent's result before continuing, especially when exploration informs your
-  next steps. Use background for genuinely independent work. You are notified when background agents finish —
-  never poll or sleep.
+- Agent always spawns concurrently and returns an identity. Use WaitAgent only when selected findings block
+  progress; otherwise continue useful work or respond and accept automatic completion delivery. Never poll or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before
   reporting work done.
-- MessageAgent sends a message to a running background agent; it does not resume completed agents.
+- MessageAgent sends a message to a running agent; it does not resume completed agents.
 - isolation: "worktree" runs the agent in an isolated git worktree; changes land on a branch.`;
 
 const FULL_DESCRIPTION = `Launch a new agent when delegation has a concrete benefit. Each agent type has specific
@@ -45,8 +43,8 @@ When using the Agent tool, specify a subagent_type parameter to select which age
 
 Handle ordinary implementation requests directly in the primary agent. Use a general subagent when the user
 explicitly requests one, independent work can run in parallel, or delegation has another concrete, stated
-benefit. Do not spawn a blocking foreground general subagent merely because a task is complex or multi-step.
-Continue to use specialized agents when their specialization provides a clear benefit.
+benefit. Do not spawn a general subagent merely because a task is complex or multi-step. Continue to use
+specialized agents when their specialization provides a clear benefit.
 
 Start bounded lookups with direct tools — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or string.
 If 2-4 targeted tool calls do not locate the answer and the next step requires broader retrieval, delegate to
@@ -59,20 +57,17 @@ and final technical conclusions.
 ## Usage notes
 
 - Always include a short (3-5 word) description summarizing what the agent will do (shown in UI).
-- When you launch multiple agents for independent work, send them in a single message with multiple tool uses,
-  with run_in_background: true on each, so they run concurrently. If the user specifies that they want agents run
-  "in parallel", you MUST send a single message with multiple tool calls. Foreground calls run sequentially —
-  only one executes at a time.
+- Launch independent agents together when parallel tool calls are available; every Agent call returns immediately
+  with a stable identity and agents run subject to the configured concurrency limit.
 - When the agent is done, it returns a single message back to you. The result is not visible to the user — to
   show the user, send a text message with a concise summary.
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an
   agent writes or edits code, check the actual changes before reporting work as done.
-- Use foreground (run_in_background: false) when you need the agent's result before you can proceed, especially
-  when exploration informs your next steps.
-- Use background for genuinely independent work. You will be notified when one completes — do NOT poll or sleep
-  waiting for it. Continue with other independent work or respond to the user instead.
+- Use WaitAgent when selected findings are required before you can proceed. Wait once with a long enough timeout,
+  and only after doing useful parallel work. Do not repeatedly wait, poll status, or sleep with shell commands.
+- If an agent's result does not block progress, continue or respond. Unconsumed results are delivered automatically.
 - Every Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
-- Use MessageAgent to send mid-run messages to a running background agent.
+- Use MessageAgent to send mid-run messages to a running agent.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.),
   since it is not aware of the user's intent.
 - Do not duplicate delegated exploration. Pass prior findings into the prompt, then use the result to narrow any
@@ -117,7 +112,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Do not delegate code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy work to Explore.",
     "The primary agent must read decisive files and perform synthesis, evaluation, and recommendations.",
   ].join(" "),
-  "Use foreground when you need the agent's result before continuing, especially when exploration informs your next steps. Use background for genuinely independent work. You will be notified when background agents finish — do not poll or sleep.",
+  "Agent returns immediately with a stable identity. Use WaitAgent only when selected findings block progress; otherwise continue useful work or respond and accept automatic completion delivery. Never poll status or sleep.",
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",
 ];
 
@@ -141,12 +136,6 @@ export function getAgentToolParameters() {
         Type.String({
           description:
             "Thinking level: off, minimal, low, medium, high, xhigh, max. Overrides agent default.",
-        }),
-      ),
-      run_in_background: Type.Optional(
-        Type.Boolean({
-          description:
-            "Defaults to the agent's configured mode, otherwise background. Set to false when you need the result before continuing.",
         }),
       ),
       isolation: Type.Optional(

@@ -1,8 +1,8 @@
-import { Text } from "@earendil-works/pi-tui";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getSessionContextPercent, getLifetimeTotal } from "./usage.js";
 import { getStatusNote } from "./status-note.js";
 import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
+import { fitLine, sanitizeSingleLine, sanitizeText, wrapDisplayLines } from "./ui/text-lines.js";
 import { type AgentRecord, type NotificationDetails } from "./types.js";
 
 /** Human-readable status label for agent completion. */
@@ -19,7 +19,7 @@ function getStatusLabel(status: string, error?: string): string {
 
 /** Escape XML special characters to prevent injection in structured notifications. */
 function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return sanitizeText(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** Format a structured task notification matching Claude Code's <task-notification> XML. */
@@ -55,25 +55,20 @@ export function formatTaskNotification(record: AgentRecord): string {
 /** Build notification details for the custom message renderer. */
 export function buildNotificationDetails(
   record: AgentRecord,
-  resultMaxLen: number,
   activity?: AgentActivity,
 ): NotificationDetails {
   const totalTokens = getLifetimeTotal(record.lifetimeUsage);
 
   return {
     id: record.id,
-    description: record.description,
+    description: sanitizeSingleLine(record.description),
     status: record.status,
     toolUses: record.toolUses,
     turnCount: activity?.turnCount ?? 0,
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
-    error: record.error,
-    resultPreview: record.result
-      ? record.result.length > resultMaxLen
-        ? record.result.slice(0, resultMaxLen) + "…"
-        : record.result
-      : "No output.",
+    error: record.error ? sanitizeSingleLine(record.error) : undefined,
+    result: sanitizeText(record.result || "No output."),
   };
 }
 
@@ -84,36 +79,41 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
       const d = message.details;
       if (!d) return undefined;
 
-      function renderOne(d: NotificationDetails): string {
+      function renderOne(d: NotificationDetails, width: number): string[] {
         const isError = d.status === "error" || d.status === "stopped";
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
         const statusText = isError ? d.status : "completed";
-
-        let line = `${icon} ${theme.bold(d.description)} ${theme.fg("dim", statusText)}`;
+        const lines = [
+          fitLine(
+            `${icon} ${theme.bold(sanitizeSingleLine(d.description))} ${theme.fg("dim", statusText)}`,
+            width,
+          ),
+        ];
 
         const parts: string[] = [];
         if (d.turnCount > 0) parts.push(formatTurns(d.turnCount));
         if (d.toolUses > 0) parts.push(`${d.toolUses} tool use${d.toolUses === 1 ? "" : "s"}`);
-        if (d.totalTokens > 0) parts.push(formatTokens(d.totalTokens));
+        if (d.totalTokens > 0)
+          parts.push(`${formatTokens(d.totalTokens).replace(/ token$/, "")} tokens`);
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
-        if (parts.length) {
-          line +=
-            "\n  " + parts.map((p) => theme.fg("dim", p)).join(" " + theme.fg("dim", "·") + " ");
-        }
+        if (parts.length) lines.push(fitLine(theme.fg("dim", `  (${parts.join(" · ")})`), width));
 
-        if (expanded) {
-          const lines = d.resultPreview.split("\n").slice(0, 30);
-          for (const l of lines) line += "\n" + theme.fg("dim", `  ${l}`);
-        } else {
-          const preview = d.resultPreview.split("\n")[0]?.slice(0, 80) ?? "";
-          line += "\n  " + theme.fg("dim", `⎿  ${preview}`);
+        const result = d.result ?? d.resultPreview ?? "No output.";
+        const gutter = "  ";
+        const contentWidth = Math.max(1, width - gutter.length);
+        const resultLines = wrapDisplayLines(result, contentWidth);
+        for (const line of expanded ? resultLines : resultLines.slice(0, 3)) {
+          lines.push(fitLine(theme.fg("dim", `${gutter}${line}`), width));
         }
-
-        return line;
+        if (!expanded) lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
+        return lines;
       }
 
       const all = [d, ...(d.others ?? [])];
-      return new Text(all.map(renderOne).join("\n"), 0, 0);
+      return {
+        render: (width: number) => all.flatMap((details) => renderOne(details, width)),
+        invalidate() {},
+      };
     },
   );
 }

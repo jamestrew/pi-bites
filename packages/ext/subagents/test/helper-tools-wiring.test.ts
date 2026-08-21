@@ -39,7 +39,12 @@ function ctx() {
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd: "/tmp",
     model: undefined,
-    modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+    modelRegistry: {
+      find: vi.fn(),
+      getAvailable: vi.fn(() => []),
+      getRegisteredProviderIds: vi.fn(() => []),
+      getRegisteredProviderConfig: vi.fn(),
+    },
     sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
     getSystemPrompt: vi.fn(() => "parent"),
   } as any;
@@ -54,7 +59,6 @@ async function spawnBackground(tools: Map<string, any>) {
       prompt: "go",
       description: "bg",
       subagent_type: "general-purpose",
-      run_in_background: true,
     },
     undefined,
     undefined,

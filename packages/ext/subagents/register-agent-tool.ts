@@ -1,21 +1,18 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { type AgentManager } from "./agent-manager.js";
+import { Container } from "@earendil-works/pi-tui";
+import type { AgentManager } from "./agent-manager.js";
 import {
   AGENT_PROMPT_GUIDELINES,
   getAgentToolDescription,
   getAgentToolParameters,
 } from "./agent-tool-description.js";
 import { createAgentToolExecute } from "./agent-tool-execute.js";
-import { buildDetails } from "./tool-result.js";
 import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { getAgentConfig, resolveType } from "./agent-types.js";
-import { resolveRunInBackground } from "./invocation-config.js";
 import { applyAndEmitLoaded, type ToolDescriptionMode } from "./settings.js";
-import { type AgentRecord, type JoinMode } from "./types.js";
-import { type AgentActivity, getDisplayName } from "./ui/agent-format.js";
-import { type FleetList } from "./ui/fleet-list.js";
-import { renderAgentToolResult } from "./ui/agent-tool-render.js";
+import { type AgentActivity } from "./ui/agent-format.js";
+import type { FleetList } from "./ui/fleet-list.js";
+import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./ui/text-lines.js";
 
 type RegisterAgentToolDeps = {
   manager: AgentManager;
@@ -24,121 +21,92 @@ type RegisterAgentToolDeps = {
   reloadCustomAgents: () => void;
   isScopeModelsEnabled: () => boolean;
   getToolDescriptionMode: () => ToolDescriptionMode;
-  setDefaultJoinMode: (mode: JoinMode) => void;
   setScopeModelsEnabled: (enabled: boolean) => void;
   setDisableDefaultAgents: (disabled: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setFleetViewEnabled: (enabled: boolean) => void;
-  getDefaultJoinMode: () => JoinMode;
-  trackSpawned: (id: string, joinMode: JoinMode) => void;
 };
 
 export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
-  const {
-    manager,
-    agentActivity,
-    fleet,
-    reloadCustomAgents,
-    isScopeModelsEnabled,
-    getToolDescriptionMode,
-    setDefaultJoinMode,
-    setScopeModelsEnabled,
-    setDisableDefaultAgents,
-    setToolDescriptionMode,
-    setFleetViewEnabled,
-    getDefaultJoinMode,
-    trackSpawned,
-  } = deps;
-  const terminalRecords = new Map<string, AgentRecord>();
-  const rememberTerminalRecord = (event: { id: string }) => {
-    const { id } = event;
-    if (!id) return;
-    const record = manager.getRecord(id);
-    if (record) terminalRecords.set(id, record);
-  };
-  pi.events.on("subagents:completed", (data) => rememberTerminalRecord(data as { id: string }));
-  pi.events.on("subagents:failed", (data) => rememberTerminalRecord(data as { id: string }));
-
   applyAndEmitLoaded(
     {
-      setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
-      setDefaultJoinMode,
-      setScopeModels: setScopeModelsEnabled,
-      setDisableDefaultAgents,
-      setToolDescriptionMode,
-      setFleetView: setFleetViewEnabled,
+      setMaxConcurrent: (n) => deps.manager.setMaxConcurrent(n),
+      setScopeModels: deps.setScopeModelsEnabled,
+      setDisableDefaultAgents: deps.setDisableDefaultAgents,
+      setToolDescriptionMode: deps.setToolDescriptionMode,
+      setFleetView: deps.setFleetViewEnabled,
     },
     (event, payload) => pi.events.emit(event, payload),
   );
 
-  const renderMetadata = new Map<string, { model: string; thinking: string }>();
+  const renderMetadata = new Map<string, { model?: string; thinking?: string }>();
 
   pi.registerTool(
     defineTool({
       name: SUBAGENT_TOOL_NAMES.AGENT,
       label: "Agent",
-      description: getAgentToolDescription(getToolDescriptionMode()),
+      description: getAgentToolDescription(deps.getToolDescriptionMode()),
       promptSnippet: "Launch autonomous sub-agents when delegation has a concrete benefit",
       promptGuidelines: AGENT_PROMPT_GUIDELINES,
       parameters: getAgentToolParameters(),
 
-      // ---- Custom rendering: Claude Code style ----
-
       renderCall(args, theme, context) {
         const subagentType = args.subagent_type
           ? (resolveType(args.subagent_type) ?? "general")
-          : undefined;
-        const displayName = subagentType ? getDisplayName(subagentType) : "Agent";
-        const preview =
-          args.description ||
-          String(args.prompt).replace(/\s+/g, " ").trim().slice(0, 80) ||
-          "no prompt";
-        const config = subagentType ? getAgentConfig(subagentType) : undefined;
-        const effective = renderMetadata.get(context.toolCallId);
-        const model = effective?.model ?? args.model ?? config?.model;
-        const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
-        const modelSuffix = [model, thinking && `thinking: ${thinking}`]
-          .filter(Boolean)
-          .join(" · ");
-        const suffixes = [
-          modelSuffix || undefined,
-          resolveRunInBackground(config, args.run_in_background) ? "background" : undefined,
-        ]
-          .filter(Boolean)
-          .map((s) => theme.fg("dim", `: ${s}`))
-          .join("");
-        return new Text(
-          theme.fg("toolTitle", theme.bold(displayName)) +
-            theme.fg("dim", `(${preview})`) +
-            suffixes,
-          0,
-          0,
-        );
+          : "general";
+        const description = sanitizeSingleLine(args.description || "no description");
+        const prompt = typeof args.prompt === "string" ? args.prompt : "";
+
+        return {
+          render(width: number): string[] {
+            const config = getAgentConfig(subagentType);
+            const effective = renderMetadata.get(context.toolCallId);
+            const model = effective?.model ?? args.model ?? config?.model;
+            const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
+            const metadata = sanitizeSingleLine(
+              [model, thinking && `thinking: ${thinking}`].filter(Boolean).join(" · "),
+            );
+            const title =
+              theme.fg("toolTitle", theme.bold(sanitizeSingleLine(subagentType))) +
+              theme.fg("dim", `(${description})`) +
+              (metadata ? theme.fg("dim", `: ${metadata}`) : "");
+            const lines = [fitLine(title, width)];
+            const promptWidth = Math.max(1, width - 1);
+            const promptLines = wrapDisplayLines(prompt, promptWidth);
+            const visiblePromptLines = context.expanded
+              ? promptLines
+              : promptLines.slice(0, 3).filter((line) => line.trim().length > 0);
+            for (const line of visiblePromptLines) {
+              lines.push(fitLine(theme.fg("dim", ` ${line}`), width));
+            }
+            if (!context.expanded)
+              lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
+            return lines;
+          },
+          invalidate() {},
+        };
       },
 
-      renderResult(result, options, theme, context) {
+      renderResult(result, _options, _theme, context) {
         const details = result.details;
-        const record = details?.agentId
-          ? (terminalRecords.get(details.agentId) ?? manager.getRecord(details.agentId))
-          : undefined;
-        const currentResult =
-          details && record && ["completed", "error", "stopped"].includes(record.status)
-            ? {
-                ...result,
-                details: buildDetails(details, record, agentActivity.get(record.id)),
-              }
-            : result;
-        return renderAgentToolResult(currentResult, options, theme, context);
+        const thinking =
+          details?.thinking ??
+          details?.tags?.find((tag) => tag.startsWith("thinking: "))?.slice("thinking: ".length);
+        if (details?.modelName || thinking) {
+          renderMetadata.set(context.toolCallId, {
+            model: details?.modelName,
+            thinking,
+          });
+        }
+        return new Container();
       },
       execute: createAgentToolExecute({
         pi,
-        manager,
-        agentActivity,
-        fleet,
-        reloadCustomAgents,
-        isScopeModelsEnabled,
-        getDefaultJoinMode,
-        trackSpawned,
+        manager: deps.manager,
+        agentActivity: deps.agentActivity,
+        fleet: deps.fleet,
+        reloadCustomAgents: deps.reloadCustomAgents,
+        isScopeModelsEnabled: deps.isScopeModelsEnabled,
         setRenderMetadata: (toolCallId, model, thinking) =>
           renderMetadata.set(toolCallId, { model, thinking }),
       }),

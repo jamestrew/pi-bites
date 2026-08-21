@@ -41,7 +41,12 @@ function ctx() {
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd: "/tmp",
     model: undefined,
-    modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+    modelRegistry: {
+      find: vi.fn(),
+      getAvailable: vi.fn(() => []),
+      getRegisteredProviderIds: vi.fn(() => []),
+      getRegisteredProviderConfig: vi.fn(),
+    },
     sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
     getSystemPrompt: vi.fn(() => "parent"),
   } as any;
@@ -56,7 +61,7 @@ const plainTheme = {
 describe("status note reaches the parent through the real handlers", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("renders compact running state without an empty spinner or thinking line", () => {
+  it("keeps launch result details out of the prompt-focused Agent renderer", () => {
     const { pi, tools } = makePi();
     subagentsExtension(pi);
 
@@ -73,10 +78,10 @@ describe("status note reaches the parent through the real handlers", () => {
       )
       .render(80);
 
-    expect(lines).toEqual(["⎿  Running… (ctrl+o to expand)"]);
+    expect(lines).toEqual([]);
   });
 
-  it("background execution publishes the full final response without creating a transcript", async () => {
+  it("asynchronous execution publishes the full final response without creating a transcript", async () => {
     const result = "x".repeat(1_000) + "final marker";
     vi.mocked(runAgent).mockResolvedValue({ responseText: result, session: {} as any });
     const { pi, tools } = makePi();
@@ -89,7 +94,6 @@ describe("status note reaches the parent through the real handlers", () => {
         prompt: "go",
         description: "d",
         subagent_type: "general-purpose",
-        run_in_background: true,
       },
       undefined,
       undefined,
@@ -105,7 +109,7 @@ describe("status note reaches the parent through the real handlers", () => {
     expect(notification.details).not.toHaveProperty("outputFile");
   });
 
-  it("background user-stop is delivered automatically as STOPPED BY THE USER", async () => {
+  it("a user stop is delivered automatically as STOPPED BY THE USER", async () => {
     vi.mocked(runAgent).mockImplementation(
       (_ctx, _type, _prompt, options) =>
         new Promise((_resolve, reject) => {
@@ -121,14 +125,13 @@ describe("status note reaches the parent through the real handlers", () => {
         prompt: "go",
         description: "d",
         subagent_type: "general-purpose",
-        run_in_background: true,
       },
       undefined,
       undefined,
       ctx(),
     );
     const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
-    expect(id, "background spawn should surface an agent id").toBeTruthy();
+    expect(id, "spawn should surface an agent id").toBeTruthy();
 
     // The user stops it — same path the viewer's stop key uses (manager.abort).
     eventHandlers.get("subagents:rpc:stop")?.({ requestId: "r1", agentId: id });

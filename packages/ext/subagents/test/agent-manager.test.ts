@@ -1,7 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentManager } from "../agent-manager.js";
-import type { AgentRecord } from "../types.js";
 
 vi.mock("../agent-runner.js", () => ({
   runAgent: vi.fn(),
@@ -25,7 +24,14 @@ import { appendSubagentUsageRecord } from "../usage.js";
 const mockPi = { events: { emit: vi.fn() } } as any;
 const mockCtx = {
   cwd: "/tmp",
-  sessionManager: { getSessionId: () => "parent-session" },
+  model: undefined,
+  getSystemPrompt: () => "parent prompt",
+  modelRegistry: {
+    getAvailable: () => [],
+    getRegisteredProviderIds: () => [],
+    getRegisteredProviderConfig: () => undefined,
+  },
+  sessionManager: { getSessionId: () => "parent-session", getBranch: () => [] },
 } as any;
 
 const mockSession = () => ({ dispose: vi.fn() }) as any;
@@ -35,30 +41,6 @@ const resolvedRun = () =>
     responseText: "done",
     session: mockSession(),
   });
-
-describe("AgentManager — completion lifecycle", () => {
-  let manager: AgentManager;
-
-  afterEach(() => {
-    manager.dispose();
-  });
-
-  it("calls onComplete for foreground agents", async () => {
-    let completedRecord: AgentRecord | undefined;
-    manager = new AgentManager((record) => {
-      completedRecord = record;
-    });
-    resolvedRun();
-
-    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-    });
-
-    expect(completedRecord).toBeDefined();
-    expect(completedRecord!.status).toBe("completed");
-    expect(record).toBe(completedRecord);
-  });
-});
 
 describe("AgentManager — detached lifecycle", () => {
   let manager: AgentManager;
@@ -76,104 +58,69 @@ describe("AgentManager — detached lifecycle", () => {
     expect(manager.getRecord(id)?.prompt).toBe("raw task");
   });
 
-  it("emits created for detached spawns but not foreground agents", async () => {
+  it("snapshots a queued agent's parent context before the extension context goes stale", async () => {
+    manager = new AgentManager(undefined, 1);
+    let resolveFirst!: (value: { responseText: string; session: any }) => void;
+    vi.mocked(runAgent)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ responseText: "second", session: mockSession() });
+
+    let stale = false;
+    const parent = {
+      get cwd() {
+        if (stale) throw new Error("stale ctx");
+        return "/tmp";
+      },
+      get model() {
+        if (stale) throw new Error("stale ctx");
+        return undefined;
+      },
+      get modelRegistry() {
+        if (stale) throw new Error("stale ctx");
+        return mockCtx.modelRegistry;
+      },
+      getSystemPrompt: () => {
+        if (stale) throw new Error("stale ctx");
+        return "parent prompt";
+      },
+      sessionManager: mockCtx.sessionManager,
+    } as any;
+
+    const first = manager.spawn(mockPi, parent, "general-purpose", "first", {
+      description: "first",
+    });
+    const second = manager.spawn(mockPi, parent, "general-purpose", "second", {
+      description: "second",
+    });
+    stale = true;
+    resolveFirst({ responseText: "first", session: mockSession() });
+
+    await manager.getRecord(first)!.promise;
+    await vi.waitFor(() => expect(manager.getRecord(second)?.status).toBe("completed"));
+    expect(vi.mocked(runAgent).mock.calls[1]?.[0]).toMatchObject({
+      cwd: "/tmp",
+      sessionId: "parent-session",
+      systemPrompt: "parent prompt",
+    });
+  });
+
+  it("emits created with a stable identity for every spawn", () => {
     const pi = { events: { emit: vi.fn() } } as any;
     manager = new AgentManager();
-    resolvedRun();
+    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
 
-    manager.spawn(pi, mockCtx, "general-purpose", "detached", { description: "detached" });
-    await manager.spawnAndWait(pi, mockCtx, "general-purpose", "foreground", {
-      description: "foreground",
+    const id = manager.spawn(pi, mockCtx, "general-purpose", "task", { description: "task" });
+
+    expect(pi.events.emit).toHaveBeenCalledWith("subagents:created", {
+      id,
+      type: "general-purpose",
+      description: "task",
     });
-
-    expect(pi.events.emit).toHaveBeenCalledTimes(1);
-    expect(pi.events.emit).toHaveBeenCalledWith(
-      "subagents:created",
-      expect.objectContaining({ description: "detached", isBackground: true }),
-    );
-  });
-});
-
-describe("AgentManager — spawnAndWait onSpawned + foreground output file wiring (#105)", () => {
-  let manager: AgentManager;
-  afterEach(() => manager.dispose());
-
-  it("fields set on the record in onSpawned are visible when onSessionCreated fires", async () => {
-    // The load-bearing ordering guarantee: onSpawned fires synchronously inside
-    // spawn(), before runAgent's async onSessionCreated fires. index.ts relies on
-    // this to set record.outputFile so streamToOutputFile can pick it up.
-    manager = new AgentManager();
-    let capturedId: string | undefined;
-    let outputFileSeenAtSessionCreated: string | undefined;
-
-    vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, opts: any) => {
-      const session = mockSession();
-      // Yield one microtask to mirror real behavior: in production, onSessionCreated
-      // fires async (after network/session setup). onSpawned fires synchronously
-      // inside spawn() before runAgent's promise even starts. This await lets the
-      // remainder of startAgent (record.promise = …, onSpawned?.()) finish first.
-      await Promise.resolve();
-      opts.onSessionCreated?.(session);
-      outputFileSeenAtSessionCreated = capturedId
-        ? manager.getRecord(capturedId)?.outputFile
-        : undefined;
-      return { responseText: "done", session };
-    });
-
-    await manager.spawnAndWait(
-      mockPi,
-      mockCtx,
-      "general-purpose",
-      "test",
-      {
-        description: "test",
-      },
-      (fgId) => {
-        capturedId = fgId;
-        manager.getRecord(fgId)!.outputFile = "/fake/agent.jsonl";
-      },
-    );
-
-    expect(outputFileSeenAtSessionCreated).toBe("/fake/agent.jsonl");
-  });
-
-  it("onSpawned id matches the id returned by spawnAndWait", async () => {
-    manager = new AgentManager();
-    let spawnedId: string | undefined;
-    resolvedRun();
-
-    const { id } = await manager.spawnAndWait(
-      mockPi,
-      mockCtx,
-      "general-purpose",
-      "test",
-      {
-        description: "test",
-      },
-      (fgId) => {
-        spawnedId = fgId;
-      },
-    );
-
-    expect(spawnedId).toBe(id);
-  });
-
-  it("onComplete fires on the foreground error path", async () => {
-    // The .then path is covered by the lifecycle-symmetry test above; this guards
-    // the .catch path which lacks try/catch around onComplete (a known asymmetry).
-    let completedRecord: AgentRecord | undefined;
-    manager = new AgentManager((r) => {
-      completedRecord = r;
-    });
-    vi.mocked(runAgent).mockRejectedValue(new Error("agent failed"));
-
-    const { record } = await manager.spawnAndWait(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-    });
-
-    expect(completedRecord).toBeDefined();
-    expect(completedRecord!.status).toBe("error");
-    expect(record).toBe(completedRecord);
   });
 });
 
@@ -192,7 +139,6 @@ describe("AgentManager — completion callbacks", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     await expect(manager.getRecord(id)!.promise).resolves.toBe("done");
 
@@ -227,7 +173,6 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     await manager.getRecord(id)!.promise;
 
@@ -237,7 +182,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
   });
 
   it("clearCompleted does not remove running or queued agents", async () => {
-    // Use maxConcurrent=0 to keep agents queued, then spawn one running via foreground
+    // With one concurrency slot, the second agent stays queued behind the first.
     manager = new AgentManager(undefined, 1);
 
     // Mock runAgent to never resolve (keeps agent "running")
@@ -247,12 +192,10 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
 
     const id1 = manager.spawn(mockPi, mockCtx, "general-purpose", "test1", {
       description: "running agent",
-      isBackground: true,
     });
     // Second agent should be queued (limit=1)
     const id2 = manager.spawn(mockPi, mockCtx, "general-purpose", "test2", {
       description: "queued agent",
-      isBackground: true,
     });
 
     expect(manager.getRecord(id1)!.status).toBe("running");
@@ -280,7 +223,6 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     await manager.getRecord(id)!.promise;
 
@@ -295,7 +237,6 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     await manager.getRecord(id)!.promise;
     expect(manager.getRecord(id)!.status).toBe("error");
@@ -321,7 +262,6 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     const record = manager.getRecord(id)!;
 
@@ -346,7 +286,6 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     await manager.getRecord(id)!.promise;
 
@@ -376,7 +315,6 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     await manager.getRecord(id)!.promise;
 
@@ -407,7 +345,6 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
-      isBackground: true,
     });
     expect(manager.cancelAndSteer(id, "change course")).toBe(true);
     vi.mocked(appendSubagentUsageRecord).mockClear();
@@ -417,44 +354,6 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     expect(appendSubagentUsageRecord).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: id, parentSessionId: "parent-session" }),
     );
-  });
-
-  it("resume() also accumulates usage and increments compactions on the same record", async () => {
-    manager = new AgentManager();
-
-    // First, spawn with a session that resume can latch onto
-    const session = { ...mockSession() };
-    vi.mocked(runAgent).mockResolvedValue({
-      responseText: "first",
-      session: session as any,
-    });
-
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isBackground: true,
-    });
-    await manager.getRecord(id)!.promise;
-
-    // Pre-resume: lifetimeUsage from spawn was zero (mock didn't call onAssistantUsage)
-    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 0, output: 0, cacheWrite: 0 });
-    expect(manager.getRecord(id)!.compactionCount).toBe(0);
-
-    // Now resume — drive callbacks via the mocked resumeAgent
-    vi.mocked(appendSubagentUsageRecord).mockClear();
-    const { resumeAgent: resumeMock } = await import("../agent-runner.js");
-    vi.mocked(resumeMock).mockImplementation(async (_session, _prompt, opts: any) => {
-      opts.onAssistantUsage?.({ input: 70, output: 30, cacheWrite: 5 });
-      opts.onCompaction?.({ reason: "overflow", tokensBefore: 999 });
-      return "second";
-    });
-
-    await manager.resume(id, "more");
-
-    expect(manager.getRecord(id)!.lifetimeUsage).toEqual({ input: 70, output: 30, cacheWrite: 5 });
-    expect(appendSubagentUsageRecord).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: id, parentSessionId: "parent-session" }),
-    );
-    expect(manager.getRecord(id)!.compactionCount).toBe(1);
   });
 });
 
@@ -502,7 +401,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     await manager.getRecord(id)!.promise;
 
     expect(runAgent).toHaveBeenCalledWith(
-      mockCtx,
+      expect.objectContaining({ cwd: "/tmp", sessionId: "parent-session" }),
       "general-purpose",
       "test",
       expect.objectContaining({ cwd: "/", configCwd: "/tmp" }),
@@ -562,7 +461,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     // Worktree wins for the working dir — at workPath, so subdirectory scoping
     // survives isolation. Config still anchored to the parent.
     expect(runAgent).toHaveBeenCalledWith(
-      mockCtx,
+      expect.objectContaining({ cwd: "/tmp", sessionId: "parent-session" }),
       "general-purpose",
       "test",
       expect.objectContaining({ cwd: "/wt/copy/packages/api", configCwd: "/tmp" }),
@@ -658,14 +557,13 @@ describe("AgentManager — abort() state machine", () => {
   });
 
   it("removes a queued agent from the queue and marks it stopped", () => {
-    // Concurrency=1: the second background spawn queues behind the first
+    // Concurrency=1: the second spawn queues behind the first
     manager = new AgentManager(undefined, 1);
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
 
-    manager.spawn(mockPi, mockCtx, "X", "blocker", { description: "block", isBackground: true });
+    manager.spawn(mockPi, mockCtx, "X", "blocker", { description: "block" });
     const queuedId = manager.spawn(mockPi, mockCtx, "Y", "queued", {
       description: "q",
-      isBackground: true,
     });
     const queuedRecord = manager.getRecord(queuedId)!;
     expect(queuedRecord.status).toBe("queued");
@@ -687,7 +585,6 @@ describe("AgentManager — abort() state machine", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "X", "p", {
       description: "r",
-      isBackground: true,
     });
     const record = manager.getRecord(id)!;
     expect(record.status).toBe("running");
@@ -704,7 +601,6 @@ describe("AgentManager — abort() state machine", () => {
     resolvedRun();
     const id = manager.spawn(mockPi, mockCtx, "X", "p", {
       description: "x",
-      isBackground: false,
     });
     await manager.getRecord(id)?.promise;
     expect(manager.getRecord(id)?.status).toBe("completed");
@@ -719,7 +615,8 @@ describe("AgentManager — abort() state machine", () => {
     // as a non-cooperative mock would), and must NOT flip the
     // user-stopped status back to "completed" — otherwise the parent agent
     // would read the partial output as a finished result.
-    manager = new AgentManager();
+    const onComplete = vi.fn();
+    manager = new AgentManager(onComplete);
     let resolveRun!: (v: unknown) => void;
     vi.mocked(runAgent).mockImplementation(
       () =>
@@ -728,12 +625,17 @@ describe("AgentManager — abort() state machine", () => {
         }),
     );
 
-    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r", isBackground: true });
+    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r" });
     const record = manager.getRecord(id)!;
     expect(record.status).toBe("running");
 
     expect(manager.abort(id)).toBe(true);
     expect(record.status).toBe("stopped");
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onComplete).toHaveBeenCalledWith(record);
+
+    manager.clearCompleted();
+    expect(manager.getRecord(id)).toBe(record);
 
     // The agent loop ends and the promise settles "normally".
     resolveRun({
@@ -744,12 +646,14 @@ describe("AgentManager — abort() state machine", () => {
 
     expect(record.status).toBe("stopped"); // not overwritten to "completed"
     expect(record.result).toBe("partial output"); // partial result still captured
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect((manager as any).runningCount).toBe(0);
+
+    manager.clearCompleted();
+    expect(manager.getRecord(id)).toBeUndefined();
   });
 });
 
-// Regression for #44: ESC during a foreground Agent call must propagate to
-// the child. Pi delivers parent abort via AbortSignal; the manager wires the
-// signal's "abort" event to this.abort(id).
 describe("AgentManager — steer()", () => {
   let manager: AgentManager;
   afterEach(() => manager.dispose());
@@ -767,7 +671,7 @@ describe("AgentManager — steer()", () => {
       captured = (opts as any)?.onSessionCreated;
       return new Promise(() => {});
     });
-    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r", isBackground: true });
+    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r" });
     // Simulate the session becoming ready.
     captured?.({ steer, dispose: vi.fn(), isStreaming: true });
 
@@ -778,7 +682,7 @@ describe("AgentManager — steer()", () => {
   it("queues onto pendingSteers when the session isn't ready yet", () => {
     manager = new AgentManager();
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
-    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r", isBackground: true });
+    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r" });
     const record = manager.getRecord(id)!;
     record.session = undefined; // not ready
 
@@ -790,34 +694,11 @@ describe("AgentManager — steer()", () => {
   it("rejects a message to a completed session", async () => {
     manager = new AgentManager();
     resolvedRun();
-    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "x", isBackground: false });
+    const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "x" });
     await manager.getRecord(id)?.promise;
 
     expect(manager.getRecord(id)?.status).toBe("completed");
     expect(manager.steer(id, "keep going")).toBe(false);
-  });
-});
-
-describe("AgentManager — parent abort signal forwarding (#44)", () => {
-  let manager: AgentManager;
-  afterEach(() => manager.dispose());
-
-  it("aborts the child when the parent signal aborts", () => {
-    manager = new AgentManager();
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
-
-    const parent = new AbortController();
-    const id = manager.spawn(mockPi, mockCtx, "X", "p", {
-      description: "x",
-      isBackground: false,
-      signal: parent.signal,
-    });
-    const record = manager.getRecord(id)!;
-    expect(record.status).toBe("running");
-
-    parent.abort();
-    expect(record.status).toBe("stopped");
-    expect(record.completedAt).toBeGreaterThan(0);
   });
 });
 
@@ -852,11 +733,9 @@ describe("AgentManager — abortAll", () => {
 
     const running = manager.spawn(mockPi, mockCtx, "X", "r", {
       description: "r",
-      isBackground: true,
     });
     const queued = manager.spawn(mockPi, mockCtx, "Y", "q", {
       description: "q",
-      isBackground: true,
     });
     expect(manager.getRecord(running)?.status).toBe("running");
     expect(manager.getRecord(queued)?.status).toBe("queued");
@@ -877,14 +756,13 @@ describe("AgentManager — hasRunning", () => {
   let manager: AgentManager;
   afterEach(() => manager.dispose());
 
-  it("is true while a background agent is running, false after it completes", async () => {
+  it("is true while an agent is running, false after it completes", async () => {
     manager = new AgentManager();
     resolvedRun();
 
     expect(manager.hasRunning()).toBe(false);
     const id = manager.spawn(mockPi, mockCtx, "X", "p", {
       description: "x",
-      isBackground: true,
     });
     expect(manager.hasRunning()).toBe(true);
 
@@ -896,8 +774,8 @@ describe("AgentManager — hasRunning", () => {
     manager = new AgentManager(undefined, 1);
     vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
 
-    manager.spawn(mockPi, mockCtx, "X", "r", { description: "r", isBackground: true });
-    manager.spawn(mockPi, mockCtx, "Y", "q", { description: "q", isBackground: true });
+    manager.spawn(mockPi, mockCtx, "X", "r", { description: "r" });
+    manager.spawn(mockPi, mockCtx, "Y", "q", { description: "q" });
     expect(manager.hasRunning()).toBe(true);
   });
 });
@@ -912,7 +790,6 @@ describe("AgentManager — runAgent rejection leaves the record visible with err
 
     const id = manager.spawn(mockPi, mockCtx, "X", "p", {
       description: "x",
-      isBackground: false,
     });
     const record = manager.getRecord(id)!;
     await record.promise;

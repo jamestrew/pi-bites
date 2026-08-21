@@ -4,12 +4,12 @@
  *
  * The unit tests in fleet-list.test.ts drive FleetList with a fake ui/manager.
  * These prove the bits only the extension can: that `tool_execution_start`
- * hands the fleet the live UI (so it captures input), that spawning a background
+ * hands the fleet the live UI (so it captures input), that spawning an
  * agent actually registers the `aboveEditor` widget once the agent has a session,
  * and that `session_shutdown` tears it down. runAgent is mocked (no LLM); the
  * manager, settings load, completion routing, and lifecycle handlers are real.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -80,7 +80,12 @@ function ctxWith(ui: ReturnType<typeof uiCtx>) {
     ui,
     cwd: process.cwd(),
     model: undefined,
-    modelRegistry: { find: vi.fn(), getAvailable: vi.fn(() => []) },
+    modelRegistry: {
+      find: vi.fn(),
+      getAvailable: vi.fn(() => []),
+      getRegisteredProviderIds: vi.fn(() => []),
+      getRegisteredProviderConfig: vi.fn(),
+    },
     sessionManager: { getSessionId: () => "s1", getBranch: () => [] },
     getSystemPrompt: () => "parent",
   } as any;
@@ -108,12 +113,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     process.env.HOME = agentDir;
     prevCwd = process.cwd();
     mkdirSync(join(tmpDir, ".pi"), { recursive: true });
-    // async join → completion routes straight to sendIndividualNudge (no batch
-    // debounce), so fleet.onAgentFinished fires synchronously on the result.
-    writeFileSync(
-      join(tmpDir, ".pi", "subagents.json"),
-      JSON.stringify({ defaultJoinMode: "async" }),
-    );
     process.chdir(tmpDir);
   });
 
@@ -434,7 +433,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         prompt: "go",
         description: "review context",
         subagent_type: "general-purpose",
-        run_in_background: true,
       },
       undefined,
       undefined,
@@ -489,7 +487,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         prompt: "go",
         description: "live one",
         subagent_type: "general-purpose",
-        run_in_background: true,
       },
       undefined,
       undefined,
@@ -525,7 +522,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         prompt: "go",
         description: "live one",
         subagent_type: "general-purpose",
-        run_in_background: true,
       },
       undefined,
       undefined,

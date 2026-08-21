@@ -1,7 +1,7 @@
 /** Shared formatting/types for subagent inline results, FleetView, and notifications. */
 
 import { getConfig } from "../agent-types.js";
-import type { AgentInvocation, SubagentType } from "../types.js";
+import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.js";
 import { type LifetimeUsage, type SessionLike } from "../usage.js";
 
 // ---- Constants ----
@@ -51,7 +51,7 @@ export interface AgentDetails {
   toolUses: number;
   tokens: string;
   durationMs: number;
-  status: "queued" | "running" | "completed" | "stopped" | "error" | "background";
+  status: "queued" | "running" | "completed" | "stopped" | "error";
   /** Human-readable description of what the agent is currently doing. */
   activity?: string;
   /** Command blocked pending a parent bash-gate decision. */
@@ -60,6 +60,8 @@ export interface AgentDetails {
   spinnerFrame?: number;
   /** Full effective provider/model identifier. */
   modelName?: string;
+  /** Effective reasoning level persisted for restored call rendering. */
+  thinking?: ThinkingLevel;
   /** Notable config tags (e.g. ["thinking: high", "isolated"]). */
   tags?: string[];
   /** Current turn count. */
@@ -140,7 +142,6 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): {
   if (invocation.isolated) tags.push("isolated");
   if (invocation.isolation === "worktree") tags.push("worktree");
   if (invocation.inheritContext) tags.push("inherit context");
-  if (invocation.runInBackground) tags.push("background");
   return { modelName: invocation.modelName, tags };
 }
 

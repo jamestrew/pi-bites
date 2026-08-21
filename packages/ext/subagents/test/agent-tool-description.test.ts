@@ -73,11 +73,11 @@ describe("Agent tool descriptions", () => {
     expect(guidelines).toContain("primary agent must read decisive files");
   });
 
-  it("describes dependent foreground work", () => {
-    expect(AGENT_PROMPT_GUIDELINES.join("\n")).toContain("exploration informs your next steps");
-    expect(JSON.stringify(getAgentToolParameters().properties.run_in_background)).toContain(
-      "configured mode",
-    );
+  it("describes composable spawn-and-wait work", () => {
+    const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
+    expect(guidelines).toContain("Agent returns immediately with a stable identity");
+    expect(guidelines).toContain("Use WaitAgent only when selected findings block progress");
+    expect(getAgentToolParameters().properties).not.toHaveProperty("run_in_background");
   });
 
   it("uses project then global custom templates and falls back to full", () => {

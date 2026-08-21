@@ -1,9 +1,8 @@
 /**
- * agent-manager.ts — Tracks agents, background execution, resume support.
+ * agent-manager.ts — Tracks concurrent agents, queued execution, and resume support.
  *
- * Background agents are subject to a configurable concurrency limit (default: 4).
+ * Agents are subject to a configurable concurrency limit (default: 4).
  * Excess agents are queued and auto-started as running agents complete.
- * Foreground agents bypass the queue (they block the parent anyway).
  */
 
 import { randomUUID } from "node:crypto";
@@ -12,6 +11,7 @@ import { isAbsolute } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import type {
   AgentInvocation,
   AgentRecord,
@@ -27,7 +27,7 @@ export type OnAgentStart = (record: AgentRecord) => void;
 export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
-/** Default max concurrent background agents. */
+/** Default max concurrent agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
 
 /**
@@ -57,7 +57,7 @@ function assertValidSpawnCwd(cwd: unknown): asserts cwd is string | undefined | 
 
 interface SpawnArgs {
   pi: ExtensionAPI;
-  ctx: ExtensionContext;
+  parent: ParentSnapshot;
   type: SubagentType;
   prompt: string;
   options: SpawnOptions;
@@ -69,7 +69,6 @@ export interface SpawnOptions {
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
-  isBackground?: boolean;
   /** Isolation mode — "worktree" creates a temp git worktree for the agent. */
   isolation?: IsolationMode;
   /**
@@ -83,8 +82,6 @@ export interface SpawnOptions {
   cwd?: string;
   /** Resolved invocation snapshot captured for UI display. */
   invocation?: AgentInvocation;
-  /** Parent abort signal — when aborted, the subagent is also stopped. */
-  signal?: AbortSignal;
   /** Called on tool start/end with activity info (for streaming progress to UI). */
   onToolActivity?: (activity: ToolActivity) => void;
   /** Called on streaming text deltas from the assistant response. */
@@ -110,10 +107,13 @@ export class AgentManager {
    *  not just the parent repo (caller-supplied cwd can target other repos). */
   private worktreeRepos = new Set<string>();
 
-  /** Queue of background agents waiting to start. */
+  /** Queue of agents waiting to start. */
   private queue: { id: string; args: SpawnArgs }[] = [];
-  /** Number of currently running background agents. */
-  private runningBackground = 0;
+  /** Number of currently running agents. */
+  private runningCount = 0;
+  private completed = new WeakSet<AgentRecord>();
+  private releasedSlots = new WeakSet<AgentRecord>();
+  private settled = new WeakSet<AgentRecord>();
 
   constructor(
     onComplete?: OnAgentComplete,
@@ -128,6 +128,23 @@ export class AgentManager {
     // Cleanup completed agents after 10 minutes (but keep sessions for resume)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
     this.cleanupInterval.unref();
+  }
+
+  private notifyComplete(record: AgentRecord): void {
+    if (this.completed.has(record)) return;
+    this.completed.add(record);
+    try {
+      this.onComplete?.(record);
+    } catch {
+      /* completion side effects must not change agent state */
+    }
+  }
+
+  private releaseSlot(record: AgentRecord): void {
+    if (this.releasedSlots.has(record)) return;
+    this.releasedSlots.add(record);
+    this.runningCount--;
+    this.drainQueue();
   }
 
   private recordAssistantUsage(
@@ -156,7 +173,7 @@ export class AgentManager {
     callback?.(usage);
   }
 
-  /** Update the max concurrent background agents limit. */
+  /** Update the max concurrent agents limit. */
   setMaxConcurrent(n: number) {
     this.maxConcurrent = Math.max(1, n);
     // Start queued agents if the new limit allows
@@ -168,7 +185,7 @@ export class AgentManager {
   }
 
   /**
-   * Spawn an agent and return its ID immediately (for background use).
+   * Spawn an agent and return its ID immediately.
    * If the concurrency limit is reached, the agent is queued.
    */
   spawn(
@@ -184,31 +201,27 @@ export class AgentManager {
     assertValidSpawnCwd(options.cwd);
 
     const id = randomUUID().slice(0, 17);
-    const parentSessionId = ctx.sessionManager.getSessionId();
+    const parent = snapshotParent(ctx, options.inheritContext === true);
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
       type,
-      parentSessionId,
+      parentSessionId: parent.sessionId,
       prompt,
       description: options.description,
-      status: options.isBackground ? "queued" : "running",
+      status: "queued",
       toolUses: 0,
       startedAt: Date.now(),
       abortController,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
       compactionCount: 0,
-      // Raw tri-state (not coerced to a boolean): true = background, false =
-      // foreground (has an inline tool-result surface), undefined = caller never
-      // declared it (e.g. a cross-extension RPC spawn).
-      isBackground: options.isBackground,
       invocation: options.invocation,
     };
     this.agents.set(id, record);
 
-    const args: SpawnArgs = { pi, ctx, type, prompt, options };
+    const args: SpawnArgs = { pi, parent, type, prompt, options };
 
-    if (options.isBackground && this.runningBackground >= this.maxConcurrent) {
+    if (this.runningCount >= this.maxConcurrent) {
       // Queue it — will be started when a running agent completes
       this.queue.push({ id, args });
     } else {
@@ -222,14 +235,11 @@ export class AgentManager {
       }
     }
 
-    if (record.isBackground !== false) {
-      pi.events.emit("subagents:created", {
-        id,
-        type,
-        description: record.description,
-        isBackground: true,
-      });
-    }
+    pi.events.emit("subagents:created", {
+      id,
+      type,
+      description: record.description,
+    });
     return id;
   }
 
@@ -237,7 +247,7 @@ export class AgentManager {
   private startAgent(
     id: string,
     record: AgentRecord,
-    { pi, ctx, type, prompt, options }: SpawnArgs,
+    { pi, parent, type, prompt, options }: SpawnArgs,
   ) {
     // Re-validate a caller-supplied cwd: queued spawns can start minutes after
     // spawn()'s check, and the directory may be gone by then (TOCTOU). Same
@@ -246,7 +256,7 @@ export class AgentManager {
     // Single resolution point for the caller-supplied cwd — the worktree base
     // repo and both cleanup calls below MUST agree on this value forever.
     const customCwd = options.cwd ?? undefined; // null (RPC "unset") → undefined
-    const baseCwd = customCwd ?? ctx.cwd;
+    const baseCwd = customCwd ?? parent.cwd;
 
     // Worktree isolation: try to create a temporary git worktree. Strict —
     // fail loud if not possible (no silent fallback to main tree). Done
@@ -273,25 +283,12 @@ export class AgentManager {
 
     record.status = "running";
     record.startedAt = Date.now();
-    if (options.isBackground) this.runningBackground++;
+    this.runningCount++;
     this.onStart?.(record);
-
-    // Wire parent abort signal to stop the subagent when the parent is interrupted
-    let detachParentSignal: (() => void) | undefined;
-    if (options.signal) {
-      const parentSignal = options.signal;
-      const onParentAbort = () => this.abort(id);
-      parentSignal.addEventListener("abort", onParentAbort, { once: true });
-      detachParentSignal = () => parentSignal.removeEventListener("abort", onParentAbort);
-    }
-    const detach = () => {
-      detachParentSignal?.();
-      detachParentSignal = undefined;
-    };
 
     const abortController = record.abortController;
     if (!abortController) throw new Error(`Agent ${id} has no abort controller`);
-    const promise = runAgent(ctx, type, prompt, {
+    const promise = runAgent(parent, type, prompt, {
       pi,
       agentId: id,
       model: options.model,
@@ -304,7 +301,7 @@ export class AgentManager {
       // stay undefined otherwise so plain worktree runs keep resolving config
       // (incl. relative extension paths and memory) inside the worktree copy.
       cwd: worktreeCwd ?? customCwd,
-      configCwd: customCwd !== undefined ? ctx.cwd : undefined,
+      configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,
       onToolActivity: (activity) => {
         if (activity.type === "end") record.toolUses++;
@@ -359,18 +356,6 @@ export class AgentManager {
         record.session = session;
         record.completedAt ??= Date.now();
 
-        detach();
-
-        // Final flush of streaming output file
-        if (record.outputCleanup) {
-          try {
-            record.outputCleanup();
-          } catch {
-            /* ignore */
-          }
-          record.outputCleanup = undefined;
-        }
-
         // Clean up worktree if used
         if (record.worktree) {
           const wtResult = cleanupWorktree(baseCwd, record.worktree, options.description);
@@ -385,22 +370,9 @@ export class AgentManager {
           }
         }
 
-        // Fire onComplete for foreground agents too — lifecycle symmetry.
-        if (!options.isBackground) {
-          try {
-            this.onComplete?.(record);
-          } catch {
-            /* ignore completion side-effect errors */
-          }
-        } else {
-          this.runningBackground--;
-          try {
-            this.onComplete?.(record);
-          } catch {
-            /* ignore completion side-effect errors */
-          }
-          this.drainQueue();
-        }
+        this.settled.add(record);
+        this.releaseSlot(record);
+        this.notifyComplete(record);
         return responseText;
       })
       .catch((err) => {
@@ -410,18 +382,6 @@ export class AgentManager {
         }
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt ??= Date.now();
-
-        detach();
-
-        // Final flush of streaming output file on error
-        if (record.outputCleanup) {
-          try {
-            record.outputCleanup();
-          } catch {
-            /* ignore */
-          }
-          record.outputCleanup = undefined;
-        }
 
         // Best-effort worktree cleanup on error
         if (record.worktree) {
@@ -433,28 +393,18 @@ export class AgentManager {
           }
         }
 
-        // Fire onComplete for foreground agents too — lifecycle symmetry.
-        if (!options.isBackground) {
-          this.onComplete?.(record);
-        } else {
-          this.runningBackground--;
-          this.onComplete?.(record);
-          this.drainQueue();
-        }
+        this.settled.add(record);
+        this.releaseSlot(record);
+        this.notifyComplete(record);
         return "";
       });
 
     record.promise = promise;
-
-    // Notify caller that spawn is complete (record is in the map, promise is set).
-    // Called synchronously — onSessionCreated fires asynchronously inside runAgent.
-    // Used by spawnAndWait to let the caller set up output files before streaming starts.
-    this.onSpawned?.(id);
   }
 
   /** Start queued agents up to the concurrency limit. */
   private drainQueue() {
-    while (this.queue.length > 0 && this.runningBackground < this.maxConcurrent) {
+    while (this.queue.length > 0 && this.runningCount < this.maxConcurrent) {
       const next = this.queue.shift();
       if (!next) break;
       const record = this.agents.get(next.id);
@@ -467,85 +417,9 @@ export class AgentManager {
         record.status = "error";
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt = Date.now();
-        this.onComplete?.(record);
+        this.notifyComplete(record);
       }
     }
-  }
-
-  /**
-   * Called synchronously right after spawn, before onSessionCreated fires.
-   * Lets the caller set up the output file path on the record.
-   * The record is guaranteed to be in this.agents at this point.
-   */
-  private onSpawned?: (id: string) => void;
-
-  /**
-   * Spawn an agent and wait for completion (foreground use).
-   * Foreground agents bypass the concurrency queue.
-   * Returns { id, record } so callers can access the agent ID.
-   *
-   * @param onSpawned - Called synchronously after spawn(), before onSessionCreated fires.
-   *   Use this to set record.outputFile so streamToOutputFile can pick it up.
-   */
-  async spawnAndWait(
-    pi: ExtensionAPI,
-    ctx: ExtensionContext,
-    type: SubagentType,
-    prompt: string,
-    options: Omit<SpawnOptions, "isBackground">,
-    onSpawned?: (id: string) => void,
-  ): Promise<{ id: string; record: AgentRecord }> {
-    // Temporarily register the onSpawned hook so startAgent can call it.
-    const prevOnSpawned = this.onSpawned;
-    this.onSpawned = onSpawned;
-    try {
-      const id = this.spawn(pi, ctx, type, prompt, { ...options, isBackground: false });
-      const record = this.agents.get(id);
-      if (!record) throw new Error(`Spawned agent ${id} was not registered`);
-      await record.promise;
-      return { id, record };
-    } finally {
-      this.onSpawned = prevOnSpawned;
-    }
-  }
-
-  /**
-   * Resume an existing agent session with a new prompt.
-   */
-  async resume(id: string, prompt: string, signal?: AbortSignal): Promise<AgentRecord | undefined> {
-    const record = this.agents.get(id);
-    if (!record?.session) return undefined;
-
-    record.status = "running";
-    record.startedAt = Date.now();
-    record.completedAt = undefined;
-    record.result = undefined;
-    record.error = undefined;
-
-    try {
-      const responseText = await resumeAgent(record.session, prompt, {
-        onToolActivity: (activity) => {
-          if (activity.type === "end") record.toolUses++;
-        },
-        onAssistantUsage: (usage) => {
-          this.recordAssistantUsage(record, usage);
-        },
-        onCompaction: (info) => {
-          record.compactionCount++;
-          this.onCompact?.(record, info);
-        },
-        signal,
-      });
-      record.status = "completed";
-      record.result = responseText;
-      record.completedAt = Date.now();
-    } catch (err) {
-      record.status = "error";
-      record.error = err instanceof Error ? err.message : String(err);
-      record.completedAt = Date.now();
-    }
-
-    return record;
   }
 
   /**
@@ -593,19 +467,22 @@ export class AgentManager {
       this.queue = this.queue.filter((q) => q.id !== id);
       record.status = "stopped";
       record.completedAt = Date.now();
-      try {
-        this.onComplete?.(record);
-      } catch {
-        /* ignore completion side-effect errors */
-      }
+      this.notifyComplete(record);
       return true;
     }
 
     if (record.status !== "running") return false;
-    record.abortController?.abort();
     record.status = "stopped";
+    record.error = "aborted";
     record.completedAt = Date.now();
+    record.abortController?.abort();
+    this.releaseSlot(record);
+    this.notifyComplete(record);
     return true;
+  }
+
+  private canRemove(record: AgentRecord): boolean {
+    return !record.promise || this.settled.has(record);
   }
 
   /** Dispose a record's session and remove it from the map. */
@@ -619,15 +496,16 @@ export class AgentManager {
     const cutoff = Date.now() - 10 * 60_000;
     for (const [id, record] of this.agents) {
       if (record.status === "running" || record.status === "queued") continue;
-      if ((record.completedAt ?? 0) >= cutoff) continue;
+      if ((record.completedAt ?? 0) >= cutoff || !this.canRemove(record)) continue;
       this.removeRecord(id, record);
     }
   }
 
-  /** Remove all completed/stopped/errored records immediately. */
+  /** Remove terminal records whose child promises have settled. */
   clearCompleted(): void {
     for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued") continue;
+      if (record.status === "running" || record.status === "queued" || !this.canRemove(record))
+        continue;
       this.removeRecord(id, record);
     }
   }

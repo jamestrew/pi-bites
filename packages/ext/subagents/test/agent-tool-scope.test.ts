@@ -14,7 +14,6 @@ function config(name: string, model?: string): AgentConfig {
     skills: false,
     systemPrompt: "test",
     promptMode: "replace",
-    runInBackground: true,
     ...(model ? { model } : {}),
   };
 }
@@ -33,8 +32,6 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
     fleet: { ensureTimer: vi.fn(), update: vi.fn() } as never,
     reloadCustomAgents: vi.fn(),
     isScopeModelsEnabled: () => true,
-    getDefaultJoinMode: () => "async",
-    trackSpawned: vi.fn(),
   });
   const ctx = {
     cwd: "/tmp",
@@ -56,7 +53,6 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
         subagent_type: subagentType,
         description: "check scope",
         prompt: "run",
-        run_in_background: true,
         ...(model ? { model } : {}),
       },
       undefined,
