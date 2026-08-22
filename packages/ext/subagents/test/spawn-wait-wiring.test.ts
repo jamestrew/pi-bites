@@ -63,6 +63,7 @@ function makeHarness() {
       getBranch: vi.fn(() => []),
     },
     getSystemPrompt: vi.fn(() => "parent"),
+    isIdle: vi.fn(() => true),
   } as any;
 
   subagentsExtension(pi);

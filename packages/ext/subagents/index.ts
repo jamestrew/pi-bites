@@ -20,6 +20,8 @@ import { loadCustomAgents } from "./custom-agents.js";
 import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig } from "./model-resolver.js";
+import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
+import { createSubagentMessenger } from "./subagent-messages.js";
 import { registerAgentTool } from "./register-agent-tool.js";
 import { registerMessageAgent } from "./register-message-agent.js";
 import { registerWaitAgent } from "./register-wait-agent.js";
@@ -44,8 +46,10 @@ export default function (
   autoMode?: AutoModeController,
   bashGate?: BashGateController,
 ) {
-  // ---- Register custom notification renderer ----
+  // ---- Register custom notification renderers ----
   registerNotificationRenderer(pi);
+  registerSubagentMessageRenderer(pi);
+  const parentMessenger = createSubagentMessenger(pi);
 
   /** Reload agents from .pi/agents/*.md and merge with defaults (called on init and each Agent invocation). */
   const reloadCustomAgents = () => {
@@ -98,6 +102,7 @@ export default function (
         compactionCount: record.compactionCount,
       });
     },
+    (parentSessionId, sender, message) => parentMessenger.send(parentSessionId, sender, message),
   );
 
   // Expose manager via Symbol.for() global registry for cross-package access.
@@ -122,11 +127,18 @@ export default function (
   // Capture ctx from session_start for the RPC spawn handler.
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
+    parentMessenger.sessionStarted(ctx.sessionManager.getSessionId());
     manager.clearCompleted();
+  });
+
+  pi.on("agent_start", () => parentMessenger.agentStarted());
+  pi.on("agent_settled", (_event, ctx) => {
+    if (ctx.isIdle()) parentMessenger.agentSettled();
   });
 
   pi.on("session_before_switch", () => {
     currentCtx = undefined;
+    parentMessenger.sessionCleared();
     manager.clearCompleted();
   });
 
@@ -291,6 +303,7 @@ export default function (
     unsubBashGateStarted();
     unsubBashGateResolved();
     currentCtx = undefined;
+    parentMessenger.sessionCleared();
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
     manager.abortAll();
     completion.dispose();

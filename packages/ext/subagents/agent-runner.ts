@@ -25,6 +25,7 @@ import {
   getReadOnlyMemoryToolNames,
   getToolNamesForType,
 } from "./agent-types.js";
+import { createChildMessageAgent } from "./child-message-agent.js";
 import { extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
@@ -246,6 +247,8 @@ export interface RunOptions {
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
   onSessionCreated?: (session: AgentSession) => void;
+  /** Fixed transport to the session that spawned this child. */
+  messageParent: (message: string) => boolean;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /**
@@ -620,15 +623,20 @@ export async function runAgent(
   // set, so listing the exact final set here means the session is correctly
   // scoped from the first instant — no post-construction narrowing required.
   const builtinToolNameSet = new Set(toolNames);
-  const allowedTools = [...toolNames, ...extensionToolNames].filter((t) => {
-    if (EXCLUDED_TOOL_NAMES.includes(t)) return false;
-    if (disallowedSet?.has(t)) return false;
-    if (builtinToolNameSet.has(t)) return true;
-    // Reached only for extension tools. The extension set was already filtered
-    // at the loader (extensionsOverride / noExtensions) and at enumeration
-    // (`ext:` opt-in flip), so any extension tool in `extensionToolNames` is allowed.
-    return !noExtensions;
-  });
+  const allowedTools = [
+    ...new Set([
+      ...[...toolNames, ...extensionToolNames].filter((t) => {
+        if (EXCLUDED_TOOL_NAMES.includes(t)) return false;
+        if (disallowedSet?.has(t)) return false;
+        if (builtinToolNameSet.has(t)) return true;
+        // Reached only for extension tools. The extension set was already filtered
+        // at the loader (extensionsOverride / noExtensions) and at enumeration
+        // (`ext:` opt-in flip), so any extension tool in `extensionToolNames` is allowed.
+        return !noExtensions;
+      }),
+      SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
+    ]),
+  ];
 
   const settingsManager = SettingsManager.create(configCwd, agentDir);
   const configuredSessionDir = resolveConfiguredSessionDir(agentConfig?.sessionDir, effectiveCwd);
@@ -654,6 +662,9 @@ export async function runAgent(
     modelRuntime,
     model,
     tools: allowedTools,
+    customTools: [
+      createChildMessageAgent(SUBAGENT_TOOL_NAMES.MESSAGE_AGENT, options.messageParent),
+    ],
     resourceLoader: loader,
   };
   if (thinkingLevel) {
