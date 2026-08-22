@@ -22,7 +22,10 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
   };
 }
 
-function makeHarness(records: AgentRecord[] = []) {
+function makeHarness(
+  records: AgentRecord[] = [],
+  scheduleAutomatic?: (parentSessionId: string, deliver: () => void) => boolean,
+) {
   const byId = new Map(records.map((record) => [record.id, record]));
   const pi = {
     events: { emit: vi.fn() },
@@ -34,6 +37,7 @@ function makeHarness(records: AgentRecord[] = []) {
     pi: pi as any,
     getRecord: (id) => byId.get(id),
     onAgentFinishedUI,
+    scheduleAutomatic,
   });
   return { completion, pi, onAgentFinishedUI };
 }
@@ -92,6 +96,73 @@ describe("agent completion delivery", () => {
     expect(notification.content).not.toContain("\u001b");
     expect(notification.details.description).toBe("unsafe agent");
     expect(notification.details.result).toBe("safe result");
+    completion.dispose();
+  });
+
+  it("claims a deferred automatic result before its final notification is delivered", async () => {
+    const record = makeRecord("a");
+    let deliver!: () => void;
+    const scheduleAutomatic = vi.fn((_parentSessionId: string, callback: () => void) => {
+      deliver = callback;
+      return true;
+    });
+    const { completion, pi } = makeHarness([record], scheduleAutomatic);
+
+    completion.onAgentComplete(record);
+    expect(scheduleAutomatic).toHaveBeenCalledWith("parent-session", expect.any(Function));
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+
+    const waited = await completion.waitFor([record.id], 30_000);
+    expect(waited).toMatchObject({
+      outcome: "error",
+      message: expect.stringContaining("delivered"),
+    });
+
+    deliver();
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
+    completion.dispose();
+  });
+
+  it("leaves a rejected automatic delivery available to WaitAgent", async () => {
+    const record = makeRecord("a");
+    const scheduleAutomatic = vi.fn(() => false);
+    const { completion, pi } = makeHarness([record], scheduleAutomatic);
+
+    completion.onAgentComplete(record);
+    completion.onAgentComplete(record);
+
+    expect(scheduleAutomatic).toHaveBeenCalledOnce();
+    expect(pi.events.emit).toHaveBeenCalledOnce();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
+      outcome: "terminal",
+      agents: [expect.objectContaining({ id: "a", result: "result a" })],
+    });
+    completion.dispose();
+  });
+
+  it("makes a deferred result waitable when its eventual delivery fails", async () => {
+    const record = makeRecord("a");
+    let deliver!: () => void;
+    const scheduleAutomatic = vi.fn((_parentSessionId: string, callback: () => void) => {
+      deliver = callback;
+      return true;
+    });
+    const { completion, pi } = makeHarness([record], scheduleAutomatic);
+    pi.sendMessage.mockImplementation(() => {
+      throw new Error("delivery failed");
+    });
+
+    completion.onAgentComplete(record);
+    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
+      outcome: "error",
+      message: expect.stringContaining("delivered"),
+    });
+    expect(deliver).toThrow("delivery failed");
+    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
+      outcome: "terminal",
+      agents: [expect.objectContaining({ id: "a", result: "result a" })],
+    });
     completion.dispose();
   });
 

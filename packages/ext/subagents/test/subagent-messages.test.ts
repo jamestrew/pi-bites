@@ -45,12 +45,81 @@ describe("subagent message delivery", () => {
     expect(sendMessage.mock.calls[1]?.[1]).toEqual({ triggerTurn: false });
   });
 
-  it("fails rather than routing to a replacement session", () => {
+  it("flushes multiple messages once in FIFO order before a deferred final", () => {
+    const delivered: string[] = [];
+    const sendMessage = vi.fn((message: any) => delivered.push(message.details.message));
+    const messenger = createSubagentMessenger({ sendMessage } as any);
+    messenger.sessionStarted("parent-1");
+    messenger.agentStarted();
+
+    expect(messenger.send("parent-1", sender, "first")).toBe(true);
+    expect(messenger.send("parent-1", sender, "second")).toBe(true);
+    expect(
+      messenger.scheduleFinal("parent-1", () => {
+        delivered.push("final");
+      }),
+    ).toBe(true);
+
+    messenger.agentSettled();
+    messenger.agentSettled();
+
+    expect(delivered).toEqual(["first", "second", "final"]);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("attempts every message and the final when delivery fails", () => {
+    const delivered: string[] = [];
+    const sendMessage = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error("delivery failed");
+      })
+      .mockImplementationOnce((message: any) => delivered.push(message.details.message));
+    const messenger = createSubagentMessenger({ sendMessage } as any);
+    messenger.sessionStarted("parent-1");
+    messenger.agentStarted();
+
+    messenger.send("parent-1", sender, "first");
+    messenger.send("parent-1", sender, "second");
+    messenger.scheduleFinal("parent-1", () => delivered.push("final"));
+    messenger.agentSettled();
+
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(delivered).toEqual(["second", "final"]);
+  });
+
+  it("shutdown flushes active messages through stable session persistence, never sendMessage", () => {
     const sendMessage = vi.fn();
+    const appendCustomMessage = vi.fn();
+    const messenger = createSubagentMessenger({ sendMessage } as any);
+    messenger.sessionStarted("parent-1", appendCustomMessage);
+    messenger.agentStarted();
+
+    messenger.send("parent-1", sender, "first");
+    messenger.send("parent-1", sender, "second");
+    messenger.flushForShutdown();
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(appendCustomMessage.mock.calls.map((call) => call[3].message)).toEqual([
+      "first",
+      "second",
+    ]);
+    expect(appendCustomMessage.mock.calls[0]?.slice(0, 3)).toEqual([
+      "subagent-message",
+      expect.stringContaining("<message>first</message>"),
+      true,
+    ]);
+  });
+
+  it("fails rather than routing messages or finals to a replacement session", () => {
+    const sendMessage = vi.fn();
+    const final = vi.fn();
     const messenger = createSubagentMessenger({ sendMessage } as any);
     messenger.sessionStarted("another-parent");
 
     expect(messenger.send("original-parent", sender, "do not reroute")).toBe(false);
+    expect(messenger.scheduleFinal("original-parent", final)).toBe(false);
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(final).not.toHaveBeenCalled();
   });
 });
