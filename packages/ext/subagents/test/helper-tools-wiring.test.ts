@@ -247,6 +247,21 @@ describe("background helper tools", () => {
     expect(messageParent?.("too late")).toBe(false);
   });
 
+  it("renders partial MessageAgent arguments while they stream", () => {
+    const { pi, tools } = makePi();
+    subagentsExtension(pi);
+
+    const component = tools
+      .get("MessageAgent")
+      .renderCall(
+        {},
+        { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+        { state: {} },
+      );
+
+    expect(component.render(80)).toEqual(["MessageAgent → ", "  "]);
+  });
+
   it("queues a message while the session initializes", async () => {
     vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
     const { pi, tools } = makePi();
