@@ -310,30 +310,20 @@ describe("FleetList rendering", () => {
     expect(agentLine).toMatch(/\d+s · ↓/); // "<seconds>s · ↓ ..." (timing-agnostic)
   });
 
-  it("shows and clears a pending bash approval with a command summary", () => {
+  it("keeps the original description and stats throughout bash approval handling", () => {
     const h = harness([makeRecord({ id: "waiting", description: "inspect files" })]);
-    h.fleet.setWaitingForBashApproval("waiting", "request-1", "git push\n  origin main");
-    expect(h.render(120).find((line) => line.includes("Waiting for bash approval"))).toContain(
-      "git push origin main",
-    );
+    const expectStableRow = () => {
+      const agentLine = h.render(120).find((line) => line.includes("inspect files"));
+      expect(agentLine).toContain("↓ 13.1k tokens");
+      expect(agentLine).toMatch(/\d+s · ↓/);
+      expect(h.render(120).some((line) => line.includes("Waiting for bash approval"))).toBe(false);
+    };
 
-    h.fleet.setWaitingForBashApproval("waiting", "request-1");
-    expect(h.render(120).some((line) => line.includes("Waiting for bash approval"))).toBe(false);
-    expect(h.render(120).some((line) => line.includes("inspect files"))).toBe(true);
-  });
-
-  it("does not clear a newer overlapping bash approval", () => {
-    const h = harness([makeRecord({ id: "waiting" })]);
-    h.fleet.setWaitingForBashApproval("waiting", "request-1", "git fetch");
-    h.fleet.setWaitingForBashApproval("waiting", "request-2", "git push");
-
-    h.fleet.setWaitingForBashApproval("waiting", "request-1");
-    expect(h.render(120).find((line) => line.includes("Waiting for bash approval"))).toContain(
-      "git push",
-    );
-
-    h.fleet.setWaitingForBashApproval("waiting", "request-2");
-    expect(h.render(120).some((line) => line.includes("Waiting for bash approval"))).toBe(false);
+    expectStableRow();
+    h.fleet.bashGateStarted();
+    expectStableRow();
+    h.fleet.bashGateResolved();
+    expectStableRow();
   });
 
   it("orders agents earliest-launched first (top)", () => {

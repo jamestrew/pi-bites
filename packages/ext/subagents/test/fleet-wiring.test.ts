@@ -56,9 +56,15 @@ function makePi() {
 /** A UI context with the surfaces the widget + fleet touch; setWidget is spied. */
 function uiCtx() {
   let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined;
+  let fleetWidget: ((tui: any, theme: any) => { render(width: number): string[] }) | undefined;
+  const tui = { requestRender: vi.fn(), terminal: { columns: 160, rows: 40 } };
+  const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
   return {
     setStatus: vi.fn(),
-    setWidget: vi.fn(),
+    setWidget: vi.fn((key: string, content: unknown, _options?: unknown) => {
+      if (key === "fleet")
+        fleetWidget = typeof content === "function" ? (content as any) : undefined;
+    }),
     notify: vi.fn(),
     onTerminalInput: vi.fn((handler) => {
       inputHandler = handler;
@@ -71,6 +77,7 @@ function uiCtx() {
     select: vi.fn(async () => "Deny"),
     custom: vi.fn(),
     press: (data: string) => inputHandler?.(data),
+    renderFleet: (width = 160) => fleetWidget?.(tui, theme).render(width) ?? [],
   };
 }
 
@@ -96,6 +103,14 @@ const flush = async () => {
   await new Promise((r) => setImmediate(r));
   await new Promise((r) => setImmediate(r));
 };
+
+function expectStableFleetRow(ui: ReturnType<typeof uiCtx>, description: string, command: string) {
+  const lines = ui.renderFleet();
+  const agentLine = lines.find((line) => line.includes(description));
+  expect(agentLine).toContain("↓ 0 tokens");
+  expect(agentLine).toMatch(/\d+s · ↓/);
+  expect(lines.join("\n")).not.toContain(command);
+}
 
 describe("FleetView wiring (real extension lifecycle)", () => {
   let tmpDir: string;
@@ -216,6 +231,48 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
   });
 
+  it("keeps the FleetView row stable while manual subagent approval is pending", async () => {
+    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    const { pi, tools, lifecycle } = makePi();
+    const ui = uiCtx();
+    let resolveSelect!: (choice: string) => void;
+    ui.select.mockImplementation(() => new Promise<string>((resolve) => (resolveSelect = resolve)));
+    subagentsExtension(pi, { current: {} }, undefined, { isYolo: () => false });
+    const ctx = ctxWith(ui);
+    await lifecycle.get("session_start")?.({}, ctx);
+    await lifecycle.get("tool_execution_start")?.({}, ctx);
+    const spawn = await tools
+      .get("Agent")
+      .execute(
+        "tc",
+        { prompt: "go", description: "stable manual row", subagent_type: "general-purpose" },
+        undefined,
+        undefined,
+        ctx,
+      );
+    const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
+
+    pi.events.emit("bites:bash_gate", {});
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-manual-pending",
+      agentId,
+      title: "general",
+      command: "git push origin main",
+      labels: ["git push"],
+      reasons: [],
+      sessionAllowKey: "git push",
+    });
+    await flush();
+
+    expect(ui.select).toHaveBeenCalledOnce();
+    expectStableFleetRow(ui, "stable manual row", "git push origin main");
+
+    resolveSelect("Deny");
+    pi.events.emit("bites:bash_gate_resolved", {});
+    await flush();
+    await lifecycle.get("session_shutdown")?.({}, ctx);
+  });
+
   it("routes subagent bash approvals through automode without UI", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
@@ -245,6 +302,50 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       ctx,
     );
     expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+  });
+
+  it("keeps the FleetView row stable while Automode reviews a subagent command", async () => {
+    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    const { pi, tools, lifecycle } = makePi();
+    let resolveReview!: (decision: { outcome: "allow" }) => void;
+    const review = vi.fn(
+      () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
+    );
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ui = uiCtx();
+    const ctx = ctxWith(ui);
+    await lifecycle.get("session_start")?.({}, ctx);
+    await lifecycle.get("tool_execution_start")?.({}, ctx);
+    const spawn = await tools
+      .get("Agent")
+      .execute(
+        "tc",
+        { prompt: "go", description: "stable Automode row", subagent_type: "general-purpose" },
+        undefined,
+        undefined,
+        ctx,
+      );
+    const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
+
+    pi.events.emit("bites:bash_gate", {});
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-automode-pending",
+      agentId,
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+
+    expect(review).toHaveBeenCalledOnce();
+    expectStableFleetRow(ui, "stable Automode row", "rm build.txt");
+
+    resolveReview({ outcome: "allow" });
+    pi.events.emit("bites:bash_gate_resolved", {});
+    await flush();
+    await lifecycle.get("session_shutdown")?.({}, ctx);
   });
 
   it("keeps a no-UI subagent Automode denial fail-closed", async () => {

@@ -139,8 +139,6 @@ export default function (
     const hasUI = ctx.hasUI;
     const cwd = ctx.cwd;
 
-    if (request.agentId)
-      fleet.setWaitingForBashApproval(request.agentId, request.requestId, request.command);
     try {
       if (autoMode?.isEnabled()) {
         const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
@@ -259,8 +257,6 @@ export default function (
         outcome: "failure",
         message: error instanceof Error ? error.message : String(error),
       };
-    } finally {
-      if (request.agentId) fleet.setWaitingForBashApproval(request.agentId, request.requestId);
     }
   });
 
