@@ -122,6 +122,24 @@ describe("AgentManager — detached lifecycle", () => {
       description: "task",
     });
   });
+
+  it("fixes child messages to the spawning parent and sender identity", () => {
+    const messageParent = vi.fn(() => true);
+    manager = new AgentManager(undefined, 4, undefined, undefined, messageParent);
+    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+
+    const id = manager.spawn(mockPi, mockCtx, "explore", "task", {
+      description: "trace auth flow",
+    });
+    const transport = vi.mocked(runAgent).mock.calls.at(-1)?.[3].messageParent;
+
+    expect(transport?.("found it")).toBe(true);
+    expect(messageParent).toHaveBeenCalledWith(
+      "parent-session",
+      { id, type: "explore", title: "trace auth flow" },
+      "found it",
+    );
+  });
 });
 
 describe("AgentManager — completion callbacks", () => {

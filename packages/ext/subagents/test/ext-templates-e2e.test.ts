@@ -143,6 +143,7 @@ describe("ext: / tools: scoping — template-driven e2e (real pi-mono, headless)
     try {
       await runAgent(ctx, agentName, "go", {
         pi,
+        messageParent: () => false,
         model,
         cwd: FIXTURES_DIR,
         isolated: resolved.isolated,

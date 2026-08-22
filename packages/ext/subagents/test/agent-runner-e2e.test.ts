@@ -124,6 +124,7 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
     try {
       await runAgent(ctx, "e2e", "go", {
         pi: options.pi ?? makePi(),
+        messageParent: () => false,
         agentId: "e2e-agent",
         model,
         onSessionCreated: (s) => {
@@ -181,6 +182,22 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
     expect(active).toContain(EXT_TOOL); // selected → surfaces despite the flip
     expect(active).toContain("read");
     expect(active).not.toContain("bash"); // builtinToolNames: ["read"] only
+  });
+
+  it("constructs the real child with only the parent-scoped MessageAgent schema", async () => {
+    let session: any;
+    const active = await activeToolsFor(
+      { extensions: [BITES_EXTENSION] },
+      { capture: (created) => (session = created) },
+    );
+
+    expect(active).toContain("MessageAgent");
+    expect(active).not.toContain("Agent");
+    expect(active).not.toContain("WaitAgent");
+    const definition = session.getToolDefinition("MessageAgent");
+    expect(definition.parameters.required).toEqual(["message"]);
+    expect(Object.keys(definition.parameters.properties)).toEqual(["message"]);
+    expect(definition.parameters.additionalProperties).toBe(false);
   });
 
   it("routes a real child bash gate to the parent approval broker", async () => {

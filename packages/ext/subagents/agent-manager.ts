@@ -12,6 +12,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
+import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import type {
   AgentInvocation,
@@ -26,6 +27,11 @@ import { cleanupWorktree, createWorktree, pruneWorktrees } from "./worktree.js";
 export type OnAgentComplete = (record: AgentRecord) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
+export type MessageParent = (
+  parentSessionId: string,
+  sender: SubagentSender,
+  message: string,
+) => boolean;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 /** Default max concurrent agents. */
@@ -104,6 +110,7 @@ export class AgentManager {
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
+  private messageParent?: MessageParent;
   private maxConcurrent: number;
   /** Base repos worktrees were created from — so dispose() can prune them all,
    *  not just the parent repo (caller-supplied cwd can target other repos). */
@@ -122,10 +129,12 @@ export class AgentManager {
     maxConcurrent = DEFAULT_MAX_CONCURRENT,
     onStart?: OnAgentStart,
     onCompact?: OnAgentCompact,
+    messageParent?: MessageParent,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.onCompact = onCompact;
+    this.messageParent = messageParent;
     this.maxConcurrent = maxConcurrent;
     // Cleanup completed agents after 10 minutes (but keep sessions for resume)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
@@ -321,6 +330,9 @@ export class AgentManager {
       cwd: worktreeCwd ?? customCwd,
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,
+      messageParent: (message) =>
+        this.messageParent?.(parent.sessionId, { id, type, title: options.description }, message) ??
+        false,
       onToolActivity,
       onTurnEnd: options.onTurnEnd,
       onTextDelta: options.onTextDelta,
