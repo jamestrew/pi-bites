@@ -91,16 +91,29 @@ test("SubagentUsageReader includes existing usage for its parent session", () =>
     const usageFile = join(usageDir, "explore.jsonl");
     writeFileSync(
       usageFile,
-      JSON.stringify({
-        type: "subagent_usage",
-        subagent: "explore",
-        sessionId: "agent-1",
-        parentSessionId: "parent-1",
-        timestamp: 1,
-        provider: "anthropic",
-        model: "claude",
-        usage: { input: 2, output: 3, cacheRead: 5, cost: 0.01 },
-      }) + "\n",
+      [
+        {
+          type: "subagent_usage",
+          subagent: "explore",
+          sessionId: "agent-1",
+          parentSessionId: "parent-1",
+          timestamp: 1,
+          provider: "anthropic",
+          model: "claude",
+          usage: { input: 2, output: 3, cacheRead: 5, cost: 0.01 },
+        },
+        {
+          type: "automode_usage",
+          version: 1,
+          parentSessionId: "parent-1",
+          timestamp: 2,
+          provider: "anthropic",
+          model: "claude",
+          usage: { input: 100, output: 100, cacheRead: 100, cost: { total: 1 } },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n") + "\n",
     );
 
     const reader = new SubagentUsageReader("parent-1");

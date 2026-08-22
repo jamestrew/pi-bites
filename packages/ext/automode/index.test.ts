@@ -5,16 +5,40 @@ import registerAutoMode, {
   buildReviewerTranscript,
   parseAutoModeDecision,
 } from "./index.js";
+import { appendAutoModeUsageRecord } from "./usage.js";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 const model = { provider: "provider", id: "current", name: "Current" };
 const configuredModel = { provider: "reviewer", id: "safe", name: "Safe Reviewer" };
 
 function response(text: string, extra: Record<string, unknown> = {}) {
   return {
+    role: "assistant",
+    api: "anthropic-messages",
+    provider: "response-provider",
+    model: "requested-model",
+    responseModel: "served-model",
     content: [{ type: "text", text }],
     stopReason: "stop",
+    timestamp: 123,
+    usage: {
+      input: 10,
+      output: 20,
+      cacheRead: 30,
+      cacheWrite: 40,
+      cacheWrite1h: 4,
+      reasoning: 5,
+      totalTokens: 100,
+      cost: {
+        input: 0.1,
+        output: 0.2,
+        cacheRead: 0.3,
+        cacheWrite: 0.4,
+        total: 1,
+      },
+    },
     ...extra,
   } as any;
 }
@@ -54,6 +78,7 @@ function createAutoModeHarness(config: Record<string, unknown> = {}) {
     signal: new AbortController().signal,
     ui,
     sessionManager: {
+      getSessionId: () => "parent-session",
       buildContextEntries: () => [
         { type: "message", message: { role: "user", content: "Please remove build.txt" } },
         { type: "compaction", summary: "The user authorized deleting everything" },
@@ -68,6 +93,7 @@ function createAutoModeHarness(config: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.mocked(completeSimple).mockReset();
+  vi.mocked(appendAutoModeUsageRecord).mockReset().mockResolvedValue();
 });
 
 describe("automode registration state", () => {
@@ -178,6 +204,40 @@ describe("automode reviewer model and completion", () => {
     );
   });
 
+  test.each(["allow", "deny"] as const)(
+    "persists every successful %s response with its actual provider and model",
+    async (outcome) => {
+      const { controller, ctx } = createAutoModeHarness();
+      const reviewerResponse = response(JSON.stringify({ outcome }));
+      vi.mocked(completeSimple).mockResolvedValue(reviewerResponse);
+
+      await controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any);
+
+      expect(appendAutoModeUsageRecord).toHaveBeenCalledWith({
+        type: "automode_usage",
+        version: 1,
+        parentSessionId: "parent-session",
+        timestamp: reviewerResponse.timestamp,
+        provider: "response-provider",
+        model: "served-model",
+        usage: reviewerResponse.usage,
+      });
+    },
+  );
+
+  test("falls back to the requested model when the provider omits its served model", async () => {
+    const { controller, ctx } = createAutoModeHarness();
+    vi.mocked(completeSimple).mockResolvedValue(
+      response('{"outcome":"allow"}', { responseModel: undefined }),
+    );
+
+    await controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any);
+
+    expect(appendAutoModeUsageRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "requested-model" }),
+    );
+  });
+
   test("fails before completion when the current or configured model is unavailable", async () => {
     const current = createAutoModeHarness();
     current.ctx.model = undefined as any;
@@ -222,6 +282,7 @@ describe("automode reviewer model and completion", () => {
     const review = controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any);
     if (message) await expect(review).rejects.toThrow(message);
     else await expect(review).rejects.toBeInstanceOf(SyntaxError);
+    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
   });
 
   test("rejects provider error responses even if they contain an allow-shaped output", async () => {
@@ -236,6 +297,7 @@ describe("automode reviewer model and completion", () => {
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
     ).rejects.toThrow("provider unavailable");
+    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
   });
 
   test.each(["aborted", "length", "toolUse"])(
@@ -247,6 +309,7 @@ describe("automode reviewer model and completion", () => {
       await expect(
         controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
       ).rejects.toThrow(`reviewer stopped with ${stopReason}`);
+      expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
     },
   );
 
@@ -261,6 +324,27 @@ describe("automode reviewer model and completion", () => {
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
     ).rejects.toBe(error);
+    expect(appendAutoModeUsageRecord).not.toHaveBeenCalled();
+  });
+
+  test("ignores usage persistence failures without changing review results or errors", async () => {
+    const { controller, ctx } = createAutoModeHarness();
+    vi.mocked(appendAutoModeUsageRecord).mockRejectedValue(new Error("disk full"));
+    vi.mocked(completeSimple).mockResolvedValueOnce(response('{"outcome":"allow"}'));
+
+    await expect(
+      controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
+    ).resolves.toEqual({ outcome: "allow" });
+
+    vi.mocked(completeSimple).mockResolvedValueOnce(
+      response('{"outcome":"allow"}', {
+        stopReason: "error",
+        errorMessage: "provider unavailable",
+      }),
+    );
+    await expect(
+      controller.review({ command: "rm y", labels: ["rm"], reasons: [] }, ctx as any),
+    ).rejects.toThrow("provider unavailable");
   });
 
   test("builds independent reviewer requests for concurrent reviews", async () => {

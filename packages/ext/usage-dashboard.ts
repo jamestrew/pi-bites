@@ -46,10 +46,12 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
+  AUTO_MODE_PROVIDER,
+  decodeAuxiliaryUsageEntry,
   decodeSessionUsageEntry,
+  formatAutoModeModelLabel,
   type DashboardSessionMessage as SessionMessage,
 } from "./usage-dashboard-data.js";
-import { decodeSubagentUsageRecord } from "./subagents/usage.js";
 
 // =============================================================================
 // Types
@@ -244,7 +246,7 @@ function getSessionsDir(): string {
   return join(getAgentDir(), "sessions");
 }
 
-function getSubagentUsageDir(): string {
+function getAuxiliaryUsageDir(): string {
   return join(getAgentDir(), "pi-bites", "usage");
 }
 
@@ -276,9 +278,9 @@ async function getAllSessionFiles(signal?: AbortSignal): Promise<string[]> {
   return files;
 }
 
-async function getAllSubagentUsageFiles(signal?: AbortSignal): Promise<string[]> {
+async function getAllAuxiliaryUsageFiles(signal?: AbortSignal): Promise<string[]> {
   const files: string[] = [];
-  await collectSessionFilesRecursively(getSubagentUsageDir(), files, signal);
+  await collectSessionFilesRecursively(getAuxiliaryUsageDir(), files, signal);
   files.sort();
   return files;
 }
@@ -335,7 +337,7 @@ async function parseSessionFile(
   }
 }
 
-async function parseSubagentUsageFile(
+async function parseAuxiliaryUsageFile(
   filePath: string,
   signal?: AbortSignal,
 ): Promise<ParsedSessionFile[]> {
@@ -353,29 +355,10 @@ async function parseSubagentUsageFile(
       const line = lines[i];
       if (!line?.trim()) continue;
       try {
-        const entry = decodeSubagentUsageRecord(JSON.parse(line));
-        if (
-          !entry ||
-          !entry.sessionId ||
-          entry.timestamp === undefined ||
-          !entry.provider ||
-          !entry.model
-        ) {
-          continue;
-        }
-
-        const usage = entry.usage;
+        const entry = decodeAuxiliaryUsageEntry(JSON.parse(line));
+        if (!entry) continue;
         const messages = bySession.get(entry.sessionId) ?? [];
-        messages.push({
-          provider: entry.provider,
-          model: entry.model,
-          cost: usage.cost.total,
-          input: usage.input,
-          output: usage.output,
-          cacheRead: usage.cacheRead,
-          cacheWrite: usage.cacheWrite,
-          timestamp: entry.timestamp,
-        });
+        messages.push(entry.message);
         bySession.set(entry.sessionId, messages);
       } catch {
         // Skip malformed lines
@@ -464,9 +447,8 @@ function addMessagesToUsageData(
   lastWeekStartMs: number,
   rawByPeriod: Record<TabName, PeriodRawData>,
   globalSessionSpans: Map<string, GlobalSessionSpan>,
+  sessionIdsByPeriod: Record<TabName, Set<string>>,
 ): void {
-  const sessionContributed = { today: false, thisWeek: false, lastWeek: false, allTime: false };
-
   for (const msg of messages) {
     // Track real per-session lifetime across every message we see, regardless of
     // which period the message falls into. Used later for the "8h+ session" insight.
@@ -514,7 +496,8 @@ function addMessagesToUsageData(
       accumulateStats(providerStats, msg.cost, tokens);
 
       accumulateStats(stats.totals, msg.cost, tokens);
-      sessionContributed[period] = true;
+      sessionIdsByPeriod[period].add(sessionId);
+      stats.totals.sessions = sessionIdsByPeriod[period].size;
 
       const raw = rawByPeriod[period];
       raw.messages.push({
@@ -528,14 +511,9 @@ function addMessagesToUsageData(
       raw.sessionCosts.set(sessionId, (raw.sessionCosts.get(sessionId) ?? 0) + msg.cost);
     }
   }
-
-  if (sessionContributed.today) data.today.totals.sessions++;
-  if (sessionContributed.thisWeek) data.thisWeek.totals.sessions++;
-  if (sessionContributed.lastWeek) data.lastWeek.totals.sessions++;
-  if (sessionContributed.allTime) data.allTime.totals.sessions++;
 }
 
-async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null> {
+export async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null> {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const todayMs = startOfToday.getTime();
@@ -560,6 +538,12 @@ async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null>
     lastWeek: emptyPeriodRawData(),
     allTime: emptyPeriodRawData(),
   };
+  const sessionIdsByPeriod: Record<TabName, Set<string>> = {
+    today: new Set(),
+    thisWeek: new Set(),
+    lastWeek: new Set(),
+    allTime: new Set(),
+  };
   const globalSessionSpans = new Map<string, GlobalSessionSpan>();
 
   const sessionFiles = await getAllSessionFiles(signal);
@@ -581,16 +565,17 @@ async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null>
       lastWeekStartMs,
       rawByPeriod,
       globalSessionSpans,
+      sessionIdsByPeriod,
     );
 
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
-  const subagentUsageFiles = await getAllSubagentUsageFiles(signal);
+  const auxiliaryUsageFiles = await getAllAuxiliaryUsageFiles(signal);
   if (signal?.aborted) return null;
-  for (const filePath of subagentUsageFiles) {
+  for (const filePath of auxiliaryUsageFiles) {
     if (signal?.aborted) return null;
-    const parsedRuns = await parseSubagentUsageFile(filePath, signal);
+    const parsedRuns = await parseAuxiliaryUsageFile(filePath, signal);
     if (signal?.aborted) return null;
 
     for (const parsed of parsedRuns) {
@@ -603,6 +588,7 @@ async function collectUsageData(signal?: AbortSignal): Promise<UsageData | null>
         lastWeekStartMs,
         rawByPeriod,
         globalSessionSpans,
+        sessionIdsByPeriod,
       );
     }
 
@@ -898,7 +884,7 @@ const TAB_LABELS: Record<TabName, string> = {
 
 const TAB_ORDER: TabName[] = ["today", "thisWeek", "lastWeek", "allTime"];
 
-class UsageComponent {
+export class UsageComponent {
   private activeTab: TabName = "allTime";
   private viewMode: ViewMode = "table";
   private data: UsageData;
@@ -1103,10 +1089,16 @@ class UsageComponent {
     name: string,
     stats: BaseStats & { sessions: Set<string> | number },
     layout: TableLayout,
-    options: { indent?: number; selected?: boolean; dimAll?: boolean; prefix?: string } = {},
+    options: {
+      indent?: number;
+      selected?: boolean;
+      dimAll?: boolean;
+      prefix?: string;
+      showStats?: boolean;
+    } = {},
   ): string {
     const th = this.theme;
-    const { indent = 0, selected = false, dimAll = false, prefix } = options;
+    const { indent = 0, selected = false, dimAll = false, prefix, showStats = true } = options;
 
     const rawPrefix = prefix ?? " ".repeat(indent);
     const safePrefix = layout.nameWidth > 0 ? truncateToWidth(rawPrefix, layout.nameWidth, "") : "";
@@ -1122,7 +1114,9 @@ class UsageComponent {
     let row = safePrefix + (innerNameWidth > 0 ? padRight(styledName, innerNameWidth) : "");
 
     for (const col of layout.columns) {
-      const value = fitCell(col.getValue(stats), col.width, "right");
+      const value = showStats
+        ? fitCell(col.getValue(stats), col.width, "right")
+        : " ".repeat(col.width);
       const shouldDim = col.dimmed || dimAll;
       row += shouldDim ? th.fg("dim", value) : value;
     }
@@ -1161,9 +1155,21 @@ class UsageComponent {
         );
 
         for (const [modelName, modelStats] of models) {
-          lines.push(
-            this.renderDataRow(modelName, modelStats, layout, { indent: 4, dimAll: true }),
-          );
+          const label =
+            providerName === AUTO_MODE_PROVIDER ? formatAutoModeModelLabel(modelName) : modelName;
+          const names =
+            providerName === AUTO_MODE_PROVIDER
+              ? wrapTextWithAnsi(label, Math.max(layout.nameWidth - 4, 1))
+              : [label];
+          for (const [index, name] of names.entries()) {
+            lines.push(
+              this.renderDataRow(name, modelStats, layout, {
+                indent: 4,
+                dimAll: true,
+                showStats: index === 0,
+              }),
+            );
+          }
         }
       }
     }
