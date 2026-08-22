@@ -55,6 +55,22 @@ describe("agent type registry", () => {
     expect(agent?.description).toContain("Do not delegate code review");
     expect(agent?.description).toContain("root-cause analysis");
     expect(agent?.systemPrompt).toContain("Do not perform code review");
+    expect(agent?.systemPrompt).toContain(
+      "Treat the working directory you were given as the default search root",
+    );
+    expect(agent?.systemPrompt).toContain(
+      "explicitly delegates another path, repository, or checkout",
+    );
+    expect(agent?.systemPrompt).toContain("including an absolute path outside that directory");
+    expect(agent?.systemPrompt).toContain(
+      "When no alternate location is supplied, keep searches rooted in the assigned working directory",
+    );
+    expect(agent?.systemPrompt).toContain(
+      "Do not roam unrelated directories or broaden the task beyond the paths and question supplied by the parent",
+    );
+    expect(agent?.systemPrompt).not.toContain(
+      "read or search files outside the working directory you were given",
+    );
     expect(agent?.bashGatePolicy).toBe("prompt");
   });
 
