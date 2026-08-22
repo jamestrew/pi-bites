@@ -10,7 +10,11 @@
  *   /agents                 — Interactive agent management menu
  */
 
-import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  type SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { type BitesConfig } from "../config.js";
 import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
@@ -78,6 +82,8 @@ export default function (
       agentActivity.delete(id);
       fleet.onAgentFinished(id);
     },
+    scheduleAutomatic: (parentSessionId, deliver) =>
+      parentMessenger.scheduleFinal(parentSessionId, deliver),
   });
 
   manager = new AgentManager(
@@ -127,7 +133,15 @@ export default function (
   // Capture ctx from session_start for the RPC spawn handler.
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
-    parentMessenger.sessionStarted(ctx.sessionManager.getSessionId());
+    // The runtime supplies the concrete manager, but ExtensionContext exposes only its read facade.
+    // Snapshot this documented append operation now so shutdown never touches a stale ctx.
+    const sessionManager = ctx.sessionManager as typeof ctx.sessionManager &
+      Pick<SessionManager, "appendCustomMessageEntry">;
+    parentMessenger.sessionStarted(
+      sessionManager.getSessionId(),
+      (customType, content, display, details) =>
+        sessionManager.appendCustomMessageEntry(customType, content, display, details),
+    );
     manager.clearCompleted();
   });
 
@@ -138,8 +152,6 @@ export default function (
 
   pi.on("session_before_switch", () => {
     currentCtx = undefined;
-    parentMessenger.sessionCleared();
-    manager.clearCompleted();
   });
 
   const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
@@ -293,8 +305,7 @@ export default function (
     fleet.bashGateResolved(),
   );
 
-  // On shutdown, abort all agents immediately and clean up.
-  // If the session is going down, there's nothing left to consume agent results.
+  // Persist queued parent deliveries before aborting children and tearing down.
   pi.on("session_shutdown", async () => {
     unsubSpawnRpc();
     unsubStopRpc();
@@ -303,9 +314,10 @@ export default function (
     unsubBashGateStarted();
     unsubBashGateResolved();
     currentCtx = undefined;
-    parentMessenger.sessionCleared();
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
+    parentMessenger.flushForShutdown();
     manager.abortAll();
+    parentMessenger.dispose();
     completion.dispose();
     fleet.dispose();
     manager.dispose();

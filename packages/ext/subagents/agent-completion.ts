@@ -34,6 +34,7 @@ type AgentCompletionDeps = {
   pi: ExtensionAPI;
   getRecord: (id: string) => AgentRecord | undefined;
   onAgentFinishedUI: (id: string) => void;
+  scheduleAutomatic?: (parentSessionId: string, deliver: () => void) => boolean;
 };
 
 type Waiter = {
@@ -49,8 +50,10 @@ export function createAgentCompletionHandler({
   pi,
   getRecord,
   onAgentFinishedUI,
+  scheduleAutomatic,
 }: AgentCompletionDeps) {
   const owners = new WeakMap<AgentRecord, "automatic" | "wait">();
+  const completed = new WeakSet<AgentRecord>();
   const claims = new Map<string, number>();
   const waiters = new Map<number, Waiter>();
   let nextWaiterId = 1;
@@ -108,18 +111,35 @@ export function createAgentCompletionHandler({
       },
       { deliverAs: "steer", triggerTurn: true },
     );
-    owners.set(record, "automatic");
   }
 
   function onAgentComplete(record: AgentRecord): void {
-    if (disposed || owners.has(record)) return;
+    if (disposed || completed.has(record)) return;
+    completed.add(record);
     const failed = record.status === "error" || record.status === "stopped";
     pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
     onAgentFinishedUI(record.id);
 
     const waiterId = claims.get(record.id);
-    if (waiterId !== undefined) resolveWaiter(waiterId);
-    else emitAutomatic(record);
+    if (waiterId !== undefined) {
+      resolveWaiter(waiterId);
+    } else {
+      try {
+        const accepted = scheduleAutomatic
+          ? scheduleAutomatic(record.parentSessionId, () => {
+              try {
+                emitAutomatic(record);
+              } catch (error) {
+                owners.delete(record);
+                throw error;
+              }
+            })
+          : (emitAutomatic(record), true);
+        if (accepted) owners.set(record, "automatic");
+      } catch {
+        /* automatic delivery failure leaves the completed result available to WaitAgent */
+      }
+    }
   }
 
   function waitFor(

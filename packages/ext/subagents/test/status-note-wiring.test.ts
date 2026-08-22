@@ -15,12 +15,13 @@ import subagentsExtension from "../index.js";
 
 function makePi() {
   const tools = new Map<string, any>();
+  const handlers = new Map<string, any>();
   const eventHandlers = new Map<string, any>();
   const pi = {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((t: any) => tools.set(t.name, t)),
     registerCommand: vi.fn(),
-    on: vi.fn(),
+    on: vi.fn((event: string, handler: any) => handlers.set(event, handler)),
     events: {
       emit: vi.fn(),
       on: vi.fn((event: string, handler: any) => {
@@ -32,7 +33,7 @@ function makePi() {
     sendMessage: vi.fn(),
     getThinkingLevel: vi.fn(() => "off"),
   } as any;
-  return { pi, tools, eventHandlers };
+  return { pi, tools, handlers, eventHandlers };
 }
 
 function ctx() {
@@ -84,9 +85,10 @@ describe("status note reaches the parent through the real handlers", () => {
   it("asynchronous execution publishes the full final response without creating a transcript", async () => {
     const result = "x".repeat(1_000) + "final marker";
     vi.mocked(runAgent).mockResolvedValue({ responseText: result, session: {} as any });
-    const { pi, tools } = makePi();
+    const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
     const runCtx = ctx();
+    handlers.get("session_start")?.({}, ctx());
 
     const spawn = await tools.get("Agent").execute(
       "tc1",
@@ -116,8 +118,10 @@ describe("status note reaches the parent through the real handlers", () => {
           options.signal?.addEventListener("abort", () => reject(new Error("aborted")));
         }),
     );
-    const { pi, tools, eventHandlers } = makePi();
+    const { pi, tools, handlers, eventHandlers } = makePi();
     subagentsExtension(pi);
+    const parentCtx = ctx();
+    handlers.get("session_start")?.({}, parentCtx);
 
     const spawn = await tools.get("Agent").execute(
       "tc2",
@@ -128,7 +132,7 @@ describe("status note reaches the parent through the real handlers", () => {
       },
       undefined,
       undefined,
-      ctx(),
+      parentCtx,
     );
     const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
     expect(id, "spawn should surface an agent id").toBeTruthy();

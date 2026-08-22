@@ -45,7 +45,11 @@ function ctx(idle = true) {
       getRegisteredProviderIds: vi.fn(() => []),
       getRegisteredProviderConfig: vi.fn(),
     },
-    sessionManager: { getSessionId: vi.fn(() => "s1"), getBranch: vi.fn(() => []) },
+    sessionManager: {
+      getSessionId: vi.fn(() => "s1"),
+      getBranch: vi.fn(() => []),
+      appendCustomMessageEntry: vi.fn(),
+    },
     getSystemPrompt: vi.fn(() => "parent"),
     isIdle: vi.fn(() => idle),
   } as any;
@@ -73,8 +77,9 @@ describe("background helper tools", () => {
   it("keeps MessageAgent registered without changing active tools at runtime", async () => {
     let finish!: (value: any) => void;
     vi.mocked(runAgent).mockReturnValue(new Promise((resolve) => (finish = resolve)));
-    const { pi, tools } = makePi();
+    const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
+    handlers.get("session_start")?.({}, ctx());
 
     expect([...tools.keys()]).toContain("Agent");
     expect(tools.get("Agent").parameters.properties).not.toHaveProperty("resume");
@@ -121,6 +126,47 @@ describe("background helper tools", () => {
     );
   });
 
+  it("delivers queued messages in order before an immediately completed child's final", async () => {
+    let messageParent: ((message: string) => boolean) | undefined;
+    let finish!: (value: any) => void;
+    vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
+      messageParent = options.messageParent;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const { pi, tools, handlers } = makePi();
+    subagentsExtension(pi);
+    handlers.get("session_start")?.({}, ctx());
+    handlers.get("agent_start")?.({}, ctx());
+
+    await spawnBackground(tools);
+    expect(messageParent?.("first")).toBe(true);
+    expect(messageParent?.("second")).toBe(true);
+    finish({ responseText: "done", session: { dispose: vi.fn() } as any });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+
+    handlers.get("agent_settled")?.({}, ctx());
+
+    expect(pi.sendMessage.mock.calls.map(([message]: any[]) => message.customType)).toEqual([
+      "subagent-message",
+      "subagent-message",
+      "subagent-notification",
+    ]);
+    expect(pi.sendMessage.mock.calls.map(([message]: any[]) => message.details.message)).toEqual([
+      "first",
+      "second",
+      undefined,
+    ]);
+    expect(pi.sendMessage.mock.calls.map(([, options]: any[]) => options)).toEqual([
+      { triggerTurn: false },
+      { triggerTurn: false },
+      { deliverAs: "steer", triggerTurn: true },
+    ]);
+  });
+
   it("keeps child messages queued when an earlier settled handler starts another run", async () => {
     let messageParent: ((message: string) => boolean) | undefined;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
@@ -136,9 +182,12 @@ describe("background helper tools", () => {
     expect(messageParent?.("still pending")).toBe(true);
 
     handlers.get("agent_settled")?.({}, ctx(false));
+    handlers.get("agent_start")?.({}, ctx());
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     handlers.get("agent_settled")?.({}, ctx());
+    handlers.get("agent_settled")?.({}, ctx());
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         customType: "subagent-message",
@@ -146,6 +195,56 @@ describe("background helper tools", () => {
       }),
       { triggerTurn: false },
     );
+  });
+
+  it("best-effort flushes before shutdown without dereferencing replaced context", async () => {
+    const order: string[] = [];
+    let messageParent: ((message: string) => boolean) | undefined;
+    vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
+      messageParent = options.messageParent;
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener(
+          "abort",
+          () => {
+            order.push("abort");
+            reject(new Error("aborted"));
+          },
+          { once: true },
+        );
+      });
+    });
+    const { pi, tools, handlers } = makePi();
+    const parentCtx = ctx();
+    parentCtx.sessionManager.appendCustomMessageEntry
+      .mockImplementationOnce(
+        (_type: string, _content: string, _display: boolean, details: any) => {
+          order.push(details.message);
+          throw new Error("delivery failed");
+        },
+      )
+      .mockImplementationOnce((_type: string, _content: string, _display: boolean, details: any) =>
+        order.push(details.message),
+      );
+    subagentsExtension(pi);
+    handlers.get("session_start")?.({}, parentCtx);
+    handlers.get("agent_start")?.({}, parentCtx);
+
+    await spawnBackground(tools);
+    expect(messageParent?.("first")).toBe(true);
+    expect(messageParent?.("second")).toBe(true);
+    handlers.get("session_before_switch")?.({}, parentCtx);
+    for (const key of ["sessionManager", "isIdle"] as const) {
+      Object.defineProperty(parentCtx, key, {
+        get: () => {
+          throw new Error("stale ctx");
+        },
+      });
+    }
+
+    handlers.get("session_shutdown")?.({}, parentCtx);
+
+    expect(order).toEqual(["first", "second", "abort"]);
+    expect(messageParent?.("too late")).toBe(false);
   });
 
   it("queues a message while the session initializes", async () => {
@@ -179,8 +278,9 @@ describe("background helper tools", () => {
       return new Promise((resolve) => (finish = resolve));
     });
     vi.mocked(steerAgent).mockResolvedValue(undefined);
-    const { pi, tools } = makePi();
+    const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
+    handlers.get("session_start")?.({}, ctx());
     const spawn = await spawnBackground(tools);
     const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
 

@@ -81,6 +81,7 @@ describe("print mode completion notifications", () => {
 
     const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
+    handlers.get("session_start")?.({}, makeHeadlessCtx());
 
     const agentTool = tools.get("Agent");
     await agentTool.execute(

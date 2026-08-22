@@ -11,6 +11,13 @@ export interface SubagentMessageDetails {
   message: string;
 }
 
+type AppendCustomMessage = (
+  customType: string,
+  content: string,
+  display: boolean,
+  details: SubagentMessageDetails,
+) => unknown;
+
 function escapeXml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
@@ -28,8 +35,12 @@ function modelContent({ sender, message }: SubagentMessageDetails): string {
 
 export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
   let active = false;
+  let flushing = false;
+  let disposed = false;
   let sessionId: string | undefined;
+  let appendCustomMessage: AppendCustomMessage | undefined;
   const pending: SubagentMessageDetails[] = [];
+  const pendingFinals: Array<() => void> = [];
 
   const persist = (details: SubagentMessageDetails): boolean => {
     try {
@@ -48,28 +59,83 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
     }
   };
 
+  const persistForShutdown = (details: SubagentMessageDetails): boolean => {
+    if (!appendCustomMessage) return false;
+    try {
+      appendCustomMessage("subagent-message", modelContent(details), true, details);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const drain = (deliverIntermediate: (details: SubagentMessageDetails) => boolean): void => {
+    if (disposed || flushing) return;
+    flushing = true;
+    try {
+      while (pending.length > 0) {
+        for (const details of pending.splice(0)) deliverIntermediate(details);
+      }
+      for (const deliver of pendingFinals.splice(0)) {
+        try {
+          deliver();
+        } catch {
+          /* one failed delivery must not suppress later finals */
+        }
+      }
+    } finally {
+      flushing = false;
+    }
+  };
+
+  const flush = (): void => drain(persist);
+  const flushForShutdown = (): void => drain(persistForShutdown);
+
   return {
-    sessionStarted(id: string): void {
-      if (sessionId !== id) pending.length = 0;
+    sessionStarted(id: string, append?: AppendCustomMessage): void {
+      if (sessionId !== id) {
+        pending.length = 0;
+        pendingFinals.length = 0;
+      }
       sessionId = id;
+      appendCustomMessage = append;
       active = false;
-    },
-    sessionCleared(): void {
-      sessionId = undefined;
-      active = false;
-      pending.length = 0;
+      disposed = false;
     },
     agentStarted(): void {
-      active = true;
+      if (!disposed && sessionId) active = true;
     },
     agentSettled(): void {
       active = false;
-      for (const details of pending.splice(0)) persist(details);
+      flush();
+    },
+    flush,
+    flushForShutdown,
+    dispose(): void {
+      disposed = true;
+      sessionId = undefined;
+      appendCustomMessage = undefined;
+      active = false;
+      pending.length = 0;
+      pendingFinals.length = 0;
+    },
+    scheduleFinal(parentSessionId: string, deliver: () => void): boolean {
+      if (disposed || parentSessionId !== sessionId) return false;
+      if (flushing || pending.length > 0) {
+        pendingFinals.push(deliver);
+        return true;
+      }
+      try {
+        deliver();
+        return true;
+      } catch {
+        return false;
+      }
     },
     send(parentSessionId: string, sender: SubagentSender, message: string): boolean {
-      if (parentSessionId !== sessionId) return false;
+      if (disposed || parentSessionId !== sessionId) return false;
       const details = { sender, message };
-      if (active) {
+      if (active || flushing) {
         pending.push(details);
         return true;
       }
