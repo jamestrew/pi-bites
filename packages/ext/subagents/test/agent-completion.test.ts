@@ -12,6 +12,8 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
     status: "completed",
     result: `result ${id}`,
     toolUses: 0,
+    toolCalls: [],
+    omittedToolCalls: 0,
     startedAt: 100,
     completedAt: 200,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },

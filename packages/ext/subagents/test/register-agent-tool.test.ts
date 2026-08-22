@@ -74,7 +74,7 @@ describe("Agent call rendering", () => {
       .join("\n");
 
     expect(collapsed).toBe(
-      "general<dim>(test agent)</dim><dim>: openai/gpt-5 · thinking: high</dim>\n" +
+      "general<dim>(test agent)</dim><dim>: openai/gpt-5 high</dim>\n" +
         "<dim> line one</dim>\n<dim> line three</dim>\n" +
         "<dim> (ctrl+o to expand)</dim>",
     );
@@ -133,7 +133,7 @@ describe("Agent call rendering", () => {
       { toolCallId: "restored-call" },
     );
 
-    expect(call.render(200)[0]).toContain("openai/gpt-5.6 · thinking: xhigh");
+    expect(call.render(200)[0]).toContain("openai/gpt-5.6 xhigh");
     expect(call.render(200)[0]).not.toContain("isolated");
   });
 

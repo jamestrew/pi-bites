@@ -88,6 +88,9 @@ export interface AgentRecord {
   result?: string;
   error?: string;
   toolUses: number;
+  /** Bounded tool-call summaries retained for expanded completion rendering. */
+  toolCalls: string[];
+  omittedToolCalls: number;
   startedAt: number;
   completedAt?: number;
   session?: AgentSession;
@@ -135,6 +138,11 @@ export interface WaitAgentResult {
   duration_ms: number;
   total_tokens: number;
   lifetime_usage?: LifetimeUsage;
+  /** UI-only invocation metadata; omitted from the tool's text result. */
+  model_name?: string;
+  thinking?: ThinkingLevel;
+  /** UI-only tool-call summaries; omitted from the tool's text result. */
+  tool_calls?: string[];
 }
 
 export interface WaitAgentOutcome {

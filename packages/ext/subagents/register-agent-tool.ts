@@ -63,9 +63,7 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
             const effective = renderMetadata.get(context.toolCallId);
             const model = effective?.model ?? args.model ?? config?.model;
             const thinking = effective?.thinking ?? args.thinking ?? config?.thinking;
-            const metadata = sanitizeSingleLine(
-              [model, thinking && `thinking: ${thinking}`].filter(Boolean).join(" · "),
-            );
+            const metadata = sanitizeSingleLine([model, thinking].filter(Boolean).join(" "));
             const title =
               theme.fg("toolTitle", theme.bold(sanitizeSingleLine(subagentType))) +
               theme.fg("dim", `(${description})`) +

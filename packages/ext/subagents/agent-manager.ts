@@ -12,6 +12,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
+import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import type {
   AgentInvocation,
   AgentRecord,
@@ -29,6 +30,7 @@ export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; toke
 
 /** Default max concurrent agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
+export const MAX_RETAINED_TOOL_CALLS = 200;
 
 /**
  * Validate a caller-supplied SpawnOptions.cwd. `undefined`/`null` mean "unset"
@@ -211,6 +213,8 @@ export class AgentManager {
       description: options.description,
       status: "queued",
       toolUses: 0,
+      toolCalls: [],
+      omittedToolCalls: 0,
       startedAt: Date.now(),
       abortController,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
@@ -288,6 +292,20 @@ export class AgentManager {
 
     const abortController = record.abortController;
     if (!abortController) throw new Error(`Agent ${id} has no abort controller`);
+    const onToolActivity = (activity: ToolActivity) => {
+      if (activity.type === "end") record.toolUses++;
+      if (activity.type === "call") {
+        if (record.toolCalls.length >= MAX_RETAINED_TOOL_CALLS) {
+          record.toolCalls.shift();
+          record.omittedToolCalls++;
+        }
+        record.toolCalls.push(
+          summarizeToolArg(formatToolCall(activity.toolName, activity.arguments ?? {})),
+        );
+      }
+      options.onToolActivity?.(activity);
+    };
+
     const promise = runAgent(parent, type, prompt, {
       pi,
       agentId: id,
@@ -303,10 +321,7 @@ export class AgentManager {
       cwd: worktreeCwd ?? customCwd,
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,
-      onToolActivity: (activity) => {
-        if (activity.type === "end") record.toolUses++;
-        options.onToolActivity?.(activity);
-      },
+      onToolActivity,
       onTurnEnd: options.onTurnEnd,
       onTextDelta: options.onTextDelta,
       onAssistantUsage: (usage) => {
@@ -335,10 +350,7 @@ export class AgentManager {
           record.pendingCancelSteer = undefined;
           record.status = "running";
           responseText = await resumeAgent(session, message, {
-            onToolActivity: (activity) => {
-              if (activity.type === "end") record.toolUses++;
-              options.onToolActivity?.(activity);
-            },
+            onToolActivity,
             onAssistantUsage: (usage) => {
               this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
             },

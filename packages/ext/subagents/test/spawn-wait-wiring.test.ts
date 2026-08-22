@@ -5,6 +5,7 @@ vi.mock("../agent-runner.js", async () => {
   return { ...actual, runAgent: vi.fn() };
 });
 
+import { MAX_RETAINED_TOOL_CALLS } from "../agent-manager.js";
 import { runAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
 
@@ -147,9 +148,21 @@ describe("spawn-and-wait orchestration", () => {
   it("returns a completed agent's full terminal result and consumes automatic delivery", async () => {
     const child = deferredRun();
     const harness = makeHarness();
+    harness.ctx.model = { provider: "openai", id: "gpt-5", reasoning: true };
     const spawned = await spawn(harness.tools, harness.ctx);
     const waiting = waitFor(harness.tools, harness.ctx, [agentId(spawned)]);
 
+    vi.mocked(runAgent).mock.calls[0]?.[3].onToolActivity?.({
+      type: "call",
+      toolName: "read",
+      arguments: { path: "src/index.ts", offset: 4, limit: 3 },
+    });
+    vi.mocked(runAgent).mock.calls[0]?.[3].onToolActivity?.({ type: "end", toolName: "read" });
+    vi.mocked(runAgent).mock.calls[0]?.[3].onToolActivity?.({
+      type: "call",
+      toolName: "write",
+      arguments: { path: "large.txt", content: "x".repeat(10_000) },
+    });
     child.resolve({ responseText: "complete result", session: { dispose: vi.fn() } });
     const result = await waiting;
 
@@ -161,11 +174,42 @@ describe("spawn-and-wait orchestration", () => {
           id: agentId(spawned),
           status: "completed",
           result: "complete result",
+          model_name: "openai/gpt-5",
+          thinking: "off",
+          tool_calls: ["Read(src/index.ts:4-6)", expect.any(String)],
         }),
       ],
     });
+    expect(result.details.agents[0].tool_calls[1]).toMatch(/^Write\(/);
+    expect(result.details.agents[0].tool_calls[1].length).toBeLessThan(140);
     expect(result.content[0].text).toContain("complete result");
+    expect(result.content[0].text).not.toContain("src/index.ts");
+    expect(result.content[0].text).not.toContain("openai/gpt-5");
     expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    harness.shutdown();
+  });
+
+  it("caps retained tool calls and reports omitted history", async () => {
+    const child = deferredRun();
+    const harness = makeHarness();
+    const spawned = await spawn(harness.tools, harness.ctx);
+    const waiting = waitFor(harness.tools, harness.ctx, [agentId(spawned)]);
+    const onToolActivity = vi.mocked(runAgent).mock.calls[0]?.[3].onToolActivity;
+
+    for (let index = 0; index < MAX_RETAINED_TOOL_CALLS + 2; index++) {
+      onToolActivity?.({
+        type: "call",
+        toolName: "bash",
+        arguments: { command: `echo ${index}` },
+      });
+    }
+    child.resolve({ responseText: "complete result", session: { dispose: vi.fn() } });
+    const result = await waiting;
+
+    expect(result.details.agents[0].tool_calls).toHaveLength(MAX_RETAINED_TOOL_CALLS + 1);
+    expect(result.details.agents[0].tool_calls[0]).toBe("… 2 earlier tool calls omitted");
+    expect(result.details.agents[0].tool_calls[1]).toBe("Bash(echo 2)");
+    expect(result.details.agents[0].tool_calls.at(-1)).toBe("Bash(echo 201)");
     harness.shutdown();
   });
 

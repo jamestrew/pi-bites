@@ -179,6 +179,27 @@ export interface ToolActivity {
   arguments?: Record<string, unknown>;
 }
 
+function dispatchToolActivity(
+  event: AgentSessionEvent,
+  onToolActivity: ((activity: ToolActivity) => void) | undefined,
+): void {
+  if (event.type === "tool_execution_start") {
+    onToolActivity?.({ type: "start", toolName: event.toolName });
+  } else if (event.type === "tool_execution_end") {
+    onToolActivity?.({ type: "end", toolName: event.toolName });
+  } else if (event.type === "message_end" && event.message.role === "assistant") {
+    for (const part of event.message.content) {
+      if (part.type === "toolCall") {
+        onToolActivity?.({
+          type: "call",
+          toolName: part.name,
+          arguments: part.arguments,
+        });
+      }
+    }
+  }
+}
+
 export const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
 
 export const SubagentMetadataSchema = Type.Object({
@@ -683,22 +704,8 @@ export async function runAgent(
       currentMessageText += event.assistantMessageEvent.delta;
       options.onTextDelta?.(event.assistantMessageEvent.delta, currentMessageText);
     }
-    if (event.type === "tool_execution_start") {
-      options.onToolActivity?.({ type: "start", toolName: event.toolName });
-    }
-    if (event.type === "tool_execution_end") {
-      options.onToolActivity?.({ type: "end", toolName: event.toolName });
-    }
+    dispatchToolActivity(event, options.onToolActivity);
     if (event.type === "message_end" && event.message.role === "assistant") {
-      for (const part of event.message.content) {
-        if (part.type === "toolCall") {
-          options.onToolActivity?.({
-            type: "call",
-            toolName: part.name,
-            arguments: part.arguments,
-          });
-        }
-      }
       options.onAssistantUsage?.(getAssistantUsage(event.message));
     }
     if (event.type === "compaction_end" && !event.aborted && event.result) {
@@ -749,10 +756,7 @@ export async function resumeAgent(
   const unsubEvents =
     options.onToolActivity || options.onAssistantUsage || options.onCompaction
       ? session.subscribe((event: AgentSessionEvent) => {
-          if (event.type === "tool_execution_start")
-            options.onToolActivity?.({ type: "start", toolName: event.toolName });
-          if (event.type === "tool_execution_end")
-            options.onToolActivity?.({ type: "end", toolName: event.toolName });
+          dispatchToolActivity(event, options.onToolActivity);
           if (event.type === "message_end" && event.message.role === "assistant") {
             options.onAssistantUsage?.(getAssistantUsage(event.message));
           }

@@ -62,7 +62,10 @@ describe("WaitAgent rendering", () => {
     const output = renderWaitAgent(
       details({
         timeout_ms: 20_000,
-        agents: [agent({}), agent({ id: "agent-2", description: "Trace completion delivery" })],
+        agents: [
+          agent({ model_name: "openai-codex/gpt-5.6-sol", thinking: "high" }),
+          agent({ id: "agent-2", description: "Trace completion delivery" }),
+        ],
       }),
       false,
       theme,
@@ -72,7 +75,7 @@ describe("WaitAgent rendering", () => {
 
     expect(output).toBe(
       "WaitAgent · waiting 7s / timeout 20s\n" +
-        " ├─ ◷ Explore subagent UI flow\n" +
+        " ├─ ◷ Explore subagent UI flow (openai-codex/gpt-5.6-sol high)\n" +
         " └─ ◷ Trace completion delivery",
     );
     vi.restoreAllMocks();
@@ -91,6 +94,8 @@ describe("WaitAgent rendering", () => {
             tool_uses: 2,
             duration_ms: 12_500,
             lifetime_usage: { input: 5_900, output: 900, cacheWrite: 0 },
+            model_name: "openai-codex/gpt-5.6-sol",
+            thinking: "high",
           }),
           agent({ id: "agent-2", description: "Trace completion delivery" }),
         ],
@@ -103,7 +108,7 @@ describe("WaitAgent rendering", () => {
 
     expect(output).toContain("WaitAgent · waited 15s / timeout 20s");
     expect(output).toContain(
-      "├─ ✓ Explore subagent UI flow · Done (2 tool uses · ↑5.9k ↓900 · 12.5s)",
+      "├─ ✓ Explore subagent UI flow · Done (openai-codex/gpt-5.6-sol high · 2 tool uses · ↑5.9k ↓900 · 12.5s)",
     );
     expect(output).toContain("│    response three");
     expect(output).not.toContain("response four");
@@ -193,7 +198,11 @@ describe("WaitAgent rendering", () => {
         outcome: "cancelled",
         wait_ended_at: 17_000,
         agents: [
-          agent({ status: "completed", result: "one\ntwo\nthree\nfour" }),
+          agent({
+            status: "completed",
+            result: "one\ntwo\nthree\nfour",
+            tool_calls: ["Read(src/index.ts:4-6)", "Bash(bun check)"],
+          }),
           agent({ id: "agent-2", description: "Trace completion delivery" }),
         ],
       }),
@@ -204,6 +213,8 @@ describe("WaitAgent rendering", () => {
       .join("\n");
 
     expect(output).toContain("WaitAgent · cancelled after 7s");
+    expect(output).toContain("│    → Read(src/index.ts:4-6)");
+    expect(output).toContain("│    → Bash(bun check)");
     expect(output).toContain("│    four");
     expect(output).toContain("continues in background");
     expect(output).not.toContain("ctrl+o");

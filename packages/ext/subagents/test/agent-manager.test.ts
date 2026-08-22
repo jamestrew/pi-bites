@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentManager } from "../agent-manager.js";
+import { AgentManager, MAX_RETAINED_TOOL_CALLS } from "../agent-manager.js";
 
 vi.mock("../agent-runner.js", () => ({
   runAgent: vi.fn(),
@@ -325,13 +325,20 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     expect(manager.getRecord(id)!.compactionCount).toBe(2);
   });
 
-  it("cancel-and-steer persists resumed usage with the original parent session", async () => {
+  it("cancel-and-steer persists resumed usage and tool calls", async () => {
     manager = new AgentManager();
     const session = { ...mockSession(), abort: vi.fn(() => Promise.resolve()) };
     let finishInitialRun!: () => void;
 
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, opts: any) => {
       opts.onSessionCreated?.(session);
+      for (let index = 0; index < MAX_RETAINED_TOOL_CALLS + 2; index++) {
+        opts.onToolActivity?.({
+          type: "call",
+          toolName: "bash",
+          arguments: { command: `echo initial-${index}` },
+        });
+      }
       await new Promise<void>((resolve) => {
         finishInitialRun = resolve;
       });
@@ -340,6 +347,11 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     const { resumeAgent: resumeMock } = await import("../agent-runner.js");
     vi.mocked(resumeMock).mockImplementation(async (_session, _prompt, opts: any) => {
       opts.onAssistantUsage?.({ input: 12, output: 3, cacheWrite: 1 });
+      opts.onToolActivity?.({
+        type: "call",
+        toolName: "read",
+        arguments: { path: "resumed.ts" },
+      });
       return "second";
     });
 
@@ -354,6 +366,10 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     expect(appendSubagentUsageRecord).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: id, parentSessionId: "parent-session" }),
     );
+    expect(manager.getRecord(id)!.toolCalls).toHaveLength(MAX_RETAINED_TOOL_CALLS);
+    expect(manager.getRecord(id)!.toolCalls[0]).toBe("Bash(echo initial-3)");
+    expect(manager.getRecord(id)!.toolCalls.at(-1)).toBe("Read(resumed.ts)");
+    expect(manager.getRecord(id)!.omittedToolCalls).toBe(3);
   });
 });
 

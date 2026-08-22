@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { buildWaitAgentResult } from "./agent-completion.js";
 import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { textResult } from "./tool-result.js";
-import type { AgentRecord, WaitAgentDetails, WaitAgentOutcome } from "./types.js";
+import type { AgentRecord, WaitAgentDetails, WaitAgentOutcome, WaitAgentResult } from "./types.js";
 import { renderWaitAgent } from "./ui/wait-agent-render.js";
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
@@ -20,6 +20,23 @@ type WaitAgentDeps = {
 };
 
 export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
+  const withDisplayDetails = (agent: WaitAgentResult): WaitAgentResult => {
+    const record = deps.getRecord(agent.id);
+    if (!record) return agent;
+    const omitted =
+      record.omittedToolCalls > 0
+        ? [`… ${record.omittedToolCalls} earlier tool calls omitted`]
+        : [];
+    return {
+      ...agent,
+      ...(record.invocation?.modelName ? { model_name: record.invocation.modelName } : {}),
+      ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
+      ...(omitted.length > 0 || record.toolCalls.length > 0
+        ? { tool_calls: [...omitted, ...record.toolCalls] }
+        : {}),
+    };
+  };
+
   pi.registerTool(
     defineTool({
       name: SUBAGENT_TOOL_NAMES.WAIT_AGENT,
@@ -58,7 +75,7 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
           agents: params.agent_ids
             .map(deps.getRecord)
             .filter((record): record is AgentRecord => Boolean(record))
-            .map((record) => buildWaitAgentResult(record, false)),
+            .map((record) => withDisplayDetails(buildWaitAgentResult(record, false))),
           wait_started_at: startedAt,
           ...(params.timeout_ms === undefined ? {} : { timeout_ms: params.timeout_ms }),
         });
@@ -79,6 +96,7 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
           );
           const finalDetails: WaitAgentDetails = {
             ...outcome,
+            agents: outcome.agents.map(withDisplayDetails),
             wait_started_at: startedAt,
             wait_ended_at: Date.now(),
             ...(params.timeout_ms === undefined ? {} : { timeout_ms: params.timeout_ms }),

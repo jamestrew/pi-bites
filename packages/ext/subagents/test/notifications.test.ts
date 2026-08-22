@@ -98,6 +98,8 @@ describe("asynchronous completion notification rendering", () => {
       status: "completed",
       result: "safe\u001b[31m result",
       toolUses: 0,
+      toolCalls: [],
+      omittedToolCalls: 0,
       startedAt: 0,
       completedAt: 1,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },

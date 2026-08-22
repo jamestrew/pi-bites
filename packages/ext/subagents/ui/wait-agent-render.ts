@@ -31,6 +31,10 @@ function header(details: WaitAgentDetails, now: number, theme: Theme): string {
 
 function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]) {
   const description = sanitizeSingleLine(agent.description || agent.id);
+  const invocation = [agent.model_name, agent.thinking]
+    .filter(Boolean)
+    .map((value) => sanitizeSingleLine(String(value)))
+    .join(" ");
   const stats = agent.lifetime_usage
     ? doneStats(agent.tool_uses, agent.lifetime_usage, agent.duration_ms)
     : [
@@ -42,11 +46,12 @@ function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]
       ]
         .filter(Boolean)
         .join(" · ");
-  if (agent.status === "completed") return `✓ ${description} · Done (${stats})`;
+  const doneDetails = [invocation, stats].filter(Boolean).join(" · ");
+  if (agent.status === "completed") return `✓ ${description} · Done (${doneDetails})`;
   if (agent.status === "error") {
-    return `✗ ${description} · Error: ${sanitizeSingleLine(agent.error ?? "unknown")}${stats ? ` (${stats})` : ""}`;
+    return `✗ ${description} · Error: ${sanitizeSingleLine(agent.error ?? "unknown")}${doneDetails ? ` (${doneDetails})` : ""}`;
   }
-  if (agent.status === "stopped") return `■ ${description} · Stopped (${stats})`;
+  if (agent.status === "stopped") return `■ ${description} · Stopped (${doneDetails})`;
 
   const suffix =
     outcome === "terminal"
@@ -54,7 +59,7 @@ function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]
       : outcome === "timeout" || outcome === "cancelled"
         ? " · continues in background"
         : "";
-  return `◷ ${description}${suffix}`;
+  return `◷ ${description}${invocation ? ` (${invocation})` : ""}${suffix}`;
 }
 
 export function renderWaitAgent(
@@ -73,17 +78,29 @@ export function renderWaitAgent(
           fitLine(theme.fg("dim", ` ${branch}${statusLine(agent, details.outcome)}`), width),
         );
 
-        const output = agent.result;
-        if (!output || (agent.status !== "completed" && agent.status !== "error")) return;
         const gutter = last ? "      " : " │    ";
         const contentWidth = Math.max(1, width - gutter.length);
+        if (expanded) {
+          for (const call of agent.tool_calls ?? []) {
+            const callLines = wrapDisplayLines(`→ ${call}`, contentWidth);
+            for (const line of callLines) {
+              lines.push(fitLine(theme.fg("dim", `${gutter}${line}`), width));
+            }
+          }
+        }
+
+        const output = agent.result;
+        if (!output || (agent.status !== "completed" && agent.status !== "error")) return;
         const outputLines = wrapDisplayLines(output, contentWidth);
         for (const line of expanded ? outputLines : outputLines.slice(0, 3)) {
           lines.push(fitLine(theme.fg("dim", `${gutter}${line}`), width));
         }
       });
 
-      if (!expanded && details.agents.some((agent) => agent.result))
+      if (
+        !expanded &&
+        details.agents.some((agent) => agent.result || (agent.tool_calls?.length ?? 0) > 0)
+      )
         lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
       if (details.message)
         lines.push(fitLine(theme.fg("dim", ` ${sanitizeSingleLine(details.message)}`), width));

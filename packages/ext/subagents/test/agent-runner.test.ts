@@ -344,12 +344,12 @@ describe("agent-runner final output capture", () => {
 // callback. The callback feeds the AgentRecord lifetime accumulator, which
 // is the source of truth for total tokens (survives compaction).
 describe("agent-runner usage callback wiring", () => {
-  function emitMessageEnd(listeners: Array<(e: any) => void>, usage: any) {
+  function emitMessageEnd(listeners: Array<(e: any) => void>, usage: any, content: any[] = []) {
     const event = {
       type: "message_end",
       message: {
         role: "assistant",
-        content: [],
+        content,
         usage: {
           input: usage.input ?? 0,
           output: usage.output ?? 0,
@@ -461,6 +461,41 @@ describe("agent-runner usage callback wiring", () => {
       },
     ]);
   });
+
+  it.each(["run", "resume"] as const)(
+    "%s dispatches tool activity in execution order",
+    async (mode) => {
+      const { session, listeners } = createSession("DONE");
+      const seen: any[] = [];
+
+      session.prompt = vi.fn(async () => {
+        for (const listener of listeners) {
+          listener({ type: "tool_execution_start", toolName: "read" });
+          listener({ type: "tool_execution_end", toolName: "read" });
+        }
+        emitMessageEnd(listeners, {}, [
+          { type: "toolCall", name: "read", arguments: { path: "src/index.ts" } },
+          { type: "toolCall", name: "bash", arguments: { command: "bun check" } },
+        ]);
+        session.messages.push({ role: "assistant", content: [{ type: "text", text: "DONE" }] });
+      });
+
+      const options = { onToolActivity: (activity: any) => seen.push(activity) };
+      if (mode === "run") {
+        createAgentSession.mockResolvedValue({ session });
+        await runAgent(ctx, "Explore", "go", { pi, ...options });
+      } else {
+        await resumeAgent(session as any, "continue", options);
+      }
+
+      expect(seen).toEqual([
+        { type: "start", toolName: "read" },
+        { type: "end", toolName: "read" },
+        { type: "call", toolName: "read", arguments: { path: "src/index.ts" } },
+        { type: "call", toolName: "bash", arguments: { command: "bun check" } },
+      ]);
+    },
+  );
 
   it("forwards compaction_end events to onCompaction (only when not aborted)", async () => {
     const { session, listeners } = createSession("OK");
