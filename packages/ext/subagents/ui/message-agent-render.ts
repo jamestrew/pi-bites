@@ -4,11 +4,7 @@ import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
 
 export type MessageAgentStatus = "sent" | "queued" | "failed";
 
-export function renderMessageAgentCall(
-  recipient: string,
-  message: string,
-  theme: Theme,
-): Component {
+export function renderMessageAgentCall(recipient = "", message = "", theme: Theme): Component {
   return {
     render(width: number): string[] {
       const lines = [
