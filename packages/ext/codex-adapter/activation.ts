@@ -47,14 +47,19 @@ function recordDisplaced(activeTools: string[]): DisplacedTool[] {
 }
 
 function activate(activeTools: string[], state: AdapterToolState): string[] {
-  if (!state.active) {
-    state.displaced = recordDisplaced(activeTools);
-    state.patchIndex = state.displaced[0]?.index;
+  const observed = recordDisplaced(activeTools);
+  if (!state.active) state.displaced = [];
+  state.displaced ??= [];
+  for (const tool of observed) {
+    if (!state.displaced.some((displaced) => displaced.name === tool.name)) {
+      state.displaced.push(tool);
+    }
   }
+  state.patchIndex ??= observed[0]?.index;
   state.active = true;
 
   const unrelated = activeTools.filter((name) => !OWNED_TOOLS.has(name));
-  if (!state.displaced?.length) return unrelated;
+  if (state.displaced.length === 0) return unrelated;
   const ownedIndex = activeTools.findIndex((name) => OWNED_TOOLS.has(name));
   const index = Math.min(
     ownedIndex < 0 ? (state.patchIndex ?? unrelated.length) : ownedIndex,

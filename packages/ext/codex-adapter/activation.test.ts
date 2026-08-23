@@ -41,6 +41,26 @@ describe("Codex adapter activation", () => {
     ]);
   });
 
+  test("restores core tools first encountered during repeated in-scope reconciliation", () => {
+    const state: AdapterToolState = {};
+    expect(reconcileTools(["read", "write", "custom"], true, state)).toEqual([
+      "read",
+      "apply_patch",
+      "custom",
+    ]);
+    expect(reconcileTools(["read", "apply_patch", "edit", "custom"], true, state)).toEqual([
+      "read",
+      "apply_patch",
+      "custom",
+    ]);
+    expect(reconcileTools(["read", "apply_patch", "custom"], false, state)).toEqual([
+      "read",
+      "write",
+      "edit",
+      "custom",
+    ]);
+  });
+
   test("leaves core tools unchanged when the model starts outside adapter scope", () => {
     const state: AdapterToolState = {};
     expect(reconcileTools(["read", "edit", "write", "bash", "apply_patch"], false, state)).toEqual([

@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { Text } from "@earendil-works/pi-tui";
 import {
   type AgentToolResult,
@@ -98,8 +99,31 @@ function touchedPatchPaths(cwd: string, patchText: string): string[] {
   }
 }
 
-function withMutationQueues<T>(paths: string[], run: () => Promise<T>): Promise<T> {
-  const uniquePaths = [...new Set(paths)].sort();
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+  );
+}
+
+async function canonicalMutationPaths(paths: string[]): Promise<string[]> {
+  const canonical = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        return await realpath(path);
+      } catch (error) {
+        if (isMissingPathError(error)) return path;
+        throw error;
+      }
+    }),
+  );
+  return [...new Set(canonical)].sort();
+}
+
+async function withMutationQueues<T>(paths: string[], run: () => Promise<T>): Promise<T> {
+  const uniquePaths = await canonicalMutationPaths(paths);
   const acquire = (index: number): Promise<T> => {
     const path = uniquePaths[index];
     return path === undefined ? run() : withFileMutationQueue(path, () => acquire(index + 1));
