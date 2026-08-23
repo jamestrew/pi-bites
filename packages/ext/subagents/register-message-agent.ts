@@ -23,7 +23,7 @@ export function registerMessageAgent(pi: ExtensionAPI, manager: AgentManager) {
       name: SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
       label: "MessageAgent",
       description:
-        "Send a message to a running agent. The agent receives it after its current tool execution. " +
+        "Send a message to a running agent. The agent receives it after its current assistant response's tool-call batch. " +
         "Messages are queued while the agent session initializes. Completed agents cannot be resumed.",
       promptSnippet: "Send a message to a running agent",
       parameters: Type.Object(
@@ -80,7 +80,7 @@ export function registerMessageAgent(pi: ExtensionAPI, manager: AgentManager) {
           await steerAgent(record.session, params.message);
           pi.events.emit("subagents:steered", { id: record.id, message: params.message });
           return result(
-            `Message sent to agent ${record.id}. The agent will process it after its current tool execution.`,
+            `Message sent to agent ${record.id}. The agent will process it after its current assistant response's tool-call batch.`,
             "sent",
           );
         } catch (err) {
