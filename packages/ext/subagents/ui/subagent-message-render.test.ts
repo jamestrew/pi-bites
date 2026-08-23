@@ -9,7 +9,13 @@ const theme = {
 };
 
 const details: SubagentMessageDetails = {
-  sender: { id: "agent-1", type: "explore", title: "trace auth flow" },
+  sender: {
+    id: "agent-1",
+    type: "explore",
+    title: "trace auth flow",
+    model_name: "openai/gpt-5.4",
+    thinking: "high",
+  },
   message: "line one\nline two\nline three\nline four",
 };
 
@@ -25,7 +31,7 @@ describe("incoming subagent message rendering", () => {
   it("shows a three-line collapsed preview and expands to the exact message", () => {
     const collapsed = renderer()({ details }, { expanded: false }, theme).render(80);
     expect(collapsed).toEqual([
-      "↳ trace auth flow sent a message",
+      "↳ trace auth flow (openai/gpt-5.4 high)",
       "  line one",
       "  line two",
       "  line three",

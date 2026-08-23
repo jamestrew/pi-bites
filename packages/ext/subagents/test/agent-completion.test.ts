@@ -178,6 +178,51 @@ describe("agent completion delivery", () => {
     completion.dispose();
   });
 
+  it("wakes the claiming waiter on a message and releases eventual completion", async () => {
+    const first = makeRecord("a", {
+      status: "running",
+      result: undefined,
+      completedAt: undefined,
+    });
+    const second = makeRecord("b", {
+      status: "running",
+      result: undefined,
+      completedAt: undefined,
+    });
+    const { completion, pi } = makeHarness([first, second]);
+    const waiting = completion.waitFor([first.id, second.id], 30_000);
+
+    expect(
+      completion.onAgentMessage(
+        { id: second.id, type: second.type, title: second.description },
+        "exact\nmessage",
+      ),
+    ).toBe(true);
+    await expect(waiting).resolves.toEqual({
+      outcome: "message",
+      timed_out: false,
+      sender: { id: "b", type: "general", title: "agent b" },
+      message: "exact\nmessage",
+      agents: [
+        expect.objectContaining({ id: "a", status: "running" }),
+        expect.objectContaining({ id: "b", status: "running" }),
+      ],
+    });
+    expect(
+      completion.onAgentMessage(
+        { id: first.id, type: first.type, title: first.description },
+        "later",
+      ),
+    ).toBe(false);
+
+    first.status = "completed";
+    first.result = "final";
+    first.completedAt = 300;
+    completion.onAgentComplete(first);
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
+    completion.dispose();
+  });
+
   it("emits a failed lifecycle event without duplicating its persisted response", () => {
     const record = makeRecord("a", { status: "error", error: "boom" });
     const { completion, pi } = makeHarness([record]);

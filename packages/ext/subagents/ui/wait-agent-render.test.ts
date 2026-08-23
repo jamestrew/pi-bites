@@ -1,6 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import type { WaitAgentDetails, WaitAgentResult } from "../types.js";
+import type { WaitAgentDetails, WaitAgentResult, WaitAgentSender } from "../types.js";
 import type { Theme } from "./agent-format.js";
 import { renderWaitAgent } from "./wait-agent-render.js";
 
@@ -23,14 +23,19 @@ function agent(overrides: Partial<WaitAgentResult>): WaitAgentResult {
   };
 }
 
-function details(overrides: Partial<WaitAgentDetails>): WaitAgentDetails {
+function details(
+  overrides: Partial<WaitAgentDetails> & {
+    sender?: WaitAgentSender;
+    message?: string;
+  },
+): WaitAgentDetails {
   return {
     outcome: "waiting",
     timed_out: false,
     agents: [],
     wait_started_at: 10_000,
     ...overrides,
-  };
+  } as WaitAgentDetails;
 }
 
 describe("WaitAgent rendering", () => {
@@ -116,11 +121,49 @@ describe("WaitAgent rendering", () => {
     expect(output).toContain("(ctrl+o to expand)");
   });
 
+  it("nests a three-line child message preview and expands the complete message", () => {
+    const message = "line one\nline two\nline three\nline four";
+    const received = details({
+      outcome: "message",
+      wait_ended_at: 22_400,
+      timeout_ms: 30_000,
+      sender: {
+        id: "agent-1",
+        type: "explore",
+        title: "trace auth flow",
+        model_name: "openai/gpt-5.4",
+        thinking: "high",
+      },
+      message,
+      agents: [agent({})],
+    });
+
+    expect(renderWaitAgent(received, false, theme).render(100)).toEqual([
+      "WaitAgent · received message after 12.4s / timeout 30s",
+      "  └─ ↳ trace auth flow (openai/gpt-5.4 high)",
+      "      line one",
+      "      line two",
+      "      line three",
+      "  (ctrl+o to expand)",
+    ]);
+    const expanded = renderWaitAgent(received, true, theme).render(100).join("\n");
+    expect(expanded).toContain("      line four");
+    expect(expanded).not.toContain("ctrl+o");
+
+    for (const width of [1, 2, 3, 20]) {
+      expect(
+        renderWaitAgent(received, false, theme)
+          .render(width)
+          .every((line) => visibleWidth(line) <= width),
+      ).toBe(true);
+    }
+  });
+
   it("caps collapsed output and metadata at every narrow width", () => {
     const rendered = (width: number) =>
       renderWaitAgent(
         details({
-          outcome: "terminal",
+          outcome: "error",
           wait_ended_at: 11_000,
           message: "error\nINJECTED ".repeat(40),
           agents: [

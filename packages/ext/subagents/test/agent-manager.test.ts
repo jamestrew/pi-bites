@@ -130,13 +130,20 @@ describe("AgentManager — detached lifecycle", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "explore", "task", {
       description: "trace auth flow",
+      invocation: { modelName: "openai/gpt-5", thinking: "high" },
     });
     const transport = vi.mocked(runAgent).mock.calls.at(-1)?.[3].messageParent;
 
     expect(transport?.("found it")).toBe(true);
     expect(messageParent).toHaveBeenCalledWith(
       "parent-session",
-      { id, type: "explore", title: "trace auth flow" },
+      {
+        id,
+        type: "explore",
+        title: "trace auth flow",
+        model_name: "openai/gpt-5",
+        thinking: "high",
+      },
       "found it",
     );
   });

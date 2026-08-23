@@ -6,6 +6,7 @@ import type {
   NotificationDetails,
   WaitAgentOutcome,
   WaitAgentResult,
+  WaitAgentSender,
 } from "./types.js";
 import { getLifetimeTotal } from "./usage.js";
 
@@ -98,6 +99,25 @@ export function createAgentCompletionHandler({
       .filter(isTerminal)
       .filter((record) => owners.get(record) !== "automatic");
     if (terminal.length > 0) finish(waiter, terminalOutcome(records, terminal));
+  }
+
+  function onAgentMessage(sender: WaitAgentSender, message: string): boolean {
+    const waiterId = claims.get(sender.id);
+    if (waiterId === undefined) return false;
+    const waiter = waiters.get(waiterId);
+    if (!waiter) return false;
+
+    finish(waiter, {
+      outcome: "message",
+      timed_out: false,
+      sender,
+      message,
+      agents: waiter.agentIds
+        .map(getRecord)
+        .filter((record): record is AgentRecord => Boolean(record))
+        .map((record) => buildWaitAgentResult(record, false)),
+    });
+    return true;
   }
 
   function emitAutomatic(record: AgentRecord): void {
@@ -241,6 +261,7 @@ export function createAgentCompletionHandler({
 
   return {
     waitFor,
+    onAgentMessage,
     onAgentComplete,
     dispose(): void {
       disposed = true;

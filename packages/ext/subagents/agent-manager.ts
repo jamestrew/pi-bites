@@ -331,8 +331,17 @@ export class AgentManager {
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,
       messageParent: (message) =>
-        this.messageParent?.(parent.sessionId, { id, type, title: options.description }, message) ??
-        false,
+        this.messageParent?.(
+          parent.sessionId,
+          {
+            id,
+            type,
+            title: options.description,
+            ...(options.invocation?.modelName ? { model_name: options.invocation.modelName } : {}),
+            ...(options.invocation?.thinking ? { thinking: options.invocation.thinking } : {}),
+          },
+          message,
+        ) ?? false,
       onToolActivity,
       onTurnEnd: options.onTurnEnd,
       onTextDelta: options.onTextDelta,

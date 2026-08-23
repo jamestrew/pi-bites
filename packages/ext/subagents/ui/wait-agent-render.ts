@@ -2,11 +2,14 @@ import type { Component } from "@earendil-works/pi-tui";
 import { doneStats } from "../tool-result.js";
 import type { WaitAgentDetails, WaitAgentResult } from "../types.js";
 import { formatTokens, type Theme } from "./agent-format.js";
+import { renderSubagentMessage } from "./subagent-message-render.js";
 import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
 
 function formatTime(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  return seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
+  const seconds = Math.max(0, ms) / 1000;
+  if (seconds < 1) return "0s";
+  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
 }
 
 function header(details: WaitAgentDetails, now: number, theme: Theme): string {
@@ -17,11 +20,13 @@ function header(details: WaitAgentDetails, now: number, theme: Theme): string {
       ? `waiting ${elapsed}`
       : details.outcome === "terminal"
         ? `waited ${elapsed}`
-        : details.outcome === "timeout"
-          ? `timed out after ${elapsed}`
-          : details.outcome === "cancelled"
-            ? `cancelled after ${elapsed}`
-            : `failed after ${elapsed}`;
+        : details.outcome === "message"
+          ? `received message after ${elapsed}`
+          : details.outcome === "timeout"
+            ? `timed out after ${elapsed}`
+            : details.outcome === "cancelled"
+              ? `cancelled after ${elapsed}`
+              : `failed after ${elapsed}`;
   const timeout =
     details.timeout_ms !== undefined && details.outcome !== "timeout"
       ? ` / timeout ${formatTime(details.timeout_ms)}`
@@ -71,6 +76,27 @@ export function renderWaitAgent(
     render(width: number): string[] {
       const lines = [fitLine(header(details, Date.now(), theme), width)];
 
+      if (details.outcome === "message") {
+        lines.push(
+          ...renderSubagentMessage(
+            {
+              sender: {
+                id: details.sender.id,
+                type: details.sender.type,
+                title: details.sender.title,
+                model_name: details.sender.model_name,
+                thinking: details.sender.thinking,
+              },
+              message: details.message,
+            },
+            expanded,
+            theme,
+            true,
+          ).render(width),
+        );
+        return lines;
+      }
+
       details.agents.forEach((agent, index) => {
         const last = index === details.agents.length - 1;
         const branch = last ? "└─ " : "├─ ";
@@ -102,7 +128,7 @@ export function renderWaitAgent(
         details.agents.some((agent) => agent.result || (agent.tool_calls?.length ?? 0) > 0)
       )
         lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
-      if (details.message)
+      if (details.outcome === "error")
         lines.push(fitLine(theme.fg("dim", ` ${sanitizeSingleLine(details.message)}`), width));
       return lines;
     },
