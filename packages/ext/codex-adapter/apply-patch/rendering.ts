@@ -46,18 +46,15 @@ export function formatApplyPatchSummary(patchText: string, cwd = process.cwd()):
   const onlyFile = files.length === 1 ? files[0] : undefined;
   if (onlyFile) {
     lines.push(
-      `${bulletHeader(onlyFile.verb, formatPatchTarget(onlyFile.path, onlyFile.movePath, cwd))} ${renderCounts(onlyFile.added, onlyFile.removed)}`,
+      `${onlyFile.verb} ${formatPatchTarget(onlyFile.path, onlyFile.movePath, cwd)} ${renderCounts(onlyFile.added, onlyFile.removed)}`,
     );
     return lines.join("\n");
   }
 
-  lines.push(
-    `${bulletHeader("Edited", `${files.length} files`)} ${renderCounts(totalAdded, totalRemoved)}`,
-  );
-  for (const [index, file] of files.entries()) {
-    const prefix = index === 0 ? "  └ " : "    ";
+  lines.push(`Edited ${files.length} files ${renderCounts(totalAdded, totalRemoved)}`);
+  for (const file of files) {
     lines.push(
-      `${prefix}${formatPatchTarget(file.path, file.movePath, cwd)} ${renderCounts(file.added, file.removed)}`,
+      `→ ${formatPatchTarget(file.path, file.movePath, cwd)} ${renderCounts(file.added, file.removed)}`,
     );
   }
 
@@ -75,7 +72,7 @@ export function formatApplyPatchCollapsedDiff(
   const visibleLines = fullLines.slice(0, maxPreviewLines + 1);
   const remaining = fullLines.length - visibleLines.length;
   const lines = [...visibleLines];
-  if (remaining > 0) lines.push(`    ... (${remaining} more lines, ${expandHint()})`);
+  if (remaining > 0) lines.push(`... (${remaining} more lines, ${expandHint()})`);
   return lines.join("\n");
 }
 
@@ -97,19 +94,17 @@ export function renderApplyPatchCall(patchText: string, cwd = process.cwd()): st
   const onlyFile = files.length === 1 ? files[0] : undefined;
   if (onlyFile) {
     lines.push(
-      `${bulletHeader(onlyFile.verb, formatPatchTarget(onlyFile.path, onlyFile.movePath, cwd))} ${renderCounts(onlyFile.added, onlyFile.removed)}`,
+      `${onlyFile.verb} ${formatPatchTarget(onlyFile.path, onlyFile.movePath, cwd)} ${renderCounts(onlyFile.added, onlyFile.removed)}`,
     );
     lines.push(...renderPreviewLines(onlyFile.lines));
     return lines.join("\n");
   }
 
-  lines.push(
-    `${bulletHeader("Edited", `${files.length} files`)} ${renderCounts(totalAdded, totalRemoved)}`,
-  );
+  lines.push(`Edited ${files.length} files ${renderCounts(totalAdded, totalRemoved)}`);
   for (const [index, file] of files.entries()) {
     if (index > 0) lines.push("");
     lines.push(
-      `  └ ${formatPatchTarget(file.path, file.movePath, cwd)} ${renderCounts(file.added, file.removed)}`,
+      `→ ${formatPatchTarget(file.path, file.movePath, cwd)} ${renderCounts(file.added, file.removed)}`,
     );
     lines.push(...renderPreviewLines(file.lines));
   }
@@ -216,6 +211,7 @@ function buildUpdatePreview(
       continue;
     }
 
+    const changeContext = line.startsWith("@@ ") ? line.slice(3) : undefined;
     index += 1;
     const sectionLines: string[] = [];
     while (index < action.lines.length) {
@@ -239,7 +235,13 @@ function buildUpdatePreview(
     const newSequence = normalizedSection
       .filter((entry) => entry.marker === " " || entry.marker === "+")
       .map((entry) => entry.text);
-    const sectionStart = findMatchingSequence(originalLines, oldSequence, searchStart);
+    const contextStart = changeContext
+      ? findMatchingSequence(originalLines, [changeContext], searchStart) + 1
+      : searchStart;
+    const sectionStart =
+      oldSequence.length === 0
+        ? originalLines.length
+        : findMatchingSequence(originalLines, oldSequence, contextStart);
     let oldLineNumber = sectionStart + 1;
     let newLineNumber = sectionStart + 1 + delta;
 
@@ -274,7 +276,7 @@ function buildUpdatePreview(
 
 function formatPreviewLine(line: PreviewLine, lines: PreviewLine[]): string {
   const numberWidth = Math.max(1, ...lines.map((entry) => String(entry.lineNumber).length));
-  return `    ${String(line.lineNumber).padStart(numberWidth, " ")} ${line.marker}${line.text}`;
+  return `${String(line.lineNumber).padStart(numberWidth, " ")} ${line.marker}${line.text}`;
 }
 
 function renderPreviewLines(lines: PreviewLine[]): string[] {
@@ -287,9 +289,7 @@ function renderPreviewLines(lines: PreviewLine[]): string[] {
     )
     .join("\n");
   try {
-    return renderDiff(diffText)
-      .split("\n")
-      .map((line) => `    ${line}`);
+    return renderDiff(diffText).split("\n");
   } catch {
     return lines.map((line) => formatPreviewLine(line, lines));
   }
@@ -373,10 +373,6 @@ function splitFileLines(text: string): string[] {
   const lines = text.split("\n");
   if (lines.at(-1) === "") lines.pop();
   return lines;
-}
-
-function bulletHeader(verb: string, label: string): string {
-  return `• ${verb} ${label}`;
 }
 
 function renderCounts(added: number, removed: number): string {

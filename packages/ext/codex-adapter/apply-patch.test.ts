@@ -94,11 +94,13 @@ describe("apply_patch", () => {
         .render(200)
         .join("\n"),
     );
-    expect(collapsed).toContain("• Edited sample.txt (+1 -1)");
-    expect(collapsed).toContain("1  one");
-    expect(collapsed).toContain("2 -two");
-    expect(collapsed).toContain("2 +TWO");
-    expect(collapsed).toContain("3  three");
+    expect(collapsed.split("\n").map((line) => line.trimEnd())).toEqual([
+      "Edited sample.txt (+1 -1)",
+      "1  one",
+      "2 -two",
+      "2 +TWO",
+      "3  three",
+    ]);
 
     expect(
       tool.renderResult!(
@@ -139,6 +141,25 @@ describe("apply_patch", () => {
     expect(renderLong(true)).toContain("14 +line 14");
   });
 
+  test("shows action-first targets while patch arguments stream", () => {
+    const rendered = createApplyPatchTool().renderCall!(
+      {
+        input: [
+          "*** Begin Patch",
+          "*** Update File: one.txt",
+          "*** Add File: two.txt",
+          "*** Delete File: three.txt",
+        ].join("\n"),
+      },
+      { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+      { argsComplete: false, state: {} } as never,
+    )
+      .render(200)
+      .map((line) => line.trimEnd());
+
+    expect(rendered).toEqual(["Edit one.txt", "Add two.txt", "Delete three.txt"]);
+  });
+
   test("restores completed previews from persisted result details", async () => {
     const cwd = tempDir();
     writeFileSync(join(cwd, "deleted.txt"), "first\nsecond\n");
@@ -174,7 +195,7 @@ describe("apply_patch", () => {
     );
 
     expect(context.invalidate).toHaveBeenCalledOnce();
-    expect(restored).toContain("• Deleted deleted.txt (+0 -2)");
+    expect(restored).toContain("Deleted deleted.txt (+0 -2)");
     expect(restored).toContain("1 -first");
     expect(restored).toContain("2 -second");
   });
@@ -210,10 +231,110 @@ describe("apply_patch", () => {
         .join("\n"),
     );
 
-    expect(rendered).toContain("• Edited repeated.txt (+2 -0)");
+    expect(rendered).toContain("Edited repeated.txt (+2 -0)");
     expect(rendered).toContain("3  two");
     expect(rendered).toContain("4 +three");
     expect(rendered).not.toContain("2 files");
+  });
+
+  test("renders insertion-only seek hunks at the native end-of-file location", async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, "seek.txt"), "one\ntwo\nthree\n");
+    const input = patch("*** Update File: seek.txt", "@@ two", "+inserted");
+    const tool = createApplyPatchTool();
+    await tool.execute("seek-render", { input }, undefined, undefined, { cwd } as never);
+
+    expect(readFileSync(join(cwd, "seek.txt"), "utf8")).toBe("one\ntwo\nthree\ninserted\n");
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+        {
+          toolCallId: "seek-render",
+          cwd,
+          argsComplete: true,
+          expanded: true,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(rendered).toContain("4 +inserted");
+    expect(rendered).not.toContain("1 +inserted");
+  });
+
+  test("renders multi-file headers as dim arrows with colored counts", async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, "one.txt"), "before one\n");
+    writeFileSync(join(cwd, "two.txt"), "before two\n");
+    const input = patch(
+      "*** Update File: one.txt",
+      "@@",
+      "-before one",
+      "+after one",
+      "*** Update File: two.txt",
+      "@@",
+      "-before two",
+      "+after two",
+    );
+    const tool = createApplyPatchTool();
+    await tool.execute("multi-render", { input }, undefined, undefined, { cwd } as never);
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        {
+          fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+          bold: (text: string) => text,
+        } as never,
+        {
+          toolCallId: "multi-render",
+          cwd,
+          argsComplete: true,
+          expanded: true,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    const counts =
+      "<toolDiffAdded>+1</toolDiffAdded><dim> </dim>" +
+      "<toolDiffRemoved>-1</toolDiffRemoved><dim>)</dim>";
+    expect(rendered).toContain(`<dim>→ one.txt</dim><dim> (</dim>${counts}`);
+    expect(rendered).toContain(`<dim>→ two.txt</dim><dim> (</dim>${counts}`);
+    expect(rendered).not.toContain("└");
+  });
+
+  test("uses seek headers to locate changed lines", async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, "seek.txt"), "old\nanchor\nold\n");
+    const input = patch("*** Update File: seek.txt", "@@ anchor", "-old", "+new");
+    const tool = createApplyPatchTool();
+    await tool.execute("seek-change-render", { input }, undefined, undefined, { cwd } as never);
+
+    expect(readFileSync(join(cwd, "seek.txt"), "utf8")).toBe("old\nanchor\nnew\n");
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+        {
+          toolCallId: "seek-change-render",
+          cwd,
+          argsComplete: true,
+          expanded: true,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(rendered).toContain("3 -old");
+    expect(rendered).toContain("3 +new");
+    expect(rendered).not.toContain("1 -old");
   });
 
   test("marks partial failures in the retained patch preview", async () => {
@@ -249,8 +370,12 @@ describe("apply_patch", () => {
         .join("\n"),
     );
 
-    expect(rendered).toContain("<warning>• Edit partially failed");
-    expect(rendered).toContain("missing.txt failed (+1 -1)</error>");
+    expect(rendered).toContain("<warning>Edit partially failed");
+    expect(rendered).toContain(
+      "<dim>→ missing.txt</dim><error> failed</error><dim> (</dim>" +
+        "<toolDiffAdded>+1</toolDiffAdded><dim> </dim>" +
+        "<toolDiffRemoved>-1</toolDiffRemoved><dim>)</dim>",
+    );
 
     clearApplyPatchRenderState();
     const restoredContext = {
@@ -274,7 +399,7 @@ describe("apply_patch", () => {
     )
       .render(200)
       .join("\n");
-    expect(restored).toContain("• Edit partially failed");
+    expect(restored).toContain("Edit partially failed");
     expect(restored).toContain("missing.txt failed (+1 -1)");
 
     const failedInput = patch("*** Update File: absent.txt", "@@", "-old", "+new");
@@ -299,7 +424,70 @@ describe("apply_patch", () => {
         .render(200)
         .join("\n"),
     );
-    expect(failed).toContain("<error>• Edit failed absent.txt (+1 -1)</error>");
+    expect(failed).toContain("<error>Edit failed absent.txt (+1 -1)</error>");
+
+    clearApplyPatchRenderState();
+    const restoredFailure = stripVTControlCharacters(
+      tool.renderCall!(
+        { input: failedInput },
+        {
+          fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+          bold: (text: string) => text,
+        } as never,
+        {
+          toolCallId: "failed-render",
+          cwd,
+          argsComplete: true,
+          expanded: false,
+          isError: true,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+    expect(restoredFailure).toContain("<error>Edit failed absent.txt (+1 -1)</error>");
+  });
+
+  test("returns render snapshots when lifecycle cleanup races execution", async () => {
+    const cwd = tempDir();
+    const tool = createApplyPatchTool();
+
+    const successful = tool.execute(
+      "cleared-success",
+      { input: patch("*** Add File: success.txt", "+success") },
+      undefined,
+      undefined,
+      { cwd } as never,
+    );
+    clearApplyPatchRenderState();
+    await expect(successful).resolves.toMatchObject({
+      details: { status: "success", render: { status: "pending" } },
+    });
+
+    const partial = tool.execute(
+      "cleared-partial",
+      {
+        input: patch(
+          "*** Add File: created.txt",
+          "+created",
+          "*** Update File: missing.txt",
+          "@@",
+          "-missing",
+          "+changed",
+        ),
+      },
+      undefined,
+      undefined,
+      { cwd } as never,
+    );
+    clearApplyPatchRenderState();
+    await expect(partial).resolves.toMatchObject({
+      details: {
+        status: "partial_failure",
+        render: { status: "partial_failure", failedTargets: ["missing.txt"] },
+      },
+    });
   });
 
   test("deduplicates symlink aliases before acquiring mutation queues", async () => {

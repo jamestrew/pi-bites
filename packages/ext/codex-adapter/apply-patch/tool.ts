@@ -188,6 +188,7 @@ export function createApplyPatchTool(
       const cwd = ctx.cwd;
       const patchText = params.input;
       setApplyPatchRenderState(toolCallId, patchText, cwd);
+      const initialRender = renderSnapshot(toolCallId);
       if (signal?.aborted) {
         markApplyPatchFailure(toolCallId, "failed");
         throw new Error("apply_patch aborted");
@@ -199,7 +200,7 @@ export function createApplyPatchTool(
         );
         return {
           content: [{ type: "text", text: successMessage(result) }],
-          details: { status: "success", result, render: renderSnapshot(toolCallId) },
+          details: { status: "success", result, render: initialRender },
         };
       } catch (error) {
         if (signal?.aborted) {
@@ -227,7 +228,11 @@ export function createApplyPatchTool(
           details: {
             status: "partial_failure",
             result: error.result,
-            render: renderSnapshot(toolCallId),
+            render: {
+              ...initialRender,
+              status: "partial_failure",
+              failedTargets: renderTargets,
+            },
             ...(targets.length > 0 ? { failedTargets: targets } : {}),
           },
         };
@@ -244,7 +249,7 @@ export function createApplyPatchTool(
       );
     },
     renderResult(result, { isPartial }, theme, context) {
-      if (isPartial) return new Text(`${theme.fg("dim", "•")} ${theme.bold("Patching")}`, 0, 0);
+      if (isPartial) return new Text(theme.bold("Edit"), 0, 0);
       const snapshot = (result.details as Partial<ApplyPatchDetails> | undefined)?.render;
       if (snapshot && context.state.snapshot !== snapshot) {
         context.state.snapshot = snapshot;
