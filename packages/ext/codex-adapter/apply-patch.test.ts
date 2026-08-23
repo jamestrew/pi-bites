@@ -5,6 +5,7 @@ import {
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,6 +65,34 @@ describe("apply_patch", () => {
 
     await execute(cwd, patch("*** Delete File: b.txt"));
     expect(existsSync(join(cwd, "b.txt"))).toBe(false);
+  });
+
+  test("deduplicates symlink aliases before acquiring mutation queues", async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, "real.txt"), "one\ntwo\n");
+    symlinkSync("real.txt", join(cwd, "alias.txt"));
+
+    const applied = execute(
+      cwd,
+      patch(
+        "*** Update File: real.txt",
+        "@@",
+        "-one",
+        "+ONE",
+        "*** Update File: alias.txt",
+        "@@",
+        "-two",
+        "+TWO",
+      ),
+    );
+    const timeout = delay(500).then(() => {
+      throw new Error("apply_patch mutation queue deadlocked on symlink aliases");
+    });
+
+    await expect(Promise.race([applied, timeout])).resolves.toMatchObject({
+      details: { status: "success" },
+    });
+    expect(readFileSync(join(cwd, "real.txt"), "utf8")).toBe("ONE\nTWO\n");
   });
 
   test("reports malformed patches, partial success, cancellation, and missing binaries", async () => {
