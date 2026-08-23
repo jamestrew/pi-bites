@@ -1,10 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { WaitAgentSender } from "./types.js";
 
-export interface SubagentSender {
-  id: string;
-  type: string;
-  title: string;
-}
+export type SubagentSender = WaitAgentSender;
 
 export interface SubagentMessageDetails {
   sender: SubagentSender;

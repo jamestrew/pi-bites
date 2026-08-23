@@ -145,20 +145,49 @@ export interface WaitAgentResult {
   tool_calls?: string[];
 }
 
-export interface WaitAgentOutcome {
-  outcome: "terminal" | "timeout" | "cancelled" | "error";
-  timed_out: boolean;
-  message?: string;
-  agents: WaitAgentResult[];
+export interface WaitAgentSender {
+  id: string;
+  type: string;
+  title: string;
+  /** UI-only invocation metadata; omitted from the tool's text result. */
+  model_name?: string;
+  thinking?: ThinkingLevel;
 }
 
-export interface WaitAgentDetails extends Omit<WaitAgentOutcome, "outcome"> {
-  outcome: WaitAgentOutcome["outcome"] | "waiting";
+export type WaitAgentOutcome =
+  | {
+      outcome: "message";
+      timed_out: false;
+      sender: WaitAgentSender;
+      message: string;
+      agents: WaitAgentResult[];
+    }
+  | {
+      outcome: "terminal" | "cancelled";
+      timed_out: false;
+      agents: WaitAgentResult[];
+    }
+  | {
+      outcome: "timeout";
+      timed_out: true;
+      agents: WaitAgentResult[];
+    }
+  | {
+      outcome: "error";
+      timed_out: false;
+      message: string;
+      agents: WaitAgentResult[];
+    };
+
+type WaitAgentTiming = {
   wait_started_at?: number;
   wait_ended_at?: number;
   /** Only present when the caller explicitly configured a timeout. */
   timeout_ms?: number;
-}
+};
+
+export type WaitAgentDetails = WaitAgentTiming &
+  (WaitAgentOutcome | { outcome: "waiting"; timed_out: false; agents: WaitAgentResult[] });
 
 /** Details attached to custom notification messages for visual rendering. */
 export interface NotificationDetails {

@@ -108,7 +108,9 @@ export default function (
         compactionCount: record.compactionCount,
       });
     },
-    (parentSessionId, sender, message) => parentMessenger.send(parentSessionId, sender, message),
+    (parentSessionId, sender, message) =>
+      completion.onAgentMessage(sender, message) ||
+      parentMessenger.send(parentSessionId, sender, message),
   );
 
   // Expose manager via Symbol.for() global registry for cross-package access.

@@ -42,7 +42,7 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
       name: SUBAGENT_TOOL_NAMES.WAIT_AGENT,
       label: "WaitAgent",
       description:
-        "Wait for any selected running agent to reach a terminal state. This is event-driven, not polling. " +
+        "Wait for any selected running agent to send a message or reach a terminal state. This is event-driven, not polling. " +
         "A timeout returns current statuses without cancelling agents. Wait only when their findings block progress.",
       promptSnippet: "Wait for selected subagents only when their results block progress",
       promptGuidelines: [
@@ -69,8 +69,8 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
       ),
       async execute(_toolCallId, params, signal, onUpdate) {
         const startedAt = Date.now();
-        const details = (outcome: WaitAgentDetails["outcome"]): WaitAgentDetails => ({
-          outcome,
+        const details = (): WaitAgentDetails => ({
+          outcome: "waiting",
           timed_out: false,
           agents: params.agent_ids
             .map(deps.getRecord)
@@ -82,7 +82,7 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
         const update = () =>
           onUpdate?.({
             content: [{ type: "text", text: "Waiting for a selected agent…" }],
-            details: details("waiting"),
+            details: details(),
           });
         update();
         const timer = onUpdate ? setInterval(update, 1_000) : undefined;
@@ -101,7 +101,18 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
             wait_ended_at: Date.now(),
             ...(params.timeout_ms === undefined ? {} : { timeout_ms: params.timeout_ms }),
           };
-          return textResult(JSON.stringify(outcome, null, 2), finalDetails);
+          const modelOutcome =
+            outcome.outcome === "message"
+              ? {
+                  ...outcome,
+                  sender: {
+                    id: outcome.sender.id,
+                    type: outcome.sender.type,
+                    title: outcome.sender.title,
+                  },
+                }
+              : outcome;
+          return textResult(JSON.stringify(modelOutcome, null, 2), finalDetails);
         } finally {
           if (timer) clearInterval(timer);
         }

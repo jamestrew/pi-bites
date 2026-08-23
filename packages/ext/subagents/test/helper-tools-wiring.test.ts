@@ -57,7 +57,7 @@ function ctx(idle = true) {
 
 const textOf = (result: any): string => result.content[0].text;
 
-async function spawnBackground(tools: Map<string, any>) {
+async function spawnBackground(tools: Map<string, any>, parentCtx = ctx()) {
   return tools.get("Agent").execute(
     "bg",
     {
@@ -67,7 +67,7 @@ async function spawnBackground(tools: Map<string, any>) {
     },
     undefined,
     undefined,
-    ctx(),
+    parentCtx,
   );
 }
 
@@ -101,26 +101,34 @@ describe("background helper tools", () => {
     expect(notification.content).not.toContain("get_subagent_result");
   });
 
-  it("queues child messages until the parent agent settles", async () => {
+  it("routes an unselected child message through the safe parent boundary with metadata", async () => {
     let messageParent: ((message: string) => boolean) | undefined;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
       messageParent = options.messageParent;
       return new Promise(() => {});
     });
     const { pi, tools, handlers } = makePi();
+    const parentCtx = ctx();
+    parentCtx.model = { provider: "openai", id: "gpt-5", reasoning: true };
     subagentsExtension(pi);
-    handlers.get("session_start")?.({}, ctx());
-    handlers.get("agent_start")?.({}, ctx());
+    handlers.get("session_start")?.({}, parentCtx);
+    handlers.get("agent_start")?.({}, parentCtx);
 
-    await spawnBackground(tools);
+    await spawnBackground(tools, parentCtx);
     expect(messageParent?.("need a decision")).toBe(true);
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
-    handlers.get("agent_settled")?.({}, ctx());
+    handlers.get("agent_settled")?.({}, parentCtx);
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         customType: "subagent-message",
-        details: expect.objectContaining({ message: "need a decision" }),
+        details: expect.objectContaining({
+          sender: expect.objectContaining({
+            model_name: "openai/gpt-5",
+            thinking: "off",
+          }),
+          message: "need a decision",
+        }),
       }),
       { triggerTurn: false },
     );

@@ -190,6 +190,88 @@ describe("spawn-and-wait orchestration", () => {
     harness.shutdown();
   });
 
+  it("does not wake a wait when an unselected child messages", async () => {
+    deferredRun();
+    const harness = makeHarness();
+    const selected = await spawn(harness.tools, harness.ctx, "selected");
+    deferredRun();
+    await spawn(harness.tools, harness.ctx, "unselected");
+    const waiting = waitFor(harness.tools, harness.ctx, [agentId(selected)]);
+    let waitSettled = false;
+    void waiting.then(() => (waitSettled = true));
+
+    const unselectedMessage = vi.mocked(runAgent).mock.calls[1]?.[3].messageParent;
+    expect(unselectedMessage?.("ordinary delivery")).toBe(true);
+    await Promise.resolve();
+
+    expect(waitSettled).toBe(false);
+    expect(harness.pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "subagent-message",
+        details: expect.objectContaining({ message: "ordinary delivery" }),
+      }),
+      { triggerTurn: false },
+    );
+
+    const selectedMessage = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
+    expect(selectedMessage?.("wake now")).toBe(true);
+    await expect(waiting).resolves.toMatchObject({
+      details: { outcome: "message", message: "wake now" },
+    });
+    harness.shutdown();
+  });
+
+  it("wakes on a selected child message without duplicating it, then delivers the final", async () => {
+    const child = deferredRun();
+    const harness = makeHarness();
+    harness.ctx.model = { provider: "openai", id: "gpt-5", reasoning: true };
+    const spawned = await spawn(harness.tools, harness.ctx, "trace auth flow");
+    const id = agentId(spawned);
+    const waiting = waitFor(harness.tools, harness.ctx, [id]);
+
+    const messageParent = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
+    expect(messageParent?.("exact\nmessage")).toBe(true);
+    const result = await waiting;
+
+    expect(result.details).toMatchObject({
+      outcome: "message",
+      timed_out: false,
+      sender: {
+        id,
+        type: "general",
+        title: "trace auth flow",
+        model_name: "openai/gpt-5",
+        thinking: "off",
+      },
+      message: "exact\nmessage",
+      agents: [expect.objectContaining({ id, status: "running" })],
+    });
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      sender: { id, type: "general", title: "trace auth flow" },
+      message: "exact\nmessage",
+    });
+    expect(result.content[0].text).not.toContain("model_name");
+    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+
+    expect(messageParent?.("later message")).toBe(true);
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
+    expect(harness.pi.sendMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        customType: "subagent-message",
+        details: expect.objectContaining({ message: "later message" }),
+      }),
+      { triggerTurn: false },
+    );
+
+    child.resolve({ responseText: "eventual final", session: { dispose: vi.fn() } });
+    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2));
+    expect(harness.pi.sendMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("eventual final") }),
+      { deliverAs: "steer", triggerTurn: true },
+    );
+    harness.shutdown();
+  });
+
   it("caps retained tool calls and reports omitted history", async () => {
     const child = deferredRun();
     const harness = makeHarness();
