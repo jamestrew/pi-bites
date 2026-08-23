@@ -1,5 +1,7 @@
-const RECOVERY =
-  "Rebuild it from packages/ext/codex-adapter/vendor/apply-patch, replace the bundled executable, then run `/reload`";
+function recovery(helper: string): string {
+  const source = helper === "exec_bridge" ? "exec" : "apply-patch";
+  return `Rebuild it from packages/ext/codex-adapter/vendor/${source}, replace the bundled executable, then run \`/reload\``;
+}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -31,7 +33,7 @@ export function nativeBinaryRecoveryMessage(
   const missingInterpreter =
     errorCode(error) === "ENOENT" && !!options.binaryPath && existsSync(options.binaryPath);
   if (!loaderFailure && !startupPipeFailure && !missingInterpreter) return undefined;
-  return `${helper} cannot run on this system. ${RECOVERY}`;
+  return `${helper} cannot run on this system. ${recovery(helper)}`;
 }
 
 export function formatNativeBinaryError(

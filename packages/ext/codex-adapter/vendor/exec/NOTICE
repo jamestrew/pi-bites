@@ -1,0 +1,13 @@
+The exec bridge source was vendored from @howaboua/pi-codex-conversion
+3.0.18 at commit e12067caadc38da4e785d0300202aac233ae3b2f, then reduced to
+the polling bridge and extended to report output dropped at its retention cap.
+
+The codex-utils-pty source was derived from openai/codex at commit
+b545c94041017d000e2c8b2f6272705d21b85dfb and is licensed under Apache-2.0.
+
+The retained Linux x86-64 exec_bridge binary was rebuilt from this workspace
+and has SHA-256:
+a240c111fcf6a3efbfb8aef56fdea6c1aa24421c3fc4c28a6a2d6703266df6fe
+
+The original package artifact had SHA-256:
+3b2d49bdaaf14bf255a0e3805554eda9c41f93a9fc911c1a97beeaeee905841e

@@ -1,5 +1,7 @@
-const CORE_TOOLS = ["edit", "write"] as const;
-const OWNED_TOOLS = new Set<string>([...CORE_TOOLS, "apply_patch"]);
+const CORE_TOOLS = ["read", "bash", "edit", "write"] as const;
+const ADAPTER_TOOLS = ["exec_command", "write_stdin", "apply_patch"] as const;
+const OWNED_TOOLS = new Set<string>([...CORE_TOOLS, ...ADAPTER_TOOLS]);
+const ADAPTER_TOOL_NAMES = new Set<string>(ADAPTER_TOOLS);
 
 type CoreTool = (typeof CORE_TOOLS)[number];
 
@@ -35,10 +37,10 @@ export function isAdapterModel(model: AdapterModel | undefined, providers: strin
 
 function recordDisplaced(activeTools: string[]): DisplacedTool[] {
   return activeTools.flatMap((name, index): DisplacedTool[] => {
-    if (name !== "edit" && name !== "write") return [];
+    if (!CORE_TOOLS.includes(name as CoreTool)) return [];
     return [
       {
-        name,
+        name: name as CoreTool,
         index,
         before: activeTools.slice(index + 1).find((tool: string) => !OWNED_TOOLS.has(tool)),
       },
@@ -65,13 +67,13 @@ function activate(activeTools: string[], state: AdapterToolState): string[] {
     ownedIndex < 0 ? (state.patchIndex ?? unrelated.length) : ownedIndex,
     unrelated.length,
   );
-  unrelated.splice(index, 0, "apply_patch");
+  unrelated.splice(index, 0, ...ADAPTER_TOOLS);
   return unrelated;
 }
 
 function restore(activeTools: string[], state: AdapterToolState): string[] {
-  if (!state.active) return activeTools.filter((name) => name !== "apply_patch");
-  const restored = activeTools.filter((name) => name !== "apply_patch");
+  if (!state.active) return activeTools.filter((name) => !ADAPTER_TOOL_NAMES.has(name));
+  const restored = activeTools.filter((name) => !ADAPTER_TOOL_NAMES.has(name));
   for (const tool of state.displaced ?? []) {
     if (restored.includes(tool.name)) continue;
     const beforeIndex = tool.before === undefined ? -1 : restored.indexOf(tool.before);

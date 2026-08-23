@@ -1,0 +1,31 @@
+[workspace]
+members = ["crates/codex-exec-shim", "crates/codex-utils-pty"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+version = "0.0.0"
+
+[workspace.dependencies]
+anyhow = "1"
+base64 = "0.22.1"
+codex-utils-pty = { path = "crates/codex-utils-pty" }
+libc = "0.2"
+portable-pty = "0.9"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = [
+  "io-util",
+  "macros",
+  "process",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
