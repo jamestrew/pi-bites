@@ -1,0 +1,31 @@
+{
+  "skill_name": "tool-call-rendering",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Review packages/ext/subagents/ui/message-agent-render.ts and its test. Propose an exact patch that brings this ordinary tool renderer in line with the repository's tool rendering conventions. Do not edit source files; save a concise implementation rationale and unified diff to answer.md. Preserve sanitization and narrow-width behavior.",
+      "expected_output": "A focused patch with a bold default-foreground MessageAgent scanline, cyan remainder, blank separator, dim unindented body, semantic status rendering, and style-visible regression tests.",
+      "files": [],
+      "expectations": [
+        "The proposal makes the first word MessageAgent visibly bold in the default foreground and styles the remaining scanline text with the accent color.",
+        "The proposal removes decorative arrows and ordinary body indentation, inserting one blank line before dim message details.",
+        "The result/status proposal uses the same first-line grammar as the call or deliberately makes one slot the sole row owner; it does not leave an indented status fragment.",
+        "The proposed tests use non-identity style markers that can distinguish bold, accent, and dim output.",
+        "The proposal preserves control-sequence sanitization and verifies visible width at narrow widths."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Review packages/ext/codex-adapter/apply-patch/rendering.ts and nearby renderer tests against the repository's tool rendering conventions. Do not edit source files. Save answer.md with a concrete recommendation and, only where needed, an exact unified diff. Keep useful patch/diff semantics rather than mechanically forcing ordinary body styling.",
+      "expected_output": "A restrained review that applies the shared scanline and compactness rules while preserving meaningful diff syntax, colors, line numbers, and hierarchy; any proposed tests make styles observable.",
+      "files": [],
+      "expectations": [
+        "The review explicitly treats diff syntax, colors, line numbers, or hierarchy as meaningful semantics rather than dimming or flattening them mechanically.",
+        "The review checks that the first visible line retains a bold tool/action word and accent-colored remainder, proposing a focused change if it does not.",
+        "The review accounts for collapsed versus expanded output and shows an expansion hint only when content is hidden.",
+        "Any proposed renderer tests make relevant styles observable instead of relying only on identity theme functions.",
+        "The recommendation is restrained: it preserves already-correct behavior and avoids an unrelated renderer rewrite."
+      ]
+    }
+  ]
+}
