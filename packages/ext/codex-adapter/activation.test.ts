@@ -4,6 +4,18 @@ vi.mock("./apply-patch/tool.js", () => ({
   registerApplyPatchTool: (pi: { registerTool(tool: { name: string }): void }) =>
     pi.registerTool({ name: "apply_patch" }),
 }));
+const { shutdown } = vi.hoisted(() => ({ shutdown: vi.fn(async () => {}) }));
+vi.mock("./exec/session-manager.js", () => ({
+  createExecSessionManager: () => ({ shutdown }),
+}));
+vi.mock("./exec/command-tool.js", () => ({
+  registerExecCommandTool: (pi: { registerTool(tool: { name: string }): void }) =>
+    pi.registerTool({ name: "exec_command" }),
+}));
+vi.mock("./exec/write-stdin-tool.js", () => ({
+  registerWriteStdinTool: (pi: { registerTool(tool: { name: string }): void }) =>
+    pi.registerTool({ name: "write_stdin" }),
+}));
 
 import { isAdapterModel, reconcileTools, type AdapterToolState } from "./activation.js";
 import registerCodexAdapter from "./index.js";
@@ -21,20 +33,28 @@ describe("Codex adapter activation", () => {
     expect(isAdapterModel(model("github-copilot", "gpt-5"), [])).toBe(false);
   });
 
-  test("replaces only active edit and write while preserving unrelated order", () => {
+  test("replaces active core tools while preserving unrelated order", () => {
     const state: AdapterToolState = {};
     expect(
       reconcileTools(["read", "custom-a", "edit", "bash", "write", "custom-b"], true, state),
-    ).toEqual(["read", "custom-a", "apply_patch", "bash", "custom-b"]);
+    ).toEqual(["exec_command", "write_stdin", "apply_patch", "custom-a", "custom-b"]);
     expect(
-      reconcileTools(["read", "custom-a", "apply_patch", "bash", "custom-b"], false, state),
+      reconcileTools(
+        ["exec_command", "write_stdin", "apply_patch", "custom-a", "custom-b"],
+        false,
+        state,
+      ),
     ).toEqual(["read", "custom-a", "edit", "bash", "write", "custom-b"]);
   });
 
   test("restores displaced tools that originally preceded every unrelated tool", () => {
     const state: AdapterToolState = {};
-    expect(reconcileTools(["edit", "write", "read"], true, state)).toEqual(["apply_patch", "read"]);
-    expect(reconcileTools(["apply_patch", "read"], false, state)).toEqual([
+    expect(reconcileTools(["edit", "write", "read"], true, state)).toEqual([
+      "exec_command",
+      "write_stdin",
+      "apply_patch",
+    ]);
+    expect(reconcileTools(["exec_command", "write_stdin", "apply_patch"], false, state)).toEqual([
       "edit",
       "write",
       "read",
@@ -44,21 +64,17 @@ describe("Codex adapter activation", () => {
   test("restores core tools first encountered during repeated in-scope reconciliation", () => {
     const state: AdapterToolState = {};
     expect(reconcileTools(["read", "write", "custom"], true, state)).toEqual([
-      "read",
+      "exec_command",
+      "write_stdin",
       "apply_patch",
       "custom",
     ]);
-    expect(reconcileTools(["read", "apply_patch", "edit", "custom"], true, state)).toEqual([
-      "read",
-      "apply_patch",
-      "custom",
-    ]);
-    expect(reconcileTools(["read", "apply_patch", "custom"], false, state)).toEqual([
-      "read",
-      "write",
-      "edit",
-      "custom",
-    ]);
+    expect(
+      reconcileTools(["exec_command", "write_stdin", "apply_patch", "edit", "custom"], true, state),
+    ).toEqual(["exec_command", "write_stdin", "apply_patch", "custom"]);
+    expect(
+      reconcileTools(["exec_command", "write_stdin", "apply_patch", "custom"], false, state),
+    ).toEqual(["read", "write", "edit", "custom"]);
   });
 
   test("leaves core tools unchanged when the model starts outside adapter scope", () => {
@@ -80,30 +96,28 @@ describe("Codex adapter activation", () => {
   test("does not resurrect core tools that were inactive", () => {
     const state: AdapterToolState = {};
     expect(reconcileTools(["read", "write", "custom"], true, state)).toEqual([
-      "read",
+      "exec_command",
+      "write_stdin",
       "apply_patch",
       "custom",
     ]);
-    expect(reconcileTools(["read", "apply_patch", "custom"], false, state)).toEqual([
-      "read",
-      "write",
-      "custom",
-    ]);
+    expect(
+      reconcileTools(["exec_command", "write_stdin", "apply_patch", "custom"], false, state),
+    ).toEqual(["read", "write", "custom"]);
 
     const noWrites: AdapterToolState = {};
     expect(reconcileTools(["read", "bash", "custom", "apply_patch"], true, noWrites)).toEqual([
-      "read",
-      "bash",
+      "exec_command",
+      "write_stdin",
+      "apply_patch",
       "custom",
     ]);
-    expect(reconcileTools(["read", "bash", "custom"], false, noWrites)).toEqual([
-      "read",
-      "bash",
-      "custom",
-    ]);
+    expect(
+      reconcileTools(["exec_command", "write_stdin", "apply_patch", "custom"], false, noWrites),
+    ).toEqual(["read", "bash", "custom"]);
   });
 
-  test("session shutdown restores the exact front-of-list core order", () => {
+  test("session shutdown restores the exact front-of-list core order", async () => {
     const handlers = new Map<string, (event: any, ctx: any) => void>();
     let active = ["edit", "write", "read"];
     registerCodexAdapter(
@@ -119,12 +133,32 @@ describe("Codex adapter activation", () => {
     );
 
     handlers.get("session_start")?.({}, { model: model("openai-codex") });
-    expect(active).toEqual(["apply_patch", "read"]);
+    expect(active).toEqual(["exec_command", "write_stdin", "apply_patch"]);
     handlers.get("session_shutdown")?.({}, {});
+    expect(shutdown).toHaveBeenCalled();
     expect(active).toEqual(["edit", "write", "read"]);
   });
 
-  test("lifecycle reconciliation never retains stale ctx", () => {
+  test("session shutdown cleans up processes when tool restoration fails", async () => {
+    shutdown.mockClear();
+    const handlers = new Map<string, (...args: any[]) => unknown>();
+    registerCodexAdapter(
+      {
+        registerTool: vi.fn(),
+        on: (name: string, handler: (...args: any[]) => unknown) => handlers.set(name, handler),
+        getActiveTools: () => ["exec_command"],
+        setActiveTools: () => {
+          throw new Error("restore failed");
+        },
+      } as never,
+      { current: {} },
+    );
+
+    await expect(handlers.get("session_shutdown")?.({}, {})).rejects.toThrow("restore failed");
+    expect(shutdown).toHaveBeenCalledOnce();
+  });
+
+  test("lifecycle reconciliation never retains stale ctx", async () => {
     const handlers = new Map<string, (event: any, ctx: any) => void>();
     let active = ["read", "bash", "edit", "write", "custom"];
     const pi = {
@@ -138,6 +172,11 @@ describe("Codex adapter activation", () => {
       }),
     };
     registerCodexAdapter(pi as never, { current: { codexAdapter: { providers: ["bedrock"] } } });
+    expect(pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
+      "apply_patch",
+      "exec_command",
+      "write_stdin",
+    ]);
 
     let stale = false;
     const ctx = {
@@ -148,7 +187,7 @@ describe("Codex adapter activation", () => {
     };
     handlers.get("session_start")?.({}, ctx);
     stale = true;
-    expect(active).toEqual(["read", "bash", "apply_patch", "custom"]);
+    expect(active).toEqual(["exec_command", "write_stdin", "apply_patch", "custom"]);
 
     handlers.get("model_select")?.(
       { model: model("other") },

@@ -1,0 +1,25 @@
+[package]
+edition.workspace = true
+license.workspace = true
+name = "codex-utils-pty"
+version.workspace = true
+
+
+[dependencies]
+anyhow = { workspace = true }
+portable-pty = { workspace = true }
+tokio = { workspace = true, features = [
+  "io-util",
+  "macros",
+  "process",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
+
+[lib]
+path = "lib.rs"
+doctest = false
