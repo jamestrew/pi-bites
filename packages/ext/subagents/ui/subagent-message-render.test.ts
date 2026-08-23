@@ -31,7 +31,7 @@ describe("incoming subagent message rendering", () => {
   it("shows a three-line collapsed preview and expands to the exact message", () => {
     const collapsed = renderer()({ details }, { expanded: false }, theme).render(80);
     expect(collapsed).toEqual([
-      "↳ trace auth flow (openai/gpt-5.4 high)",
+      "↳ trace auth flow sent a message (openai/gpt-5.4 high)",
       "  line one",
       "  line two",
       "  line three",
