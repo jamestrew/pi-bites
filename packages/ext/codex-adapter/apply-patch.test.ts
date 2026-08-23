@@ -11,11 +11,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { getBundledApplyPatchBinaryPath } from "./apply-patch/binary.js";
 import { executePatchWithRust } from "./apply-patch/executor.js";
+import { clearApplyPatchRenderState } from "./apply-patch/render-state.js";
 import { createApplyPatchTool, registerApplyPatchTool } from "./apply-patch/tool.js";
 
 const dirs: string[] = [];
@@ -66,6 +68,238 @@ describe("apply_patch", () => {
 
     await execute(cwd, patch("*** Delete File: b.txt"));
     expect(existsSync(join(cwd, "b.txt"))).toBe(false);
+  });
+
+  test("renders the upstream diff preview without a duplicate result summary", async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, "sample.txt"), "one\ntwo\nthree\n");
+    const input = patch("*** Update File: sample.txt", "@@", " one", "-two", "+TWO", " three");
+    const tool = createApplyPatchTool();
+    const result = await tool.execute("render", { input }, undefined, undefined, { cwd } as never);
+    const theme = {
+      fg: (_role: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+    const context = {
+      toolCallId: "render",
+      cwd,
+      argsComplete: true,
+      expanded: false,
+      state: {},
+      invalidate: vi.fn(),
+    };
+
+    const collapsed = stripVTControlCharacters(
+      tool.renderCall!({ input }, theme as never, context as never)
+        .render(200)
+        .join("\n"),
+    );
+    expect(collapsed).toContain("• Edited sample.txt (+1 -1)");
+    expect(collapsed).toContain("1  one");
+    expect(collapsed).toContain("2 -two");
+    expect(collapsed).toContain("2 +TWO");
+    expect(collapsed).toContain("3  three");
+
+    expect(
+      tool.renderResult!(
+        result,
+        { expanded: false, isPartial: false },
+        theme as never,
+        context as never,
+      ).render(200),
+    ).toEqual([]);
+
+    const longInput = patch(
+      "*** Add File: long.txt",
+      ...Array.from({ length: 14 }, (_, index) => `+line ${index + 1}`),
+    );
+    const longTool = createApplyPatchTool();
+    await longTool.execute("long-render", { input: longInput }, undefined, undefined, {
+      cwd,
+    } as never);
+    const renderLong = (expanded: boolean) =>
+      stripVTControlCharacters(
+        longTool.renderCall!(
+          { input: longInput },
+          theme as never,
+          {
+            ...context,
+            toolCallId: "long-render",
+            expanded,
+            state: {},
+            invalidate: vi.fn(),
+          } as never,
+        )
+          .render(200)
+          .join("\n"),
+      );
+
+    expect(renderLong(false)).toContain("more lines");
+    expect(renderLong(true)).not.toContain("more lines");
+    expect(renderLong(true)).toContain("14 +line 14");
+  });
+
+  test("restores completed previews from persisted result details", async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, "deleted.txt"), "first\nsecond\n");
+    const input = patch("*** Delete File: deleted.txt");
+    const tool = createApplyPatchTool();
+    const result = await tool.execute("persisted-render", { input }, undefined, undefined, {
+      cwd,
+    } as never);
+    clearApplyPatchRenderState();
+    const theme = {
+      fg: (_role: string, text: string) => text,
+      bold: (text: string) => text,
+    };
+    const context = {
+      toolCallId: "persisted-render",
+      cwd,
+      argsComplete: true,
+      expanded: false,
+      state: {},
+      invalidate: vi.fn(),
+    };
+
+    tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      theme as never,
+      context as never,
+    );
+    const restored = stripVTControlCharacters(
+      tool.renderCall!({ input }, theme as never, context as never)
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(context.invalidate).toHaveBeenCalledOnce();
+    expect(restored).toContain("• Deleted deleted.txt (+0 -2)");
+    expect(restored).toContain("1 -first");
+    expect(restored).toContain("2 -second");
+  });
+
+  test("renders repeated targets as one sequential file preview", async () => {
+    const cwd = tempDir();
+    writeFileSync(join(cwd, "repeated.txt"), "one\ntwo\n");
+    const input = patch(
+      "*** Update File: repeated.txt",
+      "@@",
+      "+zero",
+      " one",
+      "*** Update File: repeated.txt",
+      "@@",
+      " two",
+      "+three",
+    );
+    const tool = createApplyPatchTool();
+    await tool.execute("repeated-render", { input }, undefined, undefined, { cwd } as never);
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+        {
+          toolCallId: "repeated-render",
+          cwd,
+          argsComplete: true,
+          expanded: true,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(rendered).toContain("• Edited repeated.txt (+2 -0)");
+    expect(rendered).toContain("3  two");
+    expect(rendered).toContain("4 +three");
+    expect(rendered).not.toContain("2 files");
+  });
+
+  test("marks partial failures in the retained patch preview", async () => {
+    const cwd = tempDir();
+    const input = patch(
+      "*** Add File: created.txt",
+      "+created",
+      "*** Update File: missing.txt",
+      "@@",
+      "-x",
+      "+y",
+    );
+    const tool = createApplyPatchTool();
+    const partialResult = await tool.execute("partial-render", { input }, undefined, undefined, {
+      cwd,
+    } as never);
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        {
+          fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+          bold: (text: string) => text,
+        } as never,
+        {
+          toolCallId: "partial-render",
+          cwd,
+          argsComplete: true,
+          expanded: false,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(rendered).toContain("<warning>• Edit partially failed");
+    expect(rendered).toContain("missing.txt failed (+1 -1)</error>");
+
+    clearApplyPatchRenderState();
+    const restoredContext = {
+      toolCallId: "partial-render",
+      cwd,
+      argsComplete: true,
+      expanded: false,
+      state: {},
+      invalidate: vi.fn(),
+    };
+    tool.renderResult!(
+      partialResult,
+      { expanded: false, isPartial: false },
+      { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+      restoredContext as never,
+    );
+    const restored = tool.renderCall!(
+      { input },
+      { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+      restoredContext as never,
+    )
+      .render(200)
+      .join("\n");
+    expect(restored).toContain("• Edit partially failed");
+    expect(restored).toContain("missing.txt failed (+1 -1)");
+
+    const failedInput = patch("*** Update File: absent.txt", "@@", "-old", "+new");
+    await expect(
+      tool.execute("failed-render", { input: failedInput }, undefined, undefined, { cwd } as never),
+    ).rejects.toThrow(/apply_patch failed/i);
+    const failed = stripVTControlCharacters(
+      tool.renderCall!(
+        { input: failedInput },
+        {
+          fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+          bold: (text: string) => text,
+        } as never,
+        {
+          toolCallId: "failed-render",
+          cwd,
+          argsComplete: true,
+          expanded: false,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+    expect(failed).toContain("<error>• Edit failed absent.txt (+1 -1)</error>");
   });
 
   test("deduplicates symlink aliases before acquiring mutation queues", async () => {

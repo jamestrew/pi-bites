@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { Text } from "@earendil-works/pi-tui";
+import { Container, Text } from "@earendil-works/pi-tui";
 import {
   type AgentToolResult,
   type ExtensionAPI,
@@ -13,7 +13,15 @@ import { parsePatchActions } from "../patch/parser.js";
 import { resolvePatchPath } from "../patch/paths.js";
 import { ExecutePatchError, type ExecutePatchResult } from "../patch/types.js";
 import { executePatchWithRust } from "./executor.js";
-import { formatApplyPatchSummary } from "./rendering.js";
+import {
+  clearApplyPatchRenderState,
+  getApplyPatchRenderSnapshot,
+  markApplyPatchFailure,
+  renderApplyPatchCallFromState,
+  setApplyPatchRenderState,
+  type ApplyPatchRenderSnapshot,
+} from "./render-state.js";
+import { formatPatchTarget } from "./rendering.js";
 
 const parameters = Type.Object({
   input: Type.String({
@@ -24,7 +32,12 @@ const parameters = Type.Object({
 export interface ApplyPatchDetails {
   status: "success" | "partial_failure";
   result: ExecutePatchResult;
+  render: ApplyPatchRenderSnapshot;
   failedTargets?: string[];
+}
+
+interface ApplyPatchToolRenderState {
+  snapshot?: ApplyPatchRenderSnapshot;
 }
 
 export interface CreateApplyPatchToolOptions {
@@ -53,6 +66,14 @@ function failedTargets(error: ExecutePatchError): string[] {
   );
 }
 
+function failedPatchTargets(error: ExecutePatchError, cwd: string): string[] {
+  return uniqueStrings(
+    error.failures.map(({ action }) =>
+      formatPatchTarget(action.path, action.type === "update" ? action.movePath : undefined, cwd),
+    ),
+  );
+}
+
 function partialFailureMessage(error: ExecutePatchError, targets: string[]): string {
   const targetSummary = targets.length > 0 ? ` while patching ${targets.join(", ")}` : "";
   const lines = [
@@ -70,6 +91,12 @@ function partialFailureMessage(error: ExecutePatchError, targets: string[]): str
     );
   }
   return lines.join("\n");
+}
+
+function renderSnapshot(toolCallId: string): ApplyPatchRenderSnapshot {
+  const snapshot = getApplyPatchRenderSnapshot(toolCallId);
+  if (!snapshot) throw new Error(`Missing apply_patch render state for ${toolCallId}`);
+  return snapshot;
 }
 
 function successMessage(result: ExecutePatchResult): string {
@@ -133,7 +160,7 @@ async function withMutationQueues<T>(paths: string[], run: () => Promise<T>): Pr
 
 export function createApplyPatchTool(
   options: CreateApplyPatchToolOptions = {},
-): ToolDefinition<typeof parameters, ApplyPatchDetails> {
+): ToolDefinition<typeof parameters, ApplyPatchDetails, ApplyPatchToolRenderState> {
   return {
     name: "apply_patch",
     label: "apply_patch",
@@ -152,15 +179,19 @@ export function createApplyPatchTool(
       return args as { input: string };
     },
     async execute(
-      _toolCallId: string,
+      toolCallId: string,
       params: { input: string },
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
       ctx: ExtensionContext,
     ): Promise<AgentToolResult<ApplyPatchDetails>> {
       const cwd = ctx.cwd;
-      if (signal?.aborted) throw new Error("apply_patch aborted");
       const patchText = params.input;
+      setApplyPatchRenderState(toolCallId, patchText, cwd);
+      if (signal?.aborted) {
+        markApplyPatchFailure(toolCallId, "failed");
+        throw new Error("apply_patch aborted");
+      }
       const touchedPaths = touchedPatchPaths(cwd, patchText);
       try {
         const result = await withMutationQueues(touchedPaths, () =>
@@ -168,58 +199,66 @@ export function createApplyPatchTool(
         );
         return {
           content: [{ type: "text", text: successMessage(result) }],
-          details: { status: "success", result },
+          details: { status: "success", result, render: renderSnapshot(toolCallId) },
         };
       } catch (error) {
         if (signal?.aborted) {
+          markApplyPatchFailure(toolCallId, "failed");
           const targets = touchedPaths.length > 0 ? touchedPaths.join(", ") : "the patch targets";
           throw new Error(
             `apply_patch aborted after the native process stopped; changes may have partially applied. Inspect before retrying: ${targets}`,
           );
         }
-        if (!(error instanceof ExecutePatchError)) throw error;
+        if (!(error instanceof ExecutePatchError)) {
+          markApplyPatchFailure(toolCallId, "failed");
+          throw error;
+        }
         const targets = failedTargets(error);
+        const renderTargets = failedPatchTargets(error, cwd);
         if (!error.hasPartialSuccess()) {
+          markApplyPatchFailure(toolCallId, "failed", renderTargets);
           const targetSummary = targets.length > 0 ? ` while patching ${targets.join(", ")}` : "";
           throw new Error(`apply_patch failed${targetSummary}: ${error.message}`);
         }
+        markApplyPatchFailure(toolCallId, "partial_failure", renderTargets);
         const text = partialFailureMessage(error, targets);
         return {
           content: [{ type: "text", text }],
           details: {
             status: "partial_failure",
             result: error.result,
+            render: renderSnapshot(toolCallId),
             ...(targets.length > 0 ? { failedTargets: targets } : {}),
           },
         };
       }
     },
     renderCall(args, theme, context) {
-      const input = typeof args.input === "string" ? args.input : "";
-      if (context.argsComplete === false || input.trim().length === 0) {
-        return new Text(`${theme.fg("dim", "•")} ${theme.bold("Patching")}`, 0, 0);
-      }
-      const text =
-        formatApplyPatchSummary(input, context.cwd) ||
-        `${theme.fg("dim", "•")} ${theme.bold("Patching")}`;
-      return new Text(text, 0, 0);
-    },
-    renderResult(result, { expanded }, theme) {
-      const text = result.content.find((item) => item.type === "text")?.text ?? "";
       return new Text(
-        theme.fg(
-          result.details.status === "partial_failure" ? "warning" : "success",
-          expanded ? text : (text.split("\n")[0] ?? ""),
-        ),
+        renderApplyPatchCallFromState(args, theme, {
+          ...context,
+          snapshot: context.state.snapshot,
+        }),
         0,
         0,
       );
+    },
+    renderResult(result, { isPartial }, theme, context) {
+      if (isPartial) return new Text(`${theme.fg("dim", "•")} ${theme.bold("Patching")}`, 0, 0);
+      const snapshot = (result.details as Partial<ApplyPatchDetails> | undefined)?.render;
+      if (snapshot && context.state.snapshot !== snapshot) {
+        context.state.snapshot = snapshot;
+        context.invalidate();
+      }
+      return new Container();
     },
   };
 }
 
 export function registerApplyPatchTool(pi: ExtensionAPI): void {
   pi.registerTool(createApplyPatchTool());
+  pi.on("session_start", clearApplyPatchRenderState);
+  pi.on("session_shutdown", clearApplyPatchRenderState);
   pi.on("tool_result", (event) => {
     if (
       event.toolName === "apply_patch" &&
