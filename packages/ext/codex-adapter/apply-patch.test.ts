@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { getBundledApplyPatchBinaryPath } from "./apply-patch/binary.js";
@@ -93,6 +94,34 @@ describe("apply_patch", () => {
       details: { status: "success" },
     });
     expect(readFileSync(join(cwd, "real.txt"), "utf8")).toBe("ONE\nTWO\n");
+  });
+
+  test("queues valid patches that update the same path more than once", async () => {
+    const cwd = tempDir();
+    const target = join(cwd, "repeated.txt");
+    writeFileSync(target, "one\ntwo\n");
+    let applied: ReturnType<typeof execute> | undefined;
+
+    await withFileMutationQueue(target, async () => {
+      applied = execute(
+        cwd,
+        patch(
+          "*** Update File: repeated.txt",
+          "@@",
+          "-one",
+          "+ONE",
+          "*** Update File: repeated.txt",
+          "@@",
+          "-two",
+          "+TWO",
+        ),
+      );
+      await delay(100);
+      expect(readFileSync(target, "utf8")).toBe("one\ntwo\n");
+    });
+
+    await expect(applied).resolves.toMatchObject({ details: { status: "success" } });
+    expect(readFileSync(target, "utf8")).toBe("ONE\nTWO\n");
   });
 
   test("reports malformed patches, partial success, cancellation, and missing binaries", async () => {

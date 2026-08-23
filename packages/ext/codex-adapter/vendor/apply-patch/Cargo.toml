@@ -29,8 +29,6 @@ similar = "2"
 tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "macros", "rt", "rt-multi-thread", "sync"] }
-tree-sitter = "0.25"
-tree-sitter-bash = "0.25"
 ts-rs = { version = "11", features = ["serde-json-impl", "no-serde-warnings"] }
 url = "2"
 urlencoding = "2"

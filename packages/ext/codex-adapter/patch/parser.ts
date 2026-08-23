@@ -73,7 +73,6 @@ export function parsePatchActions({ text }: { text: string }): ParsedPatchAction
   }
 
   const actions: ParsedPatchAction[] = [];
-  const seenPaths = new Set<string>();
   let index = 1;
 
   while (index < lines.length - 1) {
@@ -83,10 +82,6 @@ export function parsePatchActions({ text }: { text: string }): ParsedPatchAction
 
     if (line.startsWith("*** Update File: ")) {
       const updatePath = normalizePatchPath({ path: line.slice("*** Update File: ".length) });
-      if (seenPaths.has(updatePath)) {
-        throw new DiffError(`Update File Error: Duplicate Path: ${updatePath}`);
-      }
-      seenPaths.add(updatePath);
       index += 1;
       let movePath: string | undefined;
       const possibleMove = lines[index];
@@ -124,10 +119,6 @@ export function parsePatchActions({ text }: { text: string }): ParsedPatchAction
 
     if (line.startsWith("*** Delete File: ")) {
       const deletePath = normalizePatchPath({ path: line.slice("*** Delete File: ".length) });
-      if (seenPaths.has(deletePath)) {
-        throw new DiffError(`Delete File Error: Duplicate Path: ${deletePath}`);
-      }
-      seenPaths.add(deletePath);
       actions.push({
         type: "delete",
         path: deletePath,
@@ -138,12 +129,6 @@ export function parsePatchActions({ text }: { text: string }): ParsedPatchAction
 
     if (line.startsWith("*** Add File: ")) {
       const addPath = normalizePatchPath({ path: line.slice("*** Add File: ".length) });
-      const previous = actions.at(-1);
-      const replacesDeletedPath = previous?.type === "delete" && previous.path === addPath;
-      if (seenPaths.has(addPath) && !replacesDeletedPath) {
-        throw new DiffError(`Add File Error: Duplicate Path: ${addPath}`);
-      }
-      seenPaths.add(addPath);
       const state: ParserState = {
         lines,
         index: index + 1,

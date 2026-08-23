@@ -1,10 +1,8 @@
-mod invocation;
 mod parser;
 mod seek_sequence;
 mod standalone_executable;
 mod streaming_parser;
 
-use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 
@@ -25,20 +23,7 @@ use similar::TextDiff;
 pub use streaming_parser::StreamingPatchParser;
 use thiserror::Error;
 
-pub use invocation::maybe_parse_apply_patch_verified;
-pub use invocation::verify_apply_patch_args;
 pub use standalone_executable::main;
-
-use crate::invocation::ExtractHeredocError;
-
-/// Special argv[1] flag used when the Codex executable self-invokes to run the
-/// internal `apply_patch` path.
-///
-/// Although this constant lives in `codex-apply-patch` (to avoid forcing
-/// `codex-arg0` to depend on `codex-core`), it remains part of the "codex core"
-/// process-invocation contract for the standalone `apply_patch` command
-/// surface.
-pub const CODEX_CORE_APPLY_PATCH_ARG1: &str = "--codex-run-as-apply-patch";
 
 #[derive(Debug, Error, PartialEq)]
 pub enum ApplyPatchError {
@@ -52,11 +37,6 @@ pub enum ApplyPatchError {
     /// A patch path could not be resolved as a path URI.
     #[error(transparent)]
     PathUri(#[from] PathUriParseError),
-    /// A raw patch body was provided without an explicit `apply_patch` invocation.
-    #[error(
-        "patch detected without explicit call to apply_patch. Rerun as [\"apply_patch\", \"<patch>\"]"
-    )]
-    ImplicitInvocation,
 }
 
 impl From<std::io::Error> for ApplyPatchError {
@@ -99,84 +79,6 @@ pub struct ApplyPatchArgs {
     pub hunks: Vec<Hunk>,
     pub workdir: Option<String>,
     pub environment_id: Option<String>,
-}
-
-#[derive(Debug, PartialEq)]
-pub enum ApplyPatchFileChange {
-    Add {
-        content: String,
-    },
-    Delete {
-        content: String,
-    },
-    Update {
-        unified_diff: String,
-        move_path: Option<PathUri>,
-        /// new_content that will result after the unified_diff is applied.
-        new_content: String,
-    },
-}
-
-#[derive(Debug, PartialEq)]
-pub enum MaybeApplyPatchVerified {
-    /// `argv` corresponded to an `apply_patch` invocation, and these are the
-    /// resulting proposed file changes.
-    Body(ApplyPatchAction),
-    /// `argv` could not be parsed to determine whether it corresponds to an
-    /// `apply_patch` invocation.
-    ShellParseError(ExtractHeredocError),
-    /// `argv` corresponded to an `apply_patch` invocation, but it could not
-    /// be fulfilled due to the specified error.
-    CorrectnessError(ApplyPatchError),
-    /// `argv` decidedly did not correspond to an `apply_patch` invocation.
-    NotApplyPatch,
-}
-
-/// ApplyPatchAction is the result of parsing an `apply_patch` command. By
-/// construction, all paths should be absolute paths.
-#[derive(Debug, PartialEq)]
-pub struct ApplyPatchAction {
-    changes: HashMap<PathUri, ApplyPatchFileChange>,
-
-    /// The raw patch argument that can be used to apply the patch. i.e., if the
-    /// original arg was parsed in "lenient" mode with a
-    /// heredoc, this should be the value without the heredoc wrapper.
-    pub patch: String,
-
-    /// The working directory that was used to resolve relative paths in the patch.
-    pub cwd: PathUri,
-}
-
-impl ApplyPatchAction {
-    pub fn is_empty(&self) -> bool {
-        self.changes.is_empty()
-    }
-
-    /// Returns the changes that would be made by applying the patch.
-    pub fn changes(&self) -> &HashMap<PathUri, ApplyPatchFileChange> {
-        &self.changes
-    }
-
-    /// Should be used exclusively for testing. (Not worth the overhead of
-    /// creating a feature flag for this.)
-    pub fn new_add_for_test(path: &PathUri, content: String) -> Self {
-        #[expect(clippy::expect_used)]
-        let filename = path.basename().expect("path should not be empty");
-        let patch = format!(
-            r#"*** Begin Patch
-*** Update File: {filename}
-@@
-+ {content}
-*** End Patch"#,
-        );
-        let changes = HashMap::from([(path.clone(), ApplyPatchFileChange::Add { content })]);
-        #[expect(clippy::expect_used)]
-        Self {
-            changes,
-            cwd: path.parent().expect("path should have parent"),
-            patch,
-        }
-    }
 }
 
 /// Textual file changes that were actually committed while applying a patch.
