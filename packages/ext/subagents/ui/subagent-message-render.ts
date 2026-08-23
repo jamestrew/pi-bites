@@ -18,9 +18,10 @@ export function renderSubagentMessage(
         .join(" ");
       const title = theme.bold(sanitizeSingleLine(details.sender.title));
       const branch = nested ? theme.fg("dim", "  └─ ") : "";
+      const action = nested ? "" : " sent a message";
       const lines = [
         fitLine(
-          `${branch}${theme.fg("toolTitle", "↳")} ${title}${invocation ? ` (${invocation})` : ""}`,
+          `${branch}${theme.fg("toolTitle", "↳")} ${title}${action}${invocation ? ` (${invocation})` : ""}`,
           width,
         ),
       ];
