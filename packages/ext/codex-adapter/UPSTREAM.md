@@ -11,7 +11,7 @@ The `apply_patch` tracer bullet is owned in this repository and was adapted from
 
 The TypeScript parser, path rules, result types, native runner/error handling, executor, and tool behavior came from `packages/pi-codex-conversion/src/{patch,tools/apply-patch,tools/native}`. They were reduced to the direct `apply_patch` surface and adapted to Pi-bites paths and APIs. The local adapter uses Pi's existing provider, transport, model catalogue, authentication, and core tools; it does not retain upstream provider registration, prompt conversion, code mode, shell-session tools, `web_run`, compaction, voice, image, or settings features.
 
-Local integration changes include configuration-based provider matching, ownership-aware active-tool reconciliation, a Linux-x64-only binary locator, compact rendering, direct binary-path injection for failure tests, and nested use of the host's single-file mutation queue. Patch parsing and execution remain delegated to the retained upstream parser and native implementation.
+Local integration changes include configuration-based provider matching, ownership-aware active-tool reconciliation, a Linux-x64-only binary locator, direct binary-path injection for failure tests, and nested use of the host's single-file mutation queue. The upstream collapsed/expanded patch diff and failure rendering is retained, with local sequencing for repeated targets and result-detail snapshots for restored rows. Patch parsing and execution remain delegated to the retained upstream parser and native implementation.
 
 ## Native artifact
 
