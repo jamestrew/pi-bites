@@ -1,6 +1,11 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { doneStats } from "../tool-result.js";
-import type { WaitAgentDetails, WaitAgentResult } from "../types.js";
+import {
+  isMissingFinalResponse,
+  MISSING_FINAL_RESPONSE_ERROR,
+  type WaitAgentDetails,
+  type WaitAgentResult,
+} from "../types.js";
 import { formatTokens, type Theme } from "./agent-format.js";
 import { renderSubagentMessage } from "./subagent-message-render.js";
 import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
@@ -52,9 +57,12 @@ function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]
         .filter(Boolean)
         .join(" · ");
   const doneDetails = [invocation, stats].filter(Boolean).join(" · ");
-  if (agent.status === "completed") return `✓ ${description} · Done (${doneDetails})`;
-  if (agent.status === "error") {
-    return `✗ ${description} · Error: ${sanitizeSingleLine(agent.error ?? "unknown")}${doneDetails ? ` (${doneDetails})` : ""}`;
+  const missingFinal = isMissingFinalResponse(agent.status, agent.result);
+  if (agent.status === "completed" && !missingFinal)
+    return `✓ ${description} · Done (${doneDetails})`;
+  if (agent.status === "error" || missingFinal) {
+    const error = missingFinal ? MISSING_FINAL_RESPONSE_ERROR : (agent.error ?? "unknown");
+    return `✗ ${description} · Error: ${sanitizeSingleLine(error)}${doneDetails ? ` (${doneDetails})` : ""}`;
   }
   if (agent.status === "stopped") return `■ ${description} · Stopped (${doneDetails})`;
 
@@ -116,7 +124,7 @@ export function renderWaitAgent(
         }
 
         const output = agent.result;
-        if (!output || (agent.status !== "completed" && agent.status !== "error")) return;
+        if (!output?.trim() || (agent.status !== "completed" && agent.status !== "error")) return;
         const outputLines = wrapDisplayLines(output, contentWidth);
         for (const line of expanded ? outputLines : outputLines.slice(0, 3)) {
           lines.push(fitLine(theme.fg("dim", `${gutter}${line}`), width));
@@ -125,7 +133,7 @@ export function renderWaitAgent(
 
       if (
         !expanded &&
-        details.agents.some((agent) => agent.result || (agent.tool_calls?.length ?? 0) > 0)
+        details.agents.some((agent) => agent.result?.trim() || (agent.tool_calls?.length ?? 0) > 0)
       )
         lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
       if (details.outcome === "error")

@@ -25,6 +25,12 @@ export function isThinkingLevel(value: unknown): value is ThinkingLevel {
 /** Agent type: any string name (built-in defaults or user-defined). */
 export type SubagentType = string;
 
+export const MISSING_FINAL_RESPONSE_ERROR = "Agent completed without a final response.";
+
+export function isMissingFinalResponse(status: string, result?: string): boolean {
+  return status === "completed" && !result?.trim();
+}
+
 /** Memory scope for persistent agent memory. */
 export type MemoryScope = "user" | "project" | "local";
 

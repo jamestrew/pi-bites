@@ -16,10 +16,12 @@ export function createChildMessageAgent(name: string, messageParent: (message: s
     description:
       "Send a message to the parent that spawned this agent. Use this for blockers, questions, " +
       "corrected premises, conflicts, or findings that unblock the parent—not routine progress updates. " +
-      "Delivery is queued for the parent's next model request and does not interrupt work in progress.",
+      "Delivery is queued for the parent's next model request and does not interrupt work in progress. " +
+      "This is intermediate communication and does not replace your required final response.",
     promptSnippet: "Message the parent only when it can unblock work",
     promptGuidelines: [
       "Use MessageAgent only for blockers, questions, corrected premises, conflicts, and findings that unblock the parent—not routine progress updates.",
+      "MessageAgent is intermediate-only; after using it, still return a non-empty final response summarizing your result.",
     ],
     parameters: Type.Object(
       {

@@ -301,27 +301,29 @@ function getToolCallName(value: unknown): string {
  * Returns an object with a `getText()` getter and an `unsubscribe` function.
  */
 function collectResponseText(session: AgentSession) {
-  let text = "";
+  let text: string | undefined;
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "message_start") {
-      text = "";
-    }
+    if (event.type === "message_start") text = "";
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      text += event.assistantMessageEvent.delta;
+      text = (text ?? "") + event.assistantMessageEvent.delta;
+    }
+    if (event.type === "message_end" && event.message.role === "assistant") {
+      text = extractText(event.message.content).trim();
     }
   });
   return { getText: () => text, unsubscribe };
 }
 
-/** Get the last assistant text from the completed session history. */
-function getLastAssistantText(session: AgentSession): string {
-  for (let index = session.messages.length - 1; index >= 0; index--) {
+/** Get text from the terminal assistant message without falling back to earlier turns. */
+function getTerminalAssistantText(
+  session: AgentSession,
+  invocationStart: number,
+): string | undefined {
+  for (let index = session.messages.length - 1; index >= invocationStart; index--) {
     const msg = session.messages[index];
-    if (!msg || msg.role !== "assistant") continue;
-    const text = extractText(msg.content).trim();
-    if (text) return text;
+    if (msg?.role === "assistant") return extractText(msg.content).trim();
   }
-  return "";
+  return undefined;
 }
 
 /**
@@ -733,6 +735,7 @@ export async function runAgent(
     effectivePrompt = parent.parentContext + prompt;
   }
 
+  const invocationStart = session.messages.length;
   try {
     await session.prompt(effectivePrompt);
   } finally {
@@ -741,7 +744,8 @@ export async function runAgent(
     cleanupAbort();
   }
 
-  const responseText = collector.getText().trim() || getLastAssistantText(session);
+  const responseText =
+    collector.getText() ?? getTerminalAssistantText(session, invocationStart) ?? "";
   return { responseText, session };
 }
 
@@ -780,6 +784,7 @@ export async function resumeAgent(
         })
       : () => {};
 
+  const invocationStart = session.messages.length;
   try {
     await session.prompt(prompt);
   } finally {
@@ -788,7 +793,7 @@ export async function resumeAgent(
     cleanupAbort();
   }
 
-  return collector.getText().trim() || getLastAssistantText(session);
+  return collector.getText() ?? getTerminalAssistantText(session, invocationStart) ?? "";
 }
 
 /**

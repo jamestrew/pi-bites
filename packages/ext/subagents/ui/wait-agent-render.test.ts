@@ -219,6 +219,26 @@ describe("WaitAgent rendering", () => {
     expect(output).not.toContain('"outcome"');
   });
 
+  it.each([false, true])(
+    "renders a completed record with no final response as an error when expanded=%s",
+    (expanded) => {
+      const output = renderWaitAgent(
+        details({
+          outcome: "terminal",
+          wait_ended_at: 11_000,
+          agents: [agent({ status: "completed", result: " \n" })],
+        }),
+        expanded,
+        theme,
+      )
+        .render(120)
+        .join("\n");
+
+      expect(output).toContain("Error: Agent completed without a final response.");
+      expect(output).not.toContain("· Done");
+    },
+  );
+
   it("shows statistics for stopped agents", () => {
     const output = renderWaitAgent(
       details({

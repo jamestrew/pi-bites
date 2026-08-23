@@ -1,6 +1,10 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import { formatTaskNotification, registerNotificationRenderer } from "../notifications.js";
+import {
+  buildNotificationDetails,
+  formatTaskNotification,
+  registerNotificationRenderer,
+} from "../notifications.js";
 import type { NotificationDetails } from "../types.js";
 
 const theme = {
@@ -109,6 +113,50 @@ describe("asynchronous completion notification rendering", () => {
     expect(payload).not.toContain("\u001b");
     expect(payload).toContain("unsafe agent");
     expect(payload).toContain("safe result");
+  });
+
+  it("exposes a missing final response as the same model and UI error", () => {
+    const record = {
+      id: "agent-1",
+      type: "general",
+      parentSessionId: "parent",
+      prompt: "prompt",
+      description: "tool-only child",
+      status: "error" as const,
+      error: "Agent completed without a final response.",
+      toolUses: 0,
+      toolCalls: [],
+      omittedToolCalls: 0,
+      startedAt: 0,
+      completedAt: 1,
+      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
+      compactionCount: 0,
+    };
+
+    const payload = formatTaskNotification(record);
+    const notificationDetails = buildNotificationDetails(record);
+    const legacyMissingFinal = {
+      ...notificationDetails,
+      status: "completed",
+      error: undefined,
+      result: " \n",
+    };
+    const collapsed = renderer()({ details: legacyMissingFinal }, { expanded: false }, theme)
+      .render(120)
+      .join("\n");
+    const expanded = renderer()({ details: legacyMissingFinal }, { expanded: true }, theme)
+      .render(120)
+      .join("\n");
+
+    expect(payload).toContain("Agent completed without a final response.");
+    expect(notificationDetails).toMatchObject({
+      status: "error",
+      error: "Agent completed without a final response.",
+      result: "Agent completed without a final response.",
+    });
+    expect(collapsed).toContain("Agent completed without a final response.");
+    expect(expanded).toContain("Agent completed without a final response.");
+    expect(collapsed.split("\n")[0]).toBe("✗ tool-only child error");
   });
 
   it("still renders legacy preview details restored from older sessions", () => {

@@ -223,6 +223,30 @@ describe("agent-runner final output capture", () => {
     expect(result.responseText).toBe("LOCKED");
   });
 
+  it("does not reuse an earlier assistant preamble when the terminal response is empty", async () => {
+    const { session } = createSession("");
+    session.messages.push({
+      role: "assistant",
+      content: [{ type: "text", text: "Earlier preamble" }],
+    });
+    createAgentSession.mockResolvedValue({ session });
+
+    const result = await runAgent(ctx, "Explore", "Send findings", { pi, messageParent });
+
+    expect(result.responseText).toBe("");
+  });
+
+  it("does not reuse a previous response when resume produces no assistant message", async () => {
+    const { session } = createSession("previous response");
+    session.messages.push({
+      role: "assistant",
+      content: [{ type: "text", text: "previous response" }],
+    });
+    session.prompt.mockImplementationOnce(async () => {});
+
+    await expect(resumeAgent(session as any, "continue")).resolves.toBe("");
+  });
+
   it("aborts a session when its signal was cancelled before session creation", async () => {
     const { session } = createSession("ABORTED");
     createAgentSession.mockResolvedValue({ session });

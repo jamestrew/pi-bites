@@ -14,6 +14,7 @@ import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
+import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
 import type {
   AgentInvocation,
   AgentRecord,
@@ -383,9 +384,19 @@ export class AgentManager {
           });
         }
 
-        // Don't overwrite status if externally stopped via abort()
-        if (record.status !== "stopped") record.status = "completed";
-        record.result = responseText;
+        // Don't overwrite status if externally stopped via abort().
+        if (record.status !== "stopped") {
+          if (responseText.trim()) {
+            record.status = "completed";
+            record.result = responseText;
+          } else {
+            record.status = "error";
+            record.error = MISSING_FINAL_RESPONSE_ERROR;
+            record.result = undefined;
+          }
+        } else if (responseText.trim()) {
+          record.result = responseText;
+        }
         record.session = session;
         record.completedAt ??= Date.now();
 
@@ -397,9 +408,9 @@ export class AgentManager {
             // With a caller-supplied cwd the branch lives in THAT repo, not the
             // parent session's — say so, or the orchestrator merges in the wrong repo.
             const repoNote = customCwd !== undefined ? ` in \`${baseCwd}\`` : "";
-            record.result =
-              (record.result ?? "") +
-              `\n\n---\nChanges saved to branch \`${wtResult.branch}\`${repoNote}. Merge with: \`git merge ${wtResult.branch}\`${customCwd !== undefined ? ` (run in \`${baseCwd}\`)` : ""}`;
+            const worktreeNote = `Changes saved to branch \`${wtResult.branch}\`${repoNote}. Merge with: \`git merge ${wtResult.branch}\`${customCwd !== undefined ? ` (run in \`${baseCwd}\`)` : ""}`;
+            if (record.result) record.result += `\n\n---\n${worktreeNote}`;
+            else record.error = `${record.error ?? "Agent failed."}\n\n${worktreeNote}`;
           }
         }
 

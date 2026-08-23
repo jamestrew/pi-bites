@@ -190,6 +190,59 @@ describe("spawn-and-wait orchestration", () => {
     harness.shutdown();
   });
 
+  it("returns a missing final response as a WaitAgent terminal error", async () => {
+    const child = deferredRun();
+    const harness = makeHarness();
+    const spawned = await spawn(harness.tools, harness.ctx);
+    const waiting = waitFor(harness.tools, harness.ctx, [agentId(spawned)]);
+
+    child.resolve({ responseText: "  \n", session: { dispose: vi.fn() } });
+    const result = await waiting;
+
+    expect(result.details.agents).toEqual([
+      expect.objectContaining({
+        status: "error",
+        error: "Agent completed without a final response.",
+      }),
+    ]);
+    expect(result.content[0].text).toContain("Agent completed without a final response.");
+    expect(result.content[0].text).not.toContain('"status": "completed"');
+    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    harness.shutdown();
+  });
+
+  it("delivers intermediate messages once and before an automatic missing-final error", async () => {
+    const child = deferredRun();
+    const harness = makeHarness();
+    await spawn(harness.tools, harness.ctx, "tool-only child");
+
+    const messageParent = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
+    expect(messageParent?.("actual finding")).toBe(true);
+    child.resolve({ responseText: "", session: { dispose: vi.fn() } });
+
+    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2));
+    expect(harness.pi.sendMessage.mock.calls[0]).toEqual([
+      expect.objectContaining({
+        customType: "subagent-message",
+        details: expect.objectContaining({ message: "actual finding" }),
+      }),
+      { triggerTurn: false },
+    ]);
+    expect(harness.pi.sendMessage.mock.calls[1]).toEqual([
+      expect.objectContaining({
+        customType: "subagent-notification",
+        content: expect.stringContaining("Agent completed without a final response."),
+        details: expect.objectContaining({
+          status: "error",
+          error: "Agent completed without a final response.",
+          result: "Agent completed without a final response.",
+        }),
+      }),
+      { deliverAs: "steer", triggerTurn: true },
+    ]);
+    harness.shutdown();
+  });
+
   it("does not wake a wait when an unselected child messages", async () => {
     deferredRun();
     const harness = makeHarness();

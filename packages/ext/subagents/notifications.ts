@@ -3,7 +3,12 @@ import { getSessionContextPercent, getLifetimeTotal } from "./usage.js";
 import { getStatusNote } from "./status-note.js";
 import { type AgentActivity, formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
 import { fitLine, sanitizeSingleLine, sanitizeText, wrapDisplayLines } from "./ui/text-lines.js";
-import { type AgentRecord, type NotificationDetails } from "./types.js";
+import {
+  isMissingFinalResponse,
+  MISSING_FINAL_RESPONSE_ERROR,
+  type AgentRecord,
+  type NotificationDetails,
+} from "./types.js";
 
 /** Human-readable status label for agent completion. */
 function getStatusLabel(status: string, error?: string): string {
@@ -36,7 +41,7 @@ export function formatTaskNotification(record: AgentRecord): string {
     ? `<compactions>${record.compactionCount}</compactions>`
     : "";
 
-  const result = record.result || "No output.";
+  const result = record.result?.trim() ? record.result : (record.error ?? "No output.");
 
   return [
     `<task-notification>`,
@@ -68,7 +73,7 @@ export function buildNotificationDetails(
     totalTokens,
     durationMs: record.completedAt ? record.completedAt - record.startedAt : 0,
     error: record.error ? sanitizeSingleLine(record.error) : undefined,
-    result: sanitizeText(record.result || "No output."),
+    result: sanitizeText(record.result?.trim() ? record.result : (record.error ?? "No output.")),
   };
 }
 
@@ -80,9 +85,11 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
       if (!d) return undefined;
 
       function renderOne(d: NotificationDetails, width: number): string[] {
-        const isError = d.status === "error" || d.status === "stopped";
+        const missingFinal = isMissingFinalResponse(d.status, d.result ?? d.resultPreview);
+        const status = missingFinal ? "error" : d.status;
+        const isError = status === "error" || status === "stopped";
         const icon = isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
-        const statusText = isError ? d.status : "completed";
+        const statusText = isError ? status : "completed";
         const lines = [
           fitLine(
             `${icon} ${theme.bold(sanitizeSingleLine(d.description))} ${theme.fg("dim", statusText)}`,
@@ -98,7 +105,9 @@ export function registerNotificationRenderer(pi: ExtensionAPI) {
         if (d.durationMs > 0) parts.push(formatMs(d.durationMs));
         if (parts.length) lines.push(fitLine(theme.fg("dim", `  (${parts.join(" · ")})`), width));
 
-        const result = d.result ?? d.resultPreview ?? "No output.";
+        const result = missingFinal
+          ? MISSING_FINAL_RESPONSE_ERROR
+          : (d.result ?? d.resultPreview ?? "No output.");
         const gutter = "  ";
         const contentWidth = Math.max(1, width - gutter.length);
         const resultLines = wrapDisplayLines(result, contentWidth);

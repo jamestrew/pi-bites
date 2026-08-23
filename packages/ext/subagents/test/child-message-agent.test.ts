@@ -9,9 +9,13 @@ const theme = {
 it("records a normal parent-scoped call/result with sent or failed status", async () => {
   const send = vi.fn(() => true);
   const tool = createChildMessageAgent("MessageAgent", send);
-  expect(tool.promptGuidelines).toEqual([expect.stringMatching(/^Use MessageAgent only for/)]);
+  expect(tool.promptGuidelines).toEqual([
+    expect.stringMatching(/^Use MessageAgent only for/),
+    expect.stringContaining("final response"),
+  ]);
   expect(tool.description).toContain("queued");
   expect(tool.description).toContain("does not interrupt");
+  expect(tool.description).toContain("does not replace your required final response");
   const sent = await tool.execute(
     "call",
     { message: "need a decision" },

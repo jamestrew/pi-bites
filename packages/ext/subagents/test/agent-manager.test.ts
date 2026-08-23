@@ -123,6 +123,24 @@ describe("AgentManager — detached lifecycle", () => {
     });
   });
 
+  it("treats a whitespace-only terminal response as an error", async () => {
+    const onComplete = vi.fn();
+    manager = new AgentManager(onComplete);
+    vi.mocked(runAgent).mockResolvedValue({ responseText: " \n\t", session: mockSession() });
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "task", {
+      description: "task",
+    });
+    await manager.getRecord(id)?.promise;
+
+    expect(manager.getRecord(id)).toMatchObject({
+      status: "error",
+      error: "Agent completed without a final response.",
+    });
+    expect(manager.getRecord(id)?.result).toBeUndefined();
+    expect(onComplete).toHaveBeenCalledOnce();
+  });
+
   it("fixes child messages to the spawning parent and sender identity", () => {
     const messageParent = vi.fn(() => true);
     manager = new AgentManager(undefined, 4, undefined, undefined, messageParent);
@@ -508,6 +526,35 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
       expect.objectContaining({ cwd: "/wt/copy/packages/api", configCwd: "/tmp" }),
     );
     expect(cleanupWorktree).toHaveBeenCalledWith("/", expect.anything(), "test");
+  });
+
+  it("keeps worktree recovery instructions on a missing-final error", async () => {
+    const { createWorktree, cleanupWorktree } = await import("../worktree.js");
+    vi.mocked(createWorktree).mockReturnValueOnce({
+      path: "/wt/copy",
+      branch: "pi-agent-x",
+      baseSha: "abc",
+      workPath: "/wt/copy",
+    });
+    vi.mocked(cleanupWorktree).mockReturnValueOnce({
+      hasChanges: true,
+      branch: "pi-agent-result",
+    });
+    vi.mocked(runAgent).mockResolvedValueOnce({ responseText: "", session: mockSession() });
+
+    manager = new AgentManager();
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+      isolation: "worktree",
+    });
+    await manager.getRecord(id)!.promise;
+
+    expect(manager.getRecord(id)).toMatchObject({
+      status: "error",
+      result: undefined,
+      error: expect.stringContaining("Agent completed without a final response."),
+    });
+    expect(manager.getRecord(id)?.error).toContain("pi-agent-result");
   });
 
   it("plain worktree (no cwd) keeps the historical root working dir even when workPath differs", async () => {

@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildEventData } from "./event-data.js";
 import { buildNotificationDetails, formatTaskNotification } from "./notifications.js";
+import { isMissingFinalResponse, MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
 import type {
   AgentRecord,
   NotificationDetails,
@@ -17,13 +18,18 @@ function isTerminal(record: AgentRecord): boolean {
 }
 
 export function buildWaitAgentResult(record: AgentRecord, includeOutput: boolean): WaitAgentResult {
+  const missingFinal = isMissingFinalResponse(record.status, record.result);
   return {
     id: record.id,
     type: record.type,
     description: record.description,
-    status: record.status,
-    ...(includeOutput && record.result !== undefined ? { result: record.result } : {}),
-    ...(includeOutput && record.error !== undefined ? { error: record.error } : {}),
+    status: missingFinal ? "error" : record.status,
+    ...(includeOutput && record.result !== undefined && !missingFinal
+      ? { result: record.result }
+      : {}),
+    ...(includeOutput && (missingFinal || record.error !== undefined)
+      ? { error: missingFinal ? MISSING_FINAL_RESPONSE_ERROR : record.error }
+      : {}),
     tool_uses: record.toolUses,
     duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
     total_tokens: getLifetimeTotal(record.lifetimeUsage),
