@@ -24,6 +24,7 @@ const registerModules = [
   "./ponytail/index.js",
   "./view/index.js",
   "./goal/index.js",
+  "./codex-adapter/index.js",
 ] as const;
 
 type RegisterModule = (typeof registerModules)[number];
@@ -118,6 +119,10 @@ describe("extension entrypoint", () => {
       );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./goal/index.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./codex-adapter/index.js")).toHaveBeenCalledWith(
+        loaded.pi,
+        expect.any(Object),
+      );
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,
         loaded.previewPonytailPrompt,
@@ -167,6 +172,16 @@ describe("extension entrypoint", () => {
     const loaded = await loadExtension({ disable: ["subagents"], argv: ["--print"] });
     try {
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
+  test("can disable the Codex adapter without disabling unrelated extensions", async () => {
+    const loaded = await loadExtension({ disable: ["codexAdapter"] });
+    try {
+      expect(loaded.registerSpies.get("./codex-adapter/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();

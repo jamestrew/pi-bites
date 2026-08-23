@@ -62,11 +62,16 @@ Example:
   "autoMode": {
     "enabled": false
   },
+  "codexAdapter": {
+    "providers": ["github-copilot"]
+  },
   "disable": ["tokenCount"]
 }
 ```
 
 `autoCompaction.thresholdTokens` is an absolute context-size limit, independent of the model's context window and Pi's `compaction.reserveTokens`. Pi's native overflow protection still applies for models with smaller context windows.
+
+`codexAdapter` exposes `apply_patch` in place of active `edit` and `write` tools for Codex-like models, including Pi's stock `openai-codex` models. Add provider IDs to `codexAdapter.providers` to opt in other providers. Matching trims and lowercases IDs, then compares the complete provider ID; it does not use substring matching. The adapter keeps Pi's provider and transport unchanged and currently bundles the native patch helper only for Linux x86-64.
 
 ## Disabling extensions
 
@@ -81,7 +86,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, autoMode, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal
+bashGate, autoMode, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal, codexAdapter
 ```
 
 You can also edit config directly:
