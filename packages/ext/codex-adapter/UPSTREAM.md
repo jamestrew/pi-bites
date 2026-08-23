@@ -33,6 +33,8 @@ The minimum Rust workspace needed to build and test `apply_patch` is in [`vendor
 - `pi-apply-patch-fs`, the package's local host-filesystem adapter
 - a reduced workspace manifest and lockfile
 
+The unrelated shell/heredoc invocation detector is omitted; the retained standalone executable reads patch text directly, so its `tree-sitter` dependencies are omitted as well.
+
 OpenAI Codex's Apache-2.0 license and NOTICE are preserved as `LICENSE-APACHE-2.0` and `NOTICE`. `codex-utils-absolute-path/absolutize.rs` identifies its adaptation from `path-absolutize` 3.1.1; that MIT license is preserved as `LICENSE-path-absolutize`.
 
 Build and test the retained source from the repository root:
