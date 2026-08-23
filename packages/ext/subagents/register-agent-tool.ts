@@ -68,17 +68,16 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
               theme.fg("toolTitle", theme.bold(sanitizeSingleLine(subagentType))) +
               theme.fg("dim", `(${description})`) +
               (metadata ? theme.fg("dim", `: ${metadata}`) : "");
-            const lines = [fitLine(title, width)];
-            const promptWidth = Math.max(1, width - 1);
-            const promptLines = wrapDisplayLines(prompt, promptWidth);
+            const lines = [fitLine(title, width), ""];
+            const promptLines = wrapDisplayLines(prompt, Math.max(1, width));
             const visiblePromptLines = context.expanded
               ? promptLines
               : promptLines.slice(0, 3).filter((line) => line.trim().length > 0);
             for (const line of visiblePromptLines) {
-              lines.push(fitLine(theme.fg("dim", ` ${line}`), width));
+              lines.push(fitLine(theme.fg("dim", line), width));
             }
             if (!context.expanded)
-              lines.push(fitLine(theme.fg("dim", " (ctrl+o to expand)"), width));
+              lines.push(fitLine(theme.fg("dim", "(ctrl+o to expand)"), width));
             return lines;
           },
           invalidate() {},
