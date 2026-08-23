@@ -457,11 +457,11 @@ export class AgentManager {
 
   /**
    * Send a message to an agent from the UI (mirrors the MessageAgent tool).
-   * A live session delivers it now — it interrupts the agent after its
-   * current tool execution and appears as a user message. If the session isn't
-   * ready yet, the message is queued on `pendingSteers` and flushed when the
-   * session is created. Returns false if the agent can't accept steering
-   * (unknown id, or no longer running/queued).
+   * A live session queues it for the boundary after the current assistant
+   * response's tool-call batch, where it appears as a user message. If the
+   * session isn't ready yet, the message is queued on `pendingSteers` and
+   * flushed when the session is created. Returns false if the agent can't
+   * accept steering (unknown id, or no longer running/queued).
    */
   steer(id: string, message: string): boolean {
     const record = this.agents.get(id);

@@ -20,7 +20,7 @@ describe("subagent message delivery", () => {
     });
   });
 
-  it("persists immediately while idle and waits for agent_settled while active", () => {
+  it("persists while idle and delivers active mail at the next model boundary", () => {
     const sendMessage = vi.fn();
     const messenger = createSubagentMessenger({ sendMessage } as any);
     messenger.sessionStarted("parent-1");
@@ -39,10 +39,67 @@ describe("subagent message delivery", () => {
     expect(messenger.send("parent-1", sender, "active message")).toBe(true);
     expect(sendMessage).toHaveBeenCalledTimes(1);
 
-    messenger.agentSettled();
+    messenger.turnEnded();
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(sendMessage.mock.calls[1]?.[0].details.message).toBe("active message");
-    expect(sendMessage.mock.calls[1]?.[1]).toEqual({ triggerTurn: false });
+    expect(sendMessage.mock.calls[1]?.[1]).toEqual({ deliverAs: "steer", triggerTurn: false });
+  });
+
+  it("leaves mail sent after terminal output for the next parent turn", () => {
+    const sendMessage = vi.fn();
+    const messenger = createSubagentMessenger({ sendMessage } as any);
+    messenger.sessionStarted("parent-1");
+    messenger.agentStarted();
+    messenger.assistantMessageEnded(true);
+
+    expect(messenger.send("parent-1", sender, "too late for this turn")).toBe(true);
+    messenger.turnEnded();
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    messenger.agentSettled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ details: { sender, message: "too late for this turn" } }),
+      { triggerTurn: false },
+    );
+  });
+
+  it("leaves queued mail for the next turn when the parent is cancelled", () => {
+    const sendMessage = vi.fn();
+    const messenger = createSubagentMessenger({ sendMessage } as any);
+    messenger.sessionStarted("parent-1");
+    messenger.agentStarted();
+    messenger.send("parent-1", sender, "survive cancellation");
+
+    messenger.assistantMessageEnded(true, true);
+    messenger.turnEnded();
+    expect(sendMessage).not.toHaveBeenCalled();
+
+    messenger.agentSettled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ details: { sender, message: "survive cancellation" } }),
+      { triggerTurn: false },
+    );
+  });
+
+  it("keeps later mail behind an earlier post-terminal message", () => {
+    const delivered: string[] = [];
+    const messenger = createSubagentMessenger({
+      sendMessage: (message: any) => delivered.push(message.details.message),
+    } as any);
+    messenger.sessionStarted("parent-1");
+    messenger.agentStarted();
+    messenger.send("parent-1", sender, "before terminal");
+    messenger.assistantMessageEnded(true);
+    messenger.send("parent-1", sender, "after terminal");
+    messenger.turnEnded();
+
+    messenger.turnStarted();
+    messenger.send("parent-1", sender, "later in the continuation");
+    messenger.turnEnded();
+    expect(delivered).toEqual(["before terminal"]);
+
+    messenger.agentSettled();
+    expect(delivered).toEqual(["before terminal", "after terminal", "later in the continuation"]);
   });
 
   it("flushes multiple messages once in FIFO order before a deferred final", () => {
@@ -60,7 +117,7 @@ describe("subagent message delivery", () => {
       }),
     ).toBe(true);
 
-    messenger.agentSettled();
+    messenger.turnEnded();
     messenger.agentSettled();
 
     expect(delivered).toEqual(["first", "second", "final"]);
@@ -82,7 +139,7 @@ describe("subagent message delivery", () => {
     messenger.send("parent-1", sender, "first");
     messenger.send("parent-1", sender, "second");
     messenger.scheduleFinal("parent-1", () => delivered.push("final"));
-    messenger.agentSettled();
+    messenger.turnEnded();
 
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(delivered).toEqual(["second", "final"]);
@@ -98,6 +155,8 @@ describe("subagent message delivery", () => {
     messenger.send("parent-1", sender, "first");
     messenger.send("parent-1", sender, "second");
     messenger.flushForShutdown();
+    messenger.dispose();
+    messenger.agentSettled();
 
     expect(sendMessage).not.toHaveBeenCalled();
     expect(appendCustomMessage.mock.calls.map((call) => call[3].message)).toEqual([
@@ -121,5 +180,19 @@ describe("subagent message delivery", () => {
     expect(messenger.scheduleFinal("original-parent", final)).toBe(false);
     expect(sendMessage).not.toHaveBeenCalled();
     expect(final).not.toHaveBeenCalled();
+  });
+
+  it("drops queued mail when the parent session is replaced", () => {
+    const sendMessage = vi.fn();
+    const messenger = createSubagentMessenger({ sendMessage } as any);
+    messenger.sessionStarted("original-parent");
+    messenger.agentStarted();
+    messenger.send("original-parent", sender, "do not reroute");
+
+    messenger.sessionStarted("replacement-parent");
+    messenger.turnEnded();
+    messenger.agentSettled();
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });

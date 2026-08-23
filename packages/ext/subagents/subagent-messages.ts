@@ -36,10 +36,12 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
   let disposed = false;
   let sessionId: string | undefined;
   let appendCustomMessage: AppendCustomMessage | undefined;
+  let afterTerminalOutput = false;
   const pending: SubagentMessageDetails[] = [];
+  const pendingNextTurn: SubagentMessageDetails[] = [];
   const pendingFinals: Array<() => void> = [];
 
-  const persist = (details: SubagentMessageDetails): boolean => {
+  const persist = (details: SubagentMessageDetails, deliverAs?: "steer"): boolean => {
     try {
       pi.sendMessage<SubagentMessageDetails>(
         {
@@ -48,7 +50,7 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
           display: true,
           details,
         },
-        { triggerTurn: false },
+        { ...(deliverAs ? { deliverAs } : {}), triggerTurn: false },
       );
       return true;
     } catch {
@@ -66,44 +68,79 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
     }
   };
 
-  const drain = (deliverIntermediate: (details: SubagentMessageDetails) => boolean): void => {
+  const deliverFinals = (): void => {
+    for (const deliver of pendingFinals.splice(0)) {
+      try {
+        deliver();
+      } catch {
+        /* one failed delivery must not suppress later finals */
+      }
+    }
+  };
+
+  const drainCurrentTurn = (): void => {
     if (disposed || flushing) return;
     flushing = true;
     try {
       while (pending.length > 0) {
-        for (const details of pending.splice(0)) deliverIntermediate(details);
+        for (const details of pending.splice(0)) persist(details, "steer");
       }
-      for (const deliver of pendingFinals.splice(0)) {
-        try {
-          deliver();
-        } catch {
-          /* one failed delivery must not suppress later finals */
-        }
-      }
+      if (pendingNextTurn.length === 0) deliverFinals();
     } finally {
       flushing = false;
     }
   };
 
-  const flush = (): void => drain(persist);
-  const flushForShutdown = (): void => drain(persistForShutdown);
+  const drainAll = (deliverIntermediate: (details: SubagentMessageDetails) => boolean): void => {
+    if (disposed || flushing) return;
+    flushing = true;
+    try {
+      while (pending.length > 0 || pendingNextTurn.length > 0) {
+        for (const details of pending.splice(0)) deliverIntermediate(details);
+        for (const details of pendingNextTurn.splice(0)) deliverIntermediate(details);
+      }
+      deliverFinals();
+    } finally {
+      flushing = false;
+    }
+  };
+
+  const flush = (): void => drainAll(persist);
+  const flushForShutdown = (): void => drainAll(persistForShutdown);
 
   return {
     sessionStarted(id: string, append?: AppendCustomMessage): void {
       if (sessionId !== id) {
         pending.length = 0;
+        pendingNextTurn.length = 0;
         pendingFinals.length = 0;
       }
       sessionId = id;
       appendCustomMessage = append;
       active = false;
+      afterTerminalOutput = false;
       disposed = false;
     },
     agentStarted(): void {
-      if (!disposed && sessionId) active = true;
+      if (!disposed && sessionId) {
+        active = true;
+        afterTerminalOutput = false;
+      }
+    },
+    turnStarted(): void {
+      afterTerminalOutput = false;
+    },
+    assistantMessageEnded(terminal: boolean, cancelled = false): void {
+      if (!active) return;
+      if (cancelled) pendingNextTurn.push(...pending.splice(0));
+      if (terminal) afterTerminalOutput = true;
+    },
+    turnEnded(): void {
+      drainCurrentTurn();
     },
     agentSettled(): void {
       active = false;
+      afterTerminalOutput = false;
       flush();
     },
     flush,
@@ -113,12 +150,14 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
       sessionId = undefined;
       appendCustomMessage = undefined;
       active = false;
+      afterTerminalOutput = false;
       pending.length = 0;
+      pendingNextTurn.length = 0;
       pendingFinals.length = 0;
     },
     scheduleFinal(parentSessionId: string, deliver: () => void): boolean {
       if (disposed || parentSessionId !== sessionId) return false;
-      if (flushing || pending.length > 0) {
+      if (flushing || pending.length > 0 || pendingNextTurn.length > 0) {
         pendingFinals.push(deliver);
         return true;
       }
@@ -133,7 +172,9 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
       if (disposed || parentSessionId !== sessionId) return false;
       const details = { sender, message };
       if (active || flushing) {
-        pending.push(details);
+        (afterTerminalOutput || pendingNextTurn.length > 0 ? pendingNextTurn : pending).push(
+          details,
+        );
         return true;
       }
       return persist(details);

@@ -118,7 +118,7 @@ describe("background helper tools", () => {
     expect(messageParent?.("need a decision")).toBe(true);
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
-    handlers.get("agent_settled")?.({}, parentCtx);
+    handlers.get("turn_end")?.({}, parentCtx);
     expect(pi.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         customType: "subagent-message",
@@ -130,7 +130,7 @@ describe("background helper tools", () => {
           message: "need a decision",
         }),
       }),
-      { triggerTurn: false },
+      { deliverAs: "steer", triggerTurn: false },
     );
   });
 
@@ -156,7 +156,7 @@ describe("background helper tools", () => {
     await Promise.resolve();
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
-    handlers.get("agent_settled")?.({}, ctx());
+    handlers.get("turn_end")?.({}, ctx());
 
     expect(pi.sendMessage.mock.calls.map(([message]: any[]) => message.customType)).toEqual([
       "subagent-message",
@@ -169,13 +169,13 @@ describe("background helper tools", () => {
       undefined,
     ]);
     expect(pi.sendMessage.mock.calls.map(([, options]: any[]) => options)).toEqual([
-      { triggerTurn: false },
-      { triggerTurn: false },
+      { deliverAs: "steer", triggerTurn: false },
+      { deliverAs: "steer", triggerTurn: false },
       { deliverAs: "steer", triggerTurn: true },
     ]);
   });
 
-  it("keeps child messages queued when an earlier settled handler starts another run", async () => {
+  it("keeps post-terminal child messages queued across a non-idle continuation", async () => {
     let messageParent: ((message: string) => boolean) | undefined;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
       messageParent = options.messageParent;
@@ -187,7 +187,12 @@ describe("background helper tools", () => {
     handlers.get("agent_start")?.({}, ctx());
 
     await spawnBackground(tools);
+    handlers.get("message_end")?.(
+      { message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+      ctx(),
+    );
     expect(messageParent?.("still pending")).toBe(true);
+    handlers.get("turn_end")?.({}, ctx());
 
     handlers.get("agent_settled")?.({}, ctx(false));
     handlers.get("agent_start")?.({}, ctx());
@@ -311,12 +316,14 @@ describe("background helper tools", () => {
       .get("MessageAgent")
       .execute("msg", { agent_id: id, message: "focus here" }, undefined, undefined, ctx());
     expect(textOf(sent)).toContain("Message sent");
+    expect(textOf(sent)).toContain("assistant response's tool-call batch");
     expect(sent.details).toMatchObject({
       status: "sent",
       recipient: "bg",
       message: "focus here",
     });
     const messageTool = tools.get("MessageAgent");
+    expect(messageTool.description).toContain("assistant response's tool-call batch");
     expect(
       messageTool
         .renderCall(

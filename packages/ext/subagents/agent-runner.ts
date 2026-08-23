@@ -793,7 +793,7 @@ export async function resumeAgent(
 
 /**
  * Send a steering message to a running subagent.
- * The message will interrupt the agent after its current tool execution.
+ * The message is consumed after the current assistant response's tool-call batch.
  */
 export async function steerAgent(session: AgentSession, message: string): Promise<void> {
   await session.steer(message);

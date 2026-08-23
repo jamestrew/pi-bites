@@ -148,6 +148,16 @@ export default function (
   });
 
   pi.on("agent_start", () => parentMessenger.agentStarted());
+  pi.on("turn_start", () => parentMessenger.turnStarted());
+  pi.on("message_end", (event) => {
+    if (event.message.role === "assistant") {
+      parentMessenger.assistantMessageEnded(
+        !event.message.content.some((part) => part.type === "toolCall"),
+        event.message.stopReason === "aborted",
+      );
+    }
+  });
+  pi.on("turn_end", () => parentMessenger.turnEnded());
   pi.on("agent_settled", (_event, ctx) => {
     if (ctx.isIdle()) parentMessenger.agentSettled();
   });
