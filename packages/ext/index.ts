@@ -20,6 +20,7 @@ import registerSubagents from "./subagents/index.js";
 import { getActiveSubagent } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
 import registerGoal from "./goal/index.js";
+import registerCodexAdapter from "./codex-adapter/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
 
@@ -46,6 +47,7 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("rtk")) registerRtk(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);
   if (!disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
+  if (!disabled.has("codexAdapter")) registerCodexAdapter(pi, configRef);
 
   if (isSubagent) return;
 

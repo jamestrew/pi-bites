@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -26,6 +26,7 @@ describe("loadConfig", () => {
         ponytail: { defaultMode: "lite" },
         autoCompaction: { thresholdTokens: 150_000 },
         smallModel: { model: "github-copilot/claude-haiku-4.5", thinking: "low" },
+        codexAdapter: { providers: ["github-copilot"] },
       }),
     );
     mkdirSync(join(project, ".pi"));
@@ -35,6 +36,7 @@ describe("loadConfig", () => {
         ponytail: { defaultMode: "ultra" },
         autoCompaction: { thresholdTokens: 120_000 },
         smallModel: { thinking: "minimal" },
+        codexAdapter: { providers: ["aws-bedrock"] },
       }),
       { flag: "wx" },
     );
@@ -44,11 +46,14 @@ describe("loadConfig", () => {
       parseBitesConfig({
         ponytail: { defaultMode: "full" },
         autoMode: { enabled: true, thinking: "low" },
-        disable: ["notifications", "goal", "autoMode"],
+        codexAdapter: { providers: ["github-copilot", "aws-bedrock"] },
+        disable: ["notifications", "goal", "autoMode", "codexAdapter"],
       }),
     ).toBeDefined();
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
     expect(parseBitesConfig({ autoCompaction: { thresholdTokens: 0 } })).toBeUndefined();
+    expect(parseBitesConfig({ codexAdapter: { providers: "github-copilot" } })).toBeUndefined();
+    expect(parseBitesConfig({ codexAdapter: { providers: [""] } })).toBeUndefined();
 
     const config = loadConfig(project);
     expect(config.ponytail?.defaultMode).toBe("ultra");
@@ -57,6 +62,7 @@ describe("loadConfig", () => {
       model: "github-copilot/claude-haiku-4.5",
       thinking: "minimal",
     });
+    expect(config.codexAdapter).toEqual({ providers: ["aws-bedrock"] });
 
     rmSync(project, { recursive: true, force: true });
   });
@@ -78,6 +84,7 @@ describe("loadConfig", () => {
         autoCompaction: {},
         autoMode: {},
         ponytail: {},
+        codexAdapter: {},
         subagents: {},
       });
       expect(error).toHaveBeenCalledWith(expect.stringContaining("failed to parse project-local"));
@@ -85,5 +92,42 @@ describe("loadConfig", () => {
       error.mockRestore();
       rmSync(project, { recursive: true, force: true });
     }
+  });
+});
+
+describe("bites commands", () => {
+  test("list, disable, and enable codexAdapter across config reloads", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
+    agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
+    const commands = new Map<string, { handler(args: string, ctx: unknown): Promise<void> }>();
+    const notifications: string[] = [];
+    const ctx = {
+      cwd: project,
+      ui: { notify: (message: string) => notifications.push(message) },
+    };
+    const { loadConfig, registerBitesCommands } = await import("./config.js");
+    registerBitesCommands({
+      registerCommand: (
+        name: string,
+        command: { handler(args: string, ctx: unknown): Promise<void> },
+      ) => commands.set(name, command),
+    } as never);
+
+    await commands.get("bites:list")!.handler("", ctx);
+    expect(notifications.at(-1)).toContain("✓  codexAdapter");
+
+    await commands.get("bites:off")!.handler("codexAdapter", ctx);
+    expect(loadConfig(project).disable).toContain("codexAdapter");
+    expect(JSON.parse(readFileSync(join(agentDir, "pi-bites.json"), "utf8"))).toMatchObject({
+      disable: ["codexAdapter"],
+    });
+
+    await commands.get("bites:on")!.handler("codexAdapter", ctx);
+    expect(loadConfig(project).disable).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(agentDir, "pi-bites.json"), "utf8"))).not.toHaveProperty(
+      "disable",
+    );
+
+    rmSync(project, { recursive: true, force: true });
   });
 });

@@ -84,6 +84,11 @@ export interface PonytailConfig {
   defaultMode?: PonytailMode;
 }
 
+export interface CodexAdapterConfig {
+  /** Additional provider IDs that should use Codex-shaped tools. */
+  providers?: string[];
+}
+
 export interface SubagentsConfig {
   /** Per-agent model overrides keyed by agent type. */
   [agentType: string]: { model?: string };
@@ -135,6 +140,7 @@ export const EXTENSION_NAMES = [
   "subagents",
   "view",
   "goal",
+  "codexAdapter",
 ] as const;
 
 export type ExtensionName = (typeof EXTENSION_NAMES)[number];
@@ -147,6 +153,7 @@ export interface BitesConfig {
   autoCompaction?: AutoCompactionConfig;
   autoMode?: AutoModeConfig;
   ponytail?: PonytailConfig;
+  codexAdapter?: CodexAdapterConfig;
   subagents?: SubagentsConfig;
   /** Extension names disabled globally or for this project. */
   disable?: ExtensionName[];
@@ -214,6 +221,19 @@ function isPonytailConfig(value: unknown): value is PonytailConfig {
   return isRecord(value) && isOptional(value, "defaultMode", isPonytailMode);
 }
 
+function isCodexAdapterConfig(value: unknown): value is CodexAdapterConfig {
+  return (
+    isRecord(value) &&
+    isOptional(
+      value,
+      "providers",
+      (field) =>
+        Array.isArray(field) &&
+        field.every((provider) => typeof provider === "string" && provider.trim().length > 0),
+    )
+  );
+}
+
 function isSubagentsConfig(value: unknown): value is SubagentsConfig {
   return (
     isRecord(value) &&
@@ -262,6 +282,7 @@ function isBitesConfig(value: unknown): value is BitesConfig {
     isOptional(value, "autoCompaction", isAutoCompactionConfig) &&
     isOptional(value, "autoMode", isAutoModeConfig) &&
     isOptional(value, "ponytail", isPonytailConfig) &&
+    isOptional(value, "codexAdapter", isCodexAdapterConfig) &&
     isOptional(value, "subagents", isSubagentsConfig) &&
     isOptional(value, "disable", (field) => Array.isArray(field) && field.every(isExtensionName))
   );
@@ -307,6 +328,7 @@ export function loadConfig(cwd: string): BitesConfig {
     autoCompaction: { ...global.autoCompaction, ...project.autoCompaction },
     autoMode: { ...global.autoMode, ...project.autoMode },
     ponytail: { ...global.ponytail, ...project.ponytail },
+    codexAdapter: { ...global.codexAdapter, ...project.codexAdapter },
     subagents: { ...global.subagents, ...project.subagents },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
