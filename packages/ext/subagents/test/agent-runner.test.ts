@@ -883,6 +883,7 @@ describe("parseExtensionsSpec", () => {
   it("classifies bare entries as names", () => {
     const spec = parseExtensionsSpec(["mcp", "logger"], "/work");
     expect(spec.names).toEqual(new Set(["mcp", "logger"]));
+    expect(spec.bareNames).toEqual(new Set(["mcp", "logger"]));
     expect(spec.paths).toEqual([]);
     expect(spec.wildcard).toBe(false);
   });
@@ -890,12 +891,14 @@ describe("parseExtensionsSpec", () => {
     const spec = parseExtensionsSpec(["*"], "/work");
     expect(spec.wildcard).toBe(true);
     expect(spec.names.size).toBe(0);
+    expect(spec.bareNames.size).toBe(0);
     expect(spec.paths).toEqual([]);
   });
   it("resolves a relative path against cwd and adds its canonical name", () => {
     const spec = parseExtensionsSpec(["./rel/foo.ts"], "/work");
     expect(spec.paths).toEqual(["/work/rel/foo.ts"]);
     expect(spec.names).toEqual(new Set(["foo"]));
+    expect(spec.bareNames.size).toBe(0);
   });
   it("keeps an absolute path as-is", () => {
     const spec = parseExtensionsSpec(["/abs/bar.ts"], "/work");
@@ -911,6 +914,7 @@ describe("parseExtensionsSpec", () => {
     const spec = parseExtensionsSpec(["*", "mcp", "/abs/foo.ts"], "/work");
     expect(spec.wildcard).toBe(true);
     expect(spec.names).toEqual(new Set(["mcp", "foo"]));
+    expect(spec.bareNames).toEqual(new Set(["mcp"]));
     expect(spec.paths).toEqual(["/abs/foo.ts"]);
   });
   it("lowercases bare-name entries — extension names match case-insensitively", () => {
@@ -973,6 +977,22 @@ describe("agent-runner extension allowlist", () => {
 
     expect(lastLoaderOpts().additionalExtensionPaths).toEqual(["/abs/foo.ts"]);
     expect(lastToolsPassed()).toContain("foo_tool");
+  });
+
+  it("a path entry does not admit a discovered extension with the same canonical name", async () => {
+    setupArrayAgent(["/selected/duplicate/index.ts"]);
+    withExtensions({
+      "/selected/duplicate/index.ts": ["selected_tool"],
+      "/global/duplicate/index.ts": ["wrong_copy_tool"],
+    });
+    const { session } = createSession("OK");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "go", { pi, messageParent });
+
+    const tools = lastToolsPassed();
+    expect(tools).toContain("selected_tool");
+    expect(tools).not.toContain("wrong_copy_tool");
   });
 
   it("['*', path] keeps all defaults plus the extra path", async () => {

@@ -78,15 +78,17 @@ export function extensionCanonicalName(extPath: string): string {
  * it is a NAME. `"*"` sets the wildcard flag (keep all default-discovered extensions).
  *
  * Path entries are resolved (`~` expanded, made absolute against `cwd`) into `paths`
- * — and their canonical name is also added to `names`. The loader override matches
- * everything by canonical name, so path-loaded extensions are matched via their name
- * rather than their post-staging `Extension.path`.
+ * — and their canonical name is also added to `names` for diagnostics. `bareNames`
+ * contains only name entries: path entries must match their resolved path, otherwise
+ * another discovered copy with the same generic canonical name (for example, two
+ * worktree copies of `ext/index.ts`) would also be admitted.
  */
 export function parseExtensionsSpec(
   entries: string[],
   cwd: string,
-): { names: Set<string>; paths: string[]; wildcard: boolean } {
+): { names: Set<string>; bareNames: Set<string>; paths: string[]; wildcard: boolean } {
   const names = new Set<string>();
+  const bareNames = new Set<string>();
   const paths: string[] = [];
   let wildcard = false;
   for (const entry of entries) {
@@ -97,7 +99,9 @@ export function parseExtensionsSpec(
     }
     const isPathEntry = entry.includes("/") || entry.includes("\\") || entry.startsWith("~");
     if (!isPathEntry) {
-      names.add(entry.toLowerCase());
+      const name = entry.toLowerCase();
+      names.add(name);
+      bareNames.add(name);
       continue;
     }
     let p = entry;
@@ -108,7 +112,7 @@ export function parseExtensionsSpec(
     paths.push(abs);
     names.add(extensionCanonicalName(abs));
   }
-  return { names, paths, wildcard };
+  return { names, bareNames, paths, wildcard };
 }
 
 /**
@@ -471,6 +475,8 @@ export async function runAgent(
     ? parseExtensionsSpec(extensions, configCwd)
     : undefined;
   const keepNames = extensionsSpec?.names ?? new Set<string>();
+  const keepBareNames = extensionsSpec?.bareNames ?? new Set<string>();
+  const keepPaths = new Set(extensionsSpec?.paths.map((path) => resolve(path)) ?? []);
   // `exclude_extensions:` is a denylist applied AFTER the include set — exclude wins.
   // Plain canonical names only (case-insensitive). Note: excluded extensions'
   // factories still run once during reload() (see comment above) — exclusion
@@ -496,7 +502,7 @@ export async function runAgent(
             extensions: base.extensions.filter((e) => {
               const name = extensionCanonicalName(e.path);
               if (excludeNames.has(name)) return false; // exclude wins
-              return loadAll || keepNames.has(name);
+              return loadAll || keepBareNames.has(name) || keepPaths.has(resolve(e.path));
             }),
           };
         };
