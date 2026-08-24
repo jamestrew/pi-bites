@@ -44,6 +44,7 @@ describe("WaitAgent rendering", () => {
     const dimTheme: Theme = {
       ...theme,
       fg: (color, text) => (color === "dim" ? `<dim>${text}</dim>` : text),
+      bold: (text) => `<bold>${text}</bold>`,
     };
     const output = renderWaitAgent(
       details({
@@ -56,7 +57,7 @@ describe("WaitAgent rendering", () => {
       .render(120)
       .join("\n");
 
-    expect(output).toContain("WaitAgent<dim> · waiting 0s / timeout 4m</dim>");
+    expect(output).toContain("<bold>WaitAgent</bold><dim> · waiting 0s / timeout 4m</dim>");
     expect(output).toContain("<dim> └─ ✓ Explore subagent UI flow · Done");
     expect(output).toContain("<dim>      answer</dim>");
     vi.restoreAllMocks();

@@ -36,7 +36,7 @@ function header(details: WaitAgentDetails, now: number, theme: Theme): string {
     details.timeout_ms !== undefined && details.outcome !== "timeout"
       ? ` / timeout ${formatTime(details.timeout_ms)}`
       : "";
-  return `WaitAgent${theme.fg("dim", ` · ${action}${timeout}`)}`;
+  return `${theme.bold("WaitAgent")}${theme.fg("dim", ` · ${action}${timeout}`)}`;
 }
 
 function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]) {
