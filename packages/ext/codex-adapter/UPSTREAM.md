@@ -56,3 +56,18 @@ cargo build --locked --release --bin exec_bridge --manifest-path packages/ext/co
 ```
 
 The rebuilt executables are written below their corresponding vendor workspace's `target/release` directory. The checked-in `apply_patch` ELF was imported from the package snapshot; `exec_bridge` was rebuilt from the retained, locally reduced source for Linux x86-64. The reduced lockfiles were regenerated for the pruned workspaces.
+
+## Deliberate exclusions
+
+The vendor does not contain Code Mode, Notebook Mode, custom provider or Responses Lite transport code, cached transport/prewarming, native compaction, web search, voice or dictation, GipPity, image generation/viewing, usage/settings/changelog UI, or binaries for targets other than Linux x86-64. The repository boundary test also rejects their known source-group names, unsupported native artifacts, changed binary digests, and upstream dependencies used only by removed features.
+
+`tree-sitter-bash` and `web-tree-sitter` remain repository dependencies for Pi-bites' bash-gate parser; they are not retained for the adapter. No runtime dependency on `@howaboua/pi-codex-conversion` or OpenAI's SDK remains.
+
+## Sync procedure
+
+1. Record the new package version, package repository commit, and every nested OpenAI Codex source revision before copying anything.
+2. Diff only the retained TypeScript groups and the two reduced Rust workspaces above. Port needed changes into the owned Pi-bites implementation; do not copy the upstream package wholesale.
+3. Reapply the local integration changes documented under **Retained surface**, including provider-neutral activation, tool preservation, bounded output, lifecycle cleanup, and Linux-x64-only lookup.
+4. Regenerate reduced Cargo lockfiles, run both locked Cargo test/build pairs, strip the Linux x86-64 executables, replace only the two documented artifacts, and update their SHA-256 values here and in `vendor-boundary.test.ts`.
+5. Recheck all nested licenses/notices and update this file for source, dependency, binary, or divergence changes.
+6. Run the focused adapter tests and `bun check`. The boundary test must pass before the sync is accepted.

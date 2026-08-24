@@ -36,7 +36,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "autoMode" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "goal"
+ *   "bashGate" | "autoMode" | "rtk" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "goal" | "codexAdapter"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.

@@ -30,7 +30,14 @@ const registerModules = [
 type RegisterModule = (typeof registerModules)[number];
 
 async function loadExtension(
-  options: { disable?: string[]; argv?: string[]; subagent?: string; realGoal?: boolean } = {},
+  options: {
+    disable?: string[];
+    argv?: string[];
+    subagent?: string;
+    realGoal?: boolean;
+    realCodex?: boolean;
+    codexProviders?: string[];
+  } = {},
 ) {
   vi.resetModules();
 
@@ -39,8 +46,10 @@ async function loadExtension(
   const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
   const bashGate = { isYolo: vi.fn(() => false) };
   if (options.realGoal) vi.doUnmock("./goal/index.js");
+  if (options.realCodex) vi.doUnmock("./codex-adapter/index.js");
   for (const modulePath of registerModules) {
     if (modulePath === "./goal/index.js" && options.realGoal) continue;
+    if (modulePath === "./codex-adapter/index.js" && options.realCodex) continue;
     const spy = vi.fn();
     if (modulePath === "./bash-gate/index.js") spy.mockReturnValue(bashGate);
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
@@ -51,7 +60,10 @@ async function loadExtension(
 
   vi.doMock("@earendil-works/pi-coding-agent", () => ({}));
 
-  const loadConfig = vi.fn(() => (options.disable ? { disable: options.disable } : {}));
+  const loadConfig = vi.fn(() => ({
+    ...(options.disable ? { disable: options.disable } : {}),
+    ...(options.codexProviders ? { codexAdapter: { providers: options.codexProviders } } : {}),
+  }));
   const registerBitesCommands = vi.fn();
   vi.doMock("./config.js", () => ({
     loadConfig,
@@ -62,11 +74,21 @@ async function loadExtension(
   process.argv = [originalArgv[0] ?? "bun", originalArgv[1] ?? "pi", ...(options.argv ?? [])];
 
   const { default: registerExtension } = await import("./index.js");
+  const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
+  let activeTools = ["read", "bash", "edit", "write", "custom"];
   const pi = {
-    on: vi.fn(),
+    on: vi.fn((name: string, handler: (event: any, ctx: any) => unknown) => {
+      const registered = handlers.get(name) ?? [];
+      registered.push(handler);
+      handlers.set(name, registered);
+    }),
     registerCommand: vi.fn(),
     registerTool: vi.fn(),
     sendMessage: vi.fn(),
+    getActiveTools: vi.fn(() => activeTools),
+    setActiveTools: vi.fn((tools: string[]) => {
+      activeTools = tools;
+    }),
   };
   if (options.subagent) {
     const { runAsSubagent } = await import("./subagents/subagent-context.js");
@@ -80,6 +102,8 @@ async function loadExtension(
     registerSpies,
     previewPonytailPrompt,
     bashGate,
+    handlers,
+    getActiveTools: () => activeTools,
     loadConfig,
     registerBitesCommands,
     restoreArgv: () => {
@@ -195,6 +219,59 @@ describe("extension entrypoint", () => {
     try {
       expect(loaded.registerSpies.get("./codex-adapter/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
+  test("assembled adapter follows provider changes without clobbering unrelated tools", async () => {
+    const loaded = await loadExtension({
+      realCodex: true,
+      codexProviders: ["work-provider"],
+    });
+    try {
+      expect(loaded.pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
+        "apply_patch",
+        "exec_command",
+        "write_stdin",
+      ]);
+
+      for (const handler of loaded.handlers.get("session_start") ?? [])
+        await handler({}, { cwd: process.cwd(), model: { provider: "openai-codex" } });
+      expect(loaded.getActiveTools()).toEqual([
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "custom",
+      ]);
+
+      for (const handler of loaded.handlers.get("model_select") ?? [])
+        await handler({ model: { provider: "work-provider" } }, {});
+      expect(loaded.getActiveTools()).toEqual([
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "custom",
+      ]);
+
+      for (const handler of loaded.handlers.get("model_select") ?? [])
+        await handler({ model: { provider: "out-of-scope" } }, {});
+      expect(loaded.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom"]);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
+  test("assembled subagent loads adapter tools without parent-only features", async () => {
+    const loaded = await loadExtension({ subagent: "general", realCodex: true });
+    try {
+      expect(loaded.pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
+        "apply_patch",
+        "exec_command",
+        "write_stdin",
+      ]);
+      expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./footer/index.js")).not.toHaveBeenCalled();
     } finally {
       loaded.restoreArgv();
     }
