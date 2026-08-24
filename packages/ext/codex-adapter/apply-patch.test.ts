@@ -353,7 +353,9 @@ describe("apply_patch", () => {
     const context = {
       toolCallId: "persisted-render",
       cwd,
-      argsComplete: true,
+      // Restored tool rows are complete even though pi leaves argsComplete false.
+      argsComplete: false,
+      isPartial: false,
       expanded: false,
       state: {},
       invalidate: vi.fn(),

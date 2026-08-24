@@ -180,12 +180,14 @@ export function renderApplyPatchCallFromState(
     cwd?: string | undefined;
     expanded?: boolean | undefined;
     argsComplete?: boolean | undefined;
+    isPartial?: boolean | undefined;
     isError?: boolean | undefined;
     snapshot?: ApplyPatchRenderSnapshot | undefined;
   },
 ): string {
   const patchText = typeof args.input === "string" ? args.input : "";
-  if (context?.argsComplete === false) return renderPendingCall(patchText, context.cwd, theme);
+  if (context?.argsComplete === false && context.isPartial !== false)
+    return renderPendingCall(patchText, context.cwd, theme);
   if (patchText.trim().length === 0) return theme.bold("Edit");
 
   const liveState = context?.toolCallId
