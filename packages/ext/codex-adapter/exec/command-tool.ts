@@ -12,6 +12,7 @@ import {
 import { Type, type Static } from "typebox";
 
 import { sanitizeText } from "../../subagents/ui/text-lines.js";
+import { consumeRtkExecInput } from "../../rtk.js";
 import { formatUnifiedExecResult } from "./format.js";
 import type { ExecSessionManager, UnifiedExecResult } from "./session-manager.js";
 
@@ -153,6 +154,7 @@ function canonicalArguments(args: unknown): Static<typeof parameters> {
   if (!args || typeof args !== "object") return args as Static<typeof parameters>;
   const value = args as Record<string, unknown>;
   return {
+    ...value,
     cmd: (value.cmd ?? value.command) as string,
     ...(typeof (value.workdir ?? value.cwd) === "string"
       ? { workdir: (value.workdir ?? value.cwd) as string }
@@ -198,12 +200,19 @@ export function createExecCommandTool(
       const projectTrusted = ctx.isProjectTrusted();
       const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
       const defaultShell = getShellConfig(settings.getShellPath()).shell;
-      const input = { ...params, defaultShell };
+      const originalCommand = consumeRtkExecInput(params);
+      const displayCommand = originalCommand ?? params.cmd;
+      const input = {
+        ...params,
+        defaultShell,
+        displayCommand,
+        filterRtkOutput: originalCommand !== undefined,
+      };
       const result = await sessions.exec(input, cwd, signal, (update) =>
-        onUpdate?.(toolResult(update, params.cmd)),
+        onUpdate?.(toolResult(update, displayCommand)),
       );
       throwForExecFailure(result);
-      return toolResult(result, params.cmd);
+      return toolResult(result, displayCommand);
     },
     renderCall(args, theme, context) {
       if (context.executionStarted) context.state.startedAt ??= Date.now();

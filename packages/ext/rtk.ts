@@ -5,6 +5,15 @@ const RTK_COMMAND = process.env.RTK_PATH || "rtk";
 const REWRITE_TIMEOUT_MS = 2_000;
 const RTK_NO_HOOK_WARNING =
   "[rtk] /!\\ No hook installed — run `rtk init -g` for automatic token savings";
+const rtkExecInputs = new WeakMap<object, string>();
+
+export function consumeRtkExecInput(input: object): string | undefined {
+  // Pi passes the validated tool input object through tool_call and then execute.
+  // Consuming by identity avoids session-global tool-call state surviving cancellation.
+  const originalCommand = rtkExecInputs.get(input);
+  rtkExecInputs.delete(input);
+  return originalCommand;
+}
 
 export function stripRtkNoHookWarning(raw: string): string {
   return raw
@@ -13,48 +22,123 @@ export function stripRtkNoHookWarning(raw: string): string {
     .join("");
 }
 
+export interface RtkNoHookWarningDataFilter {
+  (data: Buffer, stream?: string): void;
+  end(): void;
+}
+
 export function createRtkNoHookWarningDataFilter(
   onData: (data: Buffer) => void,
-): (data: Buffer) => void {
-  let pending = "";
-  let warningTerminator: "none" | "newline" | "line-feed" = "none";
+): RtkNoHookWarningDataFilter {
+  const warning = Buffer.from(RTK_NO_HOOK_WARNING);
+  interface PendingByte {
+    byte: number;
+    keep?: boolean;
+  }
+  interface StreamState {
+    candidate: PendingByte[];
+    atLineStart: boolean;
+    matchedWarning: boolean;
+    pendingCarriageReturn: boolean;
+  }
+  const pending: PendingByte[] = [];
+  const streams = new Map<string, StreamState>();
 
-  return (data) => {
-    let chunk = data.toString();
-    if (warningTerminator === "line-feed" && chunk.startsWith("\n")) {
-      chunk = chunk.slice(1);
-      warningTerminator = "none";
-    }
-
-    if (warningTerminator === "newline" && chunk.startsWith("\r\n")) {
-      chunk = chunk.slice(2);
-      warningTerminator = "none";
-    } else if (warningTerminator === "newline" && chunk === "\r") {
-      warningTerminator = "line-feed";
-      return;
-    } else if (warningTerminator === "newline" && chunk.startsWith("\n")) {
-      chunk = chunk.slice(1);
-      warningTerminator = "none";
-    }
-
-    pending += chunk;
-    const lines = pending.split(/(?<=\n)/);
-    pending = pending.endsWith("\n") ? "" : (lines.pop() ?? "");
-
-    for (const line of lines) {
-      if (line.replace(/\r?\n$/, "") !== RTK_NO_HOOK_WARNING) onData(Buffer.from(line));
-    }
-
-    if (pending === RTK_NO_HOOK_WARNING) {
-      pending = "";
-      warningTerminator = "newline";
-    }
-
-    if (pending.length > RTK_NO_HOOK_WARNING.length + 2) {
-      onData(Buffer.from(pending));
-      pending = "";
-    }
+  const resolve = (bytes: PendingByte[], keep: boolean) => {
+    for (const byte of bytes) byte.keep = keep;
+    bytes.length = 0;
   };
+
+  const flush = () => {
+    const output: number[] = [];
+    let resolved = 0;
+    while (pending[resolved]?.keep !== undefined) {
+      const next = pending[resolved];
+      if (next?.keep) output.push(next.byte);
+      resolved += 1;
+    }
+    if (resolved) pending.splice(0, resolved);
+    if (output.length) onData(Buffer.from(output));
+  };
+
+  const filter = (data: Buffer, stream = "output") => {
+    const state = streams.get(stream) ?? {
+      candidate: [],
+      atLineStart: true,
+      matchedWarning: false,
+      pendingCarriageReturn: false,
+    };
+    streams.set(stream, state);
+    for (let index = 0; index < data.length; index += 1) {
+      const byte = data[index];
+      if (byte === undefined) break;
+      const current: PendingByte = { byte };
+      pending.push(current);
+
+      if (state.matchedWarning) {
+        if (state.pendingCarriageReturn) {
+          if (byte === 0x0a) {
+            state.candidate.push(current);
+            resolve(state.candidate, false);
+            state.matchedWarning = false;
+            state.pendingCarriageReturn = false;
+            state.atLineStart = true;
+            continue;
+          }
+          resolve(state.candidate, true);
+          state.matchedWarning = false;
+          state.pendingCarriageReturn = false;
+          state.atLineStart = false;
+          current.keep = true;
+          if (byte === 0x0a) state.atLineStart = true;
+          continue;
+        }
+        if (byte === 0x0a) {
+          state.candidate.push(current);
+          resolve(state.candidate, false);
+          state.matchedWarning = false;
+          state.atLineStart = true;
+          continue;
+        }
+        if (byte === 0x0d) {
+          state.candidate.push(current);
+          state.pendingCarriageReturn = true;
+          continue;
+        }
+        resolve(state.candidate, true);
+        state.matchedWarning = false;
+        state.atLineStart = false;
+        current.keep = true;
+        continue;
+      }
+
+      if (!state.atLineStart) {
+        current.keep = true;
+        if (byte === 0x0a) state.atLineStart = true;
+        continue;
+      }
+
+      state.candidate.push(current);
+      if (byte === warning[state.candidate.length - 1]) {
+        if (state.candidate.length < warning.length) continue;
+        state.matchedWarning = true;
+        continue;
+      }
+
+      resolve(state.candidate, true);
+      state.atLineStart = byte === 0x0a;
+    }
+    flush();
+  };
+
+  filter.end = () => {
+    for (const state of streams.values()) {
+      resolve(state.candidate, !state.matchedWarning || state.pendingCarriageReturn);
+    }
+    flush();
+    streams.clear();
+  };
+  return filter;
 }
 
 function trimMessage(raw: string, maxLength: number): string {
@@ -67,6 +151,26 @@ function formatRewriteNotice(originalCommand: string, rewrittenCommand: string):
   const original = trimMessage(originalCommand, 100);
   const rewritten = trimMessage(rewrittenCommand, 120);
   return `RTK rewrite: ${original} -> ${rewritten}`;
+}
+
+function commandField(toolName: string): "command" | "cmd" | undefined {
+  if (toolName === "bash") return "command";
+  if (toolName === "exec_command") return "cmd";
+  return undefined;
+}
+
+function alreadyUsesRtk(command: string): boolean {
+  const candidate = command.trimStart();
+  const commands = [
+    RTK_COMMAND,
+    ...(RTK_COMMAND.includes("'") ? [] : [`'${RTK_COMMAND}'`]),
+    ...(RTK_COMMAND.includes('"') ? [] : [`"${RTK_COMMAND}"`]),
+  ];
+  return commands.some(
+    (rtk) =>
+      candidate === rtk ||
+      (candidate.startsWith(rtk) && /[\s;&|<>()]/.test(candidate.charAt(rtk.length))),
+  );
 }
 
 async function rewriteCommand(
@@ -97,12 +201,14 @@ export default function registerRtk(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    const hasUI = ctx.hasUI;
+    const ui = ctx.ui;
     try {
       const available = await refreshRtkAvailability();
       if (!available && !missingWarningShown) {
         missingWarningShown = true;
         const message = `[rtk] ${RTK_COMMAND} binary not found — command rewrite disabled`;
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
+        if (hasUI) ui.notify(message, "warning");
         else console.warn(message);
       }
     } catch (err) {
@@ -110,7 +216,7 @@ export default function registerRtk(pi: ExtensionAPI): void {
       if (!missingWarningShown) {
         missingWarningShown = true;
         const message = `[rtk] failed to check ${RTK_COMMAND} — command rewrite disabled`;
-        if (ctx.hasUI) ctx.ui.notify(message, "warning");
+        if (hasUI) ui.notify(message, "warning");
         else console.warn(message, err);
       }
     }
@@ -120,17 +226,19 @@ export default function registerRtk(pi: ExtensionAPI): void {
     if (event.excludeFromContext) return undefined;
     if (process.env.RTK_DISABLED === "1") return undefined;
     if (!rtkAvailable) return undefined;
+    const hasUI = ctx.hasUI;
+    const ui = ctx.ui;
 
     return {
       operations: {
         exec: async (command, cwd, options) => {
           let commandToRun = command;
 
-          if (typeof command === "string" && command.trim() !== "" && !command.startsWith("rtk ")) {
+          if (typeof command === "string" && command.trim() !== "" && !alreadyUsesRtk(command)) {
             const rewritten = await rewriteCommand(pi, command, options.signal);
             if (rewritten && rewritten !== command) {
               commandToRun = rewritten;
-              if (ctx.hasUI) ctx.ui.notify(formatRewriteNotice(command, rewritten), "info");
+              if (hasUI) ui.notify(formatRewriteNotice(command, rewritten), "info");
             }
           }
 
@@ -149,26 +257,45 @@ export default function registerRtk(pi: ExtensionAPI): void {
     const content = event.content.map((item) =>
       item.type === "text" ? { ...item, text: stripRtkNoHookWarning(item.text) } : item,
     );
-    return { content };
+    const details = event.details;
+    if (!details || typeof details !== "object" || !("output" in details)) return { content };
+    const output = details.output;
+    return {
+      content,
+      details:
+        typeof output === "string"
+          ? { ...details, output: stripRtkNoHookWarning(output) }
+          : details,
+    };
   });
 
   pi.on("tool_call", async (event, ctx) => {
+    const field = commandField(event.toolName);
+    if (!field) return undefined;
+    const input = event.input as Record<string, unknown>;
+    const command = input[field];
+    if (typeof command !== "string" || command.trim() === "") return undefined;
+    if (process.env.RTK_DISABLED === "1") return undefined;
+    if (alreadyUsesRtk(command)) {
+      if (event.toolName === "exec_command") rtkExecInputs.set(input, command);
+      return undefined;
+    }
+    if (!rtkAvailable) return undefined;
+
+    const signal = ctx.signal;
+    const hasUI = ctx.hasUI;
+    const ui = ctx.ui;
     try {
-      if (event.toolName !== "bash") return undefined;
-
-      const command = event.input.command;
-      if (typeof command !== "string" || command.trim() === "") return undefined;
-      if (command.startsWith("rtk ")) return undefined;
-      if (process.env.RTK_DISABLED === "1") return undefined;
-      if (!rtkAvailable) return undefined;
-
-      const rewritten = await rewriteCommand(pi, command, ctx.signal);
+      const rewritten = await rewriteCommand(pi, command, signal);
+      if (signal?.aborted) return { block: true, reason: "RTK rewrite cancelled." };
       if (!rewritten || rewritten === command) return undefined;
 
-      event.input.command = rewritten;
-      if (ctx.hasUI) ctx.ui.notify(formatRewriteNotice(command, rewritten), "info");
+      input[field] = rewritten;
+      if (event.toolName === "exec_command") rtkExecInputs.set(input, command);
+      if (hasUI) ui.notify(formatRewriteNotice(command, rewritten), "info");
       return undefined;
     } catch (err) {
+      if (signal?.aborted) return { block: true, reason: "RTK rewrite cancelled." };
       console.warn("[rtk] unexpected error in tool_call handler; passing through command", err);
       return undefined;
     }

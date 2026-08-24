@@ -41,7 +41,7 @@ export interface BridgeExecSession {
 
 export interface BridgeSessionHooks {
   isOwned(session: BridgeExecSession): boolean;
-  onOutput(session: BridgeExecSession, text: string): void;
+  onOutput(session: BridgeExecSession, text: string, stream: "stdout" | "stderr" | "pty"): void;
   onOutputDropped(session: BridgeExecSession, bytes: number): void;
   onExit(session: BridgeExecSession): void;
 }
@@ -99,6 +99,7 @@ export function createBridgeSessionRuntime(
       hooks.onOutput(
         session,
         session.outputDecoders[chunk.stream].write(chunkToBytes(chunk.chunk)),
+        chunk.stream,
       );
       session.lastSeq = Math.max(session.lastSeq, chunk.seq);
       receivedOutput = true;
@@ -115,8 +116,8 @@ export function createBridgeSessionRuntime(
     if (response.closed || postExitIdle) {
       if (!session.outputDecodersFlushed) {
         session.outputDecodersFlushed = true;
-        for (const decoder of Object.values(session.outputDecoders))
-          hooks.onOutput(session, decoder.end());
+        for (const [stream, decoder] of Object.entries(session.outputDecoders))
+          hooks.onOutput(session, decoder.end(), stream as "stdout" | "stderr" | "pty");
       }
       setClosedExitCode(session, response.exitCode ?? session.observedExitCode);
       hooks.onExit(session);
@@ -131,7 +132,11 @@ export function createBridgeSessionRuntime(
       try {
         await poll(session, hooks, 250);
       } catch (error) {
-        hooks.onOutput(session, `${error instanceof Error ? error.message : String(error)}\n`);
+        hooks.onOutput(
+          session,
+          `${error instanceof Error ? error.message : String(error)}\n`,
+          "stderr",
+        );
         session.exitCode = 1;
         hooks.onExit(session);
         return;
@@ -188,7 +193,11 @@ export function createBridgeSessionRuntime(
         }
         void pollLoop(session, hooks);
       } catch (error) {
-        hooks.onOutput(session, `${error instanceof Error ? error.message : String(error)}\n`);
+        hooks.onOutput(
+          session,
+          `${error instanceof Error ? error.message : String(error)}\n`,
+          "stderr",
+        );
         session.exitCode = 1;
         hooks.onExit(session);
       }

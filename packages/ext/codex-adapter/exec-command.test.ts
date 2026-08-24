@@ -16,6 +16,8 @@ import { createWriteStdinTool } from "./exec/write-stdin-tool.js";
 const dirs: string[] = [];
 const managers: Array<ReturnType<typeof createExecSessionManager>> = [];
 const bash = getShellConfig().shell;
+const noHookWarning =
+  "[rtk] /!\\ No hook installed — run `rtk init -g` for automatic token savings";
 
 function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "pi-bites-exec-"));
@@ -58,6 +60,58 @@ afterEach(async () => {
 });
 
 describe("exec_command and write_stdin", () => {
+  test("filters an RTK warning split across native output chunks", async () => {
+    const sessions = manager();
+    const result = await sessions.exec(
+      {
+        cmd: `printf '%s' '${noHookWarning}' >&2; sleep 0.1; printf '\\nneighbor' >&2`,
+        defaultShell: bash,
+        filterRtkOutput: true,
+      },
+      tempDir(),
+    );
+
+    expect(result.output).toBe("neighbor");
+  });
+
+  test("preserves warning-like output when RTK did not rewrite the command", async () => {
+    const sessions = manager();
+    const result = await sessions.exec(
+      { cmd: `printf '%s\\n' '${noHookWarning}'`, defaultShell: bash },
+      tempDir(),
+    );
+
+    expect(result.output).toBe(`${noHookWarning}\n`);
+  });
+
+  test("filters delayed warning terminators per output stream", async () => {
+    const sessions = manager();
+    const result = await sessions.exec(
+      {
+        cmd: `printf '%s' '${noHookWarning}' >&2; printf 'a\\n\\nB' >&1; printf '\\r\\n' >&2`,
+        defaultShell: bash,
+        filterRtkOutput: true,
+      },
+      tempDir(),
+    );
+
+    expect(result.output).toBe("a\n\nB");
+  });
+
+  test("preserves cross-stream order while resolving warning candidates", async () => {
+    const sessions = manager();
+    const result = await sessions.exec(
+      {
+        cmd: "printf '[' >&2; sleep 0.1; printf B; sleep 0.1; printf X >&2",
+        defaultShell: bash,
+        filterRtkOutput: true,
+      },
+      tempDir(),
+    );
+
+    expect(result.output).toBe("[BX");
+  });
+
   test("renders one styled scanline and collapsible dim details", () => {
     const tool = createExecCommandTool({} as never);
     const theme = {
@@ -362,10 +416,18 @@ describe("exec_command and write_stdin", () => {
       "max_output_tokens",
       "login",
     ]);
-    expect(exec.prepareArguments?.({ command: "pwd", cwd: "sub", yield_time: 500 })).toMatchObject({
+    expect(
+      exec.prepareArguments?.({
+        command: "pwd",
+        cwd: "sub",
+        yield_time: 500,
+        future: { preserved: true },
+      }),
+    ).toMatchObject({
       cmd: "pwd",
       workdir: "sub",
       yield_time_ms: 500,
+      future: { preserved: true },
     });
     expect(Object.keys(write.parameters.properties)).toEqual([
       "session_id",
@@ -391,6 +453,23 @@ describe("exec_command and write_stdin", () => {
     const completed = await sessions.write({ session_id: 1, yield_time_ms: 1_000 });
     expect(completed).toMatchObject({ exit_code: 0, output: "end" });
     expect(completed.session_id).toBeUndefined();
+  });
+
+  test("executes a rewritten command but keeps the original session label", async () => {
+    const sessions = manager();
+    const started = await sessions.exec(
+      {
+        cmd: "printf rewritten; sleep .35",
+        displayCommand: "printf original",
+        yield_time_ms: 250,
+        defaultShell: bash,
+        login: false,
+      },
+      tempDir(),
+    );
+
+    expect(started.output).toBe("rewritten");
+    expect(sessions.getSessionCommand(started.session_id!)).toBe("printf original");
   });
 
   test("rejects a polled nonzero exit so Pi renders the error background", async () => {
