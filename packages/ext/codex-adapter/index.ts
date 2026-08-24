@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { BuildSystemPromptOptions, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import type { BitesConfig } from "../config.js";
 import {
@@ -11,12 +11,18 @@ import { registerApplyPatchTool } from "./apply-patch/tool.js";
 import { registerExecCommandTool } from "./exec/command-tool.js";
 import { createExecSessionManager } from "./exec/session-manager.js";
 import { registerWriteStdinTool } from "./exec/write-stdin-tool.js";
-import { buildToolGuidance } from "./prompt-guidance.js";
+import { buildExecSkillGuidance, buildToolGuidance } from "./prompt-guidance.js";
+
+export type CodexPromptPreview = (
+  systemPrompt: string,
+  model: AdapterModel | undefined,
+  options: BuildSystemPromptOptions,
+) => string;
 
 export default function registerCodexAdapter(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
-): void {
+): CodexPromptPreview {
   const state: AdapterToolState = {};
   const sessions = createExecSessionManager();
 
@@ -28,16 +34,25 @@ export default function registerCodexAdapter(
   registerApplyPatchTool(pi);
   registerExecCommandTool(pi, sessions);
   registerWriteStdinTool(pi, sessions);
+  const previewPrompt: CodexPromptPreview = (systemPrompt, model, options) => {
+    const providers = configRef.current.codexAdapter?.providers ?? [];
+    if (!isAdapterModel(model, providers)) return systemPrompt;
+    const activeTools = options.selectedTools ?? pi.getActiveTools();
+    const additions = [
+      systemPrompt.includes("<pi-bites-tool-guidance>")
+        ? undefined
+        : buildToolGuidance(activeTools),
+      systemPrompt.includes("<available_skills>")
+        ? undefined
+        : buildExecSkillGuidance(options.skills ?? [], activeTools),
+    ].filter((addition) => addition !== undefined);
+    return additions.length === 0 ? systemPrompt : `${systemPrompt}\n\n${additions.join("\n\n")}`;
+  };
   pi.on("session_start", (_event, ctx) => reconcile(ctx.model));
   pi.on("model_select", (event) => reconcile(event.model));
   pi.on("before_agent_start", (event, ctx) => {
-    const providers = configRef.current.codexAdapter?.providers ?? [];
-    if (!isAdapterModel(ctx.model, providers)) return;
-    const guidance = buildToolGuidance(
-      event.systemPromptOptions.selectedTools ?? pi.getActiveTools(),
-    );
-    if (guidance === undefined) return;
-    return { systemPrompt: `${event.systemPrompt}\n\n${guidance}` };
+    const systemPrompt = previewPrompt(event.systemPrompt, ctx.model, event.systemPromptOptions);
+    if (systemPrompt !== event.systemPrompt) return { systemPrompt };
   });
   pi.on("session_shutdown", async () => {
     try {
@@ -46,4 +61,5 @@ export default function registerCodexAdapter(
       await sessions.shutdown();
     }
   });
+  return previewPrompt;
 }

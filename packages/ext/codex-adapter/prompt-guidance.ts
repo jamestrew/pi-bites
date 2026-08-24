@@ -1,3 +1,5 @@
+import { formatSkillsForPrompt, type Skill } from "@earendil-works/pi-coding-agent";
+
 const TOOL_GUIDANCE: Readonly<Record<string, string>> = {
   exec_command:
     "- `exec_command`: Commands can yield before completion. A yielded command returns a `session_id`; use it to resume that session instead of restarting the command.",
@@ -15,4 +17,17 @@ export function buildToolGuidance(activeTools: string[]): string | undefined {
   if (guidance.length === 0) return;
 
   return `<pi-bites-tool-guidance>\n## Structured tool guidance\n\n${guidance.join("\n")}\n</pi-bites-tool-guidance>`;
+}
+
+export function buildExecSkillGuidance(skills: Skill[], activeTools: string[]): string | undefined {
+  if (!activeTools.includes("exec_command") || activeTools.includes("read")) return;
+  const guidance = formatSkillsForPrompt(skills);
+  if (!guidance) return;
+  const adapted = guidance.replace(
+    "Use the read tool to load a skill's file",
+    "Use `exec_command` to load a skill's file",
+  );
+  if (adapted === guidance)
+    throw new Error("Pi skill prompt format changed; cannot adapt read tool");
+  return adapted;
 }

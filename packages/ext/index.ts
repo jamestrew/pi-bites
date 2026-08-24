@@ -4,7 +4,7 @@ import registerStatusline from "./statusline.js";
 import registerFooter from "./footer/index.js";
 import registerTokenCount from "./token-count/index.js";
 import registerUsageDashboard from "./usage-dashboard.js";
-import registerContext from "./context.js";
+import registerContext, { type ContextPromptPreview } from "./context.js";
 import registerCustomTools from "./tools.js";
 import registerFzfFileSearch from "./file-search/index.js";
 import registerAtMentionContext from "./at-mention-context/index.js";
@@ -47,7 +47,9 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("rtk")) registerRtk(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);
   if (!disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
-  if (!disabled.has("codexAdapter")) registerCodexAdapter(pi, configRef);
+  const previewCodexPrompt = disabled.has("codexAdapter")
+    ? undefined
+    : registerCodexAdapter(pi, configRef);
 
   if (isSubagent) return;
 
@@ -72,6 +74,11 @@ export default function (pi: ExtensionAPI) {
   const previewPonytailPrompt = disabled.has("ponytail")
     ? undefined
     : registerPonytail(pi, configRef);
-  if (!isNonInteractive && !disabled.has("context")) registerContext(pi, previewPonytailPrompt);
+  const previewSystemPrompt: ContextPromptPreview = (prompt, ctx) => {
+    const withCodex =
+      previewCodexPrompt?.(prompt, ctx.model, ctx.getSystemPromptOptions()) ?? prompt;
+    return previewPonytailPrompt?.(withCodex) ?? withCodex;
+  };
+  if (!isNonInteractive && !disabled.has("context")) registerContext(pi, previewSystemPrompt);
   registerBitesCommands(pi);
 }

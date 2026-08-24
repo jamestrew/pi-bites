@@ -3,6 +3,7 @@ import {
   type BuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import { buildExecSkillGuidance } from "./codex-adapter/prompt-guidance.js";
 import { availableContextTokens, buildContextBreakdown } from "./context.js";
 
 const sourceInfo = {
@@ -78,6 +79,36 @@ describe("buildContextBreakdown", () => {
 
     expect(result.total).toBe(5);
     expect(result.parts.find((part) => part.label === "Messages")?.tokens).toBe(3);
+  });
+
+  it("includes skills loadable through exec_command", () => {
+    const options: BuildSystemPromptOptions = {
+      cwd: "/tmp",
+      selectedTools: ["exec_command"],
+      skills: [
+        {
+          name: "review",
+          description: "Review code",
+          filePath: "/tmp/review/SKILL.md",
+          baseDir: "/tmp/review",
+          sourceInfo,
+          disableModelInvocation: false,
+        },
+      ],
+    };
+    const result = buildContextBreakdown({
+      total: 100,
+      window: 1_000,
+      systemPrompt: buildExecSkillGuidance(options.skills ?? [], ["exec_command"]) ?? "",
+      options,
+      tools: [],
+      activeTools: [],
+      messageTokens: 0,
+    });
+
+    expect(result.parts.find((part) => part.label === "Skills")?.details).toEqual([
+      { label: "review", tokens: 126 },
+    ]);
   });
 
   it("does not rescale category estimates to fit a provider total", () => {

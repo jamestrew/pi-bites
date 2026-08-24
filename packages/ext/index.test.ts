@@ -43,6 +43,7 @@ async function loadExtension(
 
   const registerSpies = new Map<RegisterModule, ReturnType<typeof vi.fn>>();
   const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
+  const previewCodexPrompt = vi.fn((prompt: string) => `codex:${prompt}`);
   const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
   const bashGate = { isYolo: vi.fn(() => false) };
   if (options.realGoal) vi.doUnmock("./goal/index.js");
@@ -53,6 +54,7 @@ async function loadExtension(
     const spy = vi.fn();
     if (modulePath === "./bash-gate/index.js") spy.mockReturnValue(bashGate);
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
+    if (modulePath === "./codex-adapter/index.js") spy.mockReturnValue(previewCodexPrompt);
     if (modulePath === "./automode/index.js") spy.mockReturnValue(autoMode);
     registerSpies.set(modulePath, spy);
     vi.doMock(modulePath, () => ({ default: spy }));
@@ -101,6 +103,7 @@ async function loadExtension(
     pi,
     registerSpies,
     previewPonytailPrompt,
+    previewCodexPrompt,
     bashGate,
     handlers,
     getActiveTools: () => activeTools,
@@ -149,10 +152,15 @@ describe("extension entrypoint", () => {
       );
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,
-        loaded.previewPonytailPrompt,
+        expect.any(Function),
       );
       const preview = loaded.registerSpies.get("./context.js")?.mock.calls[0]?.[1];
-      expect(preview("base")).toBe("ponytail:base");
+      expect(
+        preview("base", {
+          model: { provider: "openai-codex" },
+          getSystemPromptOptions: () => ({ cwd: "/tmp" }),
+        }),
+      ).toBe("ponytail:codex:base");
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();

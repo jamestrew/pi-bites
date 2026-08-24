@@ -10,7 +10,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
 import { formatTokens } from "./footer/index.js";
-import type { PonytailPromptPreview } from "./ponytail/index.js";
+
+export type ContextPromptPreview = (systemPrompt: string, ctx: ExtensionCommandContext) => string;
 
 export interface ContextPart {
   label: string;
@@ -43,10 +44,12 @@ function contextFileDetails(options: BuildSystemPromptOptions) {
   }));
 }
 
-function skillDetails(options: BuildSystemPromptOptions): Array<{ label: string; tokens: number }> {
+function skillDetails(
+  options: BuildSystemPromptOptions,
+  systemPrompt: string,
+): Array<{ label: string; tokens: number }> {
   const skills = (options.skills ?? []).filter((skill) => !skill.disableModelInvocation);
-  const hasRead = !options.selectedTools || options.selectedTools.includes("read");
-  if (!hasRead || skills.length === 0) return [];
+  if (!systemPrompt.includes("<available_skills>") || skills.length === 0) return [];
   const total = estimateText(formatSkillsForPrompt(skills));
   return distribute(
     total,
@@ -85,7 +88,7 @@ export function buildContextBreakdown(input: {
   messageTokens: number;
 }): ContextBreakdown {
   const files = contextFileDetails(input.options);
-  const skills = skillDetails(input.options);
+  const skills = skillDetails(input.options, input.systemPrompt);
   const tools = toolDetails(input.tools, input.activeTools);
   const fileTokens = files.reduce((sum, item) => sum + item.tokens, 0);
   const skillTokens = skills.reduce((sum, item) => sum + item.tokens, 0);
@@ -197,7 +200,7 @@ function estimateMessages(ctx: ExtensionCommandContext): number {
 
 export default function registerContext(
   pi: ExtensionAPI,
-  previewPrompt?: PonytailPromptPreview,
+  previewPrompt?: ContextPromptPreview,
 ): void {
   pi.registerCommand("context", {
     description: "Show estimated context window usage",
@@ -214,7 +217,7 @@ export default function registerContext(
       if (ctx.mode !== "tui" || !ctx.model) return;
       const usage = ctx.getContextUsage();
       const currentSystemPrompt = ctx.getSystemPrompt();
-      const systemPrompt = previewPrompt?.(currentSystemPrompt) ?? currentSystemPrompt;
+      const systemPrompt = previewPrompt?.(currentSystemPrompt, ctx) ?? currentSystemPrompt;
       const tools = pi.getAllTools();
       const activeTools = pi.getActiveTools();
       const data = buildContextBreakdown({

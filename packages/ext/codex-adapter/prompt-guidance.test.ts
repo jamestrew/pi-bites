@@ -1,3 +1,4 @@
+import type { Skill } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test, vi } from "vitest";
 
 vi.mock("./apply-patch/tool.js", () => ({ registerApplyPatchTool: vi.fn() }));
@@ -14,7 +15,7 @@ type Handler = (event: any, ctx: any) => unknown;
 function setup(providers: string[] = []) {
   const handlers = new Map<string, Handler>();
   let activeTools = ["exec_command", "write_stdin", "apply_patch"];
-  registerCodexAdapter(
+  const preview = registerCodexAdapter(
     {
       registerTool: vi.fn(),
       on: (name: string, handler: Handler) => handlers.set(name, handler),
@@ -26,18 +27,24 @@ function setup(providers: string[] = []) {
     { current: { codexAdapter: { providers } } },
   );
   const handler = handlers.get("before_agent_start")!;
-  const run = (systemPrompt: string, model: object, selectedTools?: string[]) =>
+  const run = (systemPrompt: string, model: object, selectedTools?: string[], skills?: Skill[]) =>
     handler(
       {
         systemPrompt,
-        systemPromptOptions: { selectedTools },
+        systemPromptOptions: { selectedTools, skills },
       },
       { model },
     ) as { systemPrompt: string } | undefined;
-  return { run };
+  return { preview, run };
 }
 
 const codex = { provider: "openai-codex", id: "gpt-5.3-codex" };
+const sourceInfo = {
+  path: "<test>",
+  source: "test",
+  scope: "temporary" as const,
+  origin: "top-level" as const,
+};
 
 describe("Codex adapter prompt guidance", () => {
   test("preserves the incoming prompt and describes only active retained tools", () => {
@@ -64,6 +71,57 @@ describe("Codex adapter prompt guidance", () => {
     expect(result).toContain("until the session completes");
     expect(result).not.toContain("`exec_command`");
     expect(result).not.toContain("`apply_patch`");
+  });
+
+  test("keeps model-invoked skills available after replacing read with exec_command", () => {
+    const skills = [
+      {
+        name: "review",
+        description: "Review code",
+        filePath: "/tmp/review/SKILL.md",
+        baseDir: "/tmp/review",
+        sourceInfo,
+        disableModelInvocation: false,
+      },
+      {
+        name: "manual",
+        description: "Manual only",
+        filePath: "/tmp/manual/SKILL.md",
+        baseDir: "/tmp/manual",
+        sourceInfo,
+        disableModelInvocation: true,
+      },
+    ];
+    const result = setup().run("base", codex, ["exec_command"], skills)!.systemPrompt;
+
+    expect(result).toContain("<name>review</name>");
+    expect(result).toContain("Use `exec_command` to load a skill's file");
+    expect(result).not.toContain("<name>manual</name>");
+    expect(
+      setup().run("base", codex, ["read", "exec_command"], skills)!.systemPrompt,
+    ).not.toContain("<available_skills>");
+  });
+
+  test("previews skill additions for context alongside an existing ponytail prompt", () => {
+    const skills: Skill[] = [
+      {
+        name: "review",
+        description: "Review code",
+        filePath: "/tmp/review/SKILL.md",
+        baseDir: "/tmp/review",
+        sourceInfo,
+        disableModelInvocation: false,
+      },
+    ];
+    const prompt = setup().preview("base\n<pi-bites-ponytail>full</pi-bites-ponytail>", codex, {
+      cwd: "/tmp",
+      selectedTools: ["exec_command"],
+      skills,
+    });
+
+    expect(prompt).toContain("<pi-bites-ponytail>full</pi-bites-ponytail>");
+    expect(prompt).toContain("<available_skills>");
+    expect(prompt).toContain("<name>review</name>");
   });
 
   test("recomputes guidance across model, provider scope, and tool changes", () => {
