@@ -39,7 +39,7 @@ export function renderExecScanline(
 ): string {
   const summary = typeof command === "string" ? sanitizeText(command).trim() : "";
   const detail = `${summary ? ` ${summary}` : ""}${suffix}`;
-  return theme.bold(action) + (detail ? theme.fg("accent", detail) : "");
+  return theme.bold(action) + (detail ? theme.fg("toolTitle", detail) : "");
 }
 
 function textContent(result: AgentToolResult<UnifiedExecResult>): string {

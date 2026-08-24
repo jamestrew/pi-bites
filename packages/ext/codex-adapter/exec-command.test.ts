@@ -121,7 +121,7 @@ describe("exec_command and write_stdin", () => {
     const call = tool.renderCall!({ cmd: "printf one\nprintf two" }, theme as never, {} as never)
       .render(200)
       .map((line) => line.trimEnd());
-    expect(call).toEqual(["<bold>Exec</bold><accent> printf one", "printf two</accent>"]);
+    expect(call).toEqual(["<bold>Exec</bold><toolTitle> printf one", "printf two</toolTitle>"]);
 
     const result = {
       content: [{ type: "text" as const, text: "unused structured output" }],
@@ -174,7 +174,11 @@ describe("exec_command and write_stdin", () => {
       tool.renderCall!({ session_id: 6 }, theme as never, { state: {} } as never)
         .render(200)
         .map((line) => line.trimEnd()),
-    ).toEqual(["<bold>Poll</bold><accent> echo started", "sleep 5", "echo finished</accent>"]);
+    ).toEqual([
+      "<bold>Poll</bold><toolTitle> echo started",
+      "sleep 5",
+      "echo finished</toolTitle>",
+    ]);
 
     const rendered = tool.renderResult!(
       {
