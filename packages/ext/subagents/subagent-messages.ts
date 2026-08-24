@@ -50,7 +50,7 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
           display: true,
           details,
         },
-        { ...(deliverAs ? { deliverAs } : {}), triggerTurn: false },
+        deliverAs ? { deliverAs } : { triggerTurn: false },
       );
       return true;
     } catch {

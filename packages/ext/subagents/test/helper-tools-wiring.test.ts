@@ -130,7 +130,7 @@ describe("background helper tools", () => {
           message: "need a decision",
         }),
       }),
-      { deliverAs: "steer", triggerTurn: false },
+      { deliverAs: "steer" },
     );
   });
 
@@ -169,8 +169,8 @@ describe("background helper tools", () => {
       undefined,
     ]);
     expect(pi.sendMessage.mock.calls.map(([, options]: any[]) => options)).toEqual([
-      { deliverAs: "steer", triggerTurn: false },
-      { deliverAs: "steer", triggerTurn: false },
+      { deliverAs: "steer" },
+      { deliverAs: "steer" },
       { deliverAs: "steer", triggerTurn: true },
     ]);
   });

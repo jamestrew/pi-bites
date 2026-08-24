@@ -42,7 +42,7 @@ describe("subagent message delivery", () => {
     messenger.turnEnded();
     expect(sendMessage).toHaveBeenCalledTimes(2);
     expect(sendMessage.mock.calls[1]?.[0].details.message).toBe("active message");
-    expect(sendMessage.mock.calls[1]?.[1]).toEqual({ deliverAs: "steer", triggerTurn: false });
+    expect(sendMessage.mock.calls[1]?.[1]).toEqual({ deliverAs: "steer" });
   });
 
   it("leaves mail sent after terminal output for the next parent turn", () => {
