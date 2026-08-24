@@ -738,6 +738,7 @@ describe("findMatchedPattern", () => {
     "jj squash",
     "jj abandon @",
     "jj workspace list",
+    "sed -n '1,130p' packages/ext/codex-adapter/apply-patch/rendering.ts && sed -n '220,280p' packages/ext/codex-adapter/apply-patch.test.ts",
   ])("allows allowlisted command: %s", async (command: string) => {
     expect(await findMatchedPattern(command)).toBeUndefined();
   });
@@ -817,6 +818,10 @@ describe("findMatchedPattern", () => {
     ["jj bookmark delete old", "unlisted: jj bookmark delete old"],
     ["jj operation restore abc", "unlisted: jj operation restore abc"],
     ["jj file chmod +x script", "unlisted: jj file chmod +x script"],
+    ["sed -ni '1,20p' file", "unlisted: sed -ni '1,20p' file"],
+    ["sed -n '1e touch /tmp/pwned' file", "unlisted: sed -n '1e touch /tmp/pwned' file"],
+    ["sed -n '1,20p;w out' file", "unlisted: sed -n '1,20p;w out' file"],
+    ["sed -n '1,20p' -i file", "unlisted: sed -n '1,20p' -i file"],
   ])("gates commands outside the allowlist: %s", async (command: string, label: string) => {
     const matched = await findMatchedPattern(command);
 

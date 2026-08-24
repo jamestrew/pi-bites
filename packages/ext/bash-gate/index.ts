@@ -537,6 +537,15 @@ function pushMatches(
   }
 }
 
+function isReadOnlySedCommand(command: BashSimpleCommand): boolean {
+  const [quiet, script, ...files] = command.argv.slice(1);
+  return (
+    quiet === "-n" &&
+    /^\d+(?:,\d+)?p$/u.test(script ?? "") &&
+    files.every((file) => file === "-" || !file.startsWith("-"))
+  );
+}
+
 function pushUnlistedCommands(
   matches: BashGateMatch[],
   facts: BashFacts,
@@ -552,6 +561,7 @@ function pushUnlistedCommands(
       invokedAs === name &&
       !facts.hasVariableAssignment &&
       (DEFAULT_BASH_GATE_ALLOWLIST.some((rule) => matchCommandRule(command, rule)) ||
+        (name === "sed" && isReadOnlySedCommand(command)) ||
         DEFAULT_BASH_GATE_ALLOW_PREFIXES.some((prefix) =>
           prefix.every((token, index) => normalizeToken(command.argv[index]) === token),
         ));
