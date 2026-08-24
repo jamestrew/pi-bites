@@ -37,7 +37,9 @@ Represent parameters semantically: use a path, target, count, summary, or short 
 
 When details follow the scanline, insert one blank line, begin ordinary detail lines at column zero, and dim them with `theme.fg("dim", ...)`. On failure, preserve the same scanline and detail styles; rely on the host's red tool-call background. Add a concise error message in the details when it helps diagnosis.
 
-Collapse most output to the first 5–10 display lines; use 8 when there is no better semantic boundary. If collapsed content is hidden, append a dim `(${keyHint("app.tools.expand", "to expand")})`. Omit the hint when everything is already visible. Expanded mode exposes all available display content.
+Separate a trailing status such as elapsed time from preceding command output with one blank line. Do not add another blank line when the status is the only detail.
+
+Collapse most output to the first 5–10 display lines; use 8 when there is no better semantic boundary. If collapsed content is hidden, append a dim `(${keyHint("app.tools.expand", "to expand")})` as the final rendered detail line, after output and trailing statuses, so the expansion hint is always at the bottom. Omit the hint when everything is already visible. Expanded mode exposes all available display content.
 
 Display collapsing and execution/context truncation solve different problems. Keep pi's truncation utilities and retrievable full-output location for large results even when the renderer also supports expansion.
 
