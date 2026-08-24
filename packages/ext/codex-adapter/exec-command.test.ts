@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { stripVTControlCharacters } from "node:util";
 
 import { afterEach, describe, expect, test } from "vitest";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
@@ -57,6 +58,126 @@ afterEach(async () => {
 });
 
 describe("exec_command and write_stdin", () => {
+  test("renders one styled scanline and collapsible dim details", () => {
+    const tool = createExecCommandTool({} as never);
+    const theme = {
+      bold: (text: string) => `<bold>${text}</bold>`,
+      fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+    };
+    const call = tool.renderCall!({ cmd: "printf one\nprintf two" }, theme as never, {} as never)
+      .render(200)
+      .map((line) => line.trimEnd());
+    expect(call[0]).toBe("<bold>exec_command</bold><accent> printf one printf two</accent>");
+
+    const result = {
+      content: [{ type: "text" as const, text: "unused structured output" }],
+      details: {
+        chunk_id: "abc123",
+        wall_time_seconds: 1.25,
+        exit_code: 0,
+        output: Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\n"),
+      },
+    };
+    const collapsed = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      theme as never,
+      {} as never,
+    )
+      .render(200)
+      .map((line) => line.trimEnd());
+    expect(collapsed[0]).toBe("");
+    expect(collapsed[1]).toBe("<dim>exit 0 · 1.25s</dim>");
+    expect(collapsed.join("\n")).toContain("<dim>... (3 more lines,");
+    expect(collapsed.join("\n")).not.toContain("line 8");
+
+    const expanded = tool.renderResult!(
+      result,
+      { expanded: true, isPartial: false },
+      theme as never,
+      {} as never,
+    )
+      .render(200)
+      .join("\n");
+    expect(expanded).toContain("<dim>line 10</dim>");
+    expect(expanded).not.toContain("more lines");
+  });
+
+  test("keeps rendered exec lines within the visible width", () => {
+    const tool = createExecCommandTool({} as never);
+    const theme = { bold: (text: string) => text, fg: (_role: string, text: string) => text };
+    const result = {
+      content: [{ type: "text" as const, text: "" }],
+      details: {
+        chunk_id: "abc123",
+        wall_time_seconds: 0,
+        exit_code: 0,
+        output: "a very long output line that must wrap safely ".repeat(20),
+      },
+    };
+    const lines = [
+      ...tool.renderCall!(
+        { cmd: "a very long command that must wrap safely" },
+        theme as never,
+        {} as never,
+      ).render(16),
+      ...tool.renderResult!(
+        result,
+        { expanded: true, isPartial: false },
+        theme as never,
+        {} as never,
+      ).render(16),
+    ];
+    expect(lines.every((line) => stripVTControlCharacters(line).length <= 16)).toBe(true);
+    expect(stripVTControlCharacters(lines[0]!)).toHaveLength(16);
+    expect(
+      tool.renderResult!(
+        result,
+        { expanded: false, isPartial: false },
+        theme as never,
+        {} as never,
+      ).render(16),
+    ).toHaveLength(10);
+  });
+
+  test("sanitizes terminal controls in commands and output", () => {
+    const tool = createExecCommandTool({} as never);
+    const theme = {
+      bold: (text: string) => `<bold>${text}</bold>`,
+      fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+    };
+    const call = tool.renderCall!(
+      { cmd: "printf ok\u001b]2;changed title\u0007\u0000" },
+      theme as never,
+      {} as never,
+    )
+      .render(200)
+      .join("\n");
+    expect(call).not.toContain("changed title");
+    expect(call).not.toContain("\u0000");
+
+    const result = {
+      content: [{ type: "text" as const, text: "" }],
+      details: {
+        chunk_id: "abc123",
+        wall_time_seconds: 0,
+        exit_code: 0,
+        output: "\u001b[31mred\u001b[0m\u0000ok",
+      },
+    };
+    const rendered = tool.renderResult!(
+      result,
+      { expanded: true, isPartial: false },
+      theme as never,
+      {} as never,
+    )
+      .render(200)
+      .join("\n");
+    expect(rendered).toContain("<dim>redok</dim>");
+    expect(rendered).not.toContain("\u001b[31m");
+    expect(rendered).not.toContain("\u0000");
+  });
+
   test("returns foreground output, status, elapsed details, and the configured shell", async () => {
     const cwd = tempDir();
     const sessions = manager();

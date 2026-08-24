@@ -59,7 +59,7 @@ function markFailedTargetLine(line: string, failedTarget: string): string | unde
   if (!suffixMatch) return undefined;
   const suffix = suffixMatch[0];
   const prefixAndTarget = line.slice(0, -suffix.length);
-  const candidatePrefixes = ["Edit partially failed ", "Added ", "Edited ", "Deleted ", "→ "];
+  const candidatePrefixes = ["Add ", "Delete ", "Edit ", "→ "];
   for (const prefix of candidatePrefixes) {
     if (prefixAndTarget === `${prefix}${failedTarget}`) {
       return `${prefix}${failedTarget} failed${suffix}`;
@@ -77,7 +77,7 @@ function styleFileHeaderLine(
   const [, target, failure, added, removed] = match;
   return (
     theme.fg("dim", target ?? "") +
-    (failure ? theme.fg("error", failure) : "") +
+    (failure ? theme.fg("dim", failure) : "") +
     theme.fg("dim", " (") +
     theme.fg("toolDiffAdded", `+${added}`) +
     theme.fg("dim", " ") +
@@ -86,17 +86,33 @@ function styleFileHeaderLine(
   );
 }
 
-function styleFileHeaders(text: string, theme: { fg(role: string, text: string): string }): string {
+function styleScanline(
+  line: string,
+  theme: { fg(role: string, text: string): string; bold(text: string): string },
+): string {
+  const match = line.match(/^(Add|Edit|Delete)(.*)$/);
+  if (!match) return theme.bold("Edit") + (line ? theme.fg("accent", ` ${line}`) : "");
+  return theme.bold(match[1] ?? "Edit") + theme.fg("accent", match[2] ?? "");
+}
+
+function stylePatchCall(
+  text: string,
+  theme: { fg(role: string, text: string): string; bold(text: string): string },
+): string {
   return text
     .split("\n")
-    .map((line) => styleFileHeaderLine(line, theme))
+    .map((line, index) => {
+      if (index === 0) return styleScanline(line, theme);
+      if (line.startsWith("... (")) return theme.fg("dim", line);
+      return styleFileHeaderLine(line, theme);
+    })
     .join("\n");
 }
 
 function renderPendingCall(
   patchText: string,
   cwd: string | undefined,
-  theme: { bold(text: string): string },
+  theme: { fg(role: string, text: string): string; bold(text: string): string },
 ): string {
   const files: { action: "Add" | "Delete" | "Edit"; path: string; movePath?: string }[] = [];
   for (const line of patchText.split("\n")) {
@@ -110,27 +126,26 @@ function renderPendingCall(
     const current = files.at(-1);
     if (movePath && current?.action === "Edit") current.movePath = movePath;
   }
-  if (files.length === 0) return theme.bold("Edit");
-  return files
-    .map(
-      ({ action, path, movePath }) =>
-        `${theme.bold(action)} ${formatPatchTarget(path, movePath, cwd ?? process.cwd())}`,
-    )
-    .join("\n");
+  const file = files[0];
+  if (!file) return styleScanline("", theme);
+  if (files.length > 1) return styleScanline(`Edit ${files.length} targets`, theme);
+  return styleScanline(
+    `${file.action} ${formatPatchTarget(file.path, file.movePath, cwd ?? process.cwd())}`,
+    theme,
+  );
 }
 
 function renderFailureCall(
   text: string,
-  theme: { fg(role: string, text: string): string },
+  theme: { fg(role: string, text: string): string; bold(text: string): string },
   status: "partial_failure" | "failed",
   failedTargets?: string[],
 ): string {
-  const label = status === "partial_failure" ? "Edit partially failed" : "Edit failed";
-  const headerRole = status === "partial_failure" ? "warning" : "error";
+  const label = status === "partial_failure" ? "partially failed" : "failed";
   const lines = text.split("\n");
   const firstLine = lines[0];
-  if (firstLine === undefined) return theme.fg(headerRole, label);
-  lines[0] = firstLine.replace(/^(Added|Edited|Deleted)\b/, label);
+  if (firstLine === undefined) return styleScanline(`Edit ${label}`, theme);
+  lines[0] = firstLine.replace(/^(Add|Delete|Edit)\b/, `$1 ${label}`);
   const failedLineIndexes = new Set<number>();
   if (failedTargets) {
     for (let index = 0; index < lines.length; index += 1) {
@@ -147,8 +162,11 @@ function renderFailureCall(
   return lines
     .map((line, index) => {
       if (failedLineIndexes.has(index))
-        return line.startsWith("→ ") ? styleFileHeaderLine(line, theme) : theme.fg("error", line);
-      if (index === 0) return theme.fg(headerRole, line);
+        return line.startsWith("→ ")
+          ? styleFileHeaderLine(line, theme)
+          : styleScanline(line, theme);
+      if (index === 0) return styleScanline(line, theme);
+      if (line.startsWith("... (")) return theme.fg("dim", line);
       return styleFileHeaderLine(line, theme);
     })
     .join("\n");
@@ -187,10 +205,10 @@ export function renderApplyPatchCallFromState(
     : (cached?.collapsedDiff ?? formatApplyPatchCollapsedDiff(effectivePatchText, cwd));
 
   if (baseText.trim().length === 0) {
-    if (status === "failed") return theme.fg("error", "Edit failed");
-    return theme.bold("Edit");
+    if (status === "failed") return styleScanline("Edit failed", theme);
+    return styleScanline("", theme);
   }
   if (status === "partial_failure" || status === "failed")
     return renderFailureCall(baseText, theme, status, cached?.failedTargets);
-  return styleFileHeaders(baseText, theme);
+  return stylePatchCall(baseText, theme);
 }

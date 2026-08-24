@@ -249,7 +249,7 @@ export function createApplyPatchTool(
       );
     },
     renderResult(result, { isPartial }, theme, context) {
-      if (isPartial) return new Text(theme.bold("Edit"), 0, 0);
+      if (isPartial) return new Container();
       const snapshot = (result.details as Partial<ApplyPatchDetails> | undefined)?.render;
       if (snapshot && context.state.snapshot !== snapshot) {
         context.state.snapshot = snapshot;
