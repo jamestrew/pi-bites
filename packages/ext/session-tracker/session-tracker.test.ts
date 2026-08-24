@@ -792,7 +792,7 @@ test("pi-sessions shows focus errors", async () => {
 
   expect(notices).toEqual([["Failed to focus tmux pane: tmux failed", "error"]]);
 });
-test("extension waits for agent_settled before classifying", () => {
+test("extension registers settled and compaction lifecycle handlers", () => {
   const handlers = new Map<string, unknown>();
 
   registerSessionTracker({
@@ -804,9 +804,9 @@ test("extension waits for agent_settled before classifying", () => {
     registerShortcut() {},
   } as never);
 
-  expect(handlers.has("agent_end")).toBe(true);
   expect(handlers.has("agent_settled")).toBe(true);
-  expect(handlers.has("turn_end")).toBe(false);
+  expect(handlers.has("session_before_compact")).toBe(true);
+  expect(handlers.has("session_compact")).toBe(true);
 });
 
 test("extension tracking failures are best-effort and shutdown does not respawn", async () => {

@@ -539,9 +539,23 @@ export function createNeedsInputLifecycle(
   let pendingText: string | undefined;
   let settledState: TrackerState = "idle";
   let agentRunning = false;
+  const runningCompactions = new Set<symbol>();
   let generation = 0;
 
-  const reportSettledState = () => setState(backgroundAgents.size > 0 ? "working" : settledState);
+  const reportSettledState = () =>
+    setState(
+      backgroundAgents.size > 0 || agentRunning || runningCompactions.size > 0
+        ? "working"
+        : settledState,
+    );
+  const finishCompaction = async (compaction?: symbol) => {
+    if (compaction) runningCompactions.delete(compaction);
+    else {
+      const first = runningCompactions.values().next();
+      if (!first.done) runningCompactions.delete(first.value);
+    }
+    await reportSettledState();
+  };
 
   return {
     reset() {
@@ -549,6 +563,7 @@ export function createNeedsInputLifecycle(
       pendingText = undefined;
       settledState = "idle";
       agentRunning = false;
+      runningCompactions.clear();
       generation++;
     },
     async agentStart() {
@@ -572,6 +587,9 @@ export function createNeedsInputLifecycle(
       }
       if (generation !== settledGeneration) return;
       agentRunning = false;
+      // agent_settled is emitted only after automatic compaction and retry work ends,
+      // including failed compactions which have no session_compact event.
+      runningCompactions.clear();
       settledState = nextSettledState;
       await reportSettledState();
     },
@@ -583,6 +601,13 @@ export function createNeedsInputLifecycle(
       if (!backgroundAgents.delete(id) || backgroundAgents.size > 0 || agentRunning) return;
       await reportSettledState();
     },
+    async compactionStarted(signal?: AbortSignal) {
+      const compaction = Symbol();
+      runningCompactions.add(compaction);
+      signal?.addEventListener("abort", () => void finishCompaction(compaction), { once: true });
+      await setState("working");
+    },
+    compactionFinished: () => finishCompaction(),
   };
 }
 
@@ -632,6 +657,8 @@ export default function registerSessionTracker(
     footerRuntime.start(ctx);
   });
   pi.on("agent_start", () => needsInputLifecycle.agentStart());
+  pi.on("session_before_compact", (event) => needsInputLifecycle.compactionStarted(event.signal));
+  pi.on("session_compact", () => needsInputLifecycle.compactionFinished());
   pi.events.on("bites:bash_gate", async (data) => {
     const gate = data as BitesBashGatePayload;
     if (gate.requiresHuman) {
