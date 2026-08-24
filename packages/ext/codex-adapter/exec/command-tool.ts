@@ -1,7 +1,8 @@
-import { Text } from "@earendil-works/pi-tui";
+import { Text, truncateToWidth } from "@earendil-works/pi-tui";
 import {
   getAgentDir,
   getShellConfig,
+  keyHint,
   SettingsManager,
   type AgentToolResult,
   type ExtensionAPI,
@@ -10,8 +11,51 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
+import { sanitizeSingleLine, sanitizeText } from "../../subagents/ui/text-lines.js";
 import { formatUnifiedExecResult } from "./format.js";
 import type { ExecSessionManager, UnifiedExecResult } from "./session-manager.js";
+
+const COLLAPSED_DETAIL_LINES = 8;
+
+interface RenderTheme {
+  bold(text: string): string;
+  fg(role: string, text: string): string;
+}
+
+function expandHint(): string {
+  try {
+    return keyHint("app.tools.expand", "to expand");
+  } catch {
+    return "ctrl+o to expand";
+  }
+}
+
+function renderExecScanline(command: unknown, theme: RenderTheme): string {
+  const summary = typeof command === "string" ? sanitizeSingleLine(command).trim() : "";
+  return theme.bold("exec_command") + (summary ? theme.fg("accent", ` ${summary}`) : "");
+}
+
+function textContent(result: AgentToolResult<UnifiedExecResult>): string {
+  return result.content
+    .filter((item): item is { type: "text"; text: string } => item.type === "text")
+    .map(({ text }) => text)
+    .join("\n");
+}
+
+function execDetails(result: AgentToolResult<UnifiedExecResult>, isPartial: boolean): string[] {
+  const details = result.details as UnifiedExecResult | undefined;
+  const status = details
+    ? isPartial
+      ? "running"
+      : details.session_id === undefined
+        ? `exit ${details.exit_code ?? "?"} · ${details.wall_time_seconds.toFixed(2)}s`
+        : `session ${details.session_id} running · ${details.wall_time_seconds.toFixed(2)}s`
+    : isPartial
+      ? "running"
+      : "failed";
+  const output = sanitizeText(details?.output ?? textContent(result));
+  return [status, ...(output ? output.split("\n") : [])];
+}
 
 const parameters = Type.Object({
   cmd: Type.String({ description: "The shell command to run." }),
@@ -91,16 +135,30 @@ export function createExecCommandTool(
       );
     },
     renderCall(args, theme) {
-      return new Text(`${theme.bold("Run")} ${args.cmd}`, 0, 0);
+      const scanline = renderExecScanline(args.cmd, theme);
+      return {
+        render: (width) => [truncateToWidth(scanline, width, "…")],
+        invalidate() {},
+      };
     },
-    renderResult(result, { isPartial }, theme) {
-      const details = result.details as UnifiedExecResult | undefined;
-      if (isPartial || !details) return new Text(theme.fg("dim", "Running…"), 0, 0);
-      const status =
-        details.session_id === undefined
-          ? `exit ${details.exit_code ?? "?"}`
-          : `session ${details.session_id}`;
-      return new Text(`${theme.bold("Run")} ${status}`, 0, 0);
+    renderResult(result, { expanded, isPartial }, theme) {
+      const text = new Text(
+        execDetails(result, isPartial)
+          .map((line) => theme.fg("dim", line))
+          .join("\n"),
+        0,
+        0,
+      );
+      return {
+        render(width) {
+          const lines = text.render(width);
+          if (expanded || lines.length <= COLLAPSED_DETAIL_LINES) return ["", ...lines];
+          const hidden = lines.length - COLLAPSED_DETAIL_LINES;
+          const hint = theme.fg("dim", `... (${hidden} more lines, ${expandHint()})`);
+          return ["", ...lines.slice(0, COLLAPSED_DETAIL_LINES), truncateToWidth(hint, width, "…")];
+        },
+        invalidate: () => text.invalidate(),
+      };
     },
   };
 }

@@ -1,6 +1,7 @@
 import { isAbsolute, relative } from "node:path";
 import { keyHint, renderDiff } from "@earendil-works/pi-coding-agent";
 
+import { sanitizeSingleLine, sanitizeText } from "../../subagents/ui/text-lines.js";
 import { openFileAtPath } from "../patch/paths.js";
 import { parsePatchActions } from "../patch/parser.js";
 import type { ParsedPatchAction } from "../patch/types.js";
@@ -12,7 +13,7 @@ interface PreviewLine {
 }
 
 interface FilePreview {
-  verb: "Added" | "Deleted" | "Edited";
+  verb: "Add" | "Delete" | "Edit";
   path: string;
   movePath?: string | undefined;
   added: number;
@@ -63,7 +64,7 @@ function renderApplyPatch(patchText: string, cwd: string, maxPreviewLines?: numb
   const lines: string[] = [];
   const lastTruncatedFile = files.reduce(
     (last, file, index) =>
-      file.verb !== "Edited" && maxPreviewLines !== undefined && file.lines.length > maxPreviewLines
+      file.verb !== "Edit" && maxPreviewLines !== undefined && file.lines.length > maxPreviewLines
         ? index
         : last,
     -1,
@@ -74,11 +75,12 @@ function renderApplyPatch(patchText: string, cwd: string, maxPreviewLines?: numb
     lines.push(
       `${onlyFile.verb} ${formatPatchTarget(onlyFile.path, onlyFile.movePath, cwd)} ${renderCounts(onlyFile.added, onlyFile.removed)}`,
     );
+    if (onlyFile.lines.length > 0) lines.push("");
     lines.push(...renderFilePreview(onlyFile, maxPreviewLines, lastTruncatedFile === 0));
     return lines.join("\n");
   }
 
-  lines.push(`Edited ${files.length} files ${renderCounts(totalAdded, totalRemoved)}`);
+  lines.push(`Edit ${files.length} files ${renderCounts(totalAdded, totalRemoved)}`, "");
   for (const [index, file] of files.entries()) {
     if (index > 0) lines.push("");
     lines.push(
@@ -95,7 +97,7 @@ function renderFilePreview(
   maxPreviewLines: number | undefined,
   showExpandHint: boolean,
 ): string[] {
-  if (file.verb === "Edited") return renderEditedPreviewLines(file.lines, file.lineCount);
+  if (file.verb === "Edit") return renderEditedPreviewLines(file.lines, file.lineCount);
   if (maxPreviewLines === undefined || file.lines.length <= maxPreviewLines)
     return renderPreviewLines(file.lines);
 
@@ -122,13 +124,13 @@ function buildFilePreviews(actions: ParsedPatchAction[], cwd: string): FilePrevi
       existing.added += file.added;
       existing.removed += file.removed;
       existing.lineCount = nextLines.length;
-      if (existing.verb === "Added" && file.verb === "Edited") {
+      if (existing.verb === "Add" && file.verb === "Edit") {
         existing.lines = addedPreviewLines(nextLines);
-      } else if (file.verb === "Deleted") {
-        existing.verb = "Deleted";
+      } else if (file.verb === "Delete") {
+        existing.verb = "Delete";
         existing.lines = file.lines;
       } else {
-        if (existing.verb !== file.verb) existing.verb = "Edited";
+        if (existing.verb !== file.verb) existing.verb = "Edit";
         existing.lines.push(...file.lines);
       }
     } else {
@@ -149,7 +151,7 @@ function buildFilePreview(
     const lines = splitFileLines(action.newFile ?? "");
     return {
       file: {
-        verb: "Added",
+        verb: "Add",
         path: action.path,
         added: lines.length,
         removed: 0,
@@ -163,7 +165,7 @@ function buildFilePreview(
   if (action.type === "delete") {
     return {
       file: {
-        verb: "Deleted",
+        verb: "Delete",
         path: action.path,
         added: 0,
         removed: originalLines.length,
@@ -181,7 +183,7 @@ function buildFilePreview(
   const preview = buildUpdatePreview(action, originalLines);
   return {
     file: {
-      verb: "Edited",
+      verb: "Edit",
       path: action.path,
       movePath: action.movePath,
       added: preview.added,
@@ -329,7 +331,7 @@ function buildChangePreview(
 
 function formatPreviewLine(line: PreviewLine, lines: PreviewLine[]): string {
   const numberWidth = Math.max(1, ...lines.map((entry) => String(entry.lineNumber).length));
-  return `${String(line.lineNumber).padStart(numberWidth, " ")} ${line.marker}${line.text}`;
+  return `${String(line.lineNumber).padStart(numberWidth, " ")} ${line.marker}${sanitizeText(line.text)}`;
 }
 
 function renderPreviewLines(lines: PreviewLine[]): string[] {
@@ -338,7 +340,8 @@ function renderPreviewLines(lines: PreviewLine[]): string[] {
   const numberWidth = Math.max(1, ...lines.map((entry) => String(entry.lineNumber).length));
   const diffText = lines
     .map(
-      (line) => `${line.marker}${String(line.lineNumber).padStart(numberWidth, " ")} ${line.text}`,
+      (line) =>
+        `${line.marker}${String(line.lineNumber).padStart(numberWidth, " ")} ${sanitizeText(line.text)}`,
     )
     .join("\n");
   try {
@@ -459,13 +462,13 @@ export function formatPatchTarget(path: string, movePath: string | undefined, cw
 }
 
 function displayPath(path: string, cwd: string): string {
-  if (!isAbsolute(path)) return path;
+  if (!isAbsolute(path)) return sanitizeSingleLine(path);
 
   const relativePath = relative(cwd, path);
   if (relativePath !== "" && !relativePath.startsWith("..") && !isAbsolute(relativePath)) {
-    return relativePath;
+    return sanitizeSingleLine(relativePath);
   }
-  return path;
+  return sanitizeSingleLine(path);
 }
 
 function readFileLines(path: string, cwd: string): string[] {

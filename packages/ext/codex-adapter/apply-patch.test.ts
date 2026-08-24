@@ -95,13 +95,22 @@ describe("apply_patch", () => {
         .join("\n"),
     );
     expect(collapsed.split("\n").map((line) => line.trimEnd())).toEqual([
-      "Edited sample.txt (+1 -1)",
+      "Edit sample.txt (+1 -1)",
+      "",
       "1  one",
       "2 -two",
       "2 +TWO",
       "3  three",
     ]);
 
+    expect(
+      tool.renderResult!(
+        result,
+        { expanded: false, isPartial: true },
+        theme as never,
+        context as never,
+      ).render(200),
+    ).toEqual([]);
     expect(
       tool.renderResult!(
         result,
@@ -139,6 +148,30 @@ describe("apply_patch", () => {
     expect(renderLong(false)).toContain("more lines");
     expect(renderLong(true)).not.toContain("more lines");
     expect(renderLong(true)).toContain("14 +line 14");
+    const styled = longTool.renderCall!(
+      { input: longInput },
+      {
+        bold: (text: string) => `<bold>${text}</bold>`,
+        fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+      } as never,
+      {
+        ...context,
+        toolCallId: "long-render",
+        state: {},
+      } as never,
+    )
+      .render(300)
+      .join("\n");
+    expect(styled).toContain("<bold>Add</bold><accent> long.txt (+14 -0)</accent>");
+    expect(styled).toContain("<dim>... (");
+
+    const widthSafe = longTool.renderCall!(
+      { input: longInput },
+      theme as never,
+      { ...context, toolCallId: "long-render", state: {} } as never,
+    );
+    const narrow = widthSafe.render(16);
+    expect(narrow.every((line) => stripVTControlCharacters(line).length <= 16)).toBe(true);
   });
 
   test("collapses adds and deletes per file while keeping the full edit diff", async () => {
@@ -217,7 +250,7 @@ describe("apply_patch", () => {
         .join("\n"),
     );
 
-    expect(rendered).toContain("Added repeated-add.txt (+13 -1)");
+    expect(rendered).toContain("Add repeated-add.txt (+13 -1)");
     expect(rendered).toContain("added-10");
     expect(rendered).not.toContain("updated-11");
     expect(rendered).toContain("... (2 more lines, ctrl+o to expand)");
@@ -263,7 +296,26 @@ describe("apply_patch", () => {
     expect(rendered.match(/^\s*\.\.\./gm)).toHaveLength(2);
   });
 
-  test("shows action-first targets while patch arguments stream", () => {
+  test("sanitizes terminal controls in patch paths and content", () => {
+    const input = patch(
+      "*** Add File: safe\u001b]2;changed title\u0007.txt",
+      "+\u001b[31mhostile\u001b[0m\u0000 text",
+    );
+    const rendered = createApplyPatchTool().renderCall!(
+      { input },
+      { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+      { argsComplete: true, expanded: true, state: {} } as never,
+    )
+      .render(200)
+      .join("\n");
+
+    expect(rendered).not.toContain("changed title");
+    expect(rendered).not.toContain("[31m");
+    expect(rendered).not.toContain("\u0000");
+    expect(stripVTControlCharacters(rendered)).toContain("hostile text");
+  });
+
+  test("keeps a stable scanline while patch arguments stream", () => {
     const rendered = createApplyPatchTool().renderCall!(
       {
         input: [
@@ -273,13 +325,16 @@ describe("apply_patch", () => {
           "*** Delete File: three.txt",
         ].join("\n"),
       },
-      { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+      {
+        fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+        bold: (text: string) => `<bold>${text}</bold>`,
+      } as never,
       { argsComplete: false, state: {} } as never,
     )
       .render(200)
       .map((line) => line.trimEnd());
 
-    expect(rendered).toEqual(["Edit one.txt", "Add two.txt", "Delete three.txt"]);
+    expect(rendered).toEqual(["<bold>Edit</bold><accent> 3 targets</accent>"]);
   });
 
   test("restores completed previews from persisted result details", async () => {
@@ -317,7 +372,7 @@ describe("apply_patch", () => {
     );
 
     expect(context.invalidate).toHaveBeenCalledOnce();
-    expect(restored).toContain("Deleted deleted.txt (+0 -2)");
+    expect(restored).toContain("Delete deleted.txt (+0 -2)");
     expect(restored).toContain("1 -first");
     expect(restored).toContain("2 -second");
   });
@@ -353,7 +408,7 @@ describe("apply_patch", () => {
         .join("\n"),
     );
 
-    expect(rendered).toContain("Edited repeated.txt (+2 -0)");
+    expect(rendered).toContain("Edit repeated.txt (+2 -0)");
     expect(rendered).toContain("3  two");
     expect(rendered).toContain("4 +three");
     expect(rendered).not.toContain("2 files");
@@ -492,9 +547,9 @@ describe("apply_patch", () => {
         .join("\n"),
     );
 
-    expect(rendered).toContain("<warning>Edit partially failed");
+    expect(rendered).toContain("Edit<accent> partially failed");
     expect(rendered).toContain(
-      "<dim>→ missing.txt</dim><error> failed</error><dim> (</dim>" +
+      "<dim>→ missing.txt</dim><dim> failed</dim><dim> (</dim>" +
         "<toolDiffAdded>+1</toolDiffAdded><dim> </dim>" +
         "<toolDiffRemoved>-1</toolDiffRemoved><dim>)</dim>",
     );
@@ -546,7 +601,7 @@ describe("apply_patch", () => {
         .render(200)
         .join("\n"),
     );
-    expect(failed).toContain("<error>Edit failed absent.txt (+1 -1)</error>");
+    expect(failed).toContain("Edit<accent> failed absent.txt (+1 -1)</accent>");
 
     clearApplyPatchRenderState();
     const restoredFailure = stripVTControlCharacters(
@@ -568,7 +623,7 @@ describe("apply_patch", () => {
         .render(200)
         .join("\n"),
     );
-    expect(restoredFailure).toContain("<error>Edit failed absent.txt (+1 -1)</error>");
+    expect(restoredFailure).toContain("Edit<accent> failed absent.txt (+1 -1)</accent>");
   });
 
   test("returns render snapshots when lifecycle cleanup races execution", async () => {
