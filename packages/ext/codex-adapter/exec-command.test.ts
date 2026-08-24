@@ -93,6 +93,7 @@ describe("exec_command and write_stdin", () => {
     expect(collapsed.at(-2)).toBe("<dim>Took 1.3s</dim>");
     expect(collapsed.at(-1)).toContain("<dim>... (5 earlier lines,");
     expect(collapsed.at(-1)).toContain("to expand");
+    expect(collapsed.at(-1)?.endsWith("<dim>)</dim>")).toBe(true);
 
     const expanded = tool.renderResult!(
       result,

@@ -116,7 +116,8 @@ export function renderExecResult(
         rendered.push(...statusText.render(width));
       }
       if (hidden > 0) {
-        const hint = theme.fg("dim", `... (${hidden} earlier lines, ${expandHint()})`);
+        const hint =
+          theme.fg("dim", `... (${hidden} earlier lines, `) + expandHint() + theme.fg("dim", ")");
         rendered.push(truncateToWidth(hint, width, "…"));
       }
       return rendered.length ? ["", ...rendered] : rendered;
