@@ -65,6 +65,7 @@ function createBashGateHarness(
   yolo = false,
   autoMode?: Parameters<typeof registerBashGate>[2],
   hasUI = true,
+  config: Parameters<typeof registerBashGate>[1]["current"] = {},
 ) {
   const handlers = new Map<string, (event: any, ctx: any) => unknown>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
@@ -103,7 +104,7 @@ function createBashGateHarness(
     sessionManager: { getEntries: () => entries },
   };
 
-  registerBashGate(pi as any, { current: {} }, autoMode);
+  registerBashGate(pi as any, { current: config }, autoMode);
   handlers.get("session_start")?.({}, ctx);
 
   return {
@@ -118,6 +119,95 @@ function createBashGateHarness(
 }
 
 describe("bash gate tool_call", () => {
+  test.each([
+    ["bash", { command: "deploy production" }],
+    ["exec_command", { cmd: "deploy production" }],
+  ])("applies configured rules to the %s shell contract", async (toolName, input) => {
+    const { toolCall, ctx, ui } = createBashGateHarness([], false, undefined, true, {
+      bashGate: { rules: [{ cmd: "deploy", reason: "production deployment" }] },
+    });
+
+    await expect(toolCall({ toolName, input }, ctx)).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: command was denied by the user.",
+    });
+    expect(ui.select).toHaveBeenCalledWith(expect.stringContaining("production deployment"), [
+      "Allow",
+      'Allow for session ("deploy")',
+      "Deny",
+    ]);
+  });
+
+  test("shares session allowances across shell tool contracts", async () => {
+    const { toolCall, ctx, ui } = createBashGateHarness();
+    ui.select.mockResolvedValue('Allow for session ("rm")');
+
+    await expect(
+      toolCall({ toolName: "exec_command", input: { cmd: "rm first.txt" } }, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm second.txt" } }, ctx),
+    ).resolves.toBeUndefined();
+
+    expect(ui.select).toHaveBeenCalledTimes(1);
+  });
+
+  test("allows exec_command once without remembering the decision", async () => {
+    const { toolCall, ctx, ui } = createBashGateHarness();
+    ui.select.mockResolvedValue("Allow");
+
+    await toolCall({ toolName: "exec_command", input: { cmd: "rm first.txt" } }, ctx);
+    await toolCall({ toolName: "exec_command", input: { cmd: "rm second.txt" } }, ctx);
+
+    expect(ui.select).toHaveBeenCalledTimes(2);
+  });
+
+  test("fails closed for gated exec_command calls without UI", async () => {
+    const { toolCall, ctx } = createBashGateHarness([], false, undefined, false);
+
+    await expect(
+      toolCall({ toolName: "exec_command", input: { cmd: "rm build.txt" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: no UI available for confirmation.",
+    });
+  });
+
+  test("sends exec_command's original cmd and tool contract through automode and lifecycle events", async () => {
+    const review = vi.fn().mockResolvedValue({ outcome: "allow" });
+    const { toolCall, ctx, pi } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+
+    await expect(
+      toolCall(
+        { toolName: "exec_command", input: { cmd: "rm original", command: "cat safe" } },
+        ctx,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(review).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "rm original", toolName: "exec_command" }),
+      expect.anything(),
+    );
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate",
+      expect.objectContaining({ command: "rm original", toolName: "exec_command" }),
+    );
+  });
+
+  test("applies deny-policy subagent gates to exec_command", async () => {
+    const { toolCall, ctx } = createBashGateHarness([subagentEntry({ bashGatePolicy: "deny" })]);
+
+    await expect(
+      toolCall({ toolName: "exec_command", input: { cmd: "rm -rf tmp" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: gated command not allowed for this subagent.",
+    });
+  });
+
   test("shows the footer status when started with --yolo", () => {
     const { ui } = createBashGateHarness([], true);
 
@@ -186,7 +276,7 @@ describe("bash gate tool_call", () => {
 
     expect(review).toHaveBeenCalledWith(
       expect.objectContaining({ command: "rm build.txt", labels: ["rm"] }),
-      ctx,
+      expect.anything(),
     );
     expect(ui.select).not.toHaveBeenCalled();
   });
@@ -463,7 +553,7 @@ describe("bash gate tool_call", () => {
     expect(pi.events.emit).not.toHaveBeenCalled();
   });
 
-  test("prompt-policy subagents use parent broker and allow once only", async () => {
+  test("prompt-policy subagents use parent broker for exec_command and allow once only", async () => {
     const { pi, toolCall, ctx, eventHandlers } = createBashGateHarness([
       subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
     ]);
@@ -477,16 +567,21 @@ describe("bash gate tool_call", () => {
     });
 
     await expect(
-      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+      toolCall({ toolName: "exec_command", input: { cmd: "rm -rf tmp" } }, ctx),
     ).resolves.toBeUndefined();
     await expect(
-      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+      toolCall({ toolName: "exec_command", input: { cmd: "rm -rf tmp" } }, ctx),
     ).resolves.toBeUndefined();
 
     expect(approvals).toBe(2);
     expect(pi.events.emit).toHaveBeenCalledWith(
       "subagents:bash_gate:approval",
-      expect.objectContaining({ title: "Explore", command: "rm -rf tmp", labels: ["rm"] }),
+      expect.objectContaining({
+        title: "Explore",
+        command: "rm -rf tmp",
+        toolName: "exec_command",
+        labels: ["rm"],
+      }),
     );
   });
 

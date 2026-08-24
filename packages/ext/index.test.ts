@@ -135,6 +135,18 @@ describe("extension entrypoint", () => {
     }
   });
 
+  test("registers command authorization before command rewriting", async () => {
+    const loaded = await loadExtension();
+    try {
+      const gateOrder =
+        loaded.registerSpies.get("./bash-gate/index.js")?.mock.invocationCallOrder[0];
+      const rtkOrder = loaded.registerSpies.get("./rtk.js")?.mock.invocationCallOrder[0];
+      expect(gateOrder).toBeLessThan(rtkOrder!);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
   test("subagents load shared tools and behavior without recursive features", async () => {
     const loaded = await loadExtension({ subagent: "general" });
     try {

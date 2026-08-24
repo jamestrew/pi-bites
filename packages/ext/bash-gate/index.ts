@@ -56,6 +56,21 @@ export interface BashGateController {
   isYolo(): boolean;
 }
 
+type ShellToolName = "bash" | "exec_command";
+
+function commandPolicyRequest(
+  toolName: string,
+  input: Record<string, unknown>,
+): { command: string; toolName: ShellToolName } | undefined {
+  if (toolName === "bash" && typeof input.command === "string") {
+    return { command: input.command, toolName };
+  }
+  if (toolName === "exec_command" && typeof input.cmd === "string") {
+    return { command: input.cmd, toolName };
+  }
+  return undefined;
+}
+
 function subagentMetadata(entries: SessionEntry[]): SubagentMetadata | null | undefined {
   const entry = [...entries]
     .reverse()
@@ -671,15 +686,21 @@ export default function registerBashGate(
   pi.events.on("subagents:failed", (data) => clearSubagentAllowances(data as { id: string }));
 
   pi.on("tool_call", async (event, ctx) => {
-    if (event.toolName !== "bash") return undefined;
-
-    const { command } = event.input;
-    if (typeof command !== "string") return undefined;
+    const request = commandPolicyRequest(event.toolName, event.input);
+    if (!request) return undefined;
+    const { command, toolName } = request;
 
     const cwd = ctx.cwd;
     const hasUI = ctx.hasUI;
     const ui = ctx.ui;
-    const entries = ctx.sessionManager.getEntries();
+    const sessionManager = ctx.sessionManager;
+    const entries = [...sessionManager.getEntries()];
+    const reviewCtx = {
+      modelRegistry: ctx.modelRegistry,
+      model: ctx.model,
+      signal: ctx.signal,
+      sessionManager,
+    };
     const matchedPatterns = await findMatchedPatterns(command, rules);
     if (matchedPatterns.length === 0) return undefined;
 
@@ -706,7 +727,7 @@ export default function registerBashGate(
       }
 
       const gateStartMs = Date.now();
-      pi.events.emit("bites:bash_gate", { cwd, command });
+      pi.events.emit("bites:bash_gate", { cwd, command, toolName });
       try {
         const reasons = matchedPatterns.flatMap((match) =>
           match.reason === undefined ? [] : [match.reason],
@@ -715,6 +736,7 @@ export default function registerBashGate(
           agentId: metadata.agentId,
           title: metadata.title,
           command,
+          toolName,
           labels: matchedPatternLabels,
           reasons,
           sessionAllowKey,
@@ -751,13 +773,13 @@ export default function registerBashGate(
 
         return { block: true, reason: "Bash gate: command was denied by parent approval." };
       } finally {
-        pi.events.emit("bites:bash_gate_resolved", { cwd, command });
+        pi.events.emit("bites:bash_gate_resolved", { cwd, command, toolName });
       }
     }
 
     if (autoMode?.isEnabled()) {
       const gateStartMs = Date.now();
-      const autoGate = { cwd, command, requiresHuman: false } as const;
+      const autoGate = { cwd, command, toolName, requiresHuman: false } as const;
       pi.events.emit("bites:bash_gate", autoGate);
       try {
         let decision;
@@ -765,12 +787,13 @@ export default function registerBashGate(
           decision = await autoMode.review(
             {
               command,
+              toolName,
               labels: matchedPatternLabels,
               reasons: matchedPatterns.flatMap((match) =>
                 match.reason === undefined ? [] : [match.reason],
               ),
             },
-            ctx,
+            reviewCtx,
           );
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -793,6 +816,7 @@ export default function registerBashGate(
           ui,
           cwd,
           command,
+          toolName,
           rationale: decision.rationale,
         });
         if (escalation === "allow") {
@@ -816,7 +840,13 @@ export default function registerBashGate(
     // the gate wait duration to `event.input.timeout` so the spawned process
     // still gets its full intended timeout.
     const gateStartMs = Date.now();
-    const manualGate = { cwd, command, requiresHuman: true, waitId: randomUUID() } as const;
+    const manualGate = {
+      cwd,
+      command,
+      toolName,
+      requiresHuman: true,
+      waitId: randomUUID(),
+    } as const;
 
     pi.events.emit("bites:bash_gate", manualGate);
 

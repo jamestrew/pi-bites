@@ -70,6 +70,7 @@ export function appendAutoModeOverride(
 
 export interface AutoModeReviewRequest {
   command: string;
+  toolName?: "bash" | "exec_command";
   labels: string[];
   reasons: string[];
   subagentContext?: string;
@@ -80,9 +81,14 @@ export interface AutoModeDecision {
   rationale?: string;
 }
 
+type AutoModeReviewContext = Pick<
+  ExtensionContext,
+  "modelRegistry" | "model" | "signal" | "sessionManager"
+>;
+
 export interface AutoModeController {
   isEnabled(): boolean;
-  review(request: AutoModeReviewRequest, ctx: ExtensionContext): Promise<AutoModeDecision>;
+  review(request: AutoModeReviewRequest, ctx: AutoModeReviewContext): Promise<AutoModeDecision>;
 }
 
 function textContent(content: unknown): string {

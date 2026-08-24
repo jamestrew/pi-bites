@@ -184,6 +184,7 @@ export default function (
           decision = await autoMode.review(
             {
               command: request.command,
+              toolName: request.toolName,
               labels: request.labels,
               reasons: request.reasons,
               subagentContext: session
@@ -213,6 +214,7 @@ export default function (
           ui,
           cwd,
           command: request.command,
+          toolName: request.toolName,
           ...(decision.rationale ? { rationale: decision.rationale } : {}),
           ...(record?.session
             ? {

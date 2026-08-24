@@ -11,6 +11,7 @@ export interface ApprovalRequest {
   agentId?: string;
   title: string;
   command: string;
+  toolName?: "bash" | "exec_command";
   labels: string[];
   reasons: string[];
   sessionAllowKey: string;
@@ -24,6 +25,7 @@ export interface BitesNotifyPayload {
 export type BitesBashGatePayload = {
   cwd: string;
   command: string;
+  toolName?: "bash" | "exec_command";
 } & ({ requiresHuman: true; waitId: string } | { requiresHuman?: false; waitId?: never });
 
 function approvalResult(value: unknown): BashGateApprovalResult | undefined {
