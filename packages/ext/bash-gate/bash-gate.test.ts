@@ -63,7 +63,8 @@ function subagentEntry(data: Record<string, unknown>): SessionEntry {
 function createBashGateHarness(
   entries: SessionEntry[] = [],
   yolo = false,
-  autoMode?: Parameters<typeof registerBashGate>[2],
+  autoMode?: Omit<NonNullable<Parameters<typeof registerBashGate>[2]>, "setEnabled"> &
+    Partial<Pick<NonNullable<Parameters<typeof registerBashGate>[2]>, "setEnabled">>,
   hasUI = true,
   config: Parameters<typeof registerBashGate>[1]["current"] = {},
 ) {
@@ -104,7 +105,11 @@ function createBashGateHarness(
     sessionManager: { getEntries: () => entries },
   };
 
-  registerBashGate(pi as any, { current: config }, autoMode);
+  registerBashGate(
+    pi as any,
+    { current: config },
+    autoMode && { setEnabled: vi.fn(), ...autoMode },
+  );
   handlers.get("session_start")?.({}, ctx);
 
   return {
@@ -179,7 +184,6 @@ describe("bash gate tool_call", () => {
       isEnabled: () => true,
       review,
     });
-
     await expect(
       toolCall(
         { toolName: "exec_command", input: { cmd: "rm original", command: "cat safe" } },
@@ -445,19 +449,21 @@ describe("bash gate tool_call", () => {
     await expect(
       toolCall({ toolName: "read", input: { command: "rm file" } }, ctx),
     ).resolves.toBeUndefined();
-
     expect(review).not.toHaveBeenCalled();
   });
 
-  test("--yolo bypasses automode review", async () => {
+  test("--yolo disables automode, bypasses review, and locks the shortcut", async () => {
+    let enabled = true;
     const review = vi.fn().mockResolvedValue({ outcome: "deny" });
-    const { toolCall, ctx } = createBashGateHarness(
-      [],
-      true,
-      { isEnabled: () => true, review },
-      false,
-    );
-
+    const autoMode = {
+      isEnabled: () => enabled,
+      setEnabled: vi.fn((value: boolean) => (enabled = value)),
+      review,
+    };
+    const { toolCall, ctx, toggleYolo, ui } = createBashGateHarness([], true, autoMode, false);
+    expect(enabled).toBe(false);
+    await toggleYolo();
+    expect(ui.notify).toHaveBeenCalledWith("Bash gate mode is fixed to YOLO by --yolo.", "info");
     await expect(
       toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
     ).resolves.toBeUndefined();
@@ -472,7 +478,6 @@ describe("bash gate tool_call", () => {
       review,
     });
     ui.select.mockResolvedValue('Allow for session ("rm")');
-
     await toolCall({ toolName: "bash", input: { command: "rm first.txt" } }, ctx);
     enabled = true;
     await expect(
@@ -504,24 +509,28 @@ describe("bash gate tool_call", () => {
     expect(ui.select).toHaveBeenCalledTimes(2);
   });
 
-  test("shortcut toggles the main-agent gate and footer status", async () => {
-    const { pi, ui, toggleYolo, toolCall, ctx } = createBashGateHarness();
-
+  test("shortcut cycles YOLO, Auto, and Bash gate modes", async () => {
+    let autoEnabled = false;
+    const review = vi.fn().mockResolvedValue({ outcome: "allow" });
+    const autoMode = {
+      isEnabled: () => autoEnabled,
+      setEnabled: vi.fn((enabled: boolean) => (autoEnabled = enabled)),
+      review,
+    };
+    const { ui, toggleYolo, toolCall, ctx } = createBashGateHarness([], false, autoMode);
+    const gatedCall = () => toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
     await toggleYolo();
-    await expect(
-      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
-    ).resolves.toBeUndefined();
-
-    expect(pi.registerShortcut).toHaveBeenCalledWith(
-      "alt+y",
-      expect.objectContaining({ description: expect.any(String) }),
-    );
+    await expect(gatedCall()).resolves.toBeUndefined();
     expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
     expect(ui.select).not.toHaveBeenCalled();
-
     await toggleYolo();
-    await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
-
+    await expect(gatedCall()).resolves.toBeUndefined();
+    expect(autoMode.setEnabled).toHaveBeenLastCalledWith(true, ctx);
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(ui.select).not.toHaveBeenCalled();
+    await toggleYolo();
+    await gatedCall();
+    expect(autoMode.setEnabled).toHaveBeenLastCalledWith(false, ctx);
     expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", undefined);
     expect(ui.select).toHaveBeenCalled();
   });

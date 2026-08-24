@@ -158,7 +158,7 @@ Default difficulty is `medium`, every 2 code writes.
 
 ## Automode
 
-Run `/automode on` to review gated commands with a separate model. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded parent transcript with hidden thinking removed plus the exact command request. With an interactive UI, an explicit denial shows the rationale and lets the human allow once, allow with a remembered reason, export the exact command to a private temporary file, or keep it denied. Remembered reasons are bounded session history supplied as authorization evidence to later reviews; they never approve commands automatically. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt. `/automode off` restores manual prompts when UI is available.
+Press `Alt+Y` to cycle from Bash gate mode to YOLO mode, then Auto mode. Auto mode reviews gated commands with a separate model. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded parent transcript with hidden thinking removed plus the exact command request. With an interactive UI, an explicit denial shows the rationale and lets the human allow once, allow with a remembered reason, export the exact command to a private temporary file, or keep it denied. Remembered reasons are bounded session history supplied as authorization evidence to later reviews; they never approve commands automatically. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt.
 
 Automode uses the active model by default. It can be enabled at startup and given a separate model, thinking level, or policy:
 
@@ -208,7 +208,7 @@ When a command matches, pi asks whether to:
 - allow matching commands for the rest of the session
 - deny it
 
-Press `Alt+Y` to toggle YOLO mode. The footer shows `🔥 YOLO` while it is enabled, and default subagents inherit the same mode.
+Press `Alt+Y` to cycle through YOLO, Auto, and Bash gate modes. The footer shows `🔥 YOLO` or `🤖 AUTO` for the active bypass/review mode, and default subagents inherit it.
 
 For non-interactive runs, matching commands are blocked by default because there is no UI prompt. Use `--yolo` to bypass every gate:
 

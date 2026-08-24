@@ -47,7 +47,7 @@ import {
 export default function (
   pi: ExtensionAPI,
   configRef: { current: BitesConfig } = { current: {} },
-  autoMode?: AutoModeController,
+  autoMode?: Pick<AutoModeController, "isEnabled" | "review">,
   bashGate?: BashGateController,
 ) {
   // ---- Register custom notification renderers ----

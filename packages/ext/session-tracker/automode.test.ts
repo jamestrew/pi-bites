@@ -58,6 +58,9 @@ test("only human bash reviews report the session as blocked", async () => {
   let autoModeEnabled = true;
   const autoMode = {
     isEnabled: () => autoModeEnabled,
+    setEnabled: (enabled: boolean) => {
+      autoModeEnabled = enabled;
+    },
     review: vi
       .fn()
       .mockImplementationOnce(() => allowedReview.promise)

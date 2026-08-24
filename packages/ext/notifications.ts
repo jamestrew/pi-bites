@@ -64,7 +64,7 @@ function runCommand(command: string, payload: BitesNotifyPayload): void {
 export default function registerNotifications(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
-  autoMode?: AutoModeController,
+  autoMode?: Pick<AutoModeController, "isEnabled">,
 ): void {
   function notify(payload: BitesNotifyPayload): void {
     const command = configRef.current.notifications?.command;

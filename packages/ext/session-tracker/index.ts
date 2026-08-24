@@ -614,7 +614,7 @@ export function createNeedsInputLifecycle(
 export default function registerSessionTracker(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig } = { current: {} },
-  autoMode?: AutoModeController,
+  autoMode?: Pick<AutoModeController, "isEnabled">,
 ): void {
   const runtimeId = randomUUID();
   const socketPath = getTrackerSocketPath();

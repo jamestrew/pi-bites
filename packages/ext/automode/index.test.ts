@@ -97,40 +97,28 @@ beforeEach(() => {
 });
 
 describe("automode registration state", () => {
-  test("loads config on session startup and resets session-local command changes on reload", async () => {
-    const { commands, configRef, controller, ctx, lifecycle, ui } = createAutoModeHarness({
+  test("loads config on session startup and allows the bash gate to change modes", () => {
+    const { configRef, controller, ctx, lifecycle, pi, ui } = createAutoModeHarness({
       autoMode: { enabled: true },
     });
     const start = lifecycle.get("session_start")!;
-    const command = commands.get("automode");
 
     start({}, ctx);
     expect(controller.isEnabled()).toBe(true);
     expect(ui.setStatus).toHaveBeenLastCalledWith("automode", "🤖 AUTO");
 
-    await command.handler("off", ctx);
+    controller.setEnabled(false, ctx);
     expect(controller.isEnabled()).toBe(false);
-    expect(ui.notify).toHaveBeenLastCalledWith("Automode is off.", "info");
+    expect(ui.setStatus).toHaveBeenLastCalledWith("automode", undefined);
 
-    await command.handler("on", ctx);
-    await command.handler("status", ctx);
+    controller.setEnabled(true, ctx);
     expect(controller.isEnabled()).toBe(true);
-    expect(ui.notify).toHaveBeenLastCalledWith("Automode is on.", "info");
 
     configRef.current = { autoMode: { enabled: false } };
     start({}, ctx);
     expect(controller.isEnabled()).toBe(false);
     expect(ui.setStatus).toHaveBeenLastCalledWith("automode", undefined);
-  });
-
-  test("reports usage without changing state for an invalid command", async () => {
-    const { commands, controller, ctx, lifecycle, ui } = createAutoModeHarness();
-    lifecycle.get("session_start")!({}, ctx);
-
-    await commands.get("automode").handler("enable", ctx);
-
-    expect(controller.isEnabled()).toBe(false);
-    expect(ui.notify).toHaveBeenCalledWith("Usage: /automode [on|off|status]", "error");
+    expect(pi.registerCommand).not.toHaveBeenCalled();
   });
 });
 

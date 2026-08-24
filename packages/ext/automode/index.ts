@@ -88,6 +88,7 @@ type AutoModeReviewContext = Pick<
 
 export interface AutoModeController {
   isEnabled(): boolean;
+  setEnabled(enabled: boolean, ctx: { ui: Pick<ExtensionContext["ui"], "setStatus"> }): void;
   review(request: AutoModeReviewRequest, ctx: AutoModeReviewContext): Promise<AutoModeDecision>;
 }
 
@@ -253,7 +254,7 @@ export default function registerAutoMode(
 ): AutoModeController {
   let enabled = false;
 
-  const setStatus = (ctx: ExtensionContext) =>
+  const setStatus = (ctx: { ui: Pick<ExtensionContext["ui"], "setStatus"> }) =>
     ctx.ui.setStatus("automode", enabled ? "🤖 AUTO" : undefined);
 
   pi.on("session_start", (_event, ctx) => {
@@ -261,26 +262,12 @@ export default function registerAutoMode(
     setStatus(ctx);
   });
 
-  pi.registerCommand("automode", {
-    description: "Enable, disable, or inspect automatic bash-gate review",
-    getArgumentCompletions: (prefix) =>
-      ["on", "off", "status"]
-        .filter((value) => value.startsWith(prefix))
-        .map((value) => ({ value, label: value })),
-    handler: async (args, ctx) => {
-      const action = args.trim() || "status";
-      if (action !== "on" && action !== "off" && action !== "status") {
-        ctx.ui.notify("Usage: /automode [on|off|status]", "error");
-        return;
-      }
-      if (action !== "status") enabled = action === "on";
-      setStatus(ctx);
-      ctx.ui.notify(`Automode is ${enabled ? "on" : "off"}.`, "info");
-    },
-  });
-
   return {
     isEnabled: () => enabled,
+    setEnabled(value, ctx) {
+      enabled = value;
+      setStatus(ctx);
+    },
     async review(request, ctx) {
       const configuredModel = configRef.current.autoMode?.model;
       const modelRegistry = ctx.modelRegistry;

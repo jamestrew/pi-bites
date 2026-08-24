@@ -21,7 +21,7 @@
  * }
  * ```
  *
- * Press Alt+Y to toggle YOLO mode for the main agent and default subagents.
+ * Press Alt+Y to cycle Bash gate, YOLO, and Auto modes for the main agent and default subagents.
  * Pass `--yolo` on the CLI to bypass all gates entirely — useful for non-interactive / scripted
  * runs where no UI is available:
  *
@@ -659,17 +659,31 @@ export default function registerBashGate(
   pi.on("session_start", (_event, ctx) => {
     rules = resolveEffectiveRules(configRef.current);
     mainAgentYolo = false;
+    if (pi.getFlag("yolo")) autoMode?.setEnabled(false, ctx);
     sessionAllowed.clear();
     finishedSubagents.clear();
     syncYoloStatus(ctx);
   });
 
   pi.registerShortcut("alt+y", {
-    description: "Toggle bash-gate yolo mode for the main agent",
+    description: "Cycle bash-gate mode: YOLO, Auto, Bash gate",
     handler: async (ctx) => {
-      mainAgentYolo = !mainAgentYolo;
+      if (pi.getFlag("yolo")) {
+        ctx.ui.notify("Bash gate mode is fixed to YOLO by --yolo.", "info");
+        return;
+      }
+
+      if (mainAgentYolo) {
+        mainAgentYolo = false;
+        autoMode?.setEnabled(true, ctx);
+      } else if (autoMode?.isEnabled()) {
+        autoMode.setEnabled(false, ctx);
+      } else {
+        mainAgentYolo = true;
+      }
       syncYoloStatus(ctx);
-      ctx.ui.notify(`Bash gate ${mainAgentYolo ? "disabled" : "enabled"}.`, "info");
+      const mode = mainAgentYolo ? "YOLO" : autoMode?.isEnabled() ? "Auto" : "Bash gate";
+      ctx.ui.notify(`${mode} mode enabled.`, "info");
     },
   });
 
