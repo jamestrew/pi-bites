@@ -17,6 +17,13 @@ interface FilePreview {
   movePath?: string | undefined;
   added: number;
   removed: number;
+  lineCount: number;
+  lines: PreviewLine[];
+}
+
+interface ChangeGroup {
+  start: number;
+  end: number;
   lines: PreviewLine[];
 }
 
@@ -28,55 +35,19 @@ function expandHint(): string {
   }
 }
 
-export function formatApplyPatchSummary(patchText: string, cwd = process.cwd()): string {
-  let actions: ParsedPatchAction[];
-  try {
-    actions = parsePatchActions({ text: patchText });
-  } catch {
-    return "";
-  }
-
-  const files = buildFilePreviews(actions, cwd);
-  if (files.length === 0) return "";
-
-  const totalAdded = files.reduce((sum, file) => sum + file.added, 0);
-  const totalRemoved = files.reduce((sum, file) => sum + file.removed, 0);
-  const lines: string[] = [];
-
-  const onlyFile = files.length === 1 ? files[0] : undefined;
-  if (onlyFile) {
-    lines.push(
-      `${onlyFile.verb} ${formatPatchTarget(onlyFile.path, onlyFile.movePath, cwd)} ${renderCounts(onlyFile.added, onlyFile.removed)}`,
-    );
-    return lines.join("\n");
-  }
-
-  lines.push(`Edited ${files.length} files ${renderCounts(totalAdded, totalRemoved)}`);
-  for (const file of files) {
-    lines.push(
-      `→ ${formatPatchTarget(file.path, file.movePath, cwd)} ${renderCounts(file.added, file.removed)}`,
-    );
-  }
-
-  return lines.join("\n");
-}
-
 export function formatApplyPatchCollapsedDiff(
   patchText: string,
   cwd = process.cwd(),
   maxPreviewLines = 10,
 ): string {
-  const full = renderApplyPatchCall(patchText, cwd);
-  if (!full) return formatApplyPatchSummary(patchText, cwd);
-  const fullLines = full.split("\n");
-  const visibleLines = fullLines.slice(0, maxPreviewLines + 1);
-  const remaining = fullLines.length - visibleLines.length;
-  const lines = [...visibleLines];
-  if (remaining > 0) lines.push(`... (${remaining} more lines, ${expandHint()})`);
-  return lines.join("\n");
+  return renderApplyPatch(patchText, cwd, maxPreviewLines);
 }
 
 export function renderApplyPatchCall(patchText: string, cwd = process.cwd()): string {
+  return renderApplyPatch(patchText, cwd);
+}
+
+function renderApplyPatch(patchText: string, cwd: string, maxPreviewLines?: number): string {
   let actions: ParsedPatchAction[];
   try {
     actions = parsePatchActions({ text: patchText });
@@ -90,13 +61,20 @@ export function renderApplyPatchCall(patchText: string, cwd = process.cwd()): st
   const totalAdded = files.reduce((sum, file) => sum + file.added, 0);
   const totalRemoved = files.reduce((sum, file) => sum + file.removed, 0);
   const lines: string[] = [];
+  const lastTruncatedFile = files.reduce(
+    (last, file, index) =>
+      file.verb !== "Edited" && maxPreviewLines !== undefined && file.lines.length > maxPreviewLines
+        ? index
+        : last,
+    -1,
+  );
 
   const onlyFile = files.length === 1 ? files[0] : undefined;
   if (onlyFile) {
     lines.push(
       `${onlyFile.verb} ${formatPatchTarget(onlyFile.path, onlyFile.movePath, cwd)} ${renderCounts(onlyFile.added, onlyFile.removed)}`,
     );
-    lines.push(...renderPreviewLines(onlyFile.lines));
+    lines.push(...renderFilePreview(onlyFile, maxPreviewLines, lastTruncatedFile === 0));
     return lines.join("\n");
   }
 
@@ -106,10 +84,25 @@ export function renderApplyPatchCall(patchText: string, cwd = process.cwd()): st
     lines.push(
       `→ ${formatPatchTarget(file.path, file.movePath, cwd)} ${renderCounts(file.added, file.removed)}`,
     );
-    lines.push(...renderPreviewLines(file.lines));
+    lines.push(...renderFilePreview(file, maxPreviewLines, lastTruncatedFile === index));
   }
 
   return lines.join("\n");
+}
+
+function renderFilePreview(
+  file: FilePreview,
+  maxPreviewLines: number | undefined,
+  showExpandHint: boolean,
+): string[] {
+  if (file.verb === "Edited") return renderEditedPreviewLines(file.lines, file.lineCount);
+  if (maxPreviewLines === undefined || file.lines.length <= maxPreviewLines)
+    return renderPreviewLines(file.lines);
+
+  const visible = file.lines.slice(0, Math.max(0, maxPreviewLines));
+  const remaining = file.lines.length - visible.length;
+  const suffix = showExpandHint ? `, ${expandHint()}` : "";
+  return [...renderPreviewLines(visible), `... (${remaining} more lines${suffix})`];
 }
 
 function buildFilePreviews(actions: ParsedPatchAction[], cwd: string): FilePreview[] {
@@ -126,10 +119,18 @@ function buildFilePreviews(actions: ParsedPatchAction[], cwd: string): FilePrevi
       (candidate) => candidate.path === file.path && candidate.movePath === file.movePath,
     );
     if (existing) {
-      if (existing.verb !== file.verb) existing.verb = "Edited";
       existing.added += file.added;
       existing.removed += file.removed;
-      existing.lines.push(...file.lines);
+      existing.lineCount = nextLines.length;
+      if (existing.verb === "Added" && file.verb === "Edited") {
+        existing.lines = addedPreviewLines(nextLines);
+      } else if (file.verb === "Deleted") {
+        existing.verb = "Deleted";
+        existing.lines = file.lines;
+      } else {
+        if (existing.verb !== file.verb) existing.verb = "Edited";
+        existing.lines.push(...file.lines);
+      }
     } else {
       files.push(file);
     }
@@ -152,7 +153,8 @@ function buildFilePreview(
         path: action.path,
         added: lines.length,
         removed: 0,
-        lines: lines.map((text, index) => ({ lineNumber: index + 1, marker: "+", text })),
+        lineCount: lines.length,
+        lines: addedPreviewLines(lines),
       },
       nextLines: lines,
     };
@@ -165,6 +167,7 @@ function buildFilePreview(
         path: action.path,
         added: 0,
         removed: originalLines.length,
+        lineCount: 0,
         lines: originalLines.map((text, index) => ({
           lineNumber: index + 1,
           marker: "-",
@@ -183,6 +186,7 @@ function buildFilePreview(
       movePath: action.movePath,
       added: preview.added,
       removed: preview.removed,
+      lineCount: preview.nextLines.length,
       lines: preview.lines,
     },
     nextLines: preview.nextLines,
@@ -196,7 +200,7 @@ function buildUpdatePreview(
   if (!action.lines) return { added: 0, removed: 0, lines: [], nextLines: originalLines };
 
   const nextLines = [...originalLines];
-  const renderedLines: PreviewLine[] = [];
+  const changeGroups: ChangeGroup[] = [];
   let added = 0;
   let removed = 0;
   let searchStart = 0;
@@ -244,34 +248,83 @@ function buildUpdatePreview(
         : findMatchingSequence(originalLines, oldSequence, contextStart);
     let oldLineNumber = sectionStart + 1;
     let newLineNumber = sectionStart + 1 + delta;
+    let changeGroup: ChangeGroup | undefined;
 
     for (const rawLine of sectionLines) {
       const entry = normalizePatchLine(rawLine);
       if (entry.marker === "+") {
         added += 1;
-        renderedLines.push({ lineNumber: newLineNumber, marker: "+", text: entry.text });
+        changeGroup ??= { start: newLineNumber - 1, end: newLineNumber - 1, lines: [] };
+        changeGroup.lines.push({ lineNumber: newLineNumber, marker: "+", text: entry.text });
         newLineNumber += 1;
+        changeGroup.end = newLineNumber - 1;
         continue;
       }
 
       if (entry.marker === "-") {
         removed += 1;
-        renderedLines.push({ lineNumber: oldLineNumber, marker: "-", text: entry.text });
+        changeGroup ??= { start: newLineNumber - 1, end: newLineNumber - 1, lines: [] };
+        changeGroup.lines.push({ lineNumber: oldLineNumber, marker: "-", text: entry.text });
         oldLineNumber += 1;
         continue;
       }
 
-      renderedLines.push({ lineNumber: newLineNumber, marker: " ", text: entry.text });
+      if (changeGroup) {
+        changeGroups.push(changeGroup);
+        changeGroup = undefined;
+      }
       oldLineNumber += 1;
       newLineNumber += 1;
     }
+    if (changeGroup) changeGroups.push(changeGroup);
 
     nextLines.splice(sectionStart + delta, oldSequence.length, ...newSequence);
     searchStart = sectionStart + oldSequence.length;
     delta += newSequence.length - oldSequence.length;
   }
 
-  return { added, removed, lines: renderedLines, nextLines };
+  return { added, removed, lines: buildChangePreview(nextLines, changeGroups), nextLines };
+}
+
+function buildChangePreview(
+  finalLines: string[],
+  groups: ChangeGroup[],
+  contextLines = 4,
+): PreviewLine[] {
+  const lines: PreviewLine[] = [];
+  let groupIndex = 0;
+
+  while (groupIndex < groups.length) {
+    const first = groups[groupIndex];
+    if (!first) break;
+    let lastIndex = groupIndex;
+    let regionEnd = first.end + contextLines;
+    while (lastIndex + 1 < groups.length) {
+      const next = groups[lastIndex + 1];
+      if (!next || next.start - contextLines > regionEnd) break;
+      lastIndex += 1;
+      regionEnd = Math.max(regionEnd, next.end + contextLines);
+    }
+
+    let cursor = Math.max(0, first.start - contextLines);
+    for (let index = groupIndex; index <= lastIndex; index += 1) {
+      const group = groups[index];
+      if (!group) continue;
+      for (; cursor < group.start; cursor += 1) {
+        const text = finalLines[cursor];
+        if (text !== undefined) lines.push({ lineNumber: cursor + 1, marker: " ", text });
+      }
+      lines.push(...group.lines);
+      cursor = group.end;
+    }
+    for (const end = Math.min(finalLines.length, regionEnd); cursor < end; cursor += 1) {
+      const text = finalLines[cursor];
+      if (text !== undefined) lines.push({ lineNumber: cursor + 1, marker: " ", text });
+    }
+    groupIndex = lastIndex + 1;
+  }
+
+  return lines;
 }
 
 function formatPreviewLine(line: PreviewLine, lines: PreviewLine[]): string {
@@ -293,6 +346,61 @@ function renderPreviewLines(lines: PreviewLine[]): string[] {
   } catch {
     return lines.map((line) => formatPreviewLine(line, lines));
   }
+}
+
+function addedPreviewLines(lines: string[]): PreviewLine[] {
+  return lines.map((text, index) => ({ lineNumber: index + 1, marker: "+", text }));
+}
+
+function renderEditedPreviewLines(
+  lines: PreviewLine[],
+  lineCount: number,
+  contextLines = 4,
+): string[] {
+  const changedIndexes = lines
+    .map((line, index) => (line.marker === " " ? -1 : index))
+    .filter((index) => index >= 0);
+  if (changedIndexes.length === 0) return [];
+
+  const visible = new Set<number>();
+  for (const index of changedIndexes) {
+    const start = Math.max(0, index - contextLines);
+    const end = Math.min(lines.length - 1, index + contextLines);
+    for (let current = start; current <= end; current += 1) visible.add(current);
+  }
+
+  const numberWidth = Math.max(1, ...lines.map((entry) => String(entry.lineNumber).length));
+  const ranges: Array<{ start: number; end: number }> = [];
+  for (const index of [...visible].sort((left, right) => left - right)) {
+    const range = ranges.at(-1);
+    const previousLine = range ? lines[range.end] : undefined;
+    const currentLine = lines[index];
+    if (
+      range &&
+      index === range.end + 1 &&
+      previousLine &&
+      currentLine &&
+      currentLine.lineNumber <= previousLine.lineNumber + 1
+    )
+      range.end = index;
+    else ranges.push({ start: index, end: index });
+  }
+
+  const rendered: string[] = [];
+  for (const [index, range] of ranges.entries()) {
+    const firstLine = lines[range.start];
+    if (index > 0 || range.start > 0 || (firstLine?.lineNumber ?? 1) > 1)
+      rendered.push(`${"".padStart(numberWidth + 2, " ")}...`);
+    rendered.push(...renderPreviewLines(lines.slice(range.start, range.end + 1)));
+  }
+  const lastRange = ranges.at(-1);
+  const lastLine = lastRange ? lines[lastRange.end] : undefined;
+  if (
+    lastRange &&
+    (lastRange.end < lines.length - 1 || (lastLine?.lineNumber ?? lineCount) < lineCount)
+  )
+    rendered.push(`${"".padStart(numberWidth + 2, " ")}...`);
+  return rendered;
 }
 
 function normalizePatchLine(rawLine: string): PreviewLine {

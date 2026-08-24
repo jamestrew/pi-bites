@@ -141,6 +141,128 @@ describe("apply_patch", () => {
     expect(renderLong(true)).toContain("14 +line 14");
   });
 
+  test("collapses adds and deletes per file while keeping the full edit diff", async () => {
+    const cwd = tempDir();
+    const sourceLines = Array.from({ length: 15 }, (_, index) => `source-${index + 1}`);
+    const deletedLines = Array.from({ length: 12 }, (_, index) => `deleted-${index + 1}`);
+    writeFileSync(join(cwd, "edited.txt"), `${sourceLines.join("\n")}\n`);
+    writeFileSync(join(cwd, "deleted.txt"), `${deletedLines.join("\n")}\n`);
+    const input = patch(
+      "*** Add File: added.txt",
+      ...Array.from({ length: 12 }, (_, index) => `+added-${index + 1}`),
+      "*** Update File: edited.txt",
+      "@@",
+      ...sourceLines
+        .map((line, index) => (index === 7 ? [`-${line}`, "+source-eight"] : [` ${line}`]))
+        .flat(),
+      "*** Delete File: deleted.txt",
+    );
+    const tool = createApplyPatchTool();
+    await tool.execute("per-file-render", { input }, undefined, undefined, { cwd } as never);
+
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+        {
+          toolCallId: "per-file-render",
+          cwd,
+          argsComplete: true,
+          expanded: false,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(rendered).toContain("added-10");
+    expect(rendered).not.toContain("added-11");
+    expect(rendered).toContain("... (2 more lines)");
+    expect(rendered).toContain("source-4");
+    expect(rendered).toContain("source-eight");
+    expect(rendered).toContain("source-12");
+    expect(rendered).not.toContain("source-3");
+    expect(rendered).not.toContain("source-13");
+    expect(rendered).toContain("deleted-10");
+    expect(rendered).not.toContain("deleted-11");
+    expect(rendered.match(/to expand/g)).toHaveLength(1);
+  });
+
+  test("keeps repeated add updates collapsed as a created-file preview", async () => {
+    const cwd = tempDir();
+    const input = patch(
+      "*** Add File: repeated-add.txt",
+      ...Array.from({ length: 12 }, (_, index) => `+added-${index + 1}`),
+      "*** Update File: repeated-add.txt",
+      "@@ added-10",
+      "-added-11",
+      "+updated-11",
+    );
+    const tool = createApplyPatchTool();
+    await tool.execute("repeated-add", { input }, undefined, undefined, { cwd } as never);
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+        {
+          toolCallId: "repeated-add",
+          cwd,
+          argsComplete: true,
+          expanded: false,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(rendered).toContain("Added repeated-add.txt (+13 -1)");
+    expect(rendered).toContain("added-10");
+    expect(rendered).not.toContain("updated-11");
+    expect(rendered).toContain("... (2 more lines, ctrl+o to expand)");
+  });
+
+  test("marks omitted source ranges between sparse edit hunks", async () => {
+    const cwd = tempDir();
+    const sourceLines = Array.from({ length: 30 }, (_, index) => `source-${index + 1}`);
+    writeFileSync(join(cwd, "sparse.txt"), `${sourceLines.join("\n")}\n`);
+    const input = patch(
+      "*** Update File: sparse.txt",
+      "@@",
+      " source-1",
+      "-source-2",
+      "+updated-2",
+      "@@ source-24",
+      "-source-25",
+      "+updated-25",
+    );
+    const tool = createApplyPatchTool();
+    await tool.execute("sparse-render", { input }, undefined, undefined, { cwd } as never);
+    const rendered = stripVTControlCharacters(
+      tool.renderCall!(
+        { input },
+        { fg: (_role: string, text: string) => text, bold: (text: string) => text } as never,
+        {
+          toolCallId: "sparse-render",
+          cwd,
+          argsComplete: true,
+          expanded: false,
+          state: {},
+        } as never,
+      )
+        .render(200)
+        .join("\n"),
+    );
+
+    expect(rendered).toContain("updated-2");
+    expect(rendered).toContain("updated-25");
+    expect(rendered).toContain("source-6");
+    expect(rendered).toContain("source-21");
+    expect(rendered).toContain("source-29");
+    expect(rendered.match(/^\s*\.\.\./gm)).toHaveLength(2);
+  });
+
   test("shows action-first targets while patch arguments stream", () => {
     const rendered = createApplyPatchTool().renderCall!(
       {
