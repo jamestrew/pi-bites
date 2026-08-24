@@ -332,7 +332,7 @@ export function createExecSessionManager(
           );
         throw new Error(`Unknown process id ${input.session_id}`);
       }
-      const updateBaseline = session.bufferStartOffset + session.buffer.length;
+      const updateBaseline = session.emittedOffset;
       const chars = input.chars ?? "";
       const isEmptyPoll = chars.length === 0;
       if (!isEmptyPoll) {

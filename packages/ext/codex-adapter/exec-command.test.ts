@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { stripVTControlCharacters } from "node:util";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
 
 import { getBundledExecBridgePath } from "./exec/binary.js";
@@ -67,7 +67,7 @@ describe("exec_command and write_stdin", () => {
     const call = tool.renderCall!({ cmd: "printf one\nprintf two" }, theme as never, {} as never)
       .render(200)
       .map((line) => line.trimEnd());
-    expect(call[0]).toBe("<bold>exec_command</bold><accent> printf one printf two</accent>");
+    expect(call).toEqual(["<bold>Exec</bold><accent> printf one", "printf two</accent>"]);
 
     const result = {
       content: [{ type: "text" as const, text: "unused structured output" }],
@@ -75,32 +75,145 @@ describe("exec_command and write_stdin", () => {
         chunk_id: "abc123",
         wall_time_seconds: 1.25,
         exit_code: 0,
-        output: Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\n"),
+        output: `${Array.from({ length: 10 }, (_, index) => `line ${index + 1}`).join("\n")}\n`,
       },
     };
     const collapsed = tool.renderResult!(
       result,
       { expanded: false, isPartial: false },
       theme as never,
-      {} as never,
+      { state: {} } as never,
     )
       .render(200)
       .map((line) => line.trimEnd());
     expect(collapsed[0]).toBe("");
-    expect(collapsed[1]).toBe("<dim>exit 0 · 1.25s</dim>");
-    expect(collapsed.join("\n")).toContain("<dim>... (3 more lines,");
-    expect(collapsed.join("\n")).not.toContain("line 8");
+    expect(collapsed.join("\n")).not.toContain("line 5");
+    expect(collapsed.join("\n")).toContain("<dim>line 10</dim>");
+    expect(collapsed.at(-3)).toBe("");
+    expect(collapsed.at(-2)).toBe("<dim>Took 1.3s</dim>");
+    expect(collapsed.at(-1)).toContain("<dim>... (5 earlier lines,");
+    expect(collapsed.at(-1)).toContain("to expand");
 
     const expanded = tool.renderResult!(
       result,
       { expanded: true, isPartial: false },
       theme as never,
-      {} as never,
+      { state: {} } as never,
     )
       .render(200)
       .join("\n");
     expect(expanded).toContain("<dim>line 10</dim>");
-    expect(expanded).not.toContain("more lines");
+    expect(expanded).not.toContain("earlier lines");
+  });
+
+  test("renders polls with the original command, output, and final status", () => {
+    const sessions = {
+      getSessionCommand: () => "echo started\nsleep 5\necho finished",
+    } as never;
+    const tool = createWriteStdinTool(sessions);
+    const theme = {
+      bold: (text: string) => `<bold>${text}</bold>`,
+      fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+    };
+    expect(
+      tool.renderCall!({ session_id: 6 }, theme as never, { state: {} } as never)
+        .render(200)
+        .map((line) => line.trimEnd()),
+    ).toEqual(["<bold>Poll</bold><accent> echo started", "sleep 5", "echo finished</accent>"]);
+
+    const rendered = tool.renderResult!(
+      {
+        content: [{ type: "text", text: "unused" }],
+        details: {
+          chunk_id: "abc123",
+          wall_time_seconds: 0.42,
+          exit_code: 0,
+          output: "\nresumed\nand finished\n",
+        },
+      },
+      { expanded: false, isPartial: false },
+      theme as never,
+      { state: {}, isError: false } as never,
+    )
+      .render(200)
+      .map((line) => line.trimEnd());
+    expect(rendered).toEqual([
+      "",
+      "<dim>resumed</dim>",
+      "<dim>and finished</dim>",
+      "",
+      "<dim>Took 0.4s</dim>",
+    ]);
+  });
+
+  test("renders TTY, partial, yielded, and frozen error lifecycle states within width", () => {
+    const tool = createExecCommandTool({} as never);
+    const theme = { bold: (text: string) => text, fg: (_role: string, text: string) => text };
+    expect(
+      tool.renderCall!({ cmd: "read value", tty: true }, theme as never, { state: {} } as never)
+        .render(80)
+        .map((line) => line.trimEnd()),
+    ).toEqual(["Exec read value (TTY)"]);
+
+    const partial = tool.renderResult!(
+      {
+        content: [{ type: "text", text: "" }],
+        details: {
+          chunk_id: "partial",
+          wall_time_seconds: 0.42,
+          session_id: 123,
+          output: "live",
+        },
+      },
+      { expanded: false, isPartial: true },
+      theme as never,
+      { state: {}, isError: false } as never,
+    )
+      .render(16)
+      .map((line) => line.trimEnd());
+    expect(partial).toEqual(["", "live", "", "Elapsed 0.4s"]);
+
+    const yielded = tool.renderResult!(
+      {
+        content: [{ type: "text", text: "" }],
+        details: {
+          chunk_id: "yielded",
+          wall_time_seconds: 1,
+          session_id: 123,
+          output: "",
+        },
+      },
+      { expanded: false, isPartial: false },
+      theme as never,
+      { state: {}, isError: false } as never,
+    ).render(16);
+    expect(yielded.join("\n")).toContain("Running in");
+    expect(yielded.every((line) => stripVTControlCharacters(line).length <= 16)).toBe(true);
+
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_000);
+    try {
+      const state = { startedAt: 1_000 };
+      const error = {
+        content: [{ type: "text" as const, text: "failed\n\nCommand exited with code 9" }],
+      } as never;
+      const first = tool.renderResult!(
+        error,
+        { expanded: false, isPartial: false },
+        theme as never,
+        { state, isError: true } as never,
+      ).render(80);
+      now.mockReturnValue(5_000);
+      const rerendered = tool.renderResult!(
+        error,
+        { expanded: true, isPartial: false },
+        theme as never,
+        { state, isError: true } as never,
+      ).render(80);
+      expect(first.at(-1)?.trimEnd()).toBe("Took 1.0s");
+      expect(rerendered.at(-1)?.trimEnd()).toBe("Took 1.0s");
+    } finally {
+      now.mockRestore();
+    }
   });
 
   test("keeps rendered exec lines within the visible width", () => {
@@ -125,7 +238,7 @@ describe("exec_command and write_stdin", () => {
         result,
         { expanded: true, isPartial: false },
         theme as never,
-        {} as never,
+        { state: {} } as never,
       ).render(16),
     ];
     expect(lines.every((line) => stripVTControlCharacters(line).length <= 16)).toBe(true);
@@ -135,9 +248,9 @@ describe("exec_command and write_stdin", () => {
         result,
         { expanded: false, isPartial: false },
         theme as never,
-        {} as never,
+        { state: {} } as never,
       ).render(16),
-    ).toHaveLength(10);
+    ).toHaveLength(9);
   });
 
   test("sanitizes terminal controls in commands and output", () => {
@@ -149,7 +262,7 @@ describe("exec_command and write_stdin", () => {
     const call = tool.renderCall!(
       { cmd: "printf ok\u001b]2;changed title\u0007\u0000" },
       theme as never,
-      {} as never,
+      { state: {} } as never,
     )
       .render(200)
       .join("\n");
@@ -162,20 +275,23 @@ describe("exec_command and write_stdin", () => {
         chunk_id: "abc123",
         wall_time_seconds: 0,
         exit_code: 0,
-        output: "\u001b[31mred\u001b[0m\u0000ok",
+        output: "\n\u001b[31mred\u001b[0m\u0000ok\n\n",
       },
     };
     const rendered = tool.renderResult!(
       result,
       { expanded: true, isPartial: false },
       theme as never,
-      {} as never,
+      { state: {} } as never,
     )
       .render(200)
       .join("\n");
     expect(rendered).toContain("<dim>redok</dim>");
     expect(rendered).not.toContain("\u001b[31m");
     expect(rendered).not.toContain("\u0000");
+    expect(rendered.startsWith("\n<dim>redok</dim>")).toBe(true);
+    expect(rendered.startsWith("\n\n")).toBe(false);
+    expect(rendered.endsWith("\n")).toBe(false);
   });
 
   test("returns foreground output, status, elapsed details, and the configured shell", async () => {
@@ -197,7 +313,7 @@ describe("exec_command and write_stdin", () => {
     const resultPromise = tool.execute(
       "foreground",
       {
-        cmd: "printf '%s:%s:out' \"$0\" \"$PWD\"; printf ':err' >&2; exit 7",
+        cmd: "printf '%s:%s:out' \"$0\" \"$PWD\"; printf ':err' >&2",
         yield_time_ms: 2_000,
         login: false,
       },
@@ -208,15 +324,28 @@ describe("exec_command and write_stdin", () => {
     stale = true;
     const result = await resultPromise;
 
-    expect(result.details).toMatchObject({ exit_code: 7, output: expect.stringContaining(cwd) });
+    expect(result.details).toMatchObject({ exit_code: 0, output: expect.stringContaining(cwd) });
     expect(result.details.output).toContain(bash);
     expect(result.details.output).toContain("out");
     expect(result.details.output).toContain("err");
     expect(result.details.wall_time_seconds).toBeGreaterThanOrEqual(0);
     expect(result.details.chunk_id).toMatch(/^[a-f0-9]{6}$/);
     expect(result.content[0]).toMatchObject({
-      text: expect.stringMatching(/Process exited with code 7[\s\S]*Output:/),
+      text: expect.stringMatching(/Process exited with code 0[\s\S]*Output:/),
     });
+  });
+
+  test("rejects nonzero exits so Pi renders the error background", async () => {
+    const tool = createExecCommandTool(manager());
+    await expect(
+      tool.execute(
+        "failure",
+        { cmd: "printf oops; exit 7", yield_time_ms: 2_000, login: false },
+        undefined,
+        undefined,
+        { cwd: tempDir(), isProjectTrusted: () => true } as never,
+      ),
+    ).rejects.toThrow("oops\n\nCommand exited with code 7");
   });
 
   test("keeps upstream parameter names and canonicalizes compatibility aliases", () => {
@@ -263,6 +392,23 @@ describe("exec_command and write_stdin", () => {
     expect(completed.session_id).toBeUndefined();
   });
 
+  test("rejects a polled nonzero exit so Pi renders the error background", async () => {
+    const sessions = manager();
+    const started = await sessions.exec(
+      { cmd: "printf start; sleep .35; printf failed; exit 9", yield_time_ms: 250, login: false },
+      tempDir(),
+    );
+    await expect(
+      createWriteStdinTool(sessions).execute(
+        "poll-failure",
+        { session_id: started.session_id!, yield_time_ms: 1_000 },
+        undefined,
+        undefined,
+        {} as never,
+      ),
+    ).rejects.toThrow("failed\n\nCommand exited with code 9");
+  });
+
   test("extends foreground and empty-poll waits while output remains active", async () => {
     const sessions = manager();
     const activeCommand = "for value in 1 2 3 4 5 6; do printf $value; sleep .1; done; printf done";
@@ -289,6 +435,30 @@ describe("exec_command and write_stdin", () => {
     expect(background.session_id).toBe(2);
     const completed = await sessions.write({ session_id: 2, yield_time_ms: 250 });
     expect(completed).toMatchObject({ exit_code: 0, output: "12345done" });
+  });
+
+  test("includes already-unread output in partial poll updates", async () => {
+    const sessions = manager();
+    const started = await sessions.exec(
+      {
+        cmd: "printf first; sleep .35; printf unread; sleep .35; printf final",
+        yield_time_ms: 250,
+        max_yield_time_ms: 250,
+        login: false,
+      },
+      tempDir(),
+    );
+    expect(started).toMatchObject({ session_id: 1, output: "first" });
+    await delay(450);
+
+    const updates: string[] = [];
+    const completed = await sessions.write(
+      { session_id: 1, yield_time_ms: 1_000 },
+      undefined,
+      (update) => updates.push(update.output),
+    );
+    expect(updates[0]).toContain("unread");
+    expect(completed).toMatchObject({ exit_code: 0, output: "unreadfinal" });
   });
 
   test("accepts TTY input and control-C interruption", async () => {

@@ -7,6 +7,7 @@ import type {
 import { Type } from "typebox";
 
 import { formatUnifiedExecResult } from "./format.js";
+import { renderExecResult, renderExecScanline, throwForExecFailure } from "./command-tool.js";
 import type { ExecSessionManager, UnifiedExecResult, WriteStdinInput } from "./session-manager.js";
 
 const parameters = Type.Object({
@@ -49,7 +50,7 @@ function toolResult(
 
 export function createWriteStdinTool(
   sessions: ExecSessionManager,
-): ToolDefinition<typeof parameters, UnifiedExecResult> {
+): ToolDefinition<typeof parameters, UnifiedExecResult, { startedAt?: number; endedAt?: number }> {
   return {
     name: "write_stdin",
     label: "write_stdin",
@@ -60,24 +61,28 @@ export function createWriteStdinTool(
     prepareArguments: canonicalArguments,
     async execute(_toolCallId, params, signal, onUpdate) {
       const command = sessions.getSessionCommand(params.session_id);
-      return toolResult(
-        await sessions.write(params, signal, (update) => onUpdate?.(toolResult(update, command))),
-        command,
+      const result = await sessions.write(params, signal, (update) =>
+        onUpdate?.(toolResult(update, command)),
       );
+      throwForExecFailure(result);
+      return toolResult(result, command);
     },
-    renderCall(args, theme) {
+    renderCall(args, theme, context) {
+      if (context.executionStarted) context.state.startedAt ??= Date.now();
+      const command = sessions.getSessionCommand(args.session_id);
       return new Text(
-        `${theme.bold(args.chars === undefined ? "Poll" : "Input")} session ${args.session_id}`,
+        renderExecScanline(
+          args.chars === undefined ? "Poll" : "Input",
+          command ?? `session ${args.session_id}`,
+          "",
+          theme,
+        ),
         0,
         0,
       );
     },
-    renderResult(result, { isPartial }, theme) {
-      const details = result.details as UnifiedExecResult | undefined;
-      if (isPartial || !details) return new Text(theme.fg("dim", "Waiting…"), 0, 0);
-      const status =
-        details.session_id === undefined ? `exit ${details.exit_code ?? "?"}` : "running";
-      return new Text(`${theme.bold("Session")} ${status}`, 0, 0);
+    renderResult(result, { expanded, isPartial }, theme, context) {
+      return renderExecResult(result, { expanded, isPartial }, theme, context);
     },
   };
 }
