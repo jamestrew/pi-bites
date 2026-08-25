@@ -318,16 +318,32 @@ function collectResponseText(session: AgentSession) {
   return { getText: () => text, unsubscribe };
 }
 
-/** Get text from the terminal assistant message without falling back to earlier turns. */
+/** Get the terminal assistant message without falling back to earlier turns. */
+function getTerminalAssistantMessage(
+  session: AgentSession,
+  invocationStart: number,
+): AssistantMessage | undefined {
+  for (let index = session.messages.length - 1; index >= invocationStart; index--) {
+    const msg = session.messages[index];
+    if (msg?.role === "assistant") return msg;
+  }
+  return undefined;
+}
+
 function getTerminalAssistantText(
   session: AgentSession,
   invocationStart: number,
 ): string | undefined {
-  for (let index = session.messages.length - 1; index >= invocationStart; index--) {
-    const msg = session.messages[index];
-    if (msg?.role === "assistant") return extractText(msg.content).trim();
+  const message = getTerminalAssistantMessage(session, invocationStart);
+  return message ? extractText(message.content).trim() : undefined;
+}
+
+/** Pi resolves session.prompt() after terminal provider errors; preserve their actual cause. */
+function throwTerminalAssistantError(session: AgentSession, invocationStart: number): void {
+  const message = getTerminalAssistantMessage(session, invocationStart);
+  if (message?.stopReason === "error") {
+    throw new Error(message.errorMessage?.trim() || "Agent failed without provider error details.");
   }
-  return undefined;
 }
 
 /**
@@ -750,6 +766,7 @@ export async function runAgent(
     cleanupAbort();
   }
 
+  throwTerminalAssistantError(session, invocationStart);
   const responseText =
     collector.getText() ?? getTerminalAssistantText(session, invocationStart) ?? "";
   return { responseText, session };
@@ -799,6 +816,7 @@ export async function resumeAgent(
     cleanupAbort();
   }
 
+  throwTerminalAssistantError(session, invocationStart);
   return collector.getText() ?? getTerminalAssistantText(session, invocationStart) ?? "";
 }
 
