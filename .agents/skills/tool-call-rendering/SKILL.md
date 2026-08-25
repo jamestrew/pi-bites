@@ -9,7 +9,7 @@ Make tool activity recognizable at a glance without flattening information that 
 
 ## 1. Inspect the whole row
 
-Read the registration, `renderCall`, `renderResult`, shared helpers, and focused tests. Compare sibling renderers before introducing a new helper. Account for call-time, partial, final, restored-session, collapsed, and expanded states.
+Read the registration, `renderShell`, `renderCall`, `renderResult`, shared helpers, and focused tests. Compare sibling renderers before introducing a new helper. Account for call-time, partial, final, restored-session, collapsed, and expanded states.
 
 Assign visible content deliberately:
 
@@ -36,6 +36,8 @@ Represent parameters semantically: use a path, target, count, summary, or short 
 ## 3. Add details and collapsing
 
 When details follow the scanline, insert one blank line, begin ordinary detail lines at column zero, and dim them with `theme.fg("dim", ...)`. On failure, preserve the same scanline and detail styles; rely on the host's red tool-call background. Add a concise error message in the details when it helps diagnosis.
+
+Preserve pi's one-line vertical padding around the complete tool rendering. The default render shell supplies it through its enclosing box. A `renderShell: "self"` renderer owns that framing, so use a box with vertical padding of `1` (for example, `new Box(horizontalPadding, 1)`) or an equivalent component. Keep this outer padding distinct from the blank line between the scanline and details, and test both collapsed and expanded output so either path cannot lose it.
 
 Separate a trailing status such as elapsed time from preceding command output with one blank line. Do not add another blank line when the status is the only detail.
 

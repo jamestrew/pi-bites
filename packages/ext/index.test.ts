@@ -86,6 +86,7 @@ async function loadExtension(
     }),
     registerCommand: vi.fn(),
     registerTool: vi.fn(),
+    registerMarkdownTransformer: vi.fn(),
     sendMessage: vi.fn(),
     getActiveTools: vi.fn(() => activeTools),
     setActiveTools: vi.fn((tools: string[]) => {

@@ -18,6 +18,7 @@ function setup(providers: string[] = []) {
   const preview = registerCodexAdapter(
     {
       registerTool: vi.fn(),
+      registerMarkdownTransformer: vi.fn(),
       on: (name: string, handler: Handler) => handlers.set(name, handler),
       getActiveTools: () => activeTools,
       setActiveTools: (tools: string[]) => {

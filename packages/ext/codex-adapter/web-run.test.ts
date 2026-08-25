@@ -528,6 +528,7 @@ describe("web_run execution", () => {
         registerTool: (tool: unknown) => {
           registered = tool as typeof registered;
         },
+        registerMarkdownTransformer: vi.fn(),
         on: (event: string, handler: () => void) => {
           if (event === "session_start") onSessionStart = handler;
         },
@@ -553,5 +554,110 @@ describe("web_run execution", () => {
       ctx,
     );
     expect(runNative.mock.calls[1]?.[0].params.id).not.toBe(firstId);
+  });
+});
+
+describe("web_run rendering", () => {
+  const theme = {
+    bold: (text: string) => `<bold>${text}</bold>`,
+    fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
+    bg: (_role: string, text: string) => text,
+  };
+
+  test("renders one semantic collapsed row without exposing navigation IDs", () => {
+    const tool = createWebRunTool({ getConfig: () => ({}) });
+    const context = {
+      state: {},
+      isPartial: false,
+      isError: false,
+    } as never;
+    const call = tool.renderCall!({ open: [{ ref_id: "turn0search4" }] }, theme as never, context);
+    const result = tool.renderResult!(
+      {
+        content: [{ type: "text", text: "result body" }],
+        details: { route: "stock", webRun: {} },
+      },
+      { expanded: false, isPartial: false },
+      theme as never,
+      context,
+    );
+
+    expect(tool.renderShell).toBe("self");
+    expect([...call.render(200), ...result.render(200)].map((line) => line.trimEnd())).toEqual([
+      "",
+      "<bold>Web</bold><accent> Open search result</accent>",
+      "",
+    ]);
+  });
+
+  test("uses action summaries and reserves a blank line for expanded details", () => {
+    const tool = createWebRunTool({ getConfig: () => ({}) });
+    const context = {
+      state: {},
+      isPartial: false,
+      isError: false,
+    } as never;
+    const call = tool.renderCall!(
+      { search_query: [{ q: "TypeScript official handbook" }] },
+      theme as never,
+      context,
+    );
+    const result = tool.renderResult!(
+      {
+        content: [{ type: "text", text: "first\nsecond" }],
+        details: { route: "stock", webRun: {} },
+      },
+      { expanded: true, isPartial: false },
+      theme as never,
+      context,
+    );
+
+    expect([...call.render(200), ...result.render(200)].map((line) => line.trimEnd())).toEqual([
+      "",
+      "<bold>Web</bold><accent> Search TypeScript official handbook</accent>",
+      "",
+      "<dim>first</dim>",
+      "<dim>second</dim>",
+      "",
+    ]);
+  });
+
+  test("renders web citation markers as links instead of internal protocol syntax", async () => {
+    let transform!: (markdown: string, context: { messageType: string }) => string;
+    let recordResult!: (event: { toolName: string; details: unknown }) => void;
+    registerWebRunTool(
+      {
+        registerTool: vi.fn(),
+        registerMarkdownTransformer: (transformer: typeof transform) => {
+          transform = transformer;
+        },
+        on: (event: string, handler: typeof recordResult) => {
+          if (event === "tool_result") recordResult = handler;
+        },
+      } as never,
+      { getConfig: () => ({}) },
+    );
+    recordResult({
+      toolName: "web_run",
+      details: {
+        route: "stock",
+        webRun: {
+          search_results: [
+            {
+              ref_id: "turn0search0",
+              url: "https://www.typescriptlang.org/docs/handbook/intro",
+            },
+          ],
+        },
+      },
+    });
+
+    expect(transform("Typed JavaScript. citeturn0search0", { messageType: "assistant" })).toBe(
+      "Typed JavaScript. [source](<https://www.typescriptlang.org/docs/handbook/intro>)",
+    );
+    expect(transform("Unknown. citeturn9view9", { messageType: "assistant" })).toBe(
+      "Unknown. [web source]",
+    );
+    expect(transform("citeturn0search0", { messageType: "user" })).toBe("citeturn0search0");
   });
 });

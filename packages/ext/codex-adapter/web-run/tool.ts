@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Text } from "@earendil-works/pi-tui";
+import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import type {
   AgentToolResult,
   ExtensionAPI,
@@ -9,6 +9,7 @@ import type {
 import { Type, type Static } from "typebox";
 
 import type { CodexAdapterConfig } from "../../config.js";
+import { sanitizeText } from "../../subagents/ui/text-lines.js";
 import { nativeBinaryRecoveryMessage } from "../native-binary-error.js";
 import { runBundledTool } from "../native/runner.js";
 import { getBundledWebRunPath } from "./binary.js";
@@ -116,6 +117,10 @@ interface WebRunOutput extends Record<string, unknown> {
   output?: string;
   output_text?: string;
   text?: string;
+}
+
+interface WebRunRenderState {
+  call?: Box;
 }
 
 export interface WebRunDetails {
@@ -348,19 +353,84 @@ async function defaultNativeRunner(input: WebRunNativeInput, binaryPath?: string
   return result.stdout;
 }
 
-function callDetail(params: WebRunParameters): string | undefined {
-  return (
-    params.search_query?.[0]?.q ??
-    params.image_query?.[0]?.q ??
-    params.open?.[0]?.ref_id ??
-    params.click?.[0]?.ref_id ??
-    params.find?.[0]?.pattern
-  );
+function displayText(value: string): string {
+  return sanitizeText(value).replace(/\s+/gu, " ").trim();
 }
 
-export function createWebRunTool(
-  options: CreateWebRunToolOptions,
-): ToolDefinition<typeof parameters, WebRunDetails> & { resetNavigationState(): void } {
+function openTarget(refId: string): string {
+  const target = displayText(refId);
+  if (/^https?:\/\//iu.test(target)) return target;
+  if (/^turn\d+search\d+$/u.test(target)) return "search result";
+  if (/^turn\d+(?:view|fetch)\d+$/u.test(target)) return "page";
+  return "result";
+}
+
+function callSummary(params: WebRunParameters): string | undefined {
+  const searches = params.search_query;
+  if (searches?.[0]) {
+    const more = searches.length > 1 ? ` (+${searches.length - 1})` : "";
+    return `Search ${displayText(searches[0].q)}${more}`;
+  }
+  const images = params.image_query;
+  if (images?.[0]) {
+    const more = images.length > 1 ? ` (+${images.length - 1})` : "";
+    return `Images ${displayText(images[0].q)}${more}`;
+  }
+  const opens = params.open;
+  if (opens?.[0]) {
+    if (opens.length > 1) return `Open ${opens.length} results`;
+    const line = opens[0].lineno === undefined ? "" : ` at line ${opens[0].lineno}`;
+    return `Open ${openTarget(opens[0].ref_id)}${line}`;
+  }
+  const clicks = params.click;
+  if (clicks?.[0])
+    return clicks.length > 1 ? `Click ${clicks.length} links` : `Click link ${clicks[0].id}`;
+  const finds = params.find;
+  if (finds?.[0]) {
+    const more = finds.length > 1 ? ` (+${finds.length - 1})` : "";
+    return `Find ${displayText(finds[0].pattern)}${more}`;
+  }
+  return undefined;
+}
+
+function rememberCitationSources(output: WebRunOutput, sources: Map<string, string>): void {
+  for (const key of ["search_results", "results"]) {
+    const results = output[key];
+    if (!Array.isArray(results)) continue;
+    for (const result of results) {
+      if (!result || typeof result !== "object") continue;
+      const { ref_id: refId, url } = result as Record<string, unknown>;
+      if (typeof refId !== "string" || typeof url !== "string") continue;
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          sources.set(refId, parsed.toString());
+        }
+      } catch {
+        // Ignore malformed source metadata; the citation still gets a readable fallback.
+      }
+    }
+  }
+}
+
+function renderCitationMarkers(markdown: string, sources: ReadonlyMap<string, string>): string {
+  return markdown.replace(/cite([^]+)/gu, (_marker, payload: string) => {
+    const links = payload.split("").map((refId, index) => {
+      const url = sources.get(refId);
+      const label = payload.includes("") ? `source ${index + 1}` : "source";
+      return url ? `[${label}](<${url}>)` : "[web source]";
+    });
+    return [...new Set(links)].join(" ");
+  });
+}
+
+export function createWebRunTool(options: CreateWebRunToolOptions): ToolDefinition<
+  typeof parameters,
+  WebRunDetails,
+  WebRunRenderState
+> & {
+  resetNavigationState(): void;
+} {
   let navigationId = randomUUID();
   let navigationCalls = 0;
   let navigationRoute: string | undefined;
@@ -450,25 +520,57 @@ export function createWebRunTool(
         throw routeError(route, message);
       }
     },
-    renderCall(args, theme) {
-      const detail = callDetail(args);
-      return new Text(
-        theme.bold("Web") + (detail ? theme.fg("toolTitle", ` ${detail}`) : ""),
-        0,
-        0,
+    renderShell: "self",
+    renderCall(args, theme, context) {
+      const summary = callSummary(args);
+      const component = context.state.call ?? new Box(0, 1);
+      const background = context.isError
+        ? "toolErrorBg"
+        : context.isPartial
+          ? "toolPendingBg"
+          : "toolSuccessBg";
+      component.setBgFn((text) => theme.bg(background, text));
+      component.clear();
+      component.addChild(
+        new Text(theme.bold("Web") + (summary ? theme.fg("accent", ` ${summary}`) : ""), 0, 0),
       );
+      context.state.call = component;
+      return component;
     },
-    renderResult(result, { expanded }, theme) {
-      const text = expanded
-        ? (result.content.find((item) => item.type === "text")?.text ?? "(no output)")
-        : "";
-      return new Text(theme.fg("dim", text), 0, 0);
+    renderResult(result, { expanded }, theme, context) {
+      const text = result.content.find((item) => item.type === "text")?.text;
+      if (expanded && context.state.call && text) {
+        context.state.call.addChild(new Spacer(1));
+        context.state.call.addChild(
+          new Text(
+            text
+              .split("\n")
+              .map((line) => theme.fg("dim", line))
+              .join("\n"),
+            0,
+            0,
+          ),
+        );
+      }
+      return new Container();
     },
   };
 }
 
 export function registerWebRunTool(pi: ExtensionAPI, options: CreateWebRunToolOptions): void {
+  const sources = new Map<string, string>();
   const tool = createWebRunTool(options);
   pi.registerTool(tool);
-  pi.on("session_start", () => tool.resetNavigationState());
+  pi.registerMarkdownTransformer((markdown, context) =>
+    context.messageType === "assistant" ? renderCitationMarkers(markdown, sources) : markdown,
+  );
+  pi.on("tool_result", (event) => {
+    if (event.toolName !== "web_run") return;
+    const details = event.details as WebRunDetails | undefined;
+    if (details?.webRun) rememberCitationSources(details.webRun, sources);
+  });
+  pi.on("session_start", () => {
+    tool.resetNavigationState();
+    sources.clear();
+  });
 }
