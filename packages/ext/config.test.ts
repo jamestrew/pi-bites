@@ -46,7 +46,11 @@ describe("loadConfig", () => {
       parseBitesConfig({
         ponytail: { defaultMode: "full" },
         autoMode: { enabled: true, thinking: "low" },
-        codexAdapter: { providers: ["github-copilot", "aws-bedrock"] },
+        codexAdapter: {
+          providers: ["github-copilot", "aws-bedrock"],
+          webSearchProviders: ["trusted-responses-proxy"],
+          allowOpenAICodexFallback: true,
+        },
         disable: ["notifications", "goal", "autoMode", "codexAdapter"],
       }),
     ).toBeDefined();
@@ -54,6 +58,11 @@ describe("loadConfig", () => {
     expect(parseBitesConfig({ autoCompaction: { thresholdTokens: 0 } })).toBeUndefined();
     expect(parseBitesConfig({ codexAdapter: { providers: "github-copilot" } })).toBeUndefined();
     expect(parseBitesConfig({ codexAdapter: { providers: [""] } })).toBeUndefined();
+    expect(
+      parseBitesConfig({ codexAdapter: { webSearchProviders: ["trusted-responses-proxy"] } }),
+    ).toBeDefined();
+    expect(parseBitesConfig({ codexAdapter: { webSearchProviders: [""] } })).toBeUndefined();
+    expect(parseBitesConfig({ codexAdapter: { allowOpenAICodexFallback: "yes" } })).toBeUndefined();
 
     const config = loadConfig(project);
     expect(config.ponytail?.defaultMode).toBe("ultra");

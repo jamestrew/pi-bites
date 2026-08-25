@@ -73,7 +73,7 @@ Example:
 
 ### Codex adapter
 
-`codexAdapter` exposes `exec_command`, `write_stdin`, and `apply_patch` in place of the active core file/shell tools. It preserves unrelated tools and keeps Pi's provider, authentication, and transport unchanged.
+`codexAdapter` exposes `exec_command`, `write_stdin`, and `apply_patch` in place of the active core file/shell tools. It also exposes policy-gated `web_run` search/navigation. It preserves unrelated tools and uses Pi's stock model registry and authentication.
 
 GPT models use the adapter automatically regardless of provider, including `github-copilot/gpt-*` and Pi's stock `openai-codex` models:
 
@@ -91,7 +91,21 @@ To adapt every model from another provider, opt in that installation's exact pro
 }
 ```
 
-Configured provider matching trims and lowercases the complete provider ID. `gpt-*` model IDs and models whose provider, model ID, or API identifies them as Codex are enabled automatically. `web_run` is deliberately not included: enabling the adapter never enables an OpenAI fallback or sends work-provider requests to OpenAI.
+Configured provider matching trims and lowercases the complete provider ID. `gpt-*` model IDs and models whose provider, model ID, or API identifies them as Codex are enabled automatically.
+
+Stock `openai-codex` Responses models get `web_run` through the existing Pi login. Other providers are hidden by default even when listed under `providers`. Trust a verified Responses provider's own `/alpha/search` endpoint by exact provider ID, or independently opt in to stock OpenAI Codex fallback:
+
+```json
+{
+  "codexAdapter": {
+    "providers": ["your-work-provider"],
+    "webSearchProviders": ["your-verified-responses-provider"],
+    "allowOpenAICodexFallback": false
+  }
+}
+```
+
+`allowOpenAICodexFallback` defaults to `false`. Set it to `true` only where sending explicit search/navigation arguments through personal stock Codex authentication is permitted. A selected route never retries through another provider after auth, compatibility, HTTP, or native failure. `web_run` sends no Pi conversation or project context.
 
 Only Linux x86-64 native helpers are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
 

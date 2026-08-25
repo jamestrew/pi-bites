@@ -87,6 +87,10 @@ export interface PonytailConfig {
 export interface CodexAdapterConfig {
   /** Provider IDs whose models should all use Codex-shaped tools. */
   providers?: string[];
+  /** Responses provider IDs explicitly trusted to implement Codex `/alpha/search`. */
+  webSearchProviders?: string[];
+  /** Permit web_run to use stock openai-codex auth when the active provider cannot search. */
+  allowOpenAICodexFallback?: boolean;
 }
 
 export interface SubagentsConfig {
@@ -222,15 +226,14 @@ function isPonytailConfig(value: unknown): value is PonytailConfig {
 }
 
 function isCodexAdapterConfig(value: unknown): value is CodexAdapterConfig {
+  const isProviderList = (field: unknown) =>
+    Array.isArray(field) &&
+    field.every((provider) => typeof provider === "string" && provider.trim().length > 0);
   return (
     isRecord(value) &&
-    isOptional(
-      value,
-      "providers",
-      (field) =>
-        Array.isArray(field) &&
-        field.every((provider) => typeof provider === "string" && provider.trim().length > 0),
-    )
+    isOptional(value, "providers", isProviderList) &&
+    isOptional(value, "webSearchProviders", isProviderList) &&
+    isOptional(value, "allowOpenAICodexFallback", (field) => typeof field === "boolean")
   );
 }
 

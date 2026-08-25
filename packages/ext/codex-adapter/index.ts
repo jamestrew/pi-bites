@@ -12,6 +12,7 @@ import { registerExecCommandTool } from "./exec/command-tool.js";
 import { createExecSessionManager } from "./exec/session-manager.js";
 import { registerWriteStdinTool } from "./exec/write-stdin-tool.js";
 import { buildExecSkillGuidance, buildToolGuidance } from "./prompt-guidance.js";
+import { isWebRunAvailable, registerWebRunTool } from "./web-run/tool.js";
 
 export type CodexPromptPreview = (
   systemPrompt: string,
@@ -27,13 +28,21 @@ export default function registerCodexAdapter(
   const sessions = createExecSessionManager();
 
   const reconcile = (model: AdapterModel | undefined) => {
-    const providers = configRef.current.codexAdapter?.providers ?? [];
-    pi.setActiveTools(reconcileTools(pi.getActiveTools(), isAdapterModel(model, providers), state));
+    const config = configRef.current.codexAdapter ?? {};
+    pi.setActiveTools(
+      reconcileTools(
+        pi.getActiveTools(),
+        isAdapterModel(model, config.providers ?? []),
+        state,
+        isWebRunAvailable(model, config),
+      ),
+    );
   };
 
   registerApplyPatchTool(pi);
   registerExecCommandTool(pi, sessions);
   registerWriteStdinTool(pi, sessions);
+  registerWebRunTool(pi, { getConfig: () => configRef.current.codexAdapter ?? {} });
   const previewPrompt: CodexPromptPreview = (systemPrompt, model, options) => {
     const providers = configRef.current.codexAdapter?.providers ?? [];
     if (!isAdapterModel(model, providers)) return systemPrompt;

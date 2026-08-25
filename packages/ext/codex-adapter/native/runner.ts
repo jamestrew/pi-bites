@@ -10,6 +10,8 @@ export interface RunBundledToolOptions {
   maxBuffer?: number | undefined;
   signal?: AbortSignal | undefined;
   label?: string | undefined;
+  /** Add rebuild guidance for non-zero exits. Native protocol clients may handle their own errors. */
+  recoverNonzero?: boolean | undefined;
 }
 
 export interface BundledToolResult {
@@ -30,6 +32,7 @@ export function runBundledTool({
   maxBuffer,
   signal,
   label,
+  recoverNonzero = true,
 }: RunBundledToolOptions): Promise<BundledToolResult> {
   return new Promise((resolve, reject) => {
     const toolLabel = label ?? "tool";
@@ -95,7 +98,9 @@ export function runBundledTool({
     child.on("close", (status, exitSignal) =>
       finish(() => {
         const nativeFailure =
-          status === 0 ? undefined : nativeBinaryRecoveryMessage(toolLabel, stderr || stdout);
+          status === 0 || !recoverNonzero
+            ? undefined
+            : nativeBinaryRecoveryMessage(toolLabel, stderr || stdout);
         if (terminalError) reject(terminalError);
         else if (nativeFailure) reject(new Error(nativeFailure));
         else if (stdinError && status === 0 && !exitSignal) reject(stdinError);

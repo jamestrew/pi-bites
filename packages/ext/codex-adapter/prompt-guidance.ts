@@ -7,6 +7,8 @@ const TOOL_GUIDANCE: Readonly<Record<string, string>> = {
     "- `write_stdin`: Pass a `session_id`; omit `chars` to poll and continue waiting, send characters for interactive input, or send `\\u0003` to interrupt. Reuse it until the session completes.",
   apply_patch:
     "- `apply_patch`: Pass one patch bounded by `*** Begin Patch` and `*** End Patch`. Use `*** Add File:`, `*** Update File:`, or `*** Delete File:` sections (and optional `*** Move to:`); prefix added, removed, and context lines with `+`, `-`, and a space.",
+  web_run:
+    "- `web_run`: Search, open, click, or find with explicit arguments. Reuse returned reference IDs only in later `web_run` navigation calls.",
 };
 
 export function buildToolGuidance(activeTools: string[]): string | undefined {

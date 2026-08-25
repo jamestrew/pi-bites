@@ -1,5 +1,6 @@
 function recovery(helper: string): string {
-  const source = helper === "exec_bridge" ? "exec" : "apply-patch";
+  const source =
+    helper === "exec_bridge" ? "exec" : helper === "web_run" ? "web-run" : "apply-patch";
   return `Rebuild it from packages/ext/codex-adapter/vendor/${source}, replace the bundled executable, then run \`/reload\``;
 }
 
@@ -32,6 +33,11 @@ export function nativeBinaryRecoveryMessage(
     (errorCode(error) === "EPIPE" || /\bEPIPE\b|broken pipe/i.test(message));
   const missingInterpreter =
     errorCode(error) === "ENOENT" && !!options.binaryPath && existsSync(options.binaryPath);
+  const missingExecutable =
+    errorCode(error) === "ENOENT" && !!options.binaryPath && !existsSync(options.binaryPath);
+  if (missingExecutable) {
+    return `${helper} native executable is not available at ${options.binaryPath}. ${recovery(helper)}`;
+  }
   if (!loaderFailure && !startupPipeFailure && !missingInterpreter) return undefined;
   return `${helper} cannot run on this system. ${recovery(helper)}`;
 }

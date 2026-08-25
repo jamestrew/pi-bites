@@ -242,14 +242,22 @@ describe("extension entrypoint", () => {
         "apply_patch",
         "exec_command",
         "write_stdin",
+        "web_run",
       ]);
 
       for (const handler of loaded.handlers.get("session_start") ?? [])
-        await handler({}, { cwd: process.cwd(), model: { provider: "openai-codex" } });
+        await handler(
+          {},
+          {
+            cwd: process.cwd(),
+            model: { provider: "openai-codex", api: "openai-codex-responses" },
+          },
+        );
       expect(loaded.getActiveTools()).toEqual([
         "exec_command",
         "write_stdin",
         "apply_patch",
+        "web_run",
         "custom",
       ]);
 
@@ -277,6 +285,7 @@ describe("extension entrypoint", () => {
         "apply_patch",
         "exec_command",
         "write_stdin",
+        "web_run",
       ]);
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./footer/index.js")).not.toHaveBeenCalled();

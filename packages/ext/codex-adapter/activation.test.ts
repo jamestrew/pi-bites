@@ -16,9 +16,25 @@ vi.mock("./exec/write-stdin-tool.js", () => ({
   registerWriteStdinTool: (pi: { registerTool(tool: { name: string }): void }) =>
     pi.registerTool({ name: "write_stdin" }),
 }));
+vi.mock("./web-run/tool.js", () => ({
+  registerWebRunTool: (pi: { registerTool(tool: { name: string }): void }) =>
+    pi.registerTool({ name: "web_run" }),
+  isWebRunAvailable: (
+    selected: { provider?: string; api?: string } | undefined,
+    config: { webSearchProviders?: string[]; allowOpenAICodexFallback?: boolean },
+  ) =>
+    selected !== undefined &&
+    (config.allowOpenAICodexFallback === true ||
+      (selected.api?.includes("responses") === true &&
+        (selected.provider === "openai-codex" ||
+          config.webSearchProviders?.some(
+            (provider) => provider.toLowerCase() === selected.provider?.toLowerCase(),
+          )))),
+}));
 
 import { isAdapterModel, reconcileTools, type AdapterToolState } from "./activation.js";
 import registerCodexAdapter from "./index.js";
+import type { BitesConfig } from "../config.js";
 
 const model = (provider: string, id = "model", api = "api") => ({ provider, id, api });
 
@@ -178,6 +194,7 @@ describe("Codex adapter activation", () => {
       "apply_patch",
       "exec_command",
       "write_stdin",
+      "web_run",
     ]);
 
     let stale = false;
@@ -200,5 +217,50 @@ describe("Codex adapter activation", () => {
       },
     );
     expect(active).toEqual(["read", "bash", "edit", "write", "custom"]);
+  });
+
+  test("gates web_run independently from the structured adapter tools", () => {
+    const handlers = new Map<string, (event: any, ctx: any) => void>();
+    let active = ["read", "bash", "edit", "write", "custom"];
+    const configRef: { current: BitesConfig } = {
+      current: { codexAdapter: { providers: ["bedrock"] } },
+    };
+    registerCodexAdapter(
+      {
+        registerTool: vi.fn(),
+        on: (name: string, handler: (event: any, ctx: any) => void) => handlers.set(name, handler),
+        getActiveTools: () => active,
+        setActiveTools: (tools: string[]) => {
+          active = tools;
+        },
+      } as never,
+      configRef,
+    );
+
+    handlers.get("session_start")?.({}, { model: model("bedrock", "claude", "bedrock") });
+    expect(active).toEqual(["exec_command", "write_stdin", "apply_patch", "custom"]);
+
+    configRef.current.codexAdapter = {
+      providers: ["bedrock"],
+      allowOpenAICodexFallback: true,
+    };
+    handlers.get("model_select")?.({ model: model("bedrock", "claude", "bedrock") }, {});
+    expect(active).toEqual(["exec_command", "write_stdin", "apply_patch", "web_run", "custom"]);
+
+    configRef.current.codexAdapter = {
+      providers: ["bedrock"],
+      webSearchProviders: ["trusted-proxy"],
+    };
+    handlers.get("model_select")?.(
+      { model: model("trusted-proxy", "claude", "openai-responses") },
+      {},
+    );
+    expect(active).toEqual(["read", "bash", "edit", "write", "custom", "web_run"]);
+
+    handlers.get("model_select")?.(
+      { model: model("openai-codex", "gpt-codex", "openai-codex-responses") },
+      {},
+    );
+    expect(active).toEqual(["exec_command", "write_stdin", "apply_patch", "web_run", "custom"]);
   });
 });

@@ -1,0 +1,7 @@
+Package: @howaboua/pi-codex-conversion 3.0.18
+Package commit: e12067caadc38da4e785d0300202aac233ae3b2f
+OpenAI Codex source: b545c94041017d000e2c8b2f6272705d21b85dfb
+Retained sources: standalone web-run CLI, request/response types, HTTP client, and search request builder
+Local changes: authentication and endpoint selection are supplied only by Pi's stock model registry through the TypeScript host
+Original package Linux x86-64 binary SHA-256: 6826302570a89950c246c9d23cfd7f571f6ece9c05ec63658cb539789e814db5
+Retained rebuilt Linux x86-64 binary SHA-256: 6e827a6f3600f600d34755a8aa1c3878db0ad34ae2e3001a80c715ba7cf57e89

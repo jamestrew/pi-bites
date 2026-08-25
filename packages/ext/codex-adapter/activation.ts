@@ -91,6 +91,16 @@ export function reconcileTools(
   activeTools: string[],
   shouldActivate: boolean,
   state: AdapterToolState,
+  shouldActivateWeb = false,
 ): string[] {
-  return shouldActivate ? activate(activeTools, state) : restore(activeTools, state);
+  const reconciled = shouldActivate ? activate(activeTools, state) : restore(activeTools, state);
+  const withoutWeb = reconciled.filter((name) => name !== "web_run");
+  if (!shouldActivateWeb) return withoutWeb;
+  if (shouldActivate) {
+    const patchIndex = withoutWeb.indexOf("apply_patch");
+    withoutWeb.splice(patchIndex < 0 ? withoutWeb.length : patchIndex + 1, 0, "web_run");
+  } else {
+    withoutWeb.push("web_run");
+  }
+  return withoutWeb;
 }
