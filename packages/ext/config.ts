@@ -85,7 +85,7 @@ export interface PonytailConfig {
 }
 
 export interface CodexAdapterConfig {
-  /** Additional provider IDs that should use Codex-shaped tools. */
+  /** Provider IDs whose models should all use Codex-shaped tools. */
   providers?: string[];
 }
 

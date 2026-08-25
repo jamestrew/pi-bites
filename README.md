@@ -75,13 +75,13 @@ Example:
 
 `codexAdapter` exposes `exec_command`, `write_stdin`, and `apply_patch` in place of the active core file/shell tools. It preserves unrelated tools and keeps Pi's provider, authentication, and transport unchanged.
 
-Home users need no adapter configuration for Pi's stock `openai-codex` models:
+GPT models use the adapter automatically regardless of provider, including `github-copilot/gpt-*` and Pi's stock `openai-codex` models:
 
 ```json
 {}
 ```
 
-Work users must opt in their installation's exact provider ID (the values below are examples, not canonical Copilot or Bedrock IDs):
+To adapt every model from another provider, opt in that installation's exact provider ID (the values below are examples, not canonical Copilot or Bedrock IDs):
 
 ```json
 {
@@ -91,7 +91,7 @@ Work users must opt in their installation's exact provider ID (the values below 
 }
 ```
 
-Configured provider matching trims and lowercases the complete provider ID. Models whose provider, model ID, or API identifies them as Codex are also enabled automatically. `web_run` is deliberately not included: enabling the adapter never enables an OpenAI fallback or sends work-provider requests to OpenAI.
+Configured provider matching trims and lowercases the complete provider ID. `gpt-*` model IDs and models whose provider, model ID, or API identifies them as Codex are enabled automatically. `web_run` is deliberately not included: enabling the adapter never enables an OpenAI fallback or sends work-provider requests to OpenAI.
 
 Only Linux x86-64 native helpers are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
 

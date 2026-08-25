@@ -31,6 +31,7 @@ export function isAdapterModel(model: AdapterModel | undefined, providers: strin
   const configured = new Set(providers.map(normalize));
   return (
     configured.has(provider) ||
+    normalize(model.id).startsWith("gpt-") ||
     [provider, normalize(model.id), normalize(model.api)].some((value) => value.includes("codex"))
   );
 }

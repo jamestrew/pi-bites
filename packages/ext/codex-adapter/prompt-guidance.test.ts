@@ -152,4 +152,11 @@ describe("Codex adapter prompt guidance", () => {
       expect(result.toLowerCase()).not.toContain("transport");
     }
   });
+
+  test("automatically adapts GPT models served by Copilot", () => {
+    const result = setup().run("base", { provider: "github-copilot", id: "gpt-5.4" }, [
+      "exec_command",
+    ])!.systemPrompt;
+    expect(result).toContain("`exec_command`");
+  });
 });

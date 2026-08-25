@@ -23,14 +23,16 @@ import registerCodexAdapter from "./index.js";
 const model = (provider: string, id = "model", api = "api") => ({ provider, id, api });
 
 describe("Codex adapter activation", () => {
-  test("recognizes Codex models and exact configured providers", () => {
+  test("recognizes Codex and GPT models across providers plus exact configured providers", () => {
     expect(isAdapterModel(model("openai-codex", "gpt-5.3-codex"), [])).toBe(true);
     expect(isAdapterModel(model("proxy", "team-codex-model"), [])).toBe(true);
-    expect(isAdapterModel(model("GitHub-Copilot", "gpt-5"), [" github-copilot "])).toBe(true);
-    expect(isAdapterModel(model("github-copilot-enterprise", "gpt-5"), ["github-copilot"])).toBe(
-      false,
-    );
-    expect(isAdapterModel(model("github-copilot", "gpt-5"), [])).toBe(false);
+    expect(isAdapterModel(model("GitHub-Copilot", "gpt-5"), [])).toBe(true);
+    expect(isAdapterModel(model("proxy", " GPT-4.1 "), [])).toBe(true);
+    expect(isAdapterModel(model("Bedrock", "claude-sonnet-4.6"), [" bedrock "])).toBe(true);
+    expect(
+      isAdapterModel(model("github-copilot-enterprise", "claude-sonnet-4.6"), ["github-copilot"]),
+    ).toBe(false);
+    expect(isAdapterModel(model("github-copilot", "claude-sonnet-4.6"), [])).toBe(false);
   });
 
   test("replaces active core tools while preserving unrelated order", () => {
