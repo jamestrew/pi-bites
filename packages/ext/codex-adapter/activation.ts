@@ -1,7 +1,7 @@
 const CORE_TOOLS = ["read", "bash", "edit", "write"] as const;
 const ADAPTER_TOOLS = ["exec_command", "write_stdin", "apply_patch"] as const;
-const OWNED_TOOLS = new Set<string>([...CORE_TOOLS, ...ADAPTER_TOOLS]);
-const ADAPTER_TOOL_NAMES = new Set<string>(ADAPTER_TOOLS);
+const OWNED_TOOLS = new Set<string>([...CORE_TOOLS, ...ADAPTER_TOOLS, "view_image"]);
+const ADAPTER_TOOL_NAMES = new Set<string>([...ADAPTER_TOOLS, "view_image"]);
 
 type CoreTool = (typeof CORE_TOOLS)[number];
 
@@ -9,6 +9,7 @@ export interface AdapterModel {
   provider?: string;
   id?: string;
   api?: string;
+  input?: ("text" | "image")[];
 }
 
 interface DisplacedTool {
@@ -21,6 +22,11 @@ export interface AdapterToolState {
   displaced?: DisplacedTool[];
   active?: boolean;
   patchIndex?: number;
+}
+
+export interface AdapterToolAvailability {
+  webRun?: boolean;
+  viewImage?: boolean;
 }
 
 const normalize = (value: string | undefined): string => value?.trim().toLowerCase() ?? "";
@@ -91,16 +97,21 @@ export function reconcileTools(
   activeTools: string[],
   shouldActivate: boolean,
   state: AdapterToolState,
-  shouldActivateWeb = false,
+  availability: AdapterToolAvailability = {},
 ): string[] {
   const reconciled = shouldActivate ? activate(activeTools, state) : restore(activeTools, state);
-  const withoutWeb = reconciled.filter((name) => name !== "web_run");
-  if (!shouldActivateWeb) return withoutWeb;
-  if (shouldActivate) {
-    const patchIndex = withoutWeb.indexOf("apply_patch");
-    withoutWeb.splice(patchIndex < 0 ? withoutWeb.length : patchIndex + 1, 0, "web_run");
-  } else {
-    withoutWeb.push("web_run");
+  const tools = reconciled.filter((name) => name !== "web_run" && name !== "view_image");
+  if (shouldActivate && availability.viewImage) {
+    const patchIndex = tools.indexOf("apply_patch");
+    tools.splice(patchIndex < 0 ? tools.length : patchIndex + 1, 0, "view_image");
   }
-  return withoutWeb;
+  if (!availability.webRun) return tools;
+  if (shouldActivate) {
+    const predecessor = tools.includes("view_image") ? "view_image" : "apply_patch";
+    const predecessorIndex = tools.indexOf(predecessor);
+    tools.splice(predecessorIndex < 0 ? tools.length : predecessorIndex + 1, 0, "web_run");
+  } else {
+    tools.push("web_run");
+  }
+  return tools;
 }

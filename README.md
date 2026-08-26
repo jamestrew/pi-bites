@@ -73,7 +73,7 @@ Example:
 
 ### Codex adapter
 
-`codexAdapter` exposes `exec_command`, `write_stdin`, and `apply_patch` in place of the active core file/shell tools. It also exposes policy-gated `web_run` search/navigation. It preserves unrelated tools and uses Pi's stock model registry and authentication.
+`codexAdapter` exposes `exec_command`, `write_stdin`, and `apply_patch` in place of the active core file/shell tools. Vision-capable adapter models also get local-only `view_image({ path })`; it accepts PNG, JPEG, WebP, and non-animated GIF input up to 32 MiB and 4096 pixels per dimension, with relative paths resolved from the session working directory. Text-only models never receive the tool, and image viewing makes no hidden provider or description-model request. The adapter also exposes independently policy-gated `web_run` search/navigation. It preserves unrelated tools and uses Pi's stock model registry and authentication.
 
 GPT models use the adapter automatically regardless of provider, including `github-copilot/gpt-*` and Pi's stock `openai-codex` models:
 
@@ -107,7 +107,7 @@ Stock `openai-codex` Responses models get `web_run` through the existing Pi logi
 
 `allowOpenAICodexFallback` defaults to `false`. Set it to `true` only where sending explicit search/navigation arguments through personal stock Codex authentication is permitted. A selected route never retries through another provider after auth, compatibility, HTTP, or native failure. `web_run` sends no Pi conversation or project context.
 
-Only Linux x86-64 native helpers are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
+Only Linux x86-64 native helpers, including `view_image`, are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
 
 ## Disabling extensions
 

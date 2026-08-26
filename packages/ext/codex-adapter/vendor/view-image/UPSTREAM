@@ -1,0 +1,10 @@
+@howaboua/pi-codex-conversion 3.0.18
+https://github.com/IgorWarzocha/howaboua-pi-stuff/tree/e12067caadc38da4e785d0300202aac233ae3b2f/packages/pi-codex-conversion/src/tools
+
+Retained and locally reduced from:
+- view-image/rust
+- rust/crates/codex-utils-image
+
+rust/crates/codex-utils-image was derived upstream from openai/codex commit b545c94041017d000e2c8b2f6272705d21b85dfb.
+
+Local reductions remove data-URL input, resize modes and calculations, the process-wide image cache, and their codex-utils-cache, lru, sha1, mime_guess, and tokio dependencies. The retained original-mode path validates bounded PNG, JPEG, and WebP input while preserving source bytes, converts a single-frame GIF to PNG, and rejects animated GIFs. The CLI remains local-file-only.

@@ -5,3 +5,4 @@ bun.lock
 /packages/ext/codex-adapter/vendor/exec/target/
 
 /packages/ext/codex-adapter/vendor/web-run/target/
+/packages/ext/codex-adapter/vendor/view-image/target/
