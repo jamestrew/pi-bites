@@ -31,12 +31,21 @@ vi.mock("./web-run/tool.js", () => ({
             (provider) => provider.toLowerCase() === selected.provider?.toLowerCase(),
           )))),
 }));
+vi.mock("./view-image/tool.js", () => ({
+  registerViewImageTool: (pi: { registerTool(tool: { name: string }): void }) =>
+    pi.registerTool({ name: "view_image" }),
+}));
 
 import { isAdapterModel, reconcileTools, type AdapterToolState } from "./activation.js";
 import registerCodexAdapter from "./index.js";
 import type { BitesConfig } from "../config.js";
 
-const model = (provider: string, id = "model", api = "api") => ({ provider, id, api });
+const model = (
+  provider: string,
+  id = "model",
+  api = "api",
+  input: ("text" | "image")[] = ["text"],
+) => ({ provider, id, api, input });
 
 describe("Codex adapter activation", () => {
   test("recognizes Codex and GPT models across providers plus exact configured providers", () => {
@@ -194,6 +203,7 @@ describe("Codex adapter activation", () => {
       "apply_patch",
       "exec_command",
       "write_stdin",
+      "view_image",
       "web_run",
     ]);
 
@@ -262,5 +272,48 @@ describe("Codex adapter activation", () => {
       {},
     );
     expect(active).toEqual(["exec_command", "write_stdin", "apply_patch", "web_run", "custom"]);
+  });
+
+  test("activates view_image only for in-scope vision models", () => {
+    const handlers = new Map<string, (event: any, ctx: any) => void>();
+    let active = ["read", "bash", "edit", "write", "custom"];
+    registerCodexAdapter(
+      {
+        registerTool: vi.fn(),
+        on: (name: string, handler: (event: any, ctx: any) => void) => handlers.set(name, handler),
+        getActiveTools: () => active,
+        setActiveTools: (tools: string[]) => {
+          active = tools;
+        },
+      } as never,
+      { current: { codexAdapter: { providers: ["bedrock"] } } },
+    );
+
+    handlers.get("session_start")?.(
+      {},
+      {
+        model: model("openai-codex", "gpt-5.3-codex", "openai-codex-responses", ["text", "image"]),
+      },
+    );
+    expect(active).toEqual([
+      "exec_command",
+      "write_stdin",
+      "apply_patch",
+      "view_image",
+      "web_run",
+      "custom",
+    ]);
+
+    handlers.get("model_select")?.(
+      { model: model("openai-codex", "gpt-5.3-codex", "openai-codex-responses") },
+      {},
+    );
+    expect(active).toEqual(["exec_command", "write_stdin", "apply_patch", "web_run", "custom"]);
+
+    handlers.get("model_select")?.(
+      { model: model("other", "vision", "api", ["text", "image"]) },
+      {},
+    );
+    expect(active).toEqual(["read", "bash", "edit", "write", "custom"]);
   });
 });

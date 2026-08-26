@@ -1,6 +1,13 @@
+import { existsSync } from "node:fs";
+
+const VENDOR_SOURCE_BY_HELPER: Record<string, string> = {
+  exec_bridge: "exec",
+  view_image: "view-image",
+  web_run: "web-run",
+};
+
 function recovery(helper: string): string {
-  const source =
-    helper === "exec_bridge" ? "exec" : helper === "web_run" ? "web-run" : "apply-patch";
+  const source = VENDOR_SOURCE_BY_HELPER[helper] ?? "apply-patch";
   return `Rebuild it from packages/ext/codex-adapter/vendor/${source}, replace the bundled executable, then run \`/reload\``;
 }
 
@@ -35,10 +42,14 @@ export function nativeBinaryRecoveryMessage(
     errorCode(error) === "ENOENT" && !!options.binaryPath && existsSync(options.binaryPath);
   const missingExecutable =
     errorCode(error) === "ENOENT" && !!options.binaryPath && !existsSync(options.binaryPath);
+  const unusableExecutable =
+    !!options.binaryPath && ["EACCES", "ENOEXEC"].includes(errorCode(error) ?? "");
   if (missingExecutable) {
     return `${helper} native executable is not available at ${options.binaryPath}. ${recovery(helper)}`;
   }
-  if (!loaderFailure && !startupPipeFailure && !missingInterpreter) return undefined;
+  if (!loaderFailure && !startupPipeFailure && !missingInterpreter && !unusableExecutable) {
+    return undefined;
+  }
   return `${helper} cannot run on this system. ${recovery(helper)}`;
 }
 
@@ -53,5 +64,3 @@ export function formatNativeBinaryError(
 ): string {
   return nativeBinaryRecoveryMessage(helper, error, options) ?? errorMessage(error);
 }
-
-import { existsSync } from "node:fs";

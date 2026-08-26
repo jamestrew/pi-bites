@@ -243,6 +243,7 @@ describe("extension entrypoint", () => {
         "apply_patch",
         "exec_command",
         "write_stdin",
+        "view_image",
         "web_run",
       ]);
 
@@ -251,13 +252,18 @@ describe("extension entrypoint", () => {
           {},
           {
             cwd: process.cwd(),
-            model: { provider: "openai-codex", api: "openai-codex-responses" },
+            model: {
+              provider: "openai-codex",
+              api: "openai-codex-responses",
+              input: ["text", "image"],
+            },
           },
         );
       expect(loaded.getActiveTools()).toEqual([
         "exec_command",
         "write_stdin",
         "apply_patch",
+        "view_image",
         "web_run",
         "custom",
       ]);
@@ -286,6 +292,7 @@ describe("extension entrypoint", () => {
         "apply_patch",
         "exec_command",
         "write_stdin",
+        "view_image",
         "web_run",
       ]);
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
