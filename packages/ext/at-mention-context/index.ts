@@ -159,21 +159,41 @@ function formatExpansion(expansion: Expansion): string {
 }
 
 export default function registerAtMentionContext(pi: ExtensionAPI) {
+  const lastInjected = new Map<string, string>();
+  const clearLastInjected = () => lastInjected.clear();
+
+  pi.on("session_compact", clearLastInjected);
+  pi.on("session_tree", clearLastInjected);
+
   pi.on("input", async (event, ctx) => {
     if (event.source === "extension") return { action: "continue" };
 
     const mentions = parseAtMentions(event.text).slice(0, MAX_MENTIONS);
     if (mentions.length === 0) return { action: "continue" };
 
+    const cwd = ctx.cwd;
+    const signal = ctx.signal;
+    const ui = ctx.ui;
+    const notify = ui.notify.bind(ui);
     const expansions = (
-      await Promise.all(mentions.map((mention) => expandMention(ctx.cwd, mention, ctx.signal)))
+      await Promise.all(mentions.map((mention) => expandMention(cwd, mention, signal)))
     ).filter((expansion): expansion is Expansion => expansion !== null);
+    const changed = expansions
+      .map((expansion) => {
+        const key = JSON.stringify([
+          expansion.absolutePath,
+          expansion.mention.lineRange?.start,
+          expansion.mention.lineRange?.end,
+        ]);
+        return { expansion, key, content: formatExpansion(expansion) };
+      })
+      .filter(({ key, content }) => lastInjected.get(key) !== content);
 
-    if (expansions.length === 0) return { action: "continue" };
+    if (changed.length === 0) return { action: "continue" };
 
     const content = [
       "The following files or directories were mentioned by @path in the user's prompt and have been pre-read as context.",
-      ...expansions.map(formatExpansion),
+      ...changed.map((item) => item.content),
     ].join("\n\n");
 
     pi.sendMessage(
@@ -181,9 +201,14 @@ export default function registerAtMentionContext(pi: ExtensionAPI) {
         customType: "at-mention-context",
         content,
         display: false,
-        details: expansions.map((expansion) => expansion.mention.path).join(", "),
+        details: changed.map(({ expansion }) => expansion.mention.path).join(", "),
       },
       { triggerTurn: false },
+    );
+    for (const { key, content } of changed) lastInjected.set(key, content);
+    notify(
+      `Injected at-mention context: ${changed.map(({ expansion }) => expansion.mention.raw).join(", ")}`,
+      "info",
     );
 
     return { action: "continue" };
