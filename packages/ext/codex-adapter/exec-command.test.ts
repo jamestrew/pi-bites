@@ -7,6 +7,7 @@ import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
 
+import { extractBashFacts } from "../bash-gate/bash-command-facts.js";
 import { getBundledExecBridgePath } from "./exec/binary.js";
 import { createExecCommandTool } from "./exec/command-tool.js";
 import { createPipeOutputNormalizer } from "./exec/output.js";
@@ -60,6 +61,248 @@ afterEach(async () => {
 });
 
 describe("exec_command and write_stdin", () => {
+  test("notifies when cat reads a skill without changing execution", async () => {
+    const exec = vi.fn(async (..._args: any[]) => ({
+      chunk_id: "skill1",
+      wall_time_seconds: 0,
+      exit_code: 0,
+      output: "skill contents",
+    }));
+    const notify = vi.fn();
+    const tool = createExecCommandTool({ exec } as never);
+
+    const result = await tool.execute(
+      "skill",
+      { cmd: "cat /skills/diagnosing-bugs/SKILL.md", login: false },
+      undefined,
+      undefined,
+      {
+        cwd: tempDir(),
+        hasUI: true,
+        ui: { notify },
+        isProjectTrusted: () => true,
+      } as never,
+    );
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+    expect(notify).toHaveBeenCalledWith("[skill] diagnosing-bugs", "info");
+    expect(exec).toHaveBeenCalledWith(
+      expect.objectContaining({ cmd: "cat /skills/diagnosing-bugs/SKILL.md" }),
+      expect.any(String),
+      undefined,
+      expect.any(Function),
+    );
+    expect(result.details.output).toBe("skill contents");
+  });
+
+  test("reports ordered distinct cat and sed skill operands in one notification", async () => {
+    const command = [
+      'cat "a/SKILL.md" b/SKILL.md a/SKILL.md; git status',
+      "sed -n -e '1,20p' 'c path/SKILL.md'",
+      "cat d/SKILL.md && cat e/SKILL.md || cat b/SKILL.md",
+      "cat 'skills/$draft/SKILL.md'",
+      `cat skills/'[draft]'/SKILL.md skills/"[draft]"/SKILL.md`,
+      "cat '~/skills/quoted-tilde/SKILL.md'",
+      "cat 'foo bar/SKILL.md' foo\\ bar/SKILL.md",
+      String.raw`cat 'skills/foo\bar/SKILL.md' "skills/foo\\bar/SKILL.md"`,
+    ].join("\n");
+    const exec = vi.fn(async (..._args: any[]) => ({
+      chunk_id: "skills",
+      wall_time_seconds: 0,
+      exit_code: 0,
+      output: "combined output",
+    }));
+    const notify = vi.fn();
+
+    await createExecCommandTool({ exec } as never).execute(
+      "skills",
+      { cmd: command },
+      undefined,
+      undefined,
+      {
+        cwd: tempDir(),
+        hasUI: true,
+        ui: { notify },
+        isProjectTrusted: () => true,
+      } as never,
+    );
+
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledOnce());
+    expect(notify).toHaveBeenCalledWith(
+      "[skill] a, b, c path, d, e, $draft, [draft], quoted-tilde, foo bar, foo\\bar",
+      "info",
+    );
+    expect(exec.mock.calls[0]![0]).toMatchObject({ cmd: command, displayCommand: command });
+  });
+
+  test("ignores mentions, unsupported readers, dynamic paths, and sed scripts", async () => {
+    const command = [
+      "echo a/SKILL.md",
+      "grep pattern b/SKILL.md",
+      "cat $SKILLS/c/SKILL.md",
+      'cat "skills/$draft/SKILL.md"',
+      "cat ~/skills/tilde/SKILL.md",
+      "cat ~user/skills/tilde/SKILL.md",
+      "sed '1,20p' d/SKILL.md",
+      "sed -n e/SKILL.md",
+      "sed -i.none 's/x/y/' mutating/SKILL.md",
+      "sed -en expression/SKILL.md",
+      "sed -fn file/SKILL.md",
+    ].join(" && ");
+    const notify = vi.fn();
+    let finishClassification!: () => void;
+    const classified = new Promise<void>((resolve) => (finishClassification = resolve));
+    const analyze = async (input: string) => {
+      try {
+        return await extractBashFacts(input);
+      } finally {
+        finishClassification();
+      }
+    };
+    const exec = vi.fn(async (..._args: any[]) => ({
+      chunk_id: "ignored",
+      wall_time_seconds: 0,
+      exit_code: 0,
+      output: "unchanged",
+    }));
+
+    await createExecCommandTool({ exec } as never, analyze).execute(
+      "ignored",
+      { cmd: command },
+      undefined,
+      undefined,
+      {
+        cwd: tempDir(),
+        hasUI: true,
+        ui: { notify },
+        isProjectTrusted: () => true,
+      } as never,
+    );
+
+    await classified;
+    await delay(0);
+    expect(notify).not.toHaveBeenCalled();
+    expect(exec.mock.calls[0]![0]).toMatchObject({ cmd: command });
+  });
+
+  test("snapshots UI before parsing and fails open when classification fails", async () => {
+    let resolveFacts!: (facts: any) => void;
+    const analyze = vi.fn(() => new Promise<any>((resolve) => (resolveFacts = resolve)));
+    const exec = vi.fn(async () => ({
+      chunk_id: "stale",
+      wall_time_seconds: 0,
+      exit_code: 0,
+      output: "ran",
+    }));
+    const notify = vi.fn();
+    let stale = false;
+    const ctx = {
+      get cwd() {
+        if (stale) throw new Error("stale ctx cwd");
+        return tempDir();
+      },
+      isProjectTrusted() {
+        if (stale) throw new Error("stale ctx trust");
+        return true;
+      },
+      get hasUI() {
+        if (stale) throw new Error("stale ctx hasUI");
+        return true;
+      },
+      get ui() {
+        if (stale) throw new Error("stale ctx ui");
+        return { notify };
+      },
+    };
+    const tool = createExecCommandTool({ exec } as never, analyze);
+
+    const pending = tool.execute(
+      "stale",
+      { cmd: "cat a/SKILL.md" },
+      undefined,
+      undefined,
+      ctx as never,
+    );
+    stale = true;
+    resolveFacts({
+      commands: [{ name: "cat", argv: ["cat", "a/SKILL.md"], flags: [] }],
+      redirects: [],
+      pathCandidates: [],
+      hasPipe: false,
+      hasVariableAssignment: false,
+    });
+
+    await expect(pending).resolves.toMatchObject({ details: { output: "ran" } });
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("[skill] a", "info"));
+
+    const failedAnalyze = vi.fn(async () => {
+      throw new Error("parser unavailable");
+    });
+    await expect(
+      createExecCommandTool({ exec } as never, failedAnalyze).execute(
+        "failed-parser",
+        { cmd: "cat b/SKILL.md" },
+        undefined,
+        undefined,
+        { cwd: tempDir(), hasUI: true, ui: { notify }, isProjectTrusted: () => true } as never,
+      ),
+    ).resolves.toMatchObject({ details: { output: "ran" } });
+    expect(exec).toHaveBeenCalledTimes(2);
+  });
+
+  test("starts command execution without waiting for classification", async () => {
+    let resolveFacts!: (facts: any) => void;
+    const analyze = vi.fn(() => new Promise<any>((resolve) => (resolveFacts = resolve)));
+    const exec = vi.fn(async () => ({
+      chunk_id: "non-blocking",
+      wall_time_seconds: 0,
+      exit_code: 0,
+      output: "ran",
+    }));
+    const tool = createExecCommandTool({ exec } as never, analyze);
+
+    const pending = tool.execute("non-blocking", { cmd: "cat a/SKILL.md" }, undefined, undefined, {
+      cwd: tempDir(),
+      hasUI: true,
+      ui: { notify: vi.fn() },
+      isProjectTrusted: () => true,
+    } as never);
+    await Promise.resolve();
+
+    expect(exec).toHaveBeenCalledOnce();
+    resolveFacts({
+      commands: [],
+      redirects: [],
+      pathCandidates: [],
+      hasPipe: false,
+      hasVariableAssignment: false,
+    });
+    await expect(pending).resolves.toMatchObject({ details: { output: "ran" } });
+  });
+
+  test("skips classification when UI is unavailable", async () => {
+    const analyze = vi.fn(async () => {
+      throw new Error("must not run");
+    });
+    const exec = vi.fn(async () => ({
+      chunk_id: "no-ui",
+      wall_time_seconds: 0,
+      exit_code: 0,
+      output: "ran",
+    }));
+
+    await expect(
+      createExecCommandTool({ exec } as never, analyze).execute(
+        "no-ui",
+        { cmd: "cat a/SKILL.md" },
+        undefined,
+        undefined,
+        { cwd: tempDir(), hasUI: false, isProjectTrusted: () => true } as never,
+      ),
+    ).resolves.toMatchObject({ details: { output: "ran" } });
+    expect(analyze).not.toHaveBeenCalled();
+  });
+
   test("filters an RTK warning split across native output chunks", async () => {
     const sessions = manager();
     const result = await sessions.exec(

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import registerBashGate from "./bash-gate/index.js";
+import { createExecCommandTool } from "./codex-adapter/exec/command-tool.js";
 import registerRtk, {
   consumeRtkExecInput,
   createRtkNoHookWarningDataFilter,
@@ -151,6 +152,33 @@ describe("RTK output filtering", () => {
 });
 
 describe("RTK exec_command rewriting", () => {
+  test("classifies skill reads from the original command before RTK rewriting", async () => {
+    const { ctx, handler } = createRtkHarness();
+    const input = { cmd: "cat a/SKILL.md" };
+    await handler("tool_call")({ toolName: "exec_command", input }, ctx);
+    const sessionExec = vi.fn(async (..._args: any[]) => ({
+      chunk_id: "rtk-skill",
+      wall_time_seconds: 0,
+      exit_code: 0,
+      output: "skill",
+    }));
+
+    await createExecCommandTool({ exec: sessionExec } as never).execute(
+      "rtk-skill",
+      input,
+      undefined,
+      undefined,
+      { ...ctx, cwd: "/repo", isProjectTrusted: () => true } as never,
+    );
+
+    expect(input.cmd).toBe("rtk cat a/SKILL.md");
+    expect(sessionExec.mock.calls[0]![0]).toMatchObject({
+      cmd: "rtk cat a/SKILL.md",
+      displayCommand: "cat a/SKILL.md",
+    });
+    await vi.waitFor(() => expect(ctx.ui.notify).toHaveBeenCalledWith("[skill] a", "info"));
+  });
+
   test("does not dereference stale contexts after async work", async () => {
     const resolvers = new Map<string, (result: any) => void>();
     const exec = vi.fn(
