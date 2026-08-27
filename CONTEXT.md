@@ -15,3 +15,11 @@ _Avoid_: Triggered mention
 **Unchanged expansion**:
 An at-mention expansion whose model-visible content matches the last injected expansion with the same resolved path and line range since the active context was last rewritten.
 _Avoid_: Unmodified file
+
+**Tracked Pi pane**:
+A tmux pane currently represented in the host-local session tracker. It remains one tracked pane when Pi changes sessions within that pane.
+_Avoid_: Tracked Pi session
+
+**Tmux status segment**:
+A compact, read-only summary of all host-local tracked Pi panes displayed within tmux's status line.
+_Avoid_: Tmux status bar
