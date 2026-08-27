@@ -5,9 +5,9 @@ const MIN_NON_INTERACTIVE_EXEC_YIELD_TIME_MS = 5_000;
 const MIN_EMPTY_WRITE_YIELD_TIME_MS = 30_000;
 const MAX_YIELD_TIME_MS = 30_000;
 export const MAX_EXEC_YIELD_TIME_MS = 1_800_000;
-export const DEFAULT_EXEC_YIELD_TIME_MS = 10_000;
+export const DEFAULT_EXEC_YIELD_TIME_MS = 30_000;
 export const DEFAULT_WRITE_YIELD_TIME_MS = 250;
-export const DEFAULT_MAX_EMPTY_WRITE_YIELD_TIME_MS = 1_800_000;
+export const DEFAULT_MAX_EMPTY_WRITE_YIELD_TIME_MS = 240_000;
 
 export function resolveWorkdir(baseCwd: string, workdir?: string): string {
   return workdir ? resolve(baseCwd, workdir) : baseCwd;
