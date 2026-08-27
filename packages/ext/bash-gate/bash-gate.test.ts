@@ -3,11 +3,7 @@ import { dirname } from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test, vi } from "vitest";
 import { extractBashFacts } from "./bash-command-facts.js";
-import registerBashGate, {
-  findMatchedPattern,
-  findMatchedPatterns,
-  subagentBashGatePolicy,
-} from "./index.js";
+import registerBashGate, { subagentBashGatePolicy } from "./index.js";
 
 describe("extractBashFacts", () => {
   test("extracts commands, redirects, path-ish args, pipe presence, and flags", async () => {
@@ -68,6 +64,7 @@ function createBashGateHarness(
   hasUI = true,
   config: Parameters<typeof registerBashGate>[1]["current"] = {},
 ) {
+  let toolCallSequence = 0;
   const handlers = new Map<string, (event: any, ctx: any) => unknown>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
   const emit = vi.fn((event: string, data: any) => {
@@ -80,7 +77,9 @@ function createBashGateHarness(
       shortcutHandler = options.handler;
     }),
     getFlag: vi.fn(() => yolo),
-    appendEntry: vi.fn(),
+    appendEntry: vi.fn((customType: string, data: unknown) =>
+      entries.push({ type: "custom", customType, data } as SessionEntry),
+    ),
     on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) => {
       handlers.set(event, handler);
     }),
@@ -118,12 +117,30 @@ function createBashGateHarness(
     ui,
     eventHandlers,
     sessionStart: () => handlers.get("session_start")?.({}, ctx),
+    sessionBeforeSwitch: () => handlers.get("session_before_switch")?.({}, ctx),
     toggleYolo: () => shortcutHandler?.(ctx),
-    toolCall: handlers.get("tool_call")!,
+    toolCall: (event: any, context: any) =>
+      handlers.get("tool_call")!(
+        { toolCallId: `tool-call-${++toolCallSequence}`, ...event },
+        context,
+      ),
   };
 }
 
 describe("bash gate tool_call", () => {
+  test.each([
+    ["bash", { command: "" }],
+    ["exec_command", { cmd: "" }],
+  ])("records an empty %s invocation as not-reviewed", async (toolName, input) => {
+    const { toolCall, ctx, pi } = createBashGateHarness();
+
+    await expect(toolCall({ toolName, input }, ctx)).resolves.toBeUndefined();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-bites:shell-authorization",
+      expect.objectContaining({ command: "", status: "not-reviewed" }),
+    );
+  });
+
   test.each([
     ["bash", { command: "deploy production" }],
     ["exec_command", { cmd: "deploy production" }],
@@ -144,7 +161,7 @@ describe("bash gate tool_call", () => {
   });
 
   test("shares session allowances across shell tool contracts", async () => {
-    const { toolCall, ctx, ui } = createBashGateHarness();
+    const { toolCall, ctx, ui, pi } = createBashGateHarness();
     ui.select.mockResolvedValue('Allow for session ("rm")');
 
     await expect(
@@ -155,6 +172,9 @@ describe("bash gate tool_call", () => {
     ).resolves.toBeUndefined();
 
     expect(ui.select).toHaveBeenCalledTimes(1);
+    expect(
+      pi.appendEntry.mock.calls.map(([, data]) => (data as { status: string }).status),
+    ).toEqual(["human-approved", "human-approved"]);
   });
 
   test("allows exec_command once without remembering the decision", async () => {
@@ -178,6 +198,22 @@ describe("bash gate tool_call", () => {
     });
   });
 
+  test("records a failed manual approval prompt as blocked", async () => {
+    const { toolCall, ctx, ui, pi } = createBashGateHarness();
+    ui.select.mockRejectedValue(new Error("UI unavailable"));
+
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
+    ).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: approval failed closed: UI unavailable",
+    });
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-bites:shell-authorization",
+      expect.objectContaining({ status: "blocked" }),
+    );
+  });
+
   test("sends exec_command's original cmd and tool contract through automode and lifecycle events", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
     const { toolCall, ctx, pi } = createBashGateHarness([], false, {
@@ -198,6 +234,40 @@ describe("bash gate tool_call", () => {
     expect(pi.events.emit).toHaveBeenCalledWith(
       "bites:bash_gate",
       expect.objectContaining({ command: "rm original", toolName: "exec_command" }),
+    );
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-bites:shell-authorization",
+      expect.objectContaining({
+        toolCallId: "tool-call-1",
+        toolName: "exec_command",
+        command: "rm original",
+        status: "reviewer-approved",
+      }),
+    );
+  });
+
+  test("fails closed instead of persisting to a replacement session", async () => {
+    let resolveReview!: (decision: { outcome: "allow" }) => void;
+    const review = vi.fn(
+      () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
+    );
+    const { toolCall, ctx, pi, sessionBeforeSwitch } = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review,
+    });
+
+    const pending = toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx);
+    await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+    sessionBeforeSwitch();
+    resolveReview({ outcome: "allow" });
+
+    await expect(pending).resolves.toEqual({
+      block: true,
+      reason: "Bash gate: owning session changed before authorization completed.",
+    });
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-bites:shell-authorization",
+      expect.objectContaining({ status: "blocked" }),
     );
   });
 
@@ -269,7 +339,7 @@ describe("bash gate tool_call", () => {
       .mockResolvedValueOnce({ outcome: "allow" })
       .mockRejectedValueOnce(new Error("timeout"));
     const autoMode = { isEnabled: () => true, review };
-    const { toolCall, ctx, ui } = createBashGateHarness([], false, autoMode, false);
+    const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, autoMode, false);
 
     await expect(
       toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
@@ -283,6 +353,9 @@ describe("bash gate tool_call", () => {
       expect.anything(),
     );
     expect(ui.select).not.toHaveBeenCalled();
+    expect(
+      pi.appendEntry.mock.calls.map(([, data]) => (data as { status: string }).status),
+    ).toEqual(["reviewer-approved", "blocked"]);
   });
 
   test("escalates an explicit main-agent automode denial and preserves denial guidance", async () => {
@@ -304,11 +377,11 @@ describe("bash gate tool_call", () => {
     });
     expect(ui.select).toHaveBeenCalledWith(
       expect.stringContaining("removes files outside the requested build directory"),
-      ["Allow once", "Allow with reason…", "Export command", "Deny"],
+      ["Allow once", "Export command", "Deny"],
     );
   });
 
-  test("allows an automode-denied main-agent command once without recording history", async () => {
+  test("records an automode-denied command allowed by the human as human-approved", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "too broad" });
     const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, {
       isEnabled: () => true,
@@ -320,27 +393,12 @@ describe("bash gate tool_call", () => {
       toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
     ).resolves.toBeUndefined();
 
-    expect(pi.appendEntry).not.toHaveBeenCalled();
-  });
-
-  test("allows with a non-empty reason and records trusted session history", async () => {
-    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
-    const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, {
-      isEnabled: () => true,
-      review,
-    });
-    ui.select.mockResolvedValue("Allow with reason…");
-    ui.input.mockResolvedValueOnce("   ").mockResolvedValueOnce("Generated test output");
-
-    await expect(
-      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
-    ).resolves.toBeUndefined();
-
-    expect(ui.input).toHaveBeenCalledTimes(2);
-    expect(pi.appendEntry).toHaveBeenCalledWith("pi-bites:automode-override", {
+    expect(pi.appendEntry).toHaveBeenCalledWith("pi-bites:shell-authorization", {
       version: 1,
+      toolCallId: "tool-call-1",
+      toolName: "bash",
       command: "rm build.txt",
-      reason: "Generated test output",
+      status: "human-approved",
     });
   });
 
@@ -438,7 +496,7 @@ describe("bash gate tool_call", () => {
 
   test("does not invoke automode until a bash command actually matches the gate", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
-    const { toolCall, ctx } = createBashGateHarness([], false, {
+    const { toolCall, ctx, pi } = createBashGateHarness([], false, {
       isEnabled: () => true,
       review,
     });
@@ -450,6 +508,11 @@ describe("bash gate tool_call", () => {
       toolCall({ toolName: "read", input: { command: "rm file" } }, ctx),
     ).resolves.toBeUndefined();
     expect(review).not.toHaveBeenCalled();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-bites:shell-authorization",
+      expect.objectContaining({ command: "cat README.md", status: "not-reviewed" }),
+    );
+    expect(pi.appendEntry).toHaveBeenCalledTimes(1);
   });
 
   test("--yolo disables automode, bypasses review, and locks the shortcut", async () => {
@@ -460,7 +523,7 @@ describe("bash gate tool_call", () => {
       setEnabled: vi.fn((value: boolean) => (enabled = value)),
       review,
     };
-    const { toolCall, ctx, toggleYolo, ui } = createBashGateHarness([], true, autoMode, false);
+    const { toolCall, ctx, toggleYolo, ui, pi } = createBashGateHarness([], true, autoMode, false);
     expect(enabled).toBe(false);
     await toggleYolo();
     expect(ui.notify).toHaveBeenCalledWith("Bash gate mode is fixed to YOLO by --yolo.", "info");
@@ -468,12 +531,16 @@ describe("bash gate tool_call", () => {
       toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
     ).resolves.toBeUndefined();
     expect(review).not.toHaveBeenCalled();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-bites:shell-authorization",
+      expect.objectContaining({ status: "not-reviewed" }),
+    );
   });
 
   test("an existing session allowance bypasses later automode review", async () => {
     let enabled = false;
     const review = vi.fn().mockResolvedValue({ outcome: "deny" });
-    const { toolCall, ctx, ui } = createBashGateHarness([], false, {
+    const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, {
       isEnabled: () => enabled,
       review,
     });
@@ -486,6 +553,9 @@ describe("bash gate tool_call", () => {
 
     expect(review).not.toHaveBeenCalled();
     expect(ui.select).toHaveBeenCalledTimes(1);
+    expect(
+      pi.appendEntry.mock.calls.map(([, data]) => (data as { status: string }).status),
+    ).toEqual(["human-approved", "human-approved"]);
   });
 
   test("scopes unlisted session allowances to the exact command", async () => {
@@ -571,7 +641,7 @@ describe("bash gate tool_call", () => {
       approvals++;
       eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
       eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
-        result: { outcome: "allow" },
+        result: { outcome: "allow", authorization: "human-approved" },
       });
     });
 
@@ -604,7 +674,7 @@ describe("bash gate tool_call", () => {
       approvals++;
       eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
       eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
-        result: { outcome: "allow-session" },
+        result: { outcome: "allow-session", authorization: "human-approved" },
       });
     });
 
@@ -628,7 +698,7 @@ describe("bash gate tool_call", () => {
         approvals++;
         eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
         eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
-          result: { outcome: "allow-session" },
+          result: { outcome: "allow-session", authorization: "human-approved" },
         });
       });
 
@@ -656,7 +726,10 @@ describe("bash gate tool_call", () => {
         eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
         pi.events.emit("subagents:failed", { id: "agent-1", status: "stopped" });
         eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
-          result: { outcome: decision },
+          result: {
+            outcome: decision,
+            authorization: "human-approved",
+          },
         });
       });
 
@@ -738,263 +811,5 @@ describe("bash gate tool_call", () => {
       block: true,
       reason: "Bash gate: parent approval failed closed: parent approval broker unavailable",
     });
-  });
-});
-
-describe("findMatchedPattern", () => {
-  test.each([
-    "cat README.md 2>&1",
-    "cat README.md 1>&2",
-    "cat README.md 2>/dev/null",
-    "cat README.md >/dev/null",
-    "cat README.md >>/dev/null",
-    "printf build 2>/dev/null | wc -c",
-    "printf '%s\n' code-refactor",
-    "grep -R needle packages",
-    "rg needle .",
-    "find packages -name '*.ts' -print",
-    "cal",
-    "cksum README.md",
-    "free -h",
-    "md5sum README.md",
-    "ps aux",
-    "sha256sum README.md",
-    "uptime",
-    "tree packages",
-    "aws sts get-caller-identity",
-    "cargo test",
-    "docker ps",
-    "dotnet test",
-    "ecs check",
-    "glab mr view 42",
-    "go test ./...",
-    "golangci-lint run",
-    "gradlew test",
-    "gt log",
-    "jest --runInBand",
-    "kubectl get pods",
-    "mvn test",
-    "mypy packages",
-    "next build",
-    "npm test",
-    "oc get pods",
-    "paratest",
-    "pest",
-    "php -l index.php",
-    "phpstan analyse",
-    "phpunit",
-    "pint --test",
-    "pip list",
-    "playwright test",
-    "pnpm test",
-    "prettier --check .",
-    "prisma validate",
-    "pytest -q",
-    "rake test",
-    "rspec",
-    "rubocop",
-    "ruff check .",
-    "sbt test",
-    "tsc --noEmit",
-    "uv tree",
-    "vitest run",
-    "gh auth status",
-    "gh issue list --repo owner/repo",
-    "gh issue view 42",
-    "gh pr checks 42",
-    "gh pr diff 42",
-    "gh pr view 42 --json title,state",
-    "gh run list --limit 10",
-    "gh workflow view ci.yml",
-    "git add packages/ext/bash-gate/index.ts",
-    "git blame packages/ext/bash-gate/index.ts",
-    "git commit -m 'relax bash gate'",
-    "git diff --stat",
-    "git log -5 --oneline",
-    "git ls-files '*.ts'",
-    "git name-rev HEAD",
-    "git pull --rebase",
-    "git rebase main",
-    "git rev-list --count HEAD",
-    "git rev-parse --show-toplevel",
-    "git shortlog -sn",
-    "git show --stat HEAD",
-    "git status --short --branch",
-    "jj status",
-    "jj st",
-    "jj log -r @",
-    "jj diff --summary",
-    "jj bookmark list",
-    "jj b list",
-    "jj operation show",
-    "jj op log",
-    "jj file show README.md",
-    "jj file track new-file.ts",
-    "jj file untrack generated.txt",
-    "jj git fetch",
-    "jj new main",
-    "jj commit -m 'relax bash gate'",
-    "jj describe -m 'relax bash gate'",
-    "jj edit @-",
-    "jj rebase -d main",
-    "jj restore README.md",
-    "jj split packages/ext/bash-gate/index.ts",
-    "jj squash",
-    "jj abandon @",
-    "jj workspace list",
-    "sed -n '1,130p' packages/ext/codex-adapter/apply-patch/rendering.ts && sed -n '220,280p' packages/ext/codex-adapter/apply-patch.test.ts",
-  ])("allows allowlisted command: %s", async (command: string) => {
-    expect(await findMatchedPattern(command)).toBeUndefined();
-  });
-
-  test.each([
-    ["echo hi > out.txt", "redirect:>"],
-    ["cat < in.txt > out.txt", "redirect:>"],
-    ["make build >/tmp/build.log 2>&1", "redirect:>"],
-    ["echo hi >> out.txt", "redirect:>>"],
-    ["rm -rf tmp", "rm"],
-    ["find . -delete", "find -delete"],
-    ["find . -exec rm {} +", "find -exec"],
-    ["find . -fprint matches.txt", "find -fprint"],
-    ["rg --pre cat needle .", "rg --pre"],
-    ["rg --pre=cat needle .", "rg --pre"],
-    ["rg --hostname-bin=./script needle .", "rg --hostname-bin"],
-    ["printf -v PATH .", "printf -v"],
-    ["printf -vPATH .", "printf -v"],
-    ["printf -v PATH .; cat README.md", "printf -v"],
-    ["sort -o result.txt README.md", "sort -o"],
-    ["sort --output=result.txt README.md", "sort --output"],
-    ["sort --compress-program=./evil README.md", "sort --compress-program"],
-    ["file -C -m magic", "file -c"],
-    ["date --set=tomorrow", "date --set"],
-    ["git show --output=commit.txt HEAD", "git --output"],
-    ["git show --ext-diff HEAD", "git --ext-diff"],
-    ["git show --textconv HEAD", "git --textconv"],
-    ["git grep --open-files-in-pager=cat needle", "git --open-files-in-pager"],
-    ["git grep -Ocat needle", "git grep"],
-    ["go env -w GOTOOLCHAIN=local", "go env"],
-    ["mypy --install-types", "mypy --install-types"],
-    ["pytest --basetemp=/tmp/pytest", "pytest --basetemp"],
-    ["tree -o listing.txt", "tree -o"],
-    ["ssh prod 'rm -rf /data'", "ssh"],
-    ["scp artifact.tar prod:/srv", "scp"],
-    ["sftp prod", "sftp"],
-    ["git push origin main", "git push"],
-    ["git branch -D old-branch", "git branch -d"],
-    ["git rebase --exec 'rm -rf tmp' main", "git rebase"],
-    ["git rebase -x'rm -rf tmp' main", "git rebase"],
-    ["bun add zod", "bun add"],
-    ["service nginx restart", "service restart"],
-  ])("matches a destructive pattern for: %s", async (command: string, label: string) => {
-    const matched = await findMatchedPattern(command);
-
-    expect(matched).toBeDefined();
-    expect(matched?.label).toBe(label);
-  });
-
-  test.each([
-    ["aws s3 rm s3://bucket/key", "unlisted: aws s3 rm s3://bucket/key"],
-    ["cargo publish", "unlisted: cargo publish"],
-    ["docker rm app", "unlisted: docker rm app"],
-    ["glab mr merge 42", "unlisted: glab mr merge 42"],
-    ["go install example.com/tool@latest", "unlisted: go install example.com/tool@latest"],
-    ["kubectl delete pod app", "unlisted: kubectl delete pod app"],
-    ["npm run deploy", "unlisted: npm run deploy"],
-    ["playwright install", "unlisted: playwright install"],
-    ["prisma migrate deploy", "unlisted: prisma migrate deploy"],
-    ["date -u", "unlisted: date -u"],
-    ["date 082122002026", "unlisted: date 082122002026"],
-    ["git grep bashGate", "unlisted: git grep bashGate"],
-    ["git grep --open=cat needle", "unlisted: git grep --open=cat needle"],
-    [
-      "python3 -c 'import shutil; shutil.rmtree(\"tmp\")'",
-      "unlisted: python3 -c 'import shutil; shutil.rmtree(\"tmp\")'",
-    ],
-    ["./cat README.md", "unlisted: ./cat README.md"],
-    ["PATH=. cat README.md", "unlisted: PATH=. cat README.md"],
-    ["CAT README.md", "unlisted: CAT README.md"],
-    ["gh issue close 42", "unlisted: gh issue close 42"],
-    ["gh pr merge 42", "unlisted: gh pr merge 42"],
-    [
-      "gh api --method DELETE repos/o/r/issues/1",
-      "unlisted: gh api --method DELETE repos/o/r/issues/1",
-    ],
-    ["jj bookmark delete old", "unlisted: jj bookmark delete old"],
-    ["jj operation restore abc", "unlisted: jj operation restore abc"],
-    ["jj file chmod +x script", "unlisted: jj file chmod +x script"],
-    ["sed -ni '1,20p' file", "unlisted: sed -ni '1,20p' file"],
-    ["sed -n '1e touch /tmp/pwned' file", "unlisted: sed -n '1e touch /tmp/pwned' file"],
-    ["sed -n '1,20p;w out' file", "unlisted: sed -n '1,20p;w out' file"],
-    ["sed -n '1,20p' -i file", "unlisted: sed -n '1,20p' -i file"],
-  ])("gates commands outside the allowlist: %s", async (command: string, label: string) => {
-    const matched = await findMatchedPattern(command);
-
-    expect(matched?.label).toBe(label);
-    expect(matched?.source).toBe("builtin");
-    expect(matched?.reason).toContain("not on the bash-gate allowlist");
-  });
-
-  test("matches every gated command in a compound command", async () => {
-    const matches = await findMatchedPatterns("chmod +x foo && rm bar");
-
-    expect(matches.map((match) => match.label)).toEqual(expect.arrayContaining(["chmod", "rm"]));
-  });
-
-  test("matches every gated command separated by semicolons", async () => {
-    const matches = await findMatchedPatterns("rmdir a; rm b");
-
-    expect(matches.map((match) => match.label)).toEqual(["rmdir", "rm"]);
-  });
-
-  test("supports configured command-only rules", async () => {
-    const matched = await findMatchedPattern("pytest -q", {
-      bashGate: { rules: [{ cmd: "pytest" }] },
-    });
-
-    expect(matched?.label).toBe("pytest");
-    expect(matched?.source).toBe("configured");
-  });
-
-  test("supports configured subcommand rules", async () => {
-    const matched = await findMatchedPattern("git push origin main", {
-      bashGate: {
-        rules: [{ cmd: "git", subcommands: ["push"], reason: "push mutates remote state" }],
-      },
-    });
-
-    expect(matched?.label).toBe("git push");
-    expect(matched?.reason).toBe("push mutates remote state");
-  });
-
-  test("supports configured flagAny rules", async () => {
-    const matched = await findMatchedPattern("sed -i 's/a/b/' file.txt", {
-      bashGate: { rules: [{ cmd: "sed", flagAny: ["-i"] }] },
-    });
-
-    expect(matched?.label).toBe("sed -i");
-    expect(matched?.source).toBe("configured");
-  });
-
-  test("supports configured redirect rules", async () => {
-    const matched = await findMatchedPattern("echo hi >> out.txt", {
-      bashGate: { rules: [{ redirects: "append" }] },
-    });
-
-    expect(matched?.label).toBe("redirect:>>");
-    expect(matched?.source).toBe("configured");
-  });
-
-  test("configured rules extend builtin defaults", async () => {
-    const builtinMatch = await findMatchedPattern("git push origin main", {
-      bashGate: { rules: [{ cmd: "sed", flagAny: ["-i"] }] },
-    });
-    const configuredMatch = await findMatchedPattern("sed -i 's/a/b/' file.txt", {
-      bashGate: { rules: [{ cmd: "sed", flagAny: ["-i"] }] },
-    });
-
-    expect(builtinMatch?.label).toBe("git push");
-    expect(builtinMatch?.source).toBe("builtin");
-    expect(configuredMatch?.label).toBe("sed -i");
-    expect(configuredMatch?.source).toBe("configured");
   });
 });

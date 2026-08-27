@@ -33,7 +33,7 @@ import { type ToolDescriptionMode } from "./settings.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
-import { onSubagentApprovalRequest } from "../bash-gate/events.js";
+import { onSubagentApprovalRequest, type BashGateApprovalResult } from "../bash-gate/events.js";
 import type { BashGateController } from "../bash-gate/index.js";
 import { promptAutoModeEscalation } from "../bash-gate/automode-escalation.js";
 import {
@@ -131,10 +131,12 @@ export default function (
 
   // --- Cross-extension RPC via pi.events ---
   let currentCtx: ExtensionContext | undefined;
+  let currentSessionToken: object | undefined;
 
   // Capture ctx from session_start for the RPC spawn handler.
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
+    currentSessionToken = {};
     // The runtime supplies the concrete manager, but ExtensionContext exposes only its read facade.
     // Snapshot this documented append operation now so shutdown never touches a stale ctx.
     const sessionManager = ctx.sessionManager as typeof ctx.sessionManager &
@@ -164,13 +166,19 @@ export default function (
 
   pi.on("session_before_switch", () => {
     currentCtx = undefined;
+    currentSessionToken = undefined;
   });
 
   const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
-    if (bashGate?.isYolo()) return { outcome: "allow" };
+    if (bashGate?.isYolo()) return { outcome: "allow", authorization: "not-reviewed" };
 
     const ctx = currentCtx;
     if (!ctx) return { outcome: "failure", message: "parent approval context unavailable" };
+    const ownerSessionToken = currentSessionToken;
+    const sessionChanged = (): BashGateApprovalResult | undefined =>
+      ownerSessionToken && ownerSessionToken === currentSessionToken
+        ? undefined
+        : { outcome: "failure", message: "parent approval session changed" };
     const ui = ctx.ui;
     const hasUI = ctx.hasUI;
     const cwd = ctx.cwd;
@@ -188,7 +196,10 @@ export default function (
               labels: request.labels,
               reasons: request.reasons,
               subagentContext: session
-                ? buildReviewerTranscript(session.messages as ReviewerMessage[])
+                ? buildReviewerTranscript(
+                    session.messages as ReviewerMessage[],
+                    session.sessionManager.getBranch(),
+                  )
                 : "<subagent context unavailable>",
             },
             ctx,
@@ -199,8 +210,11 @@ export default function (
             message: `Automode reviewer failed: ${error instanceof Error ? error.message : String(error)}`,
           };
         }
+        const changedAfterReview = sessionChanged();
+        if (changedAfterReview) return changedAfterReview;
 
-        if (decision.outcome === "allow") return { outcome: "allow" };
+        if (decision.outcome === "allow")
+          return { outcome: "allow", authorization: "reviewer-approved" };
         if (!hasUI) {
           return {
             outcome: "deny",
@@ -239,8 +253,10 @@ export default function (
               }
             : {}),
         });
+        const changedAfterEscalation = sessionChanged();
+        if (changedAfterEscalation) return changedAfterEscalation;
         return escalation === "allow"
-          ? { outcome: "allow" }
+          ? { outcome: "allow", authorization: "human-approved" }
           : {
               outcome: "deny",
               source: "automode",
@@ -264,6 +280,8 @@ export default function (
           ...(viewConversation ? [viewConversation] : []),
           "Deny",
         ]);
+        const changedAfterPrompt = sessionChanged();
+        if (changedAfterPrompt) return changedAfterPrompt;
 
         if (choice === viewConversation && record?.session) {
           const session = record.session;
@@ -281,13 +299,15 @@ export default function (
               ),
             CONVERSATION_OVERLAY_OPTIONS,
           );
+          const changedAfterConversation = sessionChanged();
+          if (changedAfterConversation) return changedAfterConversation;
           continue;
         }
 
         return choice === allowSession
-          ? { outcome: "allow-session" }
+          ? { outcome: "allow-session", authorization: "human-approved" }
           : choice === "Allow"
-            ? { outcome: "allow" }
+            ? { outcome: "allow", authorization: "human-approved" }
             : { outcome: "deny", source: "manual" };
       }
     } catch (error) {
@@ -321,13 +341,14 @@ export default function (
 
   // Persist queued parent deliveries before aborting children and tearing down.
   pi.on("session_shutdown", async () => {
+    currentCtx = undefined;
+    currentSessionToken = undefined;
     unsubSpawnRpc();
     unsubStopRpc();
     unsubPingRpc();
     unsubBashGateApproval();
     unsubBashGateStarted();
     unsubBashGateResolved();
-    currentCtx = undefined;
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
     parentMessenger.flushForShutdown();
     manager.abortAll();

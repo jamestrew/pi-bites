@@ -31,7 +31,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  SessionEntry,
+  ToolCallEventResult,
+} from "@earendil-works/pi-coding-agent";
 import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
 import type {
   BashGateConfig,
@@ -48,6 +53,11 @@ import {
 import { requestSubagentApproval } from "./events.js";
 import { promptAutoModeEscalation } from "./automode-escalation.js";
 import type { AutoModeController } from "../automode/index.js";
+import {
+  appendShellAuthorization,
+  type ShellAuthorizationEntry,
+  type ShellAuthorizationStatus,
+} from "./authorization.js";
 
 export type { ApprovalRequest } from "./events.js";
 type BashGatePolicy = "deny" | "prompt";
@@ -649,6 +659,8 @@ export default function registerBashGate(
 
   let rules: BashGateRule[] = [];
   let mainAgentYolo = false;
+  let activeSessionToken: object | undefined;
+  const pendingAuthorizations = new Map<symbol, ShellAuthorizationEntry>();
   const sessionAllowed = new Set<string>();
   const finishedSubagents = new Set<string>();
 
@@ -657,6 +669,8 @@ export default function registerBashGate(
   }
 
   pi.on("session_start", (_event, ctx) => {
+    activeSessionToken = {};
+    pendingAuthorizations.clear();
     rules = resolveEffectiveRules(configRef.current);
     mainAgentYolo = false;
     if (pi.getFlag("yolo")) autoMode?.setEnabled(false, ctx);
@@ -664,6 +678,15 @@ export default function registerBashGate(
     finishedSubagents.clear();
     syncYoloStatus(ctx);
   });
+  const blockPendingAuthorizations = () => {
+    for (const entry of pendingAuthorizations.values()) {
+      appendShellAuthorization(pi, { ...entry, status: "blocked" });
+    }
+    pendingAuthorizations.clear();
+    activeSessionToken = undefined;
+  };
+  pi.on("session_before_switch", blockPendingAuthorizations);
+  pi.on("session_shutdown", blockPendingAuthorizations);
 
   pi.registerShortcut("alt+y", {
     description: "Cycle bash-gate mode: YOLO, Auto, Bash gate",
@@ -703,6 +726,32 @@ export default function registerBashGate(
     const request = commandPolicyRequest(event.toolName, event.input);
     if (!request) return undefined;
     const { command, toolName } = request;
+    const toolCallId =
+      typeof event.toolCallId === "string" && event.toolCallId ? event.toolCallId : undefined;
+    const ownerSessionToken = activeSessionToken;
+    const pendingToken = Symbol();
+    const authorizationEntry: ShellAuthorizationEntry = {
+      version: 1,
+      ...(toolCallId ? { toolCallId } : {}),
+      toolName,
+      command,
+      status: "blocked",
+    };
+    pendingAuthorizations.set(pendingToken, authorizationEntry);
+    function finish(
+      status: ShellAuthorizationStatus,
+      result: ToolCallEventResult | undefined,
+    ): ToolCallEventResult | undefined {
+      const ownerChanged = !ownerSessionToken || ownerSessionToken !== activeSessionToken;
+      pendingAuthorizations.delete(pendingToken);
+      if (!ownerChanged) appendShellAuthorization(pi, { ...authorizationEntry, status });
+      return ownerChanged
+        ? {
+            block: true,
+            reason: "Bash gate: owning session changed before authorization completed.",
+          }
+        : result;
+    }
 
     const cwd = ctx.cwd;
     const hasUI = ctx.hasUI;
@@ -716,7 +765,7 @@ export default function registerBashGate(
       sessionManager,
     };
     const matchedPatterns = await findMatchedPatterns(command, rules);
-    if (matchedPatterns.length === 0) return undefined;
+    if (matchedPatterns.length === 0) return finish("not-reviewed", undefined);
 
     const matchedPatternLabels = matchedPatterns.map((match) => match.label);
     const sessionAllowKey = matchedPatternLabels.join(" && ");
@@ -727,17 +776,24 @@ export default function registerBashGate(
       : sessionAllowKey;
 
     // --yolo bypasses every gate; shortcut YOLO reaches default subagents via the parent broker.
-    if (pi.getFlag("yolo") || (mainAgentYolo && metadata === undefined)) return undefined;
+    if (pi.getFlag("yolo") || (mainAgentYolo && metadata === undefined))
+      return finish("not-reviewed", undefined);
 
     // Pattern was already approved for this session — run silently.
-    if (sessionAllowed.has(effectiveSessionAllowKey)) return undefined;
+    if (sessionAllowed.has(effectiveSessionAllowKey)) return finish("human-approved", undefined);
     if (subagentPolicy === "deny") {
-      return { block: true, reason: "Bash gate: gated command not allowed for this subagent." };
+      return finish("blocked", {
+        block: true,
+        reason: "Bash gate: gated command not allowed for this subagent.",
+      });
     }
 
     if (subagentPolicy === "prompt") {
       if (!metadata?.agentId || finishedSubagents.has(metadata.agentId)) {
-        return { block: true, reason: "Bash gate: subagent identity is unavailable or finished." };
+        return finish("blocked", {
+          block: true,
+          reason: "Bash gate: subagent identity is unavailable or finished.",
+        });
       }
 
       const gateStartMs = Date.now();
@@ -757,35 +813,41 @@ export default function registerBashGate(
         });
 
         if (finishedSubagents.has(metadata.agentId)) {
-          return { block: true, reason: "Bash gate: subagent finished before approval." };
+          return finish("blocked", {
+            block: true,
+            reason: "Bash gate: subagent finished before approval.",
+          });
         }
 
         if (result.outcome === "allow-session") {
           sessionAllowed.add(effectiveSessionAllowKey);
           compensateTimeout(event.input, gateStartMs);
-          return undefined;
+          return finish(result.authorization, undefined);
         }
 
         if (result.outcome === "allow") {
           compensateTimeout(event.input, gateStartMs);
-          return undefined;
+          return finish(result.authorization, undefined);
         }
 
         if (result.outcome === "failure") {
-          return {
+          return finish("blocked", {
             block: true,
             reason: `Bash gate: parent approval failed closed: ${result.message}`,
-          };
+          });
         }
 
         if (result.source === "automode") {
-          return {
+          return finish("blocked", {
             block: true,
             reason: `Automode denied this command${result.rationale ? `: ${result.rationale}` : "."} Do not pursue the same outcome through a workaround or indirect execution; use a materially safer alternative or ask the user.`,
-          };
+          });
         }
 
-        return { block: true, reason: "Bash gate: command was denied by parent approval." };
+        return finish("blocked", {
+          block: true,
+          reason: "Bash gate: command was denied by parent approval.",
+        });
       } finally {
         pi.events.emit("bites:bash_gate_resolved", { cwd, command, toolName });
       }
@@ -811,19 +873,22 @@ export default function registerBashGate(
           );
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          return { block: true, reason: `Automode review failed closed: ${message}` };
+          return finish("blocked", {
+            block: true,
+            reason: `Automode review failed closed: ${message}`,
+          });
         }
 
         if (decision.outcome === "allow") {
           compensateTimeout(event.input, gateStartMs);
-          return undefined;
+          return finish("reviewer-approved", undefined);
         }
 
         const denied = {
           block: true as const,
           reason: `Automode denied this command${decision.rationale ? `: ${decision.rationale}` : "."} Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.`,
         };
-        if (!hasUI) return denied;
+        if (!hasUI) return finish("blocked", denied);
 
         const escalation = await promptAutoModeEscalation({
           pi,
@@ -835,9 +900,9 @@ export default function registerBashGate(
         });
         if (escalation === "allow") {
           compensateTimeout(event.input, gateStartMs);
-          return undefined;
+          return finish("human-approved", undefined);
         }
-        return denied;
+        return finish("blocked", denied);
       } finally {
         pi.events.emit("bites:bash_gate_resolved", autoGate);
       }
@@ -845,7 +910,10 @@ export default function registerBashGate(
 
     if (!hasUI) {
       // Non-interactive mode (e.g. `pi -p`) — block by default.
-      return { block: true, reason: "Bash gate: no UI available for confirmation." };
+      return finish("blocked", {
+        block: true,
+        reason: "Bash gate: no UI available for confirmation.",
+      });
     }
 
     // Snapshot the time before showing the prompt. The TUI's elapsed timer
@@ -879,15 +947,23 @@ export default function registerBashGate(
       if (choice?.startsWith("Allow for session")) {
         sessionAllowed.add(sessionAllowKey);
         compensateTimeout(event.input, gateStartMs);
-        return undefined; // proceed
+        return finish("human-approved", undefined); // proceed
       }
 
       if (choice === "Allow") {
         compensateTimeout(event.input, gateStartMs);
-        return undefined; // proceed just this once
+        return finish("human-approved", undefined); // proceed just this once
       }
 
-      return { block: true, reason: "Bash gate: command was denied by the user." };
+      return finish("blocked", {
+        block: true,
+        reason: "Bash gate: command was denied by the user.",
+      });
+    } catch (error) {
+      return finish("blocked", {
+        block: true,
+        reason: `Bash gate: approval failed closed: ${error instanceof Error ? error.message : String(error)}`,
+      });
     } finally {
       pi.events.emit("bites:bash_gate_resolved", manualGate);
     }

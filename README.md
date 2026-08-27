@@ -172,7 +172,9 @@ Default difficulty is `medium`, every 2 code writes.
 
 ## Automode
 
-Press `Alt+Y` to cycle from Bash gate mode to YOLO mode, then Auto mode. Auto mode reviews gated commands with a separate model. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded parent transcript with hidden thinking removed plus the exact command request. With an interactive UI, an explicit denial shows the rationale and lets the human allow once, allow with a remembered reason, export the exact command to a private temporary file, or keep it denied. Remembered reasons are bounded session history supplied as authorization evidence to later reviews; they never approve commands automatically. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt.
+Press `Alt+Y` to cycle from Bash gate mode to YOLO mode, then Auto mode. Auto mode reviews gated commands with a separate model. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded authorization transcript containing active user messages, assistant prose, and prior `bash`/`exec_command` commands. Shell commands are marked `not-reviewed`, `reviewer-approved`, `human-approved`, or `blocked`; these describe permission decisions, not process success. Tool output, non-shell calls, hidden reasoning, and generated context are omitted. A prior human approval is evidence only and never approves a later command automatically.
+
+With an interactive UI, an explicit denial shows the rationale and lets the human allow once, export the exact command to a private temporary file, view a subagent conversation where available, or keep it denied. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt.
 
 Automode uses the active model by default. It can be enabled at startup and given a separate model, thinking level, or policy:
 

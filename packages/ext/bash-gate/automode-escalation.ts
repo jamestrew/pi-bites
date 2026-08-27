@@ -3,7 +3,6 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { appendAutoModeOverride } from "../automode/index.js";
 
 export async function exportBlockedCommand(command: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), `pi-bash-gate-${process.pid}-`));
@@ -13,7 +12,7 @@ export async function exportBlockedCommand(command: string): Promise<string> {
 }
 
 interface AutoModeEscalationOptions {
-  pi: Pick<ExtensionAPI, "appendEntry" | "events">;
+  pi: Pick<ExtensionAPI, "events">;
   ui: ExtensionContext["ui"];
   cwd: string;
   command: string;
@@ -39,27 +38,12 @@ export async function promptAutoModeEscalation({
     for (;;) {
       const choice = await ui.select(prompt, [
         "Allow once",
-        "Allow with reason…",
         "Export command",
         ...(viewConversation ? ["View conversation"] : []),
         "Deny",
       ]);
 
       if (choice === "Allow once") return "allow";
-      if (choice === "Allow with reason…") {
-        let reason = await ui.input("Why are you allowing this command?");
-        while (reason !== undefined && reason.trim().length === 0) {
-          reason = await ui.input("Reason is required", reason);
-        }
-        if (reason === undefined) continue;
-        try {
-          appendAutoModeOverride(pi, command, reason);
-          return "allow";
-        } catch (error) {
-          ui.notify(`Could not remember Automode override: ${String(error)}`, "error");
-          return "deny";
-        }
-      }
       if (choice === "Export command") {
         try {
           ui.notify(await exportBlockedCommand(command), "info");

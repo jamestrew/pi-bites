@@ -1,8 +1,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ShellAuthorizationStatus } from "./authorization.js";
 
 export type BashGateApprovalResult =
-  | { outcome: "allow" }
-  | { outcome: "allow-session" }
+  | { outcome: "allow"; authorization: Exclude<ShellAuthorizationStatus, "blocked"> }
+  | { outcome: "allow-session"; authorization: "human-approved" }
   | { outcome: "deny"; source: "manual" | "automode"; rationale?: string }
   | { outcome: "failure"; message: string };
 
@@ -31,8 +32,16 @@ export type BitesBashGatePayload = {
 function approvalResult(value: unknown): BashGateApprovalResult | undefined {
   if (!value || typeof value !== "object" || !("outcome" in value)) return undefined;
   const result = value as Record<string, unknown>;
-  if (result.outcome === "allow" || result.outcome === "allow-session") {
-    return { outcome: result.outcome };
+  if (
+    result.outcome === "allow" &&
+    (result.authorization === "not-reviewed" ||
+      result.authorization === "reviewer-approved" ||
+      result.authorization === "human-approved")
+  ) {
+    return { outcome: result.outcome, authorization: result.authorization };
+  }
+  if (result.outcome === "allow-session" && result.authorization === "human-approved") {
+    return { outcome: result.outcome, authorization: result.authorization };
   }
   if (
     result.outcome === "deny" &&

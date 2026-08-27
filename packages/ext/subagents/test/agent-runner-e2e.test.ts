@@ -202,7 +202,10 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
 
   it("routes a real child bash gate to the parent approval broker", async () => {
     const pi = makePi();
-    const approve = vi.fn(async () => ({ outcome: "allow" as const }));
+    const approve = vi.fn(async () => ({
+      outcome: "allow" as const,
+      authorization: "human-approved" as const,
+    }));
     const unsubscribe = onSubagentApprovalRequest(pi, approve);
     let session: any;
 

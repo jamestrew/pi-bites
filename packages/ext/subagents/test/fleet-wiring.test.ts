@@ -173,7 +173,9 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
     await flush();
 
-    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "allow", authorization: "not-reviewed" },
+    });
     expect(review).not.toHaveBeenCalled();
   });
 
@@ -228,7 +230,9 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await flush();
 
     expect(ui.select).toHaveBeenCalledOnce();
-    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "allow", authorization: "human-approved" },
+    });
   });
 
   it("keeps the FleetView row stable while manual subagent approval is pending", async () => {
@@ -301,7 +305,39 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       },
       ctx,
     );
-    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "allow", authorization: "reviewer-approved" },
+    });
+  });
+
+  it("fails a pending subagent approval when the parent session changes", async () => {
+    const { pi, lifecycle } = makePi();
+    let resolveReview!: (decision: { outcome: "allow" }) => void;
+    const review = vi.fn(
+      () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
+    );
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    const ctx = { ...ctxWith(uiCtx()), hasUI: false };
+    await lifecycle.get("session_start")?.({}, ctx);
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:r-session-change", reply);
+
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "r-session-change",
+      title: "general",
+      command: "rm build.txt",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+    await lifecycle.get("session_before_switch")?.({}, ctx);
+    resolveReview({ outcome: "allow" });
+    await flush();
+
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "failure", message: "parent approval session changed" },
+    });
   });
 
   it("keeps the FleetView row stable while Automode reviews a subagent command", async () => {
@@ -400,7 +436,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
   });
 
-  it("lets the interactive human allow a subagent Automode denial with a remembered reason", async () => {
+  it("lets the interactive human allow a subagent Automode denial once without a reason", async () => {
     const { pi, lifecycle } = makePi();
     let stale = false;
     const review = vi.fn().mockImplementation(async () => {
@@ -409,8 +445,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
     subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
     const ui = uiCtx();
-    ui.select.mockResolvedValue("Allow with reason…");
-    ui.input.mockResolvedValue("Generated test output");
+    ui.select.mockResolvedValue("Allow once");
     const ctx = ctxWith(ui);
     for (const [key, value] of [
       ["ui", ui],
@@ -440,7 +475,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     expect(ui.select).toHaveBeenCalledWith(expect.stringContaining("not authorized"), [
       "Allow once",
-      "Allow with reason…",
       "Export command",
       "Deny",
     ]);
@@ -462,12 +496,10 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         waitId: expect.any(String),
       }),
     );
-    expect(pi.appendEntry).toHaveBeenCalledWith("pi-bites:automode-override", {
-      version: 1,
-      command: "rm build.txt",
-      reason: "Generated test output",
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "allow", authorization: "human-approved" },
     });
-    expect(reply).toHaveBeenCalledWith({ result: { outcome: "allow" } });
+    expect(ui.input).not.toHaveBeenCalled();
   });
 
   it("keeps the original subagent denial when interactive escalation fails", async () => {
@@ -511,6 +543,12 @@ describe("FleetView wiring (real extension lifecycle)", () => {
             content: [
               { type: "thinking", thinking: "hidden plan" },
               { type: "text", text: "build.txt is generated" },
+              {
+                type: "toolCall",
+                id: "child-shell",
+                name: "exec_command",
+                arguments: { cmd: "rm old-build.txt" },
+              },
             ],
           },
           ...Array.from({ length: 7 }, (_, index) => ({
@@ -519,6 +557,21 @@ describe("FleetView wiring (real extension lifecycle)", () => {
           })),
           { role: "user", content: "only remove generated build.txt" },
         ],
+        sessionManager: {
+          getBranch: () => [
+            {
+              type: "custom",
+              customType: "pi-bites:shell-authorization",
+              data: {
+                version: 1,
+                toolCallId: "child-shell",
+                toolName: "exec_command",
+                command: "rm old-build.txt",
+                status: "human-approved",
+              },
+            },
+          ],
+        },
         dispose: vi.fn(),
       } as any,
     });
@@ -558,9 +611,11 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     const request = review.mock.calls[0]?.[0];
     expect(request.command).toBe("rm build.txt");
-    expect(request.subagentContext).toContain("user: inspect generated files");
-    expect(request.subagentContext).toContain("assistant: build.txt is generated");
-    expect(request.subagentContext).toContain("user: only remove generated build.txt");
+    expect(request.subagentContext).toContain('user: "inspect generated files"');
+    expect(request.subagentContext).toContain('assistant: "build.txt is generated"');
+    expect(request.subagentContext).toContain("rm old-build.txt");
+    expect(request.subagentContext).toContain("human-approved");
+    expect(request.subagentContext).toContain('user: "only remove generated build.txt"');
     expect(request.subagentContext).toContain("<... transcript entries omitted ...>");
     expect(request.subagentContext.length).toBeLessThanOrEqual(40_000);
     expect(request.subagentContext).not.toContain("hidden plan");
