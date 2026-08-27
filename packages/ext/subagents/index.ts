@@ -37,7 +37,7 @@ import { onSubagentApprovalRequest, type BashGateApprovalResult } from "../bash-
 import type { BashGateController } from "../bash-gate/index.js";
 import { promptAutoModeEscalation } from "../bash-gate/automode-escalation.js";
 import {
-  buildReviewerTranscript,
+  buildSubagentReviewerTranscript,
   type AutoModeController,
   type ReviewerMessage,
 } from "../automode/index.js";
@@ -196,7 +196,7 @@ export default function (
               labels: request.labels,
               reasons: request.reasons,
               subagentContext: session
-                ? buildReviewerTranscript(
+                ? buildSubagentReviewerTranscript(
                     session.messages as ReviewerMessage[],
                     session.sessionManager.getBranch(),
                   )

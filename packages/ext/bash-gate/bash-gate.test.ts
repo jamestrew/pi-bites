@@ -117,7 +117,7 @@ function createBashGateHarness(
     ui,
     eventHandlers,
     sessionStart: () => handlers.get("session_start")?.({}, ctx),
-    sessionBeforeSwitch: () => handlers.get("session_before_switch")?.({}, ctx),
+    sessionShutdown: () => handlers.get("session_shutdown")?.({}, ctx),
     toggleYolo: () => shortcutHandler?.(ctx),
     toolCall: (event: any, context: any) =>
       handlers.get("tool_call")!(
@@ -251,14 +251,14 @@ describe("bash gate tool_call", () => {
     const review = vi.fn(
       () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
     );
-    const { toolCall, ctx, pi, sessionBeforeSwitch } = createBashGateHarness([], false, {
+    const { toolCall, ctx, pi, sessionShutdown } = createBashGateHarness([], false, {
       isEnabled: () => true,
       review,
     });
 
     const pending = toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx);
     await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
-    sessionBeforeSwitch();
+    sessionShutdown();
     resolveReview({ outcome: "allow" });
 
     await expect(pending).resolves.toEqual({
