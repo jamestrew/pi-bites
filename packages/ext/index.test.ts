@@ -144,6 +144,7 @@ describe("extension entrypoint", () => {
         expect.any(Object),
         expect.objectContaining({ isEnabled: expect.any(Function) }),
         loaded.bashGate,
+        expect.any(Function),
       );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./goal/index.js")).toHaveBeenCalledTimes(1);
@@ -186,6 +187,7 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./bash-gate/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./rtk.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./auto-compaction.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
     } finally {
       loaded.restoreArgv();

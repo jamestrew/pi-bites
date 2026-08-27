@@ -1,5 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
-import registerAutoCompaction, { DEFAULT_AUTO_COMPACTION_THRESHOLD } from "./auto-compaction.js";
+import registerAutoCompaction, {
+  DEFAULT_AUTO_COMPACTION_THRESHOLD,
+  installTurnBoundaryAutoCompaction,
+} from "./auto-compaction.js";
 
 function setup(thresholdTokens?: number) {
   const handlers = new Map<string, (...args: never[]) => void>();
@@ -131,5 +134,123 @@ describe("auto compaction", () => {
 
     expect(() => compact.mock.calls[0]?.[0].onError(new Error("failed"))).not.toThrow();
     expect(notify).toHaveBeenLastCalledWith("Compaction failed: failed", "error");
+  });
+});
+
+describe("subagent turn-boundary compaction", () => {
+  test("replaces the next-turn context without aborting the active run", async () => {
+    const compactedMessages = [{ role: "compactionSummary" }];
+    const runAutoCompaction = vi.fn(async () => false);
+    const session = {
+      agent: {
+        state: { messages: compactedMessages },
+        prepareNextTurnWithContext: vi.fn(async (turn, _signal?: AbortSignal) => ({
+          context: turn.context,
+        })),
+      },
+      getContextUsage: () => ({ tokens: 42_000 }),
+      abortCompaction: vi.fn(),
+      _runAutoCompaction: runAutoCompaction,
+    };
+    installTurnBoundaryAutoCompaction(session as never, 42_000);
+
+    const result = await session.agent.prepareNextTurnWithContext({ context: { messages: [] } });
+
+    expect(runAutoCompaction).toHaveBeenCalledWith("threshold", false);
+    expect(result.context.messages).toEqual(compactedMessages);
+    expect(session.abortCompaction).not.toHaveBeenCalled();
+  });
+
+  test("continues with the original context when automatic compaction rejects", async () => {
+    const originalMessages = [{ role: "toolResult" }];
+    const session = {
+      agent: {
+        state: { messages: [{ role: "partiallyCompacted" }] },
+        prepareNextTurnWithContext: vi.fn(async (turn) => ({ context: turn.context })),
+      },
+      getContextUsage: () => ({ tokens: 42_000 }),
+      abortCompaction: vi.fn(),
+      _runAutoCompaction: vi.fn(async () => {
+        throw new Error("incompatible private API");
+      }),
+    };
+    installTurnBoundaryAutoCompaction(session as never, 42_000);
+
+    const result = await session.agent.prepareNextTurnWithContext({
+      context: { messages: originalMessages },
+    });
+
+    expect(session._runAutoCompaction).toHaveBeenCalledOnce();
+    expect(result.context.messages).toBe(originalMessages);
+  });
+
+  test("forwards external cancellation to in-progress compaction", async () => {
+    let finishCompaction: (() => void) | undefined;
+    const session = {
+      agent: {
+        state: { messages: [] },
+        prepareNextTurnWithContext: vi.fn(async (turn, _signal?: AbortSignal) => ({
+          context: turn.context,
+        })),
+      },
+      getContextUsage: () => ({ tokens: 42_000 }),
+      subscribe: vi.fn(() => vi.fn()),
+      abortCompaction: vi.fn(() => finishCompaction?.()),
+      _runAutoCompaction: vi.fn(
+        () => new Promise<boolean>((resolve) => (finishCompaction = () => resolve(false))),
+      ),
+    };
+    installTurnBoundaryAutoCompaction(session as never, 42_000);
+    const controller = new AbortController();
+
+    const prepare = session.agent.prepareNextTurnWithContext as (
+      turn: { context: { messages: never[] } },
+      signal?: AbortSignal,
+    ) => Promise<{ context: { messages: never[] } } | undefined>;
+    const preparing = prepare({ context: { messages: [] } }, controller.signal);
+    await vi.waitFor(() => expect(session._runAutoCompaction).toHaveBeenCalledOnce());
+    controller.abort();
+    await preparing;
+
+    expect(session.abortCompaction).toHaveBeenCalledOnce();
+  });
+
+  test("cancels after compaction starts when cancellation landed during auth", async () => {
+    let releaseAuth: (() => void) | undefined;
+    let finishCompaction: (() => void) | undefined;
+    let listener: ((event: { type: string }) => void) | undefined;
+    const session = {
+      agent: {
+        state: { messages: [] },
+        prepareNextTurnWithContext: vi.fn(async (turn, _signal?: AbortSignal) => ({
+          context: turn.context,
+        })),
+      },
+      getContextUsage: () => ({ tokens: 42_000 }),
+      subscribe: vi.fn((next: (event: { type: string }) => void) => {
+        listener = next;
+        return vi.fn();
+      }),
+      abortCompaction: vi.fn(() => finishCompaction?.()),
+      _runAutoCompaction: vi.fn(async () => {
+        await new Promise<void>((resolve) => (releaseAuth = resolve));
+        listener?.({ type: "compaction_start" });
+        await new Promise<void>((resolve) => (finishCompaction = resolve));
+        return false;
+      }),
+    };
+    installTurnBoundaryAutoCompaction(session as never, 42_000);
+    const controller = new AbortController();
+
+    const preparing = session.agent.prepareNextTurnWithContext(
+      { context: { messages: [] } },
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(session._runAutoCompaction).toHaveBeenCalledOnce());
+    controller.abort();
+    releaseAuth?.();
+    await preparing;
+
+    expect(session.abortCompaction).toHaveBeenCalledTimes(2);
   });
 });

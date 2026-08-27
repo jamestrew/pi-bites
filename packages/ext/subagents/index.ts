@@ -49,6 +49,7 @@ export default function (
   configRef: { current: BitesConfig } = { current: {} },
   autoMode?: Pick<AutoModeController, "isEnabled" | "review">,
   bashGate?: BashGateController,
+  getAutoCompactionThreshold?: () => number | undefined,
 ) {
   // ---- Register custom notification renderers ----
   registerNotificationRenderer(pi);
@@ -111,6 +112,7 @@ export default function (
     (parentSessionId, sender, message) =>
       completion.onAgentMessage(sender, message) ||
       parentMessenger.send(parentSessionId, sender, message),
+    getAutoCompactionThreshold,
   );
 
   // Expose manager via Symbol.for() global registry for cross-package access.

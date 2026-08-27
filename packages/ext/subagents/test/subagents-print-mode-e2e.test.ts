@@ -15,7 +15,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Context } from "@earendil-works/pi-ai";
+import { fauxToolCall, type Context } from "@earendil-works/pi-ai/compat";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentCall,
@@ -128,6 +128,81 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     expect(abandonedCalls).toBe(2); // parent tool-call + summary; child never streamed
     expect(run.modelCalls).toBeGreaterThan(abandonedCalls);
     expect(run.modelCalls).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps a subagent invocation alive across turn-boundary compaction", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "subagents-compaction-"));
+    tmpDirs.push(cwd);
+    mkdirSync(join(cwd, ".pi"), { recursive: true });
+    writeFileSync(
+      join(cwd, ".pi", "pi-bites.json"),
+      JSON.stringify({ autoCompaction: { thresholdTokens: 15_000 } }),
+    );
+    writeFileSync(join(cwd, "large.txt"), "x".repeat(49_000));
+
+    run = await runPrintMode({
+      cwd,
+      prompt: "Delegate the compaction probe.",
+      maxModelCalls: 8,
+      respond: (ctx) => {
+        const toolNames = new Set((ctx.tools ?? []).map((tool) => tool.name));
+        if (toolNames.has("Agent")) {
+          const spawned = ctx.messages.some(
+            (message) =>
+              message.role === "toolResult" &&
+              (message as { toolName?: string }).toolName === "Agent",
+          );
+          return spawned
+            ? "Parent received the completion."
+            : agentCall({
+                description: "compaction probe",
+                prompt: "Read large.txt twice, then report CHILD_RESUMED exactly.",
+              });
+        }
+        if (!toolNames.has("read")) return "## Goal\nContinue the compaction probe.";
+
+        const hasReadResults = ctx.messages.some(
+          (message) =>
+            message.role === "toolResult" && (message as { toolName?: string }).toolName === "read",
+        );
+        return hasReadResults
+          ? "CHILD_RESUMED"
+          : [
+              fauxToolCall("read", { path: "large.txt" }, { id: "read-large-1" }),
+              fauxToolCall("read", { path: "large.txt" }, { id: "read-large-2" }),
+            ];
+      },
+    });
+
+    const agentId = agentToolResults(run.parentSession)[0]?.match(/Agent ID: ([^\s]+)/)?.[1];
+    const record = run.manager?.getRecord(agentId ?? "") as
+      | {
+          status: string;
+          result?: string;
+          error?: string;
+          compactionCount: number;
+          session?: {
+            messages: Array<{ role: string; stopReason?: string; errorMessage?: string }>;
+          };
+        }
+      | undefined;
+    expect(record).toMatchObject({
+      status: "completed",
+      result: "CHILD_RESUMED",
+      compactionCount: 1,
+    });
+    expect(record?.error).toBeUndefined();
+    expect(
+      record?.session?.messages.some(
+        (message) =>
+          message.role === "assistant" &&
+          (message.stopReason === "aborted" ||
+            /operation was aborted/i.test(message.errorMessage ?? "")),
+      ),
+    ).toBe(false);
+    // Parent tool turn + immediate parent follow-up + child tool turn + one
+    // summary + one resumed child turn + completion-triggered parent turn.
+    expect(run.modelCalls).toBe(6);
   });
 
   it("spawns a FRONTMATTER-defined (.pi/agents/*.md) agent and its prompt reaches the child", async () => {

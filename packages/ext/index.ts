@@ -9,7 +9,7 @@ import registerCustomTools from "./tools.js";
 import registerFzfFileSearch from "./file-search/index.js";
 import registerAtMentionContext from "./at-mention-context/index.js";
 import registerNotifications from "./notifications.js";
-import registerAutoCompaction from "./auto-compaction.js";
+import registerAutoCompaction, { DEFAULT_AUTO_COMPACTION_THRESHOLD } from "./auto-compaction.js";
 import registerAutoMode from "./automode/index.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
@@ -46,7 +46,9 @@ export default function (pi: ExtensionAPI) {
   const bashGate = disabled.has("bashGate") ? undefined : registerBashGate(pi, configRef, autoMode);
   if (!disabled.has("rtk")) registerRtk(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);
-  if (!disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
+  // Subagent sessions install the same policy directly at Pi's safe
+  // prepare-next-turn seam; ctx.compact() would abort their owning invocation.
+  if (!isSubagent && !disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
   const previewCodexPrompt = disabled.has("codexAdapter")
     ? undefined
     : registerCodexAdapter(pi, configRef);
@@ -57,7 +59,12 @@ export default function (pi: ExtensionAPI) {
   if (!disabled.has("view")) registerView(pi);
   if (!isNonInteractive && !disabled.has("sessionTracker"))
     registerSessionTracker(pi, configRef, autoMode);
-  if (!disabled.has("subagents")) registerSubagents(pi, configRef, autoMode, bashGate);
+  if (!disabled.has("subagents"))
+    registerSubagents(pi, configRef, autoMode, bashGate, () =>
+      configRef.current.disable?.includes("autoCompaction")
+        ? undefined
+        : (configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD),
+    );
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);

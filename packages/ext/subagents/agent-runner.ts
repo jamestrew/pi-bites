@@ -17,6 +17,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { installTurnBoundaryAutoCompaction } from "../auto-compaction.js";
 import {
   BUILTIN_TOOL_NAMES,
   getAgentConfig,
@@ -244,6 +245,8 @@ export interface RunOptions {
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** Pi-bites threshold policy captured by the owning parent extension. */
+  autoCompactionThreshold?: number;
   /** Override working directory (e.g. for worktree isolation). */
   cwd?: string;
   /**
@@ -722,6 +725,9 @@ export async function runAgent(
   }
 
   const { session } = await createAgentSession(sessionOpts);
+
+  if (options.autoCompactionThreshold !== undefined)
+    installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
 
   let requestIndex = 0;
   let activeRequestIndex: number | undefined, activeRequestStartedAt: number | undefined;
