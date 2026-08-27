@@ -34,6 +34,10 @@ export function buildWaitAgentResult(record: AgentRecord, includeOutput: boolean
     duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
     total_tokens: getLifetimeTotal(record.lifetimeUsage),
     lifetime_usage: { ...record.lifetimeUsage },
+    ...(includeOutput && record.failureHistory.length > 0
+      ? { failure_history: record.failureHistory.map((failure) => ({ ...failure })) }
+      : {}),
+    ...(includeOutput && record.abort ? { abort: { ...record.abort } } : {}),
   };
 }
 

@@ -108,6 +108,7 @@ describe("asynchronous completion notification rendering", () => {
       completedAt: 1,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
       compactionCount: 0,
+      failureHistory: [],
     });
 
     expect(payload).not.toContain("\u001b");
@@ -131,6 +132,7 @@ describe("asynchronous completion notification rendering", () => {
       completedAt: 1,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
       compactionCount: 0,
+      failureHistory: [],
     };
 
     const payload = formatTaskNotification(record);

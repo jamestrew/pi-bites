@@ -19,6 +19,7 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
     compactionCount: 0,
     ...overrides,
+    failureHistory: overrides.failureHistory ?? [],
   };
 }
 
@@ -43,6 +44,71 @@ function makeHarness(
 }
 
 describe("agent completion delivery", () => {
+  it("includes the chronological failure chain in a terminal result", async () => {
+    const record = makeRecord("a", {
+      status: "error",
+      result: undefined,
+      error: "The operation was aborted.",
+      abort: { timestamp: 30, source: "shutdown", reason: "shutdown" },
+      failureHistory: [
+        {
+          timestamp: 10,
+          phase: "assistant",
+          message: "429 quota exceeded",
+          stop_reason: "error",
+        },
+        {
+          timestamp: 20,
+          phase: "assistant",
+          message: "The operation was aborted.",
+          stop_reason: "error",
+        },
+      ],
+    });
+    const { completion } = makeHarness([record]);
+
+    const outcome = await completion.waitFor([record.id], 10_000);
+
+    expect(outcome.agents[0]?.failure_history?.map((failure) => failure.message)).toEqual([
+      "429 quota exceeded",
+      "The operation was aborted.",
+    ]);
+    expect(outcome.agents[0]?.abort).toEqual({
+      timestamp: 30,
+      source: "shutdown",
+      reason: "shutdown",
+    });
+  });
+
+  it("includes the original failure chain in automatic completion reports", () => {
+    const record = makeRecord("a", {
+      status: "error",
+      result: undefined,
+      error: "The operation was aborted.",
+      failureHistory: [
+        {
+          timestamp: 10,
+          phase: "assistant",
+          message: "429 quota exceeded",
+          stop_reason: "error",
+        },
+        {
+          timestamp: 20,
+          phase: "assistant",
+          message: "The operation was aborted.",
+          stop_reason: "error",
+        },
+      ],
+    });
+    const { completion, pi } = makeHarness([record]);
+
+    completion.onAgentComplete(record);
+
+    expect(pi.sendMessage.mock.calls[0]?.[0].content).toContain("429 quota exceeded");
+    expect(pi.sendMessage.mock.calls[0]?.[0].content).toContain("failure_history");
+    completion.dispose();
+  });
+
   it("automatically queues an unconsumed completion at the safe steering boundary", () => {
     const record = makeRecord("a");
     const { completion, pi, onAgentFinishedUI } = makeHarness([record]);

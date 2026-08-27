@@ -11,6 +11,7 @@ import { isAbsolute } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
@@ -185,6 +186,38 @@ export class AgentManager {
     callback?.(usage);
   }
 
+  private recordDiagnostic(
+    record: AgentRecord,
+    event: string,
+    details?: Record<string, unknown>,
+  ): void {
+    appendSubagentDiagnostic({
+      type: "subagent_diagnostic",
+      version: 1,
+      timestamp: Date.now(),
+      event,
+      agentId: record.id,
+      parentSessionId: record.parentSessionId,
+      subagent: record.type,
+      pid: process.pid,
+      ...(record.invocation?.modelName
+        ? {
+            provider: record.invocation.modelName.split("/", 1)[0],
+            model: record.invocation.modelName.includes("/")
+              ? record.invocation.modelName.slice(record.invocation.modelName.indexOf("/") + 1)
+              : record.invocation.modelName,
+          }
+        : {}),
+      ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
+      ...(details ? { details } : {}),
+    }).catch(() => undefined);
+  }
+
+  private recordFailure(record: AgentRecord, failure: AgentRecord["failureHistory"][number]): void {
+    record.failureHistory.push(failure);
+    this.recordDiagnostic(record, "failure_observed", { ...failure });
+  }
+
   /** Update the max concurrent agents limit. */
   setMaxConcurrent(n: number) {
     this.maxConcurrent = Math.max(1, n);
@@ -230,8 +263,14 @@ export class AgentManager {
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
       compactionCount: 0,
       invocation: options.invocation,
+      failureHistory: [],
     };
     this.agents.set(id, record);
+    this.recordDiagnostic(record, "created", {
+      manager_running_count: this.runningCount,
+      manager_queue_length: this.queue.length,
+      manager_max_concurrent: this.maxConcurrent,
+    });
 
     const args: SpawnArgs = { pi, parent, type, prompt, options };
 
@@ -244,6 +283,17 @@ export class AgentManager {
       try {
         this.startAgent(id, record, args);
       } catch (err) {
+        this.recordFailure(record, {
+          timestamp: Date.now(),
+          phase: "manager",
+          message: err instanceof Error ? err.message : String(err),
+          ...(err instanceof Error ? { name: err.name } : {}),
+          error_details: serializeDiagnosticError(err),
+          manager_signal_aborted: abortController.signal.aborted,
+        });
+        this.recordDiagnostic(record, "start_rejected", {
+          error: serializeDiagnosticError(err),
+        });
         this.agents.delete(id);
         throw err;
       }
@@ -296,9 +346,20 @@ export class AgentManager {
     }
 
     record.status = "running";
+    const queuedAt = record.startedAt;
     record.startedAt = Date.now();
     this.runningCount++;
     this.onStart?.(record);
+    this.recordDiagnostic(record, "started", {
+      cwd: baseCwd,
+      isolated: options.isolated === true,
+      inherit_context: options.inheritContext === true,
+      isolation: options.isolation,
+      queue_duration_ms: record.startedAt - queuedAt,
+      manager_running_count: this.runningCount,
+      manager_queue_length: this.queue.length,
+      manager_max_concurrent: this.maxConcurrent,
+    });
 
     const abortController = record.abortController;
     if (!abortController) throw new Error(`Agent ${id} has no abort controller`);
@@ -349,6 +410,8 @@ export class AgentManager {
       onAssistantUsage: (usage) => {
         this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
       },
+      onDiagnostic: (event, details) => this.recordDiagnostic(record, event, details),
+      onAssistantFailure: (failure) => this.recordFailure(record, failure),
       onCompaction: (info) => {
         record.compactionCount++;
         this.onCompact?.(record, info);
@@ -381,6 +444,8 @@ export class AgentManager {
               this.onCompact?.(record, info);
               options.onCompaction?.(info);
             },
+            onDiagnostic: (event, details) => this.recordDiagnostic(record, event, details),
+            onAssistantFailure: (failure) => this.recordFailure(record, failure),
           });
         }
 
@@ -415,6 +480,15 @@ export class AgentManager {
         }
 
         this.settled.add(record);
+        this.recordDiagnostic(record, "completed", {
+          status: record.status,
+          duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
+          tool_uses: record.toolUses,
+          lifetime_usage: record.lifetimeUsage,
+          compaction_count: record.compactionCount,
+          failure_count: record.failureHistory.length,
+          abort: record.abort,
+        });
         this.releaseSlot(record);
         this.notifyComplete(record);
         return responseText;
@@ -425,6 +499,14 @@ export class AgentManager {
           record.status = "error";
         }
         record.error = err instanceof Error ? err.message : String(err);
+        this.recordFailure(record, {
+          timestamp: Date.now(),
+          phase: "manager",
+          message: record.error,
+          ...(err instanceof Error ? { name: err.name } : {}),
+          error_details: serializeDiagnosticError(err),
+          manager_signal_aborted: abortController.signal.aborted,
+        });
         record.completedAt ??= Date.now();
 
         // Best-effort worktree cleanup on error
@@ -438,6 +520,16 @@ export class AgentManager {
         }
 
         this.settled.add(record);
+        this.recordDiagnostic(record, "completed", {
+          status: record.status,
+          error: record.error,
+          duration_ms: record.completedAt - record.startedAt,
+          tool_uses: record.toolUses,
+          lifetime_usage: record.lifetimeUsage,
+          compaction_count: record.compactionCount,
+          failure_count: record.failureHistory.length,
+          abort: record.abort,
+        });
         this.releaseSlot(record);
         this.notifyComplete(record);
         return "";
@@ -461,6 +553,20 @@ export class AgentManager {
         record.status = "error";
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt = Date.now();
+        this.recordFailure(record, {
+          timestamp: Date.now(),
+          phase: "manager",
+          message: record.error,
+          ...(err instanceof Error ? { name: err.name } : {}),
+          error_details: serializeDiagnosticError(err),
+          manager_signal_aborted: record.abortController?.signal.aborted ?? false,
+        });
+        this.recordDiagnostic(record, "completed", {
+          status: record.status,
+          error: record.error,
+          duration_ms: record.completedAt - record.startedAt,
+          failure_count: record.failureHistory.length,
+        });
         this.notifyComplete(record);
       }
     }
@@ -490,6 +596,12 @@ export class AgentManager {
     const record = this.agents.get(id);
     if (!record?.session || record.status !== "running") return false;
     record.pendingCancelSteer = message;
+    record.abort = {
+      timestamp: Date.now(),
+      source: "cancel_and_steer",
+      reason: "cancel_and_steer",
+    };
+    this.recordDiagnostic(record, "abort_requested", { source: "cancel_and_steer" });
     record.session.abort().catch(() => {});
     return true;
   }
@@ -511,6 +623,13 @@ export class AgentManager {
       this.queue = this.queue.filter((q) => q.id !== id);
       record.status = "stopped";
       record.completedAt = Date.now();
+      record.abort = { timestamp: Date.now(), source: "stop", reason: "stop" };
+      this.recordDiagnostic(record, "abort_requested", { source: "stop", queued: true });
+      this.recordDiagnostic(record, "completed", {
+        status: record.status,
+        duration_ms: record.completedAt - record.startedAt,
+        abort: record.abort,
+      });
       this.notifyComplete(record);
       return true;
     }
@@ -519,7 +638,9 @@ export class AgentManager {
     record.status = "stopped";
     record.error = "aborted";
     record.completedAt = Date.now();
-    record.abortController?.abort();
+    record.abort = { timestamp: Date.now(), source: "stop", reason: "stop" };
+    this.recordDiagnostic(record, "abort_requested", { source: "stop" });
+    record.abortController?.abort(record.abort.reason);
     this.releaseSlot(record);
     this.notifyComplete(record);
     return true;
@@ -568,6 +689,13 @@ export class AgentManager {
       if (record) {
         record.status = "stopped";
         record.completedAt = Date.now();
+        record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
+        this.recordDiagnostic(record, "abort_requested", { source: "shutdown", queued: true });
+        this.recordDiagnostic(record, "completed", {
+          status: record.status,
+          duration_ms: record.completedAt - record.startedAt,
+          abort: record.abort,
+        });
         count++;
       }
     }
@@ -575,7 +703,9 @@ export class AgentManager {
     // Abort running agents
     for (const record of this.agents.values()) {
       if (record.status === "running") {
-        record.abortController?.abort();
+        record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
+        this.recordDiagnostic(record, "abort_requested", { source: "shutdown" });
+        record.abortController?.abort(record.abort.reason);
         record.status = "stopped";
         record.completedAt = Date.now();
         count++;

@@ -18,6 +18,11 @@ vi.mock("../usage.js", async (importOriginal) => ({
   appendSubagentUsageRecord: vi.fn(() => Promise.resolve()),
 }));
 
+vi.mock("../diagnostics.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../diagnostics.js")>()),
+  appendSubagentDiagnostic: vi.fn(() => Promise.resolve()),
+}));
+
 import { runAgent } from "../agent-runner.js";
 import { appendSubagentUsageRecord } from "../usage.js";
 
@@ -172,6 +177,42 @@ describe("AgentManager — completion callbacks", () => {
 
   afterEach(() => {
     manager.dispose();
+  });
+
+  it("retains a quota failure when a later abort becomes the terminal error", async () => {
+    manager = new AgentManager();
+    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      options.onAssistantFailure?.({
+        timestamp: 10,
+        phase: "assistant",
+        message: "429 quota exceeded",
+        stop_reason: "error",
+        manager_signal_aborted: false,
+      });
+      options.onAssistantFailure?.({
+        timestamp: 20,
+        phase: "assistant",
+        message: "The operation was aborted.",
+        stop_reason: "error",
+        manager_signal_aborted: false,
+      });
+      throw new Error("The operation was aborted.");
+    });
+
+    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
+      description: "test",
+    });
+    await manager.getRecord(id)!.promise;
+
+    expect(manager.getRecord(id)).toMatchObject({
+      status: "error",
+      error: "The operation was aborted.",
+      failureHistory: [
+        { phase: "assistant", message: "429 quota exceeded" },
+        { phase: "assistant", message: "The operation was aborted." },
+        { phase: "manager", message: "The operation was aborted." },
+      ],
+    });
   });
 
   it("does not let onComplete errors turn a completed agent into a failed run", async () => {

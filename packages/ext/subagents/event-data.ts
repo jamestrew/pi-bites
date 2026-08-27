@@ -1,4 +1,4 @@
-import { type AgentRecord } from "./types.js";
+import { type AgentAbort, type AgentFailure, type AgentRecord } from "./types.js";
 import { getLifetimeTotal } from "./usage.js";
 
 export type AgentEventData = {
@@ -10,6 +10,8 @@ export type AgentEventData = {
   status: string;
   toolUses: number;
   durationMs: number;
+  failureHistory?: AgentFailure[];
+  abort?: AgentAbort;
   tokens?: {
     input: number;
     output: number;
@@ -38,6 +40,10 @@ export function buildEventData(record: AgentRecord): AgentEventData {
     status: record.status,
     toolUses: record.toolUses,
     durationMs,
+    ...(record.failureHistory.length > 0
+      ? { failureHistory: record.failureHistory.map((failure) => ({ ...failure })) }
+      : {}),
+    ...(record.abort ? { abort: { ...record.abort } } : {}),
     tokens,
   };
 }

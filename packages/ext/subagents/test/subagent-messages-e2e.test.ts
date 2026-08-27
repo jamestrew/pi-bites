@@ -328,6 +328,7 @@ it("real WaitAgent wakes once and exposes child mail only through its tool resul
     startedAt: Date.now(),
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
     compactionCount: 0,
+    failureHistory: [],
   };
   let completion!: ReturnType<typeof createAgentCompletionHandler>;
   const extension = (pi: ExtensionAPI) => {

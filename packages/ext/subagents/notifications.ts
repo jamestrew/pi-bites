@@ -40,6 +40,16 @@ export function formatTaskNotification(record: AgentRecord): string {
   const compactXml = record.compactionCount
     ? `<compactions>${record.compactionCount}</compactions>`
     : "";
+  const failureXml =
+    record.failureHistory.length > 0
+      ? `<failure_history>${escapeXml(
+          JSON.stringify(
+            record.failureHistory.map(
+              ({ diagnostics: _diagnostics, error_details: _error, ...f }) => f,
+            ),
+          ),
+        )}</failure_history>`
+      : "";
 
   const result = record.result?.trim() ? record.result : (record.error ?? "No output.");
 
@@ -50,6 +60,7 @@ export function formatTaskNotification(record: AgentRecord): string {
     `<status>${escapeXml(status)}</status>`,
     `<summary>Agent "${escapeXml(record.description)}" ${record.status}${getStatusNote(record.status)}</summary>`,
     `<result>${escapeXml(result)}</result>`,
+    failureXml,
     `<usage><total_tokens>${totalTokens}</total_tokens><tool_uses>${record.toolUses}</tool_uses>${ctxXml}${compactXml}<duration_ms>${durationMs}</duration_ms></usage>`,
     `</task-notification>`,
   ]

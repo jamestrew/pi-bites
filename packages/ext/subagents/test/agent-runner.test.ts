@@ -134,7 +134,23 @@ import {
 function createSession(finalText: string) {
   const listeners: Array<(event: any) => void> = [];
   const session = {
+    agent: {} as { onPayload?: (...args: any[]) => any; onResponse?: (...args: any[]) => any },
     messages: [] as any[],
+    model: undefined,
+    thinkingLevel: "off",
+    sessionManager: { getSessionId: vi.fn(() => "child-session") },
+    settingsManager: {
+      getTransport: vi.fn(() => "auto"),
+      getRetrySettings: vi.fn(() => ({ enabled: true, maxRetries: 3, baseDelayMs: 1000 })),
+      getProviderRetrySettings: vi.fn(() => ({
+        timeoutMs: undefined as number | undefined,
+        maxRetryDelayMs: 60_000,
+      })),
+      getHttpIdleTimeoutMs: vi.fn(() => 300_000),
+      getWebSocketConnectTimeoutMs: vi.fn(() => undefined),
+      getCompactionSettings: vi.fn(() => ({ enabled: true })),
+    },
+    getSessionStats: vi.fn(() => ({ contextUsage: { tokens: 0, contextWindow: 0 } })),
     subscribe: vi.fn((listener: (event: any) => void) => {
       listeners.push(listener);
       return () => {};
@@ -214,6 +230,99 @@ beforeEach(() => {
 });
 
 describe("agent-runner final output capture", () => {
+  it("records the effective provider timeout and request deadline", async () => {
+    const { session } = createSession("DONE");
+    session.settingsManager.getProviderRetrySettings.mockReturnValue({
+      timeoutMs: 120_000,
+      maxRetryDelayMs: 60_000,
+    });
+    createAgentSession.mockResolvedValue({ session });
+    const diagnostics: Array<{ event: string; details?: Record<string, unknown> }> = [];
+
+    await runAgent(ctx, "Explore", "go", {
+      pi,
+      messageParent,
+      onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    });
+    await session.agent.onPayload?.(
+      { input: ["secret prompt"] },
+      {
+        provider: "openai-codex",
+        id: "gpt-test",
+        api: "openai-codex-responses",
+      },
+    );
+
+    expect(diagnostics.find(({ event }) => event === "session_created")?.details).toMatchObject({
+      http_idle_timeout_ms: 300_000,
+      effective_provider_timeout_ms: 120_000,
+    });
+    const request = diagnostics.find(({ event }) => event === "provider_request")?.details;
+    expect(request).toMatchObject({ effective_timeout_ms: 120_000, input_count: 1 });
+    expect((request?.timeout_deadline as number) - 120_000).toBeGreaterThan(0);
+    expect(JSON.stringify(request)).not.toContain("secret prompt");
+  });
+
+  it("reports an earlier quota failure before a terminal abort", async () => {
+    const { session, listeners } = createSession("");
+    createAgentSession.mockResolvedValue({ session });
+    const failures: any[] = [];
+    const diagnosticEvents: string[] = [];
+    const usage = {
+      input: 1,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      cost: { total: 0 },
+    };
+    const emit = (event: any) => {
+      for (const listener of listeners) listener(event);
+    };
+    session.prompt = vi.fn(async () => {
+      const quota = {
+        role: "assistant",
+        content: [],
+        provider: "openai-codex",
+        model: "gpt-test",
+        timestamp: 10,
+        stopReason: "error",
+        errorMessage: "429 quota exceeded",
+        usage,
+      };
+      session.messages.push(quota);
+      emit({ type: "message_end", message: quota });
+      emit({
+        type: "auto_retry_start",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 1000,
+        errorMessage: quota.errorMessage,
+      });
+      const aborted = {
+        ...quota,
+        timestamp: 20,
+        errorMessage: "The operation was aborted.",
+      };
+      session.messages.push(aborted);
+      emit({ type: "message_end", message: aborted });
+    });
+
+    await expect(
+      runAgent(ctx, "Explore", "go", {
+        pi,
+        messageParent,
+        onAssistantFailure: (failure) => failures.push(failure),
+        onDiagnostic: (event) => diagnosticEvents.push(event),
+      }),
+    ).rejects.toThrow("The operation was aborted.");
+
+    expect(failures.map((failure) => failure.message)).toEqual([
+      "429 quota exceeded",
+      "The operation was aborted.",
+    ]);
+    expect(diagnosticEvents).toContain("auto_retry_start");
+  });
+
   it("returns the final assistant text even when no text_delta events were streamed", async () => {
     const { session } = createSession("LOCKED");
     createAgentSession.mockResolvedValue({ session });
