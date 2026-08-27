@@ -170,15 +170,24 @@ describe("exec_command and write_stdin", () => {
       bold: (text: string) => `<bold>${text}</bold>`,
       fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
     };
-    expect(
-      tool.renderCall!({ session_id: 6 }, theme as never, { state: {} } as never)
+    const renderCall = (chars?: string) =>
+      tool.renderCall!(
+        { session_id: 6, ...(chars === undefined ? {} : { chars }) },
+        theme as never,
+        {
+          state: {},
+        } as never,
+      )
         .render(200)
-        .map((line) => line.trimEnd()),
-    ).toEqual([
+        .map((line) => line.trimEnd());
+    const pollScanline = [
       "<bold>Poll</bold><toolTitle> echo started",
       "sleep 5",
       "echo finished</toolTitle>",
-    ]);
+    ];
+    expect(renderCall()).toEqual(pollScanline);
+    expect(renderCall("")).toEqual(pollScanline);
+    expect(renderCall("\n")[0]).toBe("<bold>Input</bold><toolTitle> echo started");
 
     const rendered = tool.renderResult!(
       {

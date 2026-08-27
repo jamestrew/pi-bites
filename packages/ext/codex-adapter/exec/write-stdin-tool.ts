@@ -72,7 +72,7 @@ export function createWriteStdinTool(
       const command = sessions.getSessionCommand(args.session_id);
       return new Text(
         renderExecScanline(
-          args.chars === undefined ? "Poll" : "Input",
+          args.chars?.length ? "Input" : "Poll",
           command ?? `session ${args.session_id}`,
           "",
           theme,
