@@ -1,15 +1,19 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import {
   defaultSessionTrackerDaemonOptions,
   defaultSessionTrackerOptions,
+  formatTmuxStatus,
   getSessionTrackerDaemonCommand,
+  getTrackerPidPath,
   getTrackerLogPath,
   getTrackerSocketPath,
+  getTrackerStatusPath,
   parseTrackerRequest,
   parseTrackerResponse,
   requestTracker,
@@ -51,6 +55,30 @@ function record(overrides: Partial<PaneRecord> = {}): PaneRecord {
     ...overrides,
   };
 }
+
+function documentedTmuxStatusCommand(): string {
+  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+  const command = readme.match(/^set -ag status-right ' #\((.*)\)'$/m)?.[1];
+  if (!command) throw new Error("README tmux status command not found");
+  return command;
+}
+
+test("formats the tmux status from every tracked pane", () => {
+  expect(
+    formatTmuxStatus([
+      record({ paneId: "%1", state: "idle" }),
+      record({ paneId: "%2", state: "needs-permission" }),
+      record({ paneId: "%3", state: "needs-input" }),
+      record({ paneId: "%4", state: "working" }),
+      record({ paneId: "%5", state: "working" }),
+    ]),
+  ).toBe("π 5 · !1 · ?1 · ▶2");
+});
+
+test("tmux status omits zero counters, but includes idle panes in its total", () => {
+  expect(formatTmuxStatus([record({ paneId: "%1" }), record({ paneId: "%2" })])).toBe("π 2");
+  expect(formatTmuxStatus([])).toBeUndefined();
+});
 
 test("parses valid tracker messages and rejects malformed ones", () => {
   const request = { type: "report", record: record(), futureField: true };
@@ -239,6 +267,70 @@ test("daemon ingests reports and returns snapshots over newline JSON", async () 
   }
 });
 
+test("daemon projects tracker changes and removes the projection on shutdown", async () => {
+  const dir = tempDir();
+  const socketPath = join(dir, "tracker.sock");
+  const statusPath = getTrackerStatusPath(socketPath);
+  const pidPath = getTrackerPidPath(socketPath);
+  const server = await startSessionTrackerDaemon(
+    socketPath,
+    new SessionTracker({
+      ...defaultSessionTrackerOptions,
+      now: () => 1_000,
+      tmuxPaneExists: () => true,
+    }),
+    {
+      ...defaultSessionTrackerDaemonOptions,
+      setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+      clearInterval: (() => {}) as typeof clearInterval,
+    },
+  );
+
+  try {
+    expect(readFileSync(pidPath, "utf8")).toBe(`${process.pid}\n`);
+    expect(existsSync(statusPath)).toBe(false);
+    await requestTracker(socketPath, { type: "report", record: record() });
+    expect(readFileSync(statusPath, "utf8")).toBe("π 1\n");
+    await requestTracker(socketPath, {
+      type: "report",
+      record: record({ seq: 2, state: "needs-permission" }),
+    });
+    expect(readFileSync(statusPath, "utf8")).toBe("π 1 · !1\n");
+
+    await closeServer(server);
+    expect(existsSync(statusPath)).toBe(false);
+    expect(existsSync(pidPath)).toBe(false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("tmux projection command prints only for a live daemon", () => {
+  const dir = tempDir();
+  const pidPath = join(dir, "session-tracker.pid");
+  writeFileSync(join(dir, "session-tracker.status"), "π 3 · ▶2\n");
+  const documentedCommand = documentedTmuxStatusCommand();
+  const command = documentedCommand.replace("dir=/tmp/pi-session-tracker-$(id -u)", 'dir="$1"');
+  expect(command).not.toBe(documentedCommand);
+  const render = () => spawnSync("sh", ["-c", command, "sh", dir], { encoding: "utf8" }).stdout;
+
+  writeFileSync(pidPath, `${process.pid}\n`);
+  expect(render()).toBe("π 3 · ▶2\n");
+  writeFileSync(pidPath, "2147483647\n");
+  expect(render()).toBe("");
+});
+
+test("README documents the opt-in liveness-checked tmux segment", () => {
+  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
+  const section = readme.split("## Tmux status segment")[1] ?? "";
+
+  expect(section).toContain("session-tracker.pid");
+  expect(section).toContain("session-tracker.status");
+  expect(section).toContain('kill -0 "$pid"');
+  expect(section).toContain("set -g status-interval 5");
+  expect(section).toContain("does not start");
+});
+
 test("daemon shuts down over newline JSON", async () => {
   const dir = tempDir();
   const socketPath = join(dir, "tracker.sock");
@@ -256,6 +348,126 @@ test("daemon shuts down over newline JSON", async () => {
     const closed = new Promise((resolve) => server.once("close", resolve));
     await expect(requestTracker(socketPath, { type: "shutdown" })).resolves.toEqual({ ok: true });
     await closed;
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("daemon shutdown cannot be undone by a late tracker update", async () => {
+  const dir = tempDir();
+  const socketPath = join(dir, "tracker.sock");
+  let paneCheckStarted: (() => void) | undefined;
+  let finishPaneCheck: ((exists: boolean) => void) | undefined;
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    now: () => 1_000,
+    tmuxPaneExists: () => {
+      paneCheckStarted?.();
+      return new Promise<boolean>((resolve) => {
+        finishPaneCheck = resolve;
+      });
+    },
+  });
+  await tracker.handle({ type: "report", record: record() });
+  const server = await startSessionTrackerDaemon(socketPath, tracker, {
+    ...defaultSessionTrackerDaemonOptions,
+    setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  try {
+    const paneCheck = new Promise<void>((resolve) => {
+      paneCheckStarted = resolve;
+    });
+    const focusRequest = requestTracker(socketPath, { type: "focus_pane", paneId: "%1" });
+    await paneCheck;
+    const closed = new Promise((resolve) => server.once("close", resolve));
+    await requestTracker(socketPath, { type: "shutdown" });
+    expect(existsSync(getTrackerStatusPath(socketPath))).toBe(false);
+    expect(existsSync(getTrackerPidPath(socketPath))).toBe(false);
+
+    finishPaneCheck?.(false);
+    await expect(focusRequest).resolves.toEqual({ ok: false, error: "not-found" });
+    await closed;
+    expect(existsSync(getTrackerStatusPath(socketPath))).toBe(false);
+    expect(existsSync(getTrackerPidPath(socketPath))).toBe(false);
+  } finally {
+    finishPaneCheck?.(false);
+    await closeServer(server);
+  }
+});
+
+test("closing daemon does not remove a replacement daemon projection", async () => {
+  const dir = tempDir();
+  const socketPath = join(dir, "tracker.sock");
+  const statusPath = getTrackerStatusPath(socketPath);
+  const pidPath = getTrackerPidPath(socketPath);
+  let paneCheckStarted: (() => void) | undefined;
+  let finishPaneCheck: ((exists: boolean) => void) | undefined;
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    now: () => 1_000,
+    tmuxPaneExists: () => {
+      paneCheckStarted?.();
+      return new Promise<boolean>((resolve) => {
+        finishPaneCheck = resolve;
+      });
+    },
+  });
+  await tracker.handle({ type: "report", record: record() });
+  const server = await startSessionTrackerDaemon(socketPath, tracker, {
+    ...defaultSessionTrackerDaemonOptions,
+    setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+    clearInterval: (() => {}) as typeof clearInterval,
+  });
+
+  try {
+    const paneCheck = new Promise<void>((resolve) => {
+      paneCheckStarted = resolve;
+    });
+    const focusRequest = requestTracker(socketPath, { type: "focus_pane", paneId: "%1" });
+    await paneCheck;
+    const closed = new Promise((resolve) => server.once("close", resolve));
+    server.close();
+    writeFileSync(pidPath, "12345\n");
+    writeFileSync(statusPath, "π 9 · ▶9\n");
+    finishPaneCheck?.(false);
+    await focusRequest;
+    await closed;
+
+    expect(readFileSync(pidPath, "utf8")).toBe("12345\n");
+    expect(readFileSync(statusPath, "utf8")).toBe("π 9 · ▶9\n");
+  } finally {
+    finishPaneCheck?.(false);
+    await closeServer(server);
+  }
+});
+
+test("daemon cleanup reaps an abandoned projection lock", async () => {
+  const dir = tempDir();
+  const socketPath = join(dir, "tracker.sock");
+  const server = await startSessionTrackerDaemon(
+    socketPath,
+    new SessionTracker(defaultSessionTrackerOptions),
+    {
+      ...defaultSessionTrackerDaemonOptions,
+      setInterval: (() => ({ unref() {} }) as ReturnType<typeof setInterval>) as typeof setInterval,
+      clearInterval: (() => {}) as typeof clearInterval,
+    },
+  );
+
+  await requestTracker(socketPath, { type: "report", record: record() });
+  expect(existsSync(getTrackerStatusPath(socketPath))).toBe(true);
+  mkdirSync(`${socketPath}.projection.lock`);
+  try {
+    await closeServer(server);
+    await vi.waitFor(
+      () => {
+        expect(existsSync(getTrackerPidPath(socketPath))).toBe(false);
+        expect(existsSync(getTrackerStatusPath(socketPath))).toBe(false);
+      },
+      { timeout: 2_000, interval: 25 },
+    );
   } finally {
     await closeServer(server);
   }
