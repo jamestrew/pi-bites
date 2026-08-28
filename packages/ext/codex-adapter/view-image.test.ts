@@ -245,14 +245,17 @@ describe("view_image", () => {
     }
   });
 
-  test("bundles only the supported Linux x64 helper", () => {
+  test("bundles supported Linux x64 and arm64 helpers", () => {
     expect(getBundledViewImagePath("linux", "x64")).toMatch(
       /view-image\/bin\/linux-x64\/view_image$/,
+    );
+    expect(getBundledViewImagePath("linux", "arm64")).toMatch(
+      /view-image\/bin\/linux-arm64\/view_image$/,
     );
     expect(getBundledViewImagePath("darwin", "arm64")).toBeUndefined();
   });
 
-  test.skipIf(process.platform !== "linux" || process.arch !== "x64")(
+  test.skipIf(process.platform !== "linux" || !["x64", "arm64"].includes(process.arch))(
     "validates supported content natively, independent of path spelling",
     async () => {
       const fixtures = {

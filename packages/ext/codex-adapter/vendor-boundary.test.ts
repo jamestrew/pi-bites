@@ -28,9 +28,13 @@ const retainedGroups = [
   /^vendor\/view-image\/rust\/crates\/codex-utils-image\/[^/]+$/,
 ];
 const nativeArtifacts = [
+  "apply-patch/bin/linux-arm64/apply_patch",
   "apply-patch/bin/linux-x64/apply_patch",
+  "exec/bin/linux-arm64/exec_bridge",
   "exec/bin/linux-x64/exec_bridge",
+  "view-image/bin/linux-arm64/view_image",
   "view-image/bin/linux-x64/view_image",
+  "web-run/bin/linux-arm64/web_run",
   "web-run/bin/linux-x64/web_run",
 ];
 
@@ -56,7 +60,7 @@ describe("Codex adapter vendor boundary", () => {
     }
   });
 
-  test("contains only retained source groups and Linux x64 artifacts", () => {
+  test("contains only retained source groups and supported Linux artifacts", () => {
     const files = filesBelow(root);
     expect(
       files.filter(
@@ -103,14 +107,26 @@ describe("Codex adapter vendor boundary", () => {
       createHash("sha256")
         .update(readFileSync(resolve(root, path)))
         .digest("hex");
+    expect(sha256("apply-patch/bin/linux-arm64/apply_patch")).toBe(
+      "0ce6c0c12fcadaa41143aee1c0de2c8be86cee4b1e7655391815c18f048c9518",
+    );
     expect(sha256("apply-patch/bin/linux-x64/apply_patch")).toBe(
       "9ded1c635a4e0e2aae2dd09d7f676b24fc4b377016f74c1a51d8b3b22ed6bb55",
+    );
+    expect(sha256("exec/bin/linux-arm64/exec_bridge")).toBe(
+      "78f499abb9821cd4cb2980ff2580682e55a4256981fc05db5c67416fb644c887",
     );
     expect(sha256("exec/bin/linux-x64/exec_bridge")).toBe(
       "a240c111fcf6a3efbfb8aef56fdea6c1aa24421c3fc4c28a6a2d6703266df6fe",
     );
+    expect(sha256("web-run/bin/linux-arm64/web_run")).toBe(
+      "be2de95f4d6ec29ea1d8a48ba0c3e363bfe3d26c116f5796eee2266c0d22e110",
+    );
     expect(sha256("web-run/bin/linux-x64/web_run")).toBe(
       "6e827a6f3600f600d34755a8aa1c3878db0ad34ae2e3001a80c715ba7cf57e89",
+    );
+    expect(sha256("view-image/bin/linux-arm64/view_image")).toBe(
+      "951ceb39bfd09173816b392f75988b65a20bf6ed8a77d51a83d4747ba45e781d",
     );
     expect(sha256("view-image/bin/linux-x64/view_image")).toBe(
       "39fe04b7cb5a5060f2ab9b22c81ee2686e942964a1d7d3d0836bbfd5c5776deb",

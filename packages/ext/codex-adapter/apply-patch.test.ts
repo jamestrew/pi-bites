@@ -833,11 +833,12 @@ describe("apply_patch", () => {
     ).rejects.toThrow(/status 7[\s\S]*native boom/i);
   });
 
-  test("bundles only the executable Linux x64 helper", () => {
-    const binary = getBundledApplyPatchBinaryPath("linux", "x64");
-    expect(binary).toBeDefined();
-    expect(statSync(binary!).mode & 0o111).not.toBe(0);
-    expect(getBundledApplyPatchBinaryPath("linux", "arm64")).toBeUndefined();
+  test("bundles executable Linux x64 and arm64 helpers", () => {
+    for (const arch of ["x64", "arm64"]) {
+      const binary = getBundledApplyPatchBinaryPath("linux", arch);
+      expect(binary).toBeDefined();
+      expect(statSync(binary!).mode & 0o111).not.toBe(0);
+    }
     expect(getBundledApplyPatchBinaryPath("darwin", "x64")).toBeUndefined();
   });
 

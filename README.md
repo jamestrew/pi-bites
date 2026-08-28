@@ -107,7 +107,7 @@ Stock `openai-codex` Responses models get `web_run` through the existing Pi logi
 
 `allowOpenAICodexFallback` defaults to `false`. Set it to `true` only where sending explicit search/navigation arguments through personal stock Codex authentication is permitted. A selected route never retries through another provider after auth, compatibility, HTTP, or native failure. `web_run` sends no Pi conversation or project context.
 
-Only Linux x86-64 native helpers, including `view_image`, are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
+Linux x86-64 and arm64 native helpers, including `view_image`, are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
 
 ## Disabling extensions
 

@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { Value } from "typebox/value";
 import { describe, expect, test, vi } from "vitest";
 
+import { getBundledWebRunPath } from "./web-run/binary.js";
 import {
   createWebRunTool,
   isWebRunAvailable,
@@ -45,6 +46,12 @@ function context(options: {
 }
 
 describe("web_run route policy", () => {
+  test("bundles Linux x64 and arm64 clients", () => {
+    expect(getBundledWebRunPath("linux", "x64")).toBeDefined();
+    expect(getBundledWebRunPath("linux", "arm64")).toBeDefined();
+    expect(getBundledWebRunPath("darwin", "arm64")).toBeUndefined();
+  });
+
   test("trusts only stock Codex Responses and explicit compatible providers", () => {
     expect(
       isWebRunAvailable(model("openai-codex", "gpt", "openai-codex-responses", "https://x"), {}),

@@ -755,9 +755,9 @@ describe("exec_command and write_stdin", () => {
     await expect(sessions.exec({ cmd: "echo no" }, cwd)).rejects.toThrow(/shut down/i);
   });
 
-  test("bundles only the Linux x64 bridge", () => {
+  test("bundles Linux x64 and arm64 bridges", () => {
     expect(getBundledExecBridgePath("linux", "x64")).toBeDefined();
-    expect(getBundledExecBridgePath("linux", "arm64")).toBeUndefined();
+    expect(getBundledExecBridgePath("linux", "arm64")).toBeDefined();
     expect(getBundledExecBridgePath("darwin", "x64")).toBeUndefined();
   });
 });
