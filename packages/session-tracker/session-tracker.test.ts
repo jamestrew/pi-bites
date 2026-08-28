@@ -58,7 +58,7 @@ function record(overrides: Partial<PaneRecord> = {}): PaneRecord {
 
 function documentedTmuxStatusCommand(): string {
   const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
-  const command = readme.match(/^set -ag status-right ' #\((.*)\)'$/m)?.[1];
+  const command = readme.match(/^set -ag status-right ' #\((.*)\) '$/m)?.[1];
   if (!command) throw new Error("README tmux status command not found");
   return command;
 }
@@ -329,6 +329,8 @@ test("README documents the opt-in liveness-checked tmux segment", () => {
   expect(section).toContain('kill -0 "$pid"');
   expect(section).toContain("set -g status-interval 5");
   expect(section).toContain("does not start");
+  expect(section).toContain("after any tmux theme or plugin initialization");
+  expect(section).toContain("/pi-sessions-restart-daemon");
 });
 
 test("daemon shuts down over newline JSON", async () => {

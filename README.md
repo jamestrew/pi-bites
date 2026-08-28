@@ -154,8 +154,10 @@ Controls: `Tab`/arrow keys switch periods, `↑`/`↓` selects providers, `Enter
 To show a host-wide summary of tracked Pi panes, append this read-only segment to your existing tmux status line in `.tmux.conf`:
 
 ```tmux
-set -ag status-right ' #(dir=/tmp/pi-session-tracker-$(id -u); read -r pid < "$dir/session-tracker.pid" 2>/dev/null && kill -0 "$pid" 2>/dev/null && cat "$dir/session-tracker.status" 2>/dev/null)'
+set -ag status-right ' #(dir=/tmp/pi-session-tracker-$(id -u); read -r pid < "$dir/session-tracker.pid" 2>/dev/null && kill -0 "$pid" 2>/dev/null && cat "$dir/session-tracker.status" 2>/dev/null) '
 ```
+
+Place the line after any tmux theme or plugin initialization that sets `status-right`; a later plugin setup can replace it. If the tracker daemon was already running when you upgraded pi-bites, run `/pi-sessions-restart-daemon` once from Pi to load the new projection support.
 
 The output is `π N · !P · ?I · ▶W`: `π` counts all tracked panes, `!` counts panes waiting for permission, `?` counts panes waiting for input, and `▶` counts working panes. Zero state counters are omitted, and idle panes appear only in the `π` total. The segment stays empty when there are no tracked panes or the recorded daemon is not alive. It summarizes the host-local tracker, including panes in other tmux servers.
 
