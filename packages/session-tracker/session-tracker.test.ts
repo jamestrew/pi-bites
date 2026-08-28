@@ -87,6 +87,45 @@ test("parses valid tracker messages and rejects malformed ones", () => {
   const response = { ok: true, records: [record()], futureField: true };
   expect(parseTrackerResponse(response)).toBe(response);
   expect(parseTrackerResponse({ ok: true, records: [{ state: "unknown" }] })).toBeUndefined();
+  expect(
+    parseTrackerRequest({
+      type: "focus_next",
+      currentPaneId: "%2",
+      targetClient: "/dev/pts/4",
+    }),
+  ).toEqual({ type: "focus_next", currentPaneId: "%2", targetClient: "/dev/pts/4" });
+  expect(parseTrackerRequest({ type: "focus_next", targetClient: 4 })).toBeUndefined();
+});
+
+test("pi-sessions helper sends a targeted focus-next request", async () => {
+  const cli = (await import(new URL("../../bin/pi-sessions.mjs", import.meta.url).href)) as {
+    parseArgs(args: string[]): unknown;
+    requestNext(socketPath: string, request: unknown): Promise<unknown>;
+  };
+  const request = cli.parseArgs(["next", "--from", "%2", "--client", "/dev/pts/4"]);
+  expect(request).toEqual({
+    type: "focus_next",
+    currentPaneId: "%2",
+    targetClient: "/dev/pts/4",
+  });
+  expect(() => cli.parseArgs(["next", "--wat"])).toThrow(/usage:/);
+
+  const socketPath = join(tempDir(), "cli.sock");
+  let received: unknown;
+  const server = createServer((socket) => {
+    socket.setEncoding("utf8");
+    socket.on("data", (data) => {
+      received = JSON.parse(String(data).trim());
+      socket.end('{"ok":true}\n');
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  try {
+    await expect(cli.requestNext(socketPath, request)).resolves.toEqual({ ok: true });
+    expect(received).toEqual(request);
+  } finally {
+    await closeServer(server);
+  }
 });
 
 test("release removes only the owning runtime pane record", async () => {
@@ -666,6 +705,27 @@ test("focus next cycles blocked, needs-input, working, then idle panes", async (
     ["switch-client", "-t", "%2"],
     ["switch-client", "-t", "%1"],
   ]);
+});
+
+test("focus next switches the tmux client that requested it", async () => {
+  const calls: string[][] = [];
+  const tracker = new SessionTracker({
+    ...defaultSessionTrackerOptions,
+    tmuxPaneExists: () => true,
+    tmuxRunner: (args) => {
+      calls.push(args);
+    },
+  });
+  await tracker.handle({ type: "report", record: record({ paneId: "%1" }) });
+  await tracker.handle({ type: "report", record: record({ paneId: "%2" }) });
+
+  await tracker.handle({
+    type: "focus_next",
+    currentPaneId: "%1",
+    targetClient: "/dev/pts/4",
+  });
+
+  expect(calls).toEqual([["switch-client", "-c", "/dev/pts/4", "-t", "%2"]]);
 });
 
 test("focus next skips panes that vanished before selection", async () => {

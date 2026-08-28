@@ -61,7 +61,7 @@ export type TrackerRequest =
   | { type: "release"; paneId: string; runtimeId: string }
   | { type: "snapshot" }
   | { type: "focus_pane"; paneId: string }
-  | { type: "focus_next"; currentPaneId?: string }
+  | { type: "focus_next"; currentPaneId?: string; targetClient?: string }
   | { type: "shutdown" };
 
 export interface TrackerResponse {
@@ -102,7 +102,10 @@ function isTrackerRequest(value: unknown): value is TrackerRequest {
     case "focus_pane":
       return typeof value.paneId === "string";
     case "focus_next":
-      return !("currentPaneId" in value) || typeof value.currentPaneId === "string";
+      return (
+        (!("currentPaneId" in value) || typeof value.currentPaneId === "string") &&
+        (!("targetClient" in value) || typeof value.targetClient === "string")
+      );
     case "snapshot":
     case "shutdown":
       return true;
@@ -355,7 +358,8 @@ export class SessionTracker {
     await this.prune();
     if (request.type === "snapshot") return { ok: true, records: this.snapshot() };
     if (request.type === "focus_pane") return this.focusPane(request.paneId);
-    if (request.type === "focus_next") return this.focusNextPane(request.currentPaneId);
+    if (request.type === "focus_next")
+      return this.focusNextPane(request.currentPaneId, request.targetClient);
     if (request.type === "shutdown") return { ok: true };
     if (request.type === "release") {
       const current = this.records.get(request.paneId);
@@ -373,7 +377,7 @@ export class SessionTracker {
     return { ok: true };
   }
 
-  async focusNextPane(currentPaneId?: string): Promise<TrackerResponse> {
+  async focusNextPane(currentPaneId?: string, targetClient?: string): Promise<TrackerResponse> {
     const records = [...this.records.values()].sort(
       (a, b) =>
         compareTrackerStates(a.state, b.state) ||
@@ -382,25 +386,31 @@ export class SessionTracker {
     );
     if (records.length === 0) return { ok: false, error: "not-found" };
     const currentIndex = records.findIndex(
-      (record) => record.paneId === (this.focusedPaneId ?? currentPaneId),
+      (record) =>
+        record.paneId === (targetClient ? currentPaneId : (this.focusedPaneId ?? currentPaneId)),
     );
     for (let offset = 1; offset <= records.length; offset++) {
       const record = records[(currentIndex + offset) % records.length];
       if (!record) continue;
-      const response = await this.focusPane(record.paneId);
+      const response = await this.focusPane(record.paneId, targetClient);
       if (response.ok || response.error !== "not-found") return response;
     }
     return { ok: false, error: "not-found" };
   }
 
-  async focusPane(paneId: string): Promise<TrackerResponse> {
+  async focusPane(paneId: string, targetClient?: string): Promise<TrackerResponse> {
     if (!this.records.has(paneId) || !(await this.tmuxPaneExists(paneId))) {
       this.records.delete(paneId);
       return { ok: false, error: "not-found" };
     }
     try {
-      await this.tmuxRunner(["switch-client", "-t", paneId]);
-      this.focusedPaneId = paneId;
+      await this.tmuxRunner([
+        "switch-client",
+        ...(targetClient ? ["-c", targetClient] : []),
+        "-t",
+        paneId,
+      ]);
+      if (!targetClient) this.focusedPaneId = paneId;
       return { ok: true };
     } catch (error) {
       if (!(await this.tmuxPaneExists(paneId))) {

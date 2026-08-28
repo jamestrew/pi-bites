@@ -12,7 +12,9 @@
     "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "checkJs": true
   },
-  "include": ["packages/**/*.ts", "scripts/**/*.ts"]
+  "include": ["bin/**/*.mjs", "packages/**/*.ts", "scripts/**/*.ts"]
 }

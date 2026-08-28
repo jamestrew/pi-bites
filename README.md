@@ -163,6 +163,14 @@ The output is `π N · !P · ?I · ▶W`: `π` counts all tracked panes, `!` cou
 
 The shell command inside the segment only reads daemon-maintained files; it does not start Pi or the tracker daemon or change tmux options itself. It uses your existing `status-interval`. For faster refreshes, you may optionally add `set -g status-interval 5` yourself.
 
+To make `Alt+S` focus the next tracked Pi pane even when Pi is not focused, add:
+
+```tmux
+bind-key -n M-s run-shell -b 'node "/path/to/pi-bites/bin/pi-sessions.mjs" next --from "#{pane_id}" --client "#{client_tty}"'
+```
+
+Adjust the script path when pi-bites is installed from a local checkout. The helper only contacts an already-running tracker daemon; it does not start Pi or the daemon.
+
 ## Inline references
 
 Use `$skill:name` or `$prompt:name` anywhere in a message to attach the referenced skill or prompt template as hidden context without expanding it into the visible user prompt. Typing `$` in the TUI offers completions for available skills and prompt templates.
