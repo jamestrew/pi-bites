@@ -13,11 +13,18 @@ import type { ExecSessionManager, UnifiedExecResult, WriteStdinInput } from "./s
 const parameters = Type.Object({
   session_id: Type.Number({ description: "Session identifier returned by exec_command." }),
   chars: Type.Optional(
-    Type.String({ description: "Characters to write. Omit to poll for output." }),
+    Type.String({
+      description: "Characters to write. Omit or pass empty to poll without writing.",
+    }),
   ),
-  yield_time_ms: Type.Optional(Type.Number({ description: "Wait time for output or completion." })),
+  yield_time_ms: Type.Optional(
+    Type.Number({
+      description:
+        "Wait before yielding output. Non-empty writes default to 250 ms; empty polls default to 30000 ms.",
+    }),
+  ),
   max_output_tokens: Type.Optional(
-    Type.Number({ description: "Maximum approximate output tokens returned." }),
+    Type.Number({ description: "Output token budget. Defaults to 10000 tokens." }),
   ),
 });
 

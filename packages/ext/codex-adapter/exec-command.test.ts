@@ -144,7 +144,7 @@ describe("exec_command and write_stdin", () => {
     expect(collapsed.join("\n")).not.toContain("line 5");
     expect(collapsed.join("\n")).toContain("<dim>line 10</dim>");
     expect(collapsed.at(-3)).toBe("");
-    expect(collapsed.at(-2)).toBe("<dim>Took 1.3s</dim>");
+    expect(collapsed.at(-2)).toBe("<dim>Took 1.3s · ~6 input tokens</dim>");
     expect(collapsed.at(-1)).toContain("<dim>... (5 earlier lines,");
     expect(collapsed.at(-1)).toContain("to expand");
     expect(collapsed.at(-1)?.endsWith("<dim>)</dim>")).toBe(true);
@@ -210,7 +210,7 @@ describe("exec_command and write_stdin", () => {
       "<dim>resumed</dim>",
       "<dim>and finished</dim>",
       "",
-      "<dim>Took 0.4s</dim>",
+      "<dim>Took 0.4s · ~2 input tokens</dim>",
     ]);
   });
 
@@ -277,8 +277,8 @@ describe("exec_command and write_stdin", () => {
         theme as never,
         { state, isError: true } as never,
       ).render(80);
-      expect(first.at(-1)?.trimEnd()).toBe("Took 1.0s");
-      expect(rerendered.at(-1)?.trimEnd()).toBe("Took 1.0s");
+      expect(first.at(-1)?.trimEnd()).toBe("Took 1.0s · ~9 input tokens");
+      expect(rerendered.at(-1)?.trimEnd()).toBe("Took 1.0s · ~9 input tokens");
     } finally {
       now.mockRestore();
     }
@@ -429,6 +429,15 @@ describe("exec_command and write_stdin", () => {
       "max_output_tokens",
       "login",
     ]);
+    expect(exec.parameters.properties.cmd).toMatchObject({
+      description: expect.stringContaining("interpreted by the current shell"),
+    });
+    expect(exec.parameters.properties.yield_time_ms).toMatchObject({
+      description: expect.stringContaining("Defaults to 30000 ms"),
+    });
+    expect(exec.parameters.properties.max_output_tokens).toMatchObject({
+      description: expect.stringContaining("Defaults to 10000 tokens"),
+    });
     expect(
       exec.prepareArguments?.({
         command: "pwd",
@@ -448,6 +457,15 @@ describe("exec_command and write_stdin", () => {
       "yield_time_ms",
       "max_output_tokens",
     ]);
+    expect(write.parameters.properties.chars).toMatchObject({
+      description: expect.stringContaining("pass empty to poll"),
+    });
+    expect(write.parameters.properties.yield_time_ms).toMatchObject({
+      description: expect.stringContaining("empty polls default to 30000 ms"),
+    });
+    expect(write.parameters.properties.max_output_tokens).toMatchObject({
+      description: expect.stringContaining("Defaults to 10000 tokens"),
+    });
     expect(write.prepareArguments?.({ process_id: 7, input: "x", yield_time: 500 })).toEqual({
       session_id: 7,
       chars: "x",

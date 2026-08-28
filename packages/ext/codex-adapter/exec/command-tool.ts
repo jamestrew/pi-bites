@@ -49,6 +49,10 @@ function textContent(result: AgentToolResult<UnifiedExecResult>): string {
     .join("\n");
 }
 
+function modelInputTokenCount(result: AgentToolResult<UnifiedExecResult>): number {
+  return Math.ceil(textContent(result).length / 4);
+}
+
 function execOutput(result: AgentToolResult<UnifiedExecResult>): string {
   const details = result.details as UnifiedExecResult | undefined;
   return sanitizeText(details?.output ?? textContent(result))
@@ -65,14 +69,17 @@ function execStatus(
 ): string | undefined {
   const details = result.details as UnifiedExecResult | undefined;
   if (isPartial) return details ? `Elapsed ${details.wall_time_seconds.toFixed(1)}s` : undefined;
+  const inputTokens = modelInputTokenCount(result);
+  const tokenSuffix =
+    inputTokens > 0 ? ` · ~${inputTokens.toLocaleString("en-US")} input tokens` : "";
   if (details?.session_id !== undefined)
-    return `Running in session ${details.session_id} · ${details.wall_time_seconds.toFixed(1)}s`;
+    return `Running in session ${details.session_id} · ${details.wall_time_seconds.toFixed(1)}s${tokenSuffix}`;
   const seconds =
     details?.wall_time_seconds ??
     (startedAt === undefined ? undefined : ((endedAt ?? Date.now()) - startedAt) / 1000);
   return seconds === undefined || (!details && !isError)
     ? undefined
-    : `Took ${seconds.toFixed(1)}s`;
+    : `Took ${seconds.toFixed(1)}s${tokenSuffix}`;
 }
 
 export function throwForExecFailure(result: UnifiedExecResult): void {
@@ -131,7 +138,10 @@ export function renderExecResult(
 }
 
 const parameters = Type.Object({
-  cmd: Type.String({ description: "The shell command to run." }),
+  cmd: Type.String({
+    description:
+      "Raw command string interpreted by the current shell; do not quote the entire command.",
+  }),
   workdir: Type.Optional(
     Type.String({ description: "Working directory, relative to the session cwd or absolute." }),
   ),
@@ -140,10 +150,13 @@ const parameters = Type.Object({
   ),
   tty: Type.Optional(Type.Boolean({ description: "Run in an interactive pseudo-terminal." })),
   yield_time_ms: Type.Optional(
-    Type.Number({ description: "Wait time before returning a resumable session." }),
+    Type.Number({
+      description:
+        "Wait before yielding output. Defaults to 30000 ms; minimum 5000 ms for non-interactive commands.",
+    }),
   ),
   max_output_tokens: Type.Optional(
-    Type.Number({ description: "Maximum approximate output tokens returned." }),
+    Type.Number({ description: "Output token budget. Defaults to 10000 tokens." }),
   ),
   login: Type.Optional(
     Type.Boolean({ description: "Start the shell as a login shell. Defaults to true." }),
