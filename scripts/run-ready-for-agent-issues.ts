@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { $ } from "bun";
 import { existsSync } from "node:fs";
-import { mkdir, rm, symlink } from "node:fs/promises";
-import { homedir } from "node:os";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 
 const IMPLEMENT_SKILL = "/home/jt/.agents/skills/implement/SKILL.md";
@@ -275,26 +275,47 @@ async function prepareExtensionRuntime(options: RunOptions): Promise<ReadonlyArr
   return ["-n", "-e", extension, "--approve", "--yolo"];
 }
 
+export async function runCaptured(
+  command: ReadonlyArray<string>,
+  cwd: string,
+): Promise<{ readonly exitCode: number; readonly stdout: string; readonly stderr: string }> {
+  // Regular files cannot be held open in a way that delays reading when an agent leaves a descendant running.
+  const outputDirectory = await mkdtemp(join(tmpdir(), "pi-bites-pi-"));
+  const stdoutPath = join(outputDirectory, "stdout");
+  const stderrPath = join(outputDirectory, "stderr");
+  try {
+    const child = Bun.spawn([...command], {
+      cwd,
+      stdout: Bun.file(stdoutPath),
+      stderr: Bun.file(stderrPath),
+    });
+    const exitCode = await child.exited;
+    const [stdout, stderr] = await Promise.all([
+      Bun.file(stdoutPath).text(),
+      Bun.file(stderrPath).text(),
+    ]);
+    return { exitCode, stdout, stderr };
+  } finally {
+    await rm(outputDirectory, { recursive: true, force: true });
+  }
+}
+
 async function runPi(
   cwd: string,
   piArgs: ReadonlyArray<string>,
   name: string,
   prompt: string,
 ): Promise<string> {
-  const child = Bun.spawn(
-    ["pi", ...piArgs, "--print", "--name", name, "--skill", IMPLEMENT_SKILL, prompt],
-    {
-      cwd,
-      stdout: "pipe",
-      stderr: "pipe",
-    },
-  );
-  const stdout = new Response(child.stdout).text();
-  const stderr = new Response(child.stderr).text();
   console.log(`${name}: Pi working...`);
 
-  const exitCode = await child.exited;
-  const [output, errors] = await Promise.all([stdout, stderr]);
+  const {
+    exitCode,
+    stdout: output,
+    stderr: errors,
+  } = await runCaptured(
+    ["pi", ...piArgs, "--print", "--name", name, "--skill", IMPLEMENT_SKILL, prompt],
+    cwd,
+  );
   if (exitCode !== 0) {
     throw new Error(
       [errors.trim() || `Pi exited with status ${exitCode}`, output.trim()]

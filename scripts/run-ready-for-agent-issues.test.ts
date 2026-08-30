@@ -5,6 +5,7 @@ import {
   pullRequestReference,
   reviewFindings,
   reviewReport,
+  runCaptured,
   selectCandidates,
 } from "./run-ready-for-agent-issues.ts";
 
@@ -83,6 +84,17 @@ describe("pull request lookup", () => {
     expect(
       pullRequestReference([], [{ number: 8, headRefOid: "commit-8" }], new Set(["commit-8"])),
     ).toStrictEqual({ number: 8 });
+  });
+});
+
+describe("process capture", () => {
+  it("stops capturing when the direct child exits", async () => {
+    const result = await runCaptured(
+      ["sh", "-c", "printf parent-output; (sleep 0.1; printf descendant-output) &"],
+      process.cwd(),
+    );
+
+    expect(result).toStrictEqual({ exitCode: 0, stdout: "parent-output", stderr: "" });
   });
 });
 
