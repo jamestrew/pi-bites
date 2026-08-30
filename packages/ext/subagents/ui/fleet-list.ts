@@ -89,6 +89,8 @@ export class FleetList {
   /** Set while a conversation overlay is open; calling it closes the overlay. */
   private viewerClose: (() => void) | undefined;
   private viewingAgentId: string | undefined;
+  /** Terminal agents whose final notification is still queued behind child messages. */
+  private pendingResults = new Set<string>();
 
   constructor(
     private manager: AgentManager,
@@ -135,7 +137,13 @@ export class FleetList {
    * Called when an agent finishes. The viewer (if open on it) stays open so the
    * final output remains readable, and the row lingers in the list — just refresh.
    */
-  onAgentFinished(_id: string): void {
+  onAgentResultPending(id: string): void {
+    this.pendingResults.add(id);
+    this.update();
+  }
+
+  onAgentFinished(id: string): void {
+    this.pendingResults.delete(id);
     this.update();
   }
 
@@ -156,6 +164,7 @@ export class FleetList {
     this.tui = undefined;
     this.active = false;
     this.pendingBashGates = 0;
+    this.pendingResults.clear();
     // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
   }
@@ -210,15 +219,17 @@ export class FleetList {
    * Agents shown in the list, ordered earliest-launched first so the ones you
    * started sooner sit at the top. Every row is openable (has a session), so Enter
    * never dead-ends. Included: running/queued, plus the agent currently being
-   * viewed, plus recently-finished ones (they linger briefly before dropping out).
+   * viewed, awaiting final-result delivery, plus recently-finished ones (they linger
+   * briefly before dropping out).
    * (`listAgents()` is newest-first, so we re-sort.)
    */
   private agentRecords(): AgentRecord[] {
     const now = Date.now();
-    return this.manager
-      .listAgents()
+    const records = this.manager.listAgents();
+    return records
       .filter(
         (a) =>
+          this.pendingResults.has(a.id) ||
           a.status === "running" ||
           a.status === "queued" ||
           a.id === this.viewingAgentId ||

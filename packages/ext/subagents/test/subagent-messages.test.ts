@@ -184,15 +184,20 @@ describe("subagent message delivery", () => {
 
   it("drops queued mail when the parent session is replaced", () => {
     const sendMessage = vi.fn();
+    const deliverFinal = vi.fn();
+    const cancelFinal = vi.fn();
     const messenger = createSubagentMessenger({ sendMessage } as any);
     messenger.sessionStarted("original-parent");
     messenger.agentStarted();
     messenger.send("original-parent", sender, "do not reroute");
+    messenger.scheduleFinal("original-parent", deliverFinal, cancelFinal);
 
     messenger.sessionStarted("replacement-parent");
     messenger.turnEnded();
     messenger.agentSettled();
 
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(deliverFinal).not.toHaveBeenCalled();
+    expect(cancelFinal).toHaveBeenCalledOnce();
   });
 });

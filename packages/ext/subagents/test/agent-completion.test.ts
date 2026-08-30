@@ -25,7 +25,7 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
 
 function makeHarness(
   records: AgentRecord[] = [],
-  scheduleAutomatic?: (parentSessionId: string, deliver: () => void) => boolean,
+  scheduleAutomatic?: (parentSessionId: string, deliver: () => void, cancel: () => void) => boolean,
 ) {
   const byId = new Map(records.map((record) => [record.id, record]));
   const pi = {
@@ -175,7 +175,11 @@ describe("agent completion delivery", () => {
     const { completion, pi } = makeHarness([record], scheduleAutomatic);
 
     completion.onAgentComplete(record);
-    expect(scheduleAutomatic).toHaveBeenCalledWith("parent-session", expect.any(Function));
+    expect(scheduleAutomatic).toHaveBeenCalledWith(
+      "parent-session",
+      expect.any(Function),
+      expect.any(Function),
+    );
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     const waited = await completion.waitFor([record.id], 30_000);
@@ -228,6 +232,46 @@ describe("agent completion delivery", () => {
     await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
       outcome: "terminal",
       agents: [expect.objectContaining({ id: "a", result: "result a" })],
+    });
+    completion.dispose();
+  });
+
+  it("makes a deferred result waitable when session replacement cancels delivery", async () => {
+    const record = makeRecord("a");
+    let cancel!: () => void;
+    const scheduleAutomatic = vi.fn(
+      (_parentSessionId: string, _deliver: () => void, cancelDelivery: () => void) => {
+        cancel = cancelDelivery;
+        return true;
+      },
+    );
+    const { completion, onAgentFinishedUI } = makeHarness([record], scheduleAutomatic);
+
+    completion.onAgentComplete(record);
+    expect(onAgentFinishedUI).not.toHaveBeenCalled();
+    cancel();
+
+    expect(onAgentFinishedUI).toHaveBeenCalledWith("a");
+    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
+      outcome: "terminal",
+      agents: [expect.objectContaining({ id: "a", result: "result a" })],
+    });
+    completion.dispose();
+  });
+
+  it("keeps a synchronously delivered result claimed when UI cleanup throws", async () => {
+    const record = makeRecord("a");
+    const { completion, pi, onAgentFinishedUI } = makeHarness([record]);
+    onAgentFinishedUI.mockImplementation(() => {
+      throw new Error("UI unavailable");
+    });
+
+    completion.onAgentComplete(record);
+
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
+    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
+      outcome: "error",
+      message: expect.stringContaining("already delivered"),
     });
     completion.dispose();
   });

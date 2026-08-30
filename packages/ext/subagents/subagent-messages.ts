@@ -39,7 +39,7 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
   let afterTerminalOutput = false;
   const pending: SubagentMessageDetails[] = [];
   const pendingNextTurn: SubagentMessageDetails[] = [];
-  const pendingFinals: Array<() => void> = [];
+  const pendingFinals: Array<{ deliver: () => void; cancel?: () => void }> = [];
 
   const persist = (details: SubagentMessageDetails, deliverAs?: "steer"): boolean => {
     try {
@@ -69,11 +69,21 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
   };
 
   const deliverFinals = (): void => {
-    for (const deliver of pendingFinals.splice(0)) {
+    for (const { deliver } of pendingFinals.splice(0)) {
       try {
         deliver();
       } catch {
         /* one failed delivery must not suppress later finals */
+      }
+    }
+  };
+
+  const cancelFinals = (): void => {
+    for (const { cancel } of pendingFinals.splice(0)) {
+      try {
+        cancel?.();
+      } catch {
+        /* one failed cancellation must not suppress later cancellations */
       }
     }
   };
@@ -113,7 +123,7 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
       if (sessionId !== id) {
         pending.length = 0;
         pendingNextTurn.length = 0;
-        pendingFinals.length = 0;
+        cancelFinals();
       }
       sessionId = id;
       appendCustomMessage = append;
@@ -153,12 +163,12 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
       afterTerminalOutput = false;
       pending.length = 0;
       pendingNextTurn.length = 0;
-      pendingFinals.length = 0;
+      cancelFinals();
     },
-    scheduleFinal(parentSessionId: string, deliver: () => void): boolean {
+    scheduleFinal(parentSessionId: string, deliver: () => void, cancel?: () => void): boolean {
       if (disposed || parentSessionId !== sessionId) return false;
       if (flushing || pending.length > 0 || pendingNextTurn.length > 0) {
-        pendingFinals.push(deliver);
+        pendingFinals.push({ deliver, cancel });
         return true;
       }
       try {

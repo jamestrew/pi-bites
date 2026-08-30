@@ -45,7 +45,8 @@ type AgentCompletionDeps = {
   pi: ExtensionAPI;
   getRecord: (id: string) => AgentRecord | undefined;
   onAgentFinishedUI: (id: string) => void;
-  scheduleAutomatic?: (parentSessionId: string, deliver: () => void) => boolean;
+  onAgentResultPendingUI?: (id: string) => void;
+  scheduleAutomatic?: (parentSessionId: string, deliver: () => void, cancel: () => void) => boolean;
 };
 
 type Waiter = {
@@ -61,6 +62,7 @@ export function createAgentCompletionHandler({
   pi,
   getRecord,
   onAgentFinishedUI,
+  onAgentResultPendingUI,
   scheduleAutomatic,
 }: AgentCompletionDeps) {
   const owners = new WeakMap<AgentRecord, "automatic" | "wait">();
@@ -148,25 +150,55 @@ export function createAgentCompletionHandler({
     completed.add(record);
     const failed = record.status === "error" || record.status === "stopped";
     pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
-    onAgentFinishedUI(record.id);
+    const notifyFinishedUI = () => {
+      try {
+        onAgentFinishedUI(record.id);
+      } catch {
+        /* UI cleanup must not change completion delivery ownership */
+      }
+    };
 
     const waiterId = claims.get(record.id);
     if (waiterId !== undefined) {
+      notifyFinishedUI();
       resolveWaiter(waiterId);
     } else {
+      let finishedUI = false;
+      const finishUI = () => {
+        if (finishedUI) return;
+        finishedUI = true;
+        notifyFinishedUI();
+      };
+      const cancelAutomatic = () => {
+        owners.delete(record);
+        finishUI();
+      };
+      try {
+        onAgentResultPendingUI?.(record.id);
+      } catch {
+        /* UI state must not block completion delivery */
+      }
       try {
         const accepted = scheduleAutomatic
-          ? scheduleAutomatic(record.parentSessionId, () => {
-              try {
-                emitAutomatic(record);
-              } catch (error) {
-                owners.delete(record);
-                throw error;
-              }
-            })
-          : (emitAutomatic(record), true);
+          ? scheduleAutomatic(
+              record.parentSessionId,
+              () => {
+                try {
+                  emitAutomatic(record);
+                } catch (error) {
+                  owners.delete(record);
+                  throw error;
+                } finally {
+                  finishUI();
+                }
+              },
+              cancelAutomatic,
+            )
+          : (emitAutomatic(record), finishUI(), true);
         if (accepted) owners.set(record, "automatic");
+        else finishUI();
       } catch {
+        finishUI();
         /* automatic delivery failure leaves the completed result available to WaitAgent */
       }
     }

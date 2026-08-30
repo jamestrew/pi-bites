@@ -83,8 +83,9 @@ export default function (
       agentActivity.delete(id);
       fleet.onAgentFinished(id);
     },
-    scheduleAutomatic: (parentSessionId, deliver) =>
-      parentMessenger.scheduleFinal(parentSessionId, deliver),
+    onAgentResultPendingUI: (id) => fleet.onAgentResultPending(id),
+    scheduleAutomatic: (parentSessionId, deliver, cancel) =>
+      parentMessenger.scheduleFinal(parentSessionId, deliver, cancel),
   });
 
   manager = new AgentManager(

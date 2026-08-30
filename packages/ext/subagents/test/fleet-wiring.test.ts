@@ -743,4 +743,56 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await lifecycle.get("session_shutdown")?.({}, ctxWith(uiCtx()));
     expect(ui.setWidget).toHaveBeenCalledWith("fleet", undefined); // dispose cleared it
   });
+
+  it("keeps a finished agent visible until its deferred final is delivered", async () => {
+    vi.useFakeTimers();
+    let messageParent: ((message: string) => boolean) | undefined;
+    let finish!: (value: any) => void;
+    const { pi, tools, lifecycle } = makePi();
+    const ui = uiCtx();
+    const ctx = ctxWith(ui);
+
+    try {
+      vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
+        messageParent = options.messageParent;
+        return new Promise((resolve) => {
+          finish = resolve;
+        });
+      });
+      subagentsExtension(pi);
+      await lifecycle.get("session_start")?.({}, ctx);
+      await lifecycle.get("tool_execution_start")?.({}, ctx);
+      lifecycle.get("agent_start")?.({}, ctx);
+
+      await tools.get("Agent").execute(
+        "tc",
+        {
+          prompt: "go",
+          description: "still delivering",
+          subagent_type: "general-purpose",
+        },
+        undefined,
+        undefined,
+        ctx,
+      );
+      expect(messageParent?.("progress")).toBe(true);
+      finish({ responseText: "done", session: { dispose: vi.fn() } as any });
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(pi.sendMessage).not.toHaveBeenCalled();
+      expect(ui.renderFleet().join("\n")).toContain("still delivering");
+
+      lifecycle.get("turn_end")?.({}, ctx);
+      expect(pi.sendMessage.mock.calls.map(([message]: any[]) => message.customType)).toEqual([
+        "subagent-message",
+        "subagent-notification",
+      ]);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(ui.renderFleet()).toEqual([]);
+    } finally {
+      await lifecycle.get("session_shutdown")?.({}, ctx);
+      vi.useRealTimers();
+    }
+  });
 });
