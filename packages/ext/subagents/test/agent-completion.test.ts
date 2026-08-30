@@ -183,10 +183,7 @@ describe("agent completion delivery", () => {
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     const waited = await completion.waitFor([record.id], 30_000);
-    expect(waited).toMatchObject({
-      outcome: "error",
-      message: expect.stringContaining("delivered"),
-    });
+    expect(waited).toMatchObject({ outcome: "delivery_claimed" });
 
     deliver();
     expect(pi.sendMessage).toHaveBeenCalledOnce();
@@ -225,8 +222,7 @@ describe("agent completion delivery", () => {
 
     completion.onAgentComplete(record);
     await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "error",
-      message: expect.stringContaining("delivered"),
+      outcome: "delivery_claimed",
     });
     expect(deliver).toThrow("delivery failed");
     await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
@@ -270,8 +266,7 @@ describe("agent completion delivery", () => {
 
     expect(pi.sendMessage).toHaveBeenCalledOnce();
     await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "error",
-      message: expect.stringContaining("already delivered"),
+      outcome: "delivery_claimed",
     });
     completion.dispose();
   });

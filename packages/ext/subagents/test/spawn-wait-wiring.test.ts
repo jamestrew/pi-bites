@@ -349,7 +349,7 @@ describe("spawn-and-wait orchestration", () => {
     harness.shutdown();
   });
 
-  it("does not return or reinject a result already delivered automatically", async () => {
+  it("reports an automatically claimed result without returning or reinjecting it", async () => {
     const child = deferredRun();
     const harness = makeHarness();
     const spawned = await spawn(harness.tools, harness.ctx);
@@ -361,8 +361,7 @@ describe("spawn-and-wait orchestration", () => {
     const result = await waitFor(harness.tools, harness.ctx, [id]);
 
     expect(result.details).toMatchObject({
-      outcome: "error",
-      message: expect.stringContaining("already delivered"),
+      outcome: "delivery_claimed",
       agents: [expect.objectContaining({ id, status: "completed" })],
     });
     expect(result.content[0].text).not.toContain("automatic result");

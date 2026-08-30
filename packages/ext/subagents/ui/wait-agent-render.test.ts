@@ -63,6 +63,44 @@ describe("WaitAgent rendering", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses matching minute units for a wait near its minute-based timeout", () => {
+    const output = renderWaitAgent(
+      details({
+        outcome: "terminal",
+        wait_ended_at: 250_050,
+        timeout_ms: 240_000,
+        agents: [agent({ status: "completed", result: "done" })],
+      }),
+      false,
+      theme,
+    )
+      .render(120)
+      .join("\n");
+
+    expect(output).toContain("WaitAgent · waited 4m / timeout 4m");
+    expect(output).not.toContain("240.1s");
+  });
+
+  it("renders an automatically claimed completion as done rather than failed", () => {
+    const output = renderWaitAgent(
+      details({
+        outcome: "delivery_claimed",
+        wait_ended_at: 10_000,
+        timeout_ms: 240_000,
+        agents: [agent({ status: "completed" })],
+      }),
+      false,
+      theme,
+    )
+      .render(120)
+      .join("\n");
+
+    expect(output).toContain("WaitAgent · delivery already claimed after 0s / timeout 4m");
+    expect(output).toContain("✓ Explore subagent UI flow · Done");
+    expect(output).not.toContain("failed");
+    expect(output).not.toContain("without a final response");
+  });
+
   it("shows live elapsed time, configured timeout, and all selected agents", () => {
     vi.spyOn(Date, "now").mockReturnValue(17_000);
     const output = renderWaitAgent(

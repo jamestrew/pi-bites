@@ -242,14 +242,13 @@ export function createAgentCompletionHandler({
       });
     }
 
-    const delivered = (records as AgentRecord[])
+    const deliveryClaimed = (records as AgentRecord[])
       .filter((record) => owners.has(record))
       .map((record) => record.id);
-    if (delivered.length > 0) {
+    if (deliveryClaimed.length > 0) {
       return Promise.resolve({
-        outcome: "error",
+        outcome: "delivery_claimed",
         timed_out: false,
-        message: `Agent result already delivered: ${delivered.join(", ")}`,
         agents: (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false)),
       });
     }

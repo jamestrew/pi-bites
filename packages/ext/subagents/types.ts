@@ -208,6 +208,12 @@ export type WaitAgentOutcome =
       agents: WaitAgentResult[];
     }
   | {
+      /** Another delivery path already owns the result; this wait must not duplicate it. */
+      outcome: "delivery_claimed";
+      timed_out: false;
+      agents: WaitAgentResult[];
+    }
+  | {
       outcome: "error";
       timed_out: false;
       message: string;

@@ -13,7 +13,7 @@ import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
 function formatTime(ms: number): string {
   const seconds = Math.max(0, ms) / 1000;
   if (seconds < 1) return "0s";
-  if (seconds >= 60 && seconds % 60 === 0) return `${seconds / 60}m`;
+  if (seconds >= 60) return `${Number((seconds / 60).toFixed(1))}m`;
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)}s`;
 }
 
@@ -31,7 +31,9 @@ function header(details: WaitAgentDetails, now: number, theme: Theme): string {
             ? `timed out after ${elapsed}`
             : details.outcome === "cancelled"
               ? `cancelled after ${elapsed}`
-              : `failed after ${elapsed}`;
+              : details.outcome === "delivery_claimed"
+                ? `delivery already claimed after ${elapsed}`
+                : `failed after ${elapsed}`;
   const timeout =
     details.timeout_ms !== undefined && details.outcome !== "timeout"
       ? ` / timeout ${formatTime(details.timeout_ms)}`
@@ -57,7 +59,9 @@ function statusLine(agent: WaitAgentResult, outcome: WaitAgentDetails["outcome"]
         .filter(Boolean)
         .join(" · ");
   const doneDetails = [invocation, stats].filter(Boolean).join(" · ");
-  const missingFinal = isMissingFinalResponse(agent.status, agent.result);
+  // WaitAgent status snapshots intentionally omit output; only explicit blank output is missing.
+  const missingFinal =
+    agent.result !== undefined && isMissingFinalResponse(agent.status, agent.result);
   if (agent.status === "completed" && !missingFinal)
     return `✓ ${description} · Done (${doneDetails})`;
   if (agent.status === "error" || missingFinal) {

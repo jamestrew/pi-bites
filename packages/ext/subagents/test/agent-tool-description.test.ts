@@ -77,6 +77,9 @@ describe("Agent tool descriptions", () => {
     const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
     expect(guidelines).toContain("Agent returns immediately with a stable identity");
     expect(guidelines).toContain("Use WaitAgent only when selected findings block progress");
+    expect(guidelines).toContain("After a maximum-length timeout");
+    expect(guidelines).toContain("reply with a concise status through its MessageAgent");
+    expect(guidelines).toContain("continue or wrap up");
     expect(getAgentToolParameters().properties).not.toHaveProperty("run_in_background");
   });
 

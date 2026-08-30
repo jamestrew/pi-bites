@@ -47,7 +47,8 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
       promptSnippet: "Wait for selected subagents only when their results block progress",
       promptGuidelines: [
         "Use WaitAgent only when selected subagent results are required before continuing; do useful independent work instead when possible.",
-        "Do not repeatedly call WaitAgent with short timeouts, poll agent status, or sleep with shell commands.",
+        "After a maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status through its MessageAgent and continue working; wait for that reply, then decide whether the agent should continue or wrap up.",
+        "Do not poll with repeated short WaitAgent calls or sleep with shell commands.",
       ],
       parameters: Type.Object(
         {

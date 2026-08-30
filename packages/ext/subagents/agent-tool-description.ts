@@ -21,7 +21,10 @@ Notes:
   explicit requests to locate, trace, or factually map code. Do not delegate code review, design or plan evaluation,
   cross-file consistency audits, root-cause analysis, or other judgment-heavy work; synthesize the evidence yourself.
 - Agent always spawns concurrently and returns an identity. Use WaitAgent only when selected findings block
-  progress; otherwise continue useful work or respond and accept automatic completion delivery. Never poll or sleep.
+  progress; otherwise continue useful work or respond and accept automatic completion delivery. After a
+  maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status through its MessageAgent
+  and continue working. Wait for that reply, then decide whether the agent should continue or wrap up. Never poll
+  with short waits or sleep.
 - The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before
   reporting work done.
 - MessageAgent sends a message to a running agent; it does not resume completed agents.
@@ -63,8 +66,10 @@ and final technical conclusions.
   show the user, send a text message with a concise summary.
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an
   agent writes or edits code, check the actual changes before reporting work as done.
-- Use WaitAgent when selected findings are required before you can proceed. Wait once with a long enough timeout,
-  and only after doing useful parallel work. Do not repeatedly wait, poll status, or sleep with shell commands.
+- Use WaitAgent when selected findings are required before you can proceed, using a long timeout after useful
+  parallel work. After a maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status
+  through its MessageAgent and continue working. Use WaitAgent to receive that reply, then decide whether the agent
+  should continue or wrap up. Never poll with repeated short waits or sleep with shell commands.
 - If an agent's result does not block progress, continue or respond. Unconsumed results are delivered automatically.
 - Every Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
 - Use MessageAgent to send mid-run messages to a running agent.
@@ -112,7 +117,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Do not delegate code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy work to Explore.",
     "The primary agent must read decisive files and perform synthesis, evaluation, and recommendations.",
   ].join(" "),
-  "Agent returns immediately with a stable identity. Use WaitAgent only when selected findings block progress; otherwise continue useful work or respond and accept automatic completion delivery. Never poll status or sleep.",
+  "Agent returns immediately with a stable identity. Use WaitAgent only when selected findings block progress; otherwise continue useful work or respond and accept automatic completion delivery. After a maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status through its MessageAgent and continue working. Wait for that reply, then decide whether the agent should continue or wrap up. Never poll with short waits or sleep.",
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",
 ];
 
