@@ -11,6 +11,7 @@ import { isAbsolute } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { shutdownAgentSession } from "./agent-session-shutdown.js";
 import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import type { SubagentSender } from "./subagent-messages.js";
@@ -126,6 +127,11 @@ export class AgentManager {
   private completed = new WeakSet<AgentRecord>();
   private releasedSlots = new WeakSet<AgentRecord>();
   private settled = new WeakSet<AgentRecord>();
+  private pendingAgents = new Set<Promise<string>>();
+  private teardowns = new Set<Promise<void>>();
+  private closing = false;
+  private disposed = false;
+  private shutdownPromise?: Promise<void>;
 
   constructor(
     onComplete?: OnAgentComplete,
@@ -161,6 +167,24 @@ export class AgentManager {
     this.releasedSlots.add(record);
     this.runningCount--;
     this.drainQueue();
+  }
+
+  private teardownSession(session: AgentSession): Promise<void> {
+    const teardown = shutdownAgentSession(session);
+    if (!this.teardowns.has(teardown)) {
+      this.teardowns.add(teardown);
+      void teardown.then(
+        () => this.teardowns.delete(teardown),
+        () => this.teardowns.delete(teardown),
+      );
+    }
+    return teardown;
+  }
+
+  private async waitForTeardowns(): Promise<void> {
+    while (this.teardowns.size > 0) {
+      await Promise.allSettled(this.teardowns);
+    }
   }
 
   private recordAssistantUsage(
@@ -243,6 +267,7 @@ export class AgentManager {
     prompt: string,
     options: SpawnOptions,
   ): string {
+    if (this.closing) throw new Error("AgentManager is shutting down.");
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.
@@ -423,6 +448,10 @@ export class AgentManager {
       },
       onSessionCreated: (session) => {
         record.session = session;
+        if (abortController.signal.aborted) {
+          void this.teardownSession(session);
+          return;
+        }
         // Flush any steers that arrived before the session was ready
         if (record.pendingSteers?.length) {
           for (const msg of record.pendingSteers) {
@@ -540,6 +569,11 @@ export class AgentManager {
       });
 
     record.promise = promise;
+    this.pendingAgents.add(promise);
+    void promise.then(
+      () => this.pendingAgents.delete(promise),
+      () => this.pendingAgents.delete(promise),
+    );
   }
 
   /** Start queued agents up to the concurrency limit. */
@@ -656,7 +690,7 @@ export class AgentManager {
 
   /** Dispose a record's session and remove it from the map. */
   private removeRecord(id: string, record: AgentRecord): void {
-    record.session?.dispose();
+    if (record.session) void this.teardownSession(record.session);
     record.session = undefined;
     this.agents.delete(id);
   }
@@ -718,27 +752,47 @@ export class AgentManager {
     return count;
   }
 
-  /** Wait for all running and queued agents to complete (including queued ones). */
+  /** Wait for every started agent to settle, including agents cancelled during shutdown. */
   async waitForAll(): Promise<void> {
     // Loop because drainQueue respects the concurrency limit — as running
     // agents finish they start queued ones, which need awaiting too.
     for (;;) {
       this.drainQueue();
-      const pending = [...this.agents.values()]
-        .filter((r) => r.status === "running" || r.status === "queued")
-        .map((r) => r.promise)
-        .filter((promise): promise is Promise<string> => promise !== undefined);
-      if (pending.length === 0) break;
-      await Promise.allSettled(pending);
+      if (this.pendingAgents.size === 0) break;
+      await Promise.allSettled(this.pendingAgents);
     }
   }
 
-  dispose() {
-    clearInterval(this.cleanupInterval);
-    // Clear queue
-    this.queue = [];
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.closing = true;
+    this.shutdownPromise = Promise.resolve().then(() => this.finishShutdown());
+    return this.shutdownPromise;
+  }
+
+  private async finishShutdown(): Promise<void> {
+    this.abortAll();
+    await this.waitForAll();
     for (const record of this.agents.values()) {
-      record.session?.dispose();
+      if (record.session) void this.teardownSession(record.session);
+    }
+    await this.waitForTeardowns();
+    this.finalizeDispose();
+    await this.waitForTeardowns();
+  }
+
+  dispose(): Promise<void> {
+    return this.shutdown();
+  }
+
+  private finalizeDispose(): void {
+    if (this.disposed) return;
+    this.closing = true;
+    this.disposed = true;
+    clearInterval(this.cleanupInterval);
+    this.abortAll();
+    for (const record of this.agents.values()) {
+      if (record.session) void this.teardownSession(record.session);
     }
     this.agents.clear();
     // Prune any orphaned git worktrees (crash recovery)

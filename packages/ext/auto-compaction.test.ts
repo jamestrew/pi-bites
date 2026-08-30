@@ -4,7 +4,7 @@ import registerAutoCompaction, {
   installTurnBoundaryAutoCompaction,
 } from "./auto-compaction.js";
 
-function setup(thresholdTokens?: number) {
+function setup(thresholdTokens?: number, mode = "tui") {
   const handlers = new Map<string, (...args: never[]) => void>();
   const compact = vi.fn();
   let tokens: number | null = 0;
@@ -20,6 +20,7 @@ function setup(thresholdTokens?: number) {
   let contextIsStale = false;
   const notify = vi.fn();
   const ctx = {
+    mode,
     getContextUsage: () => (tokens == null ? undefined : { tokens }),
     hasPendingMessages: () => false,
     compact,
@@ -65,6 +66,16 @@ describe("auto compaction", () => {
     turnEnd();
     agentSettled();
     expect(compact).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(["print", "json"])("leaves %s-mode tool loops to Pi's overflow compaction", (mode) => {
+    const { agentSettled, compact, setTokens, turnEnd } = setup(1, mode);
+
+    setTokens(100);
+    turnEnd(true);
+    agentSettled();
+
+    expect(compact).not.toHaveBeenCalled();
   });
 
   test("resumes an interrupted tool loop after compaction", () => {

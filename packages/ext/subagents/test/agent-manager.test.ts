@@ -39,7 +39,11 @@ const mockCtx = {
   sessionManager: { getSessionId: () => "parent-session", getBranch: () => [] },
 } as any;
 
-const mockSession = () => ({ dispose: vi.fn() }) as any;
+const mockSession = () =>
+  ({
+    dispose: vi.fn(),
+    extensionRunner: { emit: vi.fn(async () => {}) },
+  }) as any;
 
 const resolvedRun = () =>
   vi.mocked(runAgent).mockResolvedValue({
@@ -47,13 +51,26 @@ const resolvedRun = () =>
     session: mockSession(),
   });
 
+function waitForCancellation(signal?: AbortSignal): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    const cancel = () => reject(new Error("cancelled"));
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener("abort", cancel, { once: true });
+  });
+}
+
+function mockPendingRun(): void {
+  vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) =>
+    waitForCancellation(options.signal),
+  );
+}
 describe("AgentManager — detached lifecycle", () => {
   let manager: AgentManager;
   afterEach(() => manager.dispose());
 
   it("keeps the raw spawn prompt on the agent record", () => {
     manager = new AgentManager();
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    mockPendingRun();
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "raw task", {
       description: "task",
@@ -117,7 +134,7 @@ describe("AgentManager — detached lifecycle", () => {
   it("emits created with a stable identity for every spawn", () => {
     const pi = { events: { emit: vi.fn() } } as any;
     manager = new AgentManager();
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    mockPendingRun();
 
     const id = manager.spawn(pi, mockCtx, "general-purpose", "task", { description: "task" });
 
@@ -126,6 +143,70 @@ describe("AgentManager — detached lifecycle", () => {
       type: "general-purpose",
       description: "task",
     });
+  });
+
+  it("cancels a child that finishes initializing during shutdown", async () => {
+    manager = new AgentManager();
+    let finishInitializing!: () => void;
+    const initializing = new Promise<void>((resolve) => (finishInitializing = resolve));
+    const session = mockSession();
+    let cleanupStarted!: () => void;
+    const cleaning = new Promise<void>((resolve) => (cleanupStarted = resolve));
+    let finishCleanup!: () => void;
+    const cleanupFinished = new Promise<void>((resolve) => (finishCleanup = resolve));
+    session.extensionRunner.emit.mockImplementation(async () => {
+      cleanupStarted();
+      await cleanupFinished;
+    });
+    const providerStarted = vi.fn();
+    let reenteredShutdown: Promise<void> | undefined;
+    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      options.signal?.addEventListener("abort", () => (reenteredShutdown = manager.dispose()), {
+        once: true,
+      });
+      await initializing;
+      options.onSessionCreated?.(session);
+      if (!options.signal?.aborted) providerStarted();
+      if (options.signal?.aborted) throw new Error("cancelled");
+      return { responseText: "late", session };
+    });
+
+    manager.spawn(mockPi, mockCtx, "general-purpose", "task", { description: "task" });
+    const shutdown = manager.shutdown();
+    finishInitializing();
+    await cleaning;
+    let shutdownReturned = false;
+    void shutdown.then(() => {
+      shutdownReturned = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    const returnedBeforeCleanup = shutdownReturned;
+    finishCleanup();
+    await shutdown;
+
+    expect(reenteredShutdown).toBe(shutdown);
+    expect(returnedBeforeCleanup).toBe(false);
+    expect(providerStarted).not.toHaveBeenCalled();
+    expect(session.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+    expect(session.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("rejects spawns after shutdown begins", async () => {
+    manager = new AgentManager();
+
+    const shutdown = manager.shutdown();
+    expect(manager.shutdown()).toBe(shutdown);
+    expect(manager.dispose()).toBe(shutdown);
+
+    expect(() =>
+      manager.spawn(mockPi, mockCtx, "general-purpose", "too late", {
+        description: "too late",
+      }),
+    ).toThrow(/shutting down/i);
+    await shutdown;
   });
 
   it("treats a whitespace-only terminal response as an error", async () => {
@@ -149,7 +230,7 @@ describe("AgentManager — detached lifecycle", () => {
   it("fixes child messages to the spawning parent and sender identity", () => {
     const messageParent = vi.fn(() => true);
     manager = new AgentManager(undefined, 4, undefined, undefined, messageParent);
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    mockPendingRun();
 
     const id = manager.spawn(mockPi, mockCtx, "explore", "task", {
       description: "trace auth flow",
@@ -175,9 +256,7 @@ describe("AgentManager — detached lifecycle", () => {
 describe("AgentManager — completion callbacks", () => {
   let manager: AgentManager;
 
-  afterEach(() => {
-    manager.dispose();
-  });
+  afterEach(() => manager.dispose());
 
   it("retains a quota failure when a later abort becomes the terminal error", async () => {
     manager = new AgentManager();
@@ -233,9 +312,7 @@ describe("AgentManager — completion callbacks", () => {
 describe("AgentManager — cleanup timer", () => {
   let manager: AgentManager;
 
-  afterEach(() => {
-    manager.dispose();
-  });
+  afterEach(() => manager.dispose());
 
   it("does not keep the process alive on its own", () => {
     manager = new AgentManager();
@@ -247,9 +324,7 @@ describe("AgentManager — cleanup timer", () => {
 describe("AgentManager — Bug 3 clearCompleted", () => {
   let manager: AgentManager;
 
-  afterEach(() => {
-    manager.dispose();
-  });
+  afterEach(() => manager.dispose());
 
   it("clearCompleted removes completed records", async () => {
     manager = new AgentManager();
@@ -270,9 +345,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     manager = new AgentManager(undefined, 1);
 
     // Mock runAgent to never resolve (keeps agent "running")
-    vi.mocked(runAgent).mockImplementation(
-      () => new Promise(() => {}), // hangs forever
-    );
+    mockPendingRun();
 
     const id1 = manager.spawn(mockPi, mockCtx, "general-purpose", "test1", {
       description: "running agent",
@@ -299,7 +372,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
   it("clearCompleted calls dispose on sessions of removed records", async () => {
     manager = new AgentManager();
     const disposeSpy = vi.fn();
-    const sess = { dispose: disposeSpy };
+    const sess = { dispose: disposeSpy, extensionRunner: { emit: vi.fn(async () => {}) } };
     vi.mocked(runAgent).mockResolvedValue({
       responseText: "done",
       session: sess as any,
@@ -311,6 +384,7 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
     await manager.getRecord(id)!.promise;
 
     manager.clearCompleted();
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(disposeSpy).toHaveBeenCalledOnce();
   });
@@ -335,14 +409,12 @@ describe("AgentManager — Bug 3 clearCompleted", () => {
 describe("AgentManager — lifetime usage + compaction count are eagerly initialized", () => {
   let manager: AgentManager;
 
-  afterEach(() => {
-    manager.dispose();
-  });
+  afterEach(() => manager.dispose());
 
   it("spawn initializes lifetimeUsage to zeros and compactionCount to 0", () => {
     manager = new AgentManager();
     // Don't resolve the run — we just want to inspect the record at spawn time.
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    mockPendingRun();
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
       description: "test",
@@ -463,9 +535,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
 describe("AgentManager — isolation: worktree fails loud, no silent fallback", () => {
   let manager: AgentManager;
 
-  afterEach(() => {
-    manager.dispose();
-  });
+  afterEach(() => manager.dispose());
 
   it("spawn() throws when createWorktree returns undefined; no orphan record left behind", async () => {
     const { createWorktree } = await import("../worktree.js");
@@ -688,7 +758,7 @@ describe("AgentManager — abort() state machine", () => {
   it("removes a queued agent from the queue and marks it stopped", () => {
     // Concurrency=1: the second spawn queues behind the first
     manager = new AgentManager(undefined, 1);
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    mockPendingRun();
 
     manager.spawn(mockPi, mockCtx, "X", "blocker", { description: "block" });
     const queuedId = manager.spawn(mockPi, mockCtx, "Y", "queued", {
@@ -709,7 +779,7 @@ describe("AgentManager — abort() state machine", () => {
     let receivedSignal: AbortSignal | undefined;
     vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, opts) => {
       receivedSignal = (opts as { signal?: AbortSignal }).signal;
-      return new Promise(() => {});
+      return waitForCancellation(opts.signal);
     });
 
     const id = manager.spawn(mockPi, mockCtx, "X", "p", {
@@ -798,7 +868,7 @@ describe("AgentManager — steer()", () => {
     let captured: ((s: any) => void) | undefined;
     vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, opts) => {
       captured = (opts as any)?.onSessionCreated;
-      return new Promise(() => {});
+      return waitForCancellation(opts.signal);
     });
     const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r" });
     // Simulate the session becoming ready.
@@ -810,7 +880,7 @@ describe("AgentManager — steer()", () => {
 
   it("queues onto pendingSteers when the session isn't ready yet", () => {
     manager = new AgentManager();
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    mockPendingRun();
     const id = manager.spawn(mockPi, mockCtx, "X", "p", { description: "r" });
     const record = manager.getRecord(id)!;
     record.session = undefined; // not ready
@@ -858,7 +928,7 @@ describe("AgentManager — abortAll", () => {
 
   it("stops both queued and running agents and returns the total count", () => {
     manager = new AgentManager(undefined, 1);
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    mockPendingRun();
 
     const running = manager.spawn(mockPi, mockCtx, "X", "r", {
       description: "r",
@@ -901,7 +971,7 @@ describe("AgentManager — hasRunning", () => {
 
   it("is true when an agent is queued behind the concurrency limit", () => {
     manager = new AgentManager(undefined, 1);
-    vi.mocked(runAgent).mockImplementation(() => new Promise(() => {}));
+    mockPendingRun();
 
     manager.spawn(mockPi, mockCtx, "X", "r", { description: "r" });
     manager.spawn(mockPi, mockCtx, "Y", "q", { description: "q" });

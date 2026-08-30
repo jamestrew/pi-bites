@@ -139,6 +139,7 @@ function createSession(finalText: string) {
     model: undefined,
     thinkingLevel: "off",
     sessionManager: { getSessionId: vi.fn(() => "child-session") },
+    extensionRunner: { emit: vi.fn(async () => {}) },
     settingsManager: {
       getTransport: vi.fn(() => "auto"),
       getRetrySettings: vi.fn(() => ({ enabled: true, maxRetries: 3, baseDelayMs: 1000 })),
@@ -162,6 +163,7 @@ function createSession(finalText: string) {
       });
     }),
     abort: vi.fn(),
+    dispose: vi.fn(),
     steer: vi.fn(),
     getActiveToolNames: vi.fn(() => ["read"]),
     setActiveToolsByName: vi.fn(),
@@ -356,15 +358,97 @@ describe("agent-runner final output capture", () => {
     await expect(resumeAgent(session as any, "continue")).resolves.toBe("");
   });
 
-  it("aborts a session when its signal was cancelled before session creation", async () => {
+  it("does not start initialization for a pre-cancelled child", async () => {
     const { session } = createSession("ABORTED");
     createAgentSession.mockResolvedValue({ session });
     const controller = new AbortController();
     controller.abort();
 
-    await runAgent(ctx, "Explore", "stop", { pi, messageParent, signal: controller.signal });
+    await expect(
+      runAgent(ctx, "Explore", "stop", { pi, messageParent, signal: controller.signal }),
+    ).rejects.toThrow(/cancelled before prompt/i);
 
-    expect(session.abort).toHaveBeenCalledOnce();
+    expect(createAgentSession).not.toHaveBeenCalled();
+    expect(session.dispose).not.toHaveBeenCalled();
+    expect(session.extensionRunner.emit).not.toHaveBeenCalled();
+    expect(session.bindExtensions).not.toHaveBeenCalled();
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("tears down a session when extension initialization does not settle", async () => {
+    const { session } = createSession("ABORTED");
+    let bindingStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      bindingStarted = resolve;
+    });
+    session.bindExtensions.mockImplementation(() => {
+      bindingStarted();
+      return new Promise(() => {});
+    });
+    createAgentSession.mockResolvedValue({ session });
+    const controller = new AbortController();
+
+    const running = runAgent(ctx, "Explore", "stop", {
+      pi,
+      messageParent,
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort();
+
+    const outcome = await Promise.race([
+      running.then(
+        () => "resolved",
+        (error: unknown) => (error instanceof Error ? error.message : String(error)),
+      ),
+      new Promise<string>((resolve) => setTimeout(() => resolve("timed out"), 100)),
+    ]);
+    expect(outcome).toMatch(/cancelled before prompt/i);
+    expect(session.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("tears down a session when extension initialization fails", async () => {
+    const { session } = createSession("ABORTED");
+    session.bindExtensions.mockRejectedValue(new Error("bad extension"));
+    createAgentSession.mockResolvedValue({ session });
+
+    await expect(runAgent(ctx, "Explore", "stop", { pi, messageParent })).rejects.toThrow(
+      "bad extension",
+    );
+
+    expect(session.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("does not prompt when cancellation arrives after initialization", async () => {
+    const { session } = createSession("ABORTED");
+    createAgentSession.mockResolvedValue({ session });
+    const controller = new AbortController();
+
+    await expect(
+      runAgent(ctx, "Explore", "stop", {
+        pi,
+        messageParent,
+        signal: controller.signal,
+        onSessionCreated: () => controller.abort(),
+      }),
+    ).rejects.toThrow(/cancelled before prompt/i);
+
+    expect(session.extensionRunner.emit).toHaveBeenCalledWith({
+      type: "session_shutdown",
+      reason: "quit",
+    });
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(session.prompt).not.toHaveBeenCalled();
   });
 
   it("binds extensions before prompting", async () => {

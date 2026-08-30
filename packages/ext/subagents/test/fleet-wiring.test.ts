@@ -106,6 +106,17 @@ const flush = async () => {
   await new Promise((r) => setImmediate(r));
 };
 
+function mockRunningAgent(): void {
+  vi.mocked(runAgent).mockImplementation(
+    (_parent, _type, _prompt, options) =>
+      new Promise((resolve) => {
+        const finish = () => resolve({ responseText: "", session: { dispose: vi.fn() } as any });
+        if (options.signal?.aborted) finish();
+        else options.signal?.addEventListener("abort", finish, { once: true });
+      }),
+  );
+}
+
 function expectStableFleetRow(ui: ReturnType<typeof uiCtx>, description: string, command: string) {
   const lines = ui.renderFleet();
   const agentLine = lines.find((line) => line.includes(description));
@@ -238,7 +249,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   });
 
   it("keeps the FleetView row stable while manual subagent approval is pending", async () => {
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
     const ui = uiCtx();
     let resolveSelect!: (choice: string) => void;
@@ -343,7 +354,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   });
 
   it("keeps the FleetView row stable while Automode reviews a subagent command", async () => {
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
     let resolveReview!: (decision: { outcome: "allow" }) => void;
     const review = vi.fn(
@@ -677,7 +688,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   });
 
   it("yields terminal input between bash-gate pending and resolved events", async () => {
-    vi.mocked(runAgent).mockReturnValue(new Promise(() => {}));
+    mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
     subagentsExtension(pi);
     const ui = uiCtx();

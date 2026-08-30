@@ -358,7 +358,7 @@ export default function (
     parentMessenger.dispose();
     completion.dispose();
     fleet.dispose();
-    manager.dispose();
+    await manager.shutdown();
   });
   let fleetViewEnabled = true;
   function isFleetViewEnabled(): boolean {

@@ -52,12 +52,14 @@ import {
   type ToolCall,
 } from "@earendil-works/pi-ai/compat";
 import {
+  AgentSessionRuntime,
   type AgentSession,
   type AgentSessionEvent,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
+  runPrintMode as runPiPrintMode,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -104,7 +106,7 @@ export type FauxReply = string | FauxContentBlock | FauxContentBlock[] | Assista
  */
 export type FauxResponder = (
   context: Context,
-  state: { callCount: number },
+  state: { callCount: number; signal?: AbortSignal },
 ) => FauxReply | Promise<FauxReply>;
 
 export interface RunPrintModeOptions {
@@ -128,6 +130,8 @@ export interface RunPrintModeOptions {
   maxModelCalls?: number;
   /** Test-only: await spawned agents and completion-triggered parent turns. Default true. */
   hold?: boolean;
+  /** Drive the turn and shutdown through Pi's exported production print-mode host. */
+  usePiPrintMode?: boolean;
   /**
    * Run before the parent turn, after globals are isolated — e.g.
    * `registerAgents(loadCustomAgents(cwd))` to install frontmatter agents.
@@ -307,8 +311,8 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
         throw new Error("runPrintMode (faux mode): provide `respond` or `steps`");
       }
       const max = options.maxModelCalls ?? 16;
-      const factory: FauxResponseStep = async (context, _opts, state) =>
-        toAssistantMessage(await respond(context, state));
+      const factory: FauxResponseStep = async (context, request, state) =>
+        toAssistantMessage(await respond(context, { ...state, signal: request?.signal }));
       faux.setResponses(Array.from({ length: max }, () => factory));
     }
   }
@@ -363,11 +367,13 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   });
   session.setSessionName("print-mode-host");
 
-  // Binding fires session_start so the extension initializes and publishes its
-  // manager on the global Symbol.
-  await session.bindExtensions({});
+  // The production host owns binding when requested; the integration harness
+  // binds directly so tests can inspect the still-live manager afterwards.
+  if (!options.usePiPrintMode) await session.bindExtensions({ mode: "print" });
 
-  const manager = (globalThis as Record<symbol, unknown>)[MANAGER_KEY] as ManagerHandle | undefined;
+  const manager = options.usePiPrintMode
+    ? undefined
+    : ((globalThis as Record<symbol, unknown>)[MANAGER_KEY] as ManagerHandle | undefined);
 
   // Tests may wait for spawned children and any completion-triggered parent turn.
   // Production does not hold the parent loop; Agent always returns immediately.
@@ -394,17 +400,29 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
       timeoutMs,
     );
   });
+  let disposedByPi = false;
   try {
-    await Promise.race([
-      (async () => {
-        await session.prompt(options.prompt);
-        if (hold) {
-          await manager?.waitForAll();
-          await session.waitForIdle();
-        }
-      })(),
-      timeout,
-    ]);
+    const run = options.usePiPrintMode
+      ? runPiPrintMode(
+          new AgentSessionRuntime(
+            session,
+            { cwd, agentDir, modelRuntime, resourceLoader: loader } as never,
+            async () => {
+              throw new Error("Session replacement is not supported by the print-mode test host.");
+            },
+          ),
+          { mode: "text", initialMessage: options.prompt },
+        ).finally(() => {
+          disposedByPi = true;
+        })
+      : (async () => {
+          await session.prompt(options.prompt);
+          if (hold) {
+            await manager?.waitForAll();
+            await session.waitForIdle();
+          }
+        })();
+    await Promise.race([run, timeout]);
   } finally {
     clearTimeout(timer);
     unsubscribe();
@@ -426,15 +444,17 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     // timers would otherwise fire after dispose() invalidates the ctx and surface
     // as unhandled "stale ctx" rejections. dispose() itself does the invalidation,
     // so shutdown has to happen before it.
-    try {
-      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
-    } catch {
-      /* ignore */
-    }
-    try {
-      session.dispose();
-    } catch {
-      /* ignore */
+    if (!disposedByPi) {
+      try {
+        await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      } catch {
+        /* ignore */
+      }
+      try {
+        session.dispose();
+      } catch {
+        /* ignore */
+      }
     }
     faux?.unregister();
     delete (globalThis as Record<symbol, unknown>)[MANAGER_KEY];

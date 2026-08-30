@@ -1,7 +1,3 @@
-/**
- * agent-runner.ts — Core execution engine: creates sessions, runs agents, collects results.
- */
-
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
@@ -18,6 +14,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { installTurnBoundaryAutoCompaction } from "../auto-compaction.js";
+import * as agentSession from "./agent-session-shutdown.js";
 import {
   BUILTIN_TOOL_NAMES,
   getAgentConfig,
@@ -55,12 +52,7 @@ import {
 } from "./types.js";
 import type { AssistantUsage } from "./usage.js";
 
-/**
- * Tool names registered by THIS extension. Single source of truth so the
- * registration sites (index.ts) and the subagent exclusion list below can't
- * drift apart. These are our own tools, not pi built-ins, so they can't be
- * derived from pi — but they only need defining once.
- */
+/** Tool names shared by this extension's registration and subagent exclusion. */
 export const SUBAGENT_TOOL_NAMES = {
   AGENT: "Agent",
   WAIT_AGENT: "WaitAgent",
@@ -407,6 +399,7 @@ export async function runAgent(
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
+  agentSession.assertAgentNotCancelled(options.signal);
   const parent =
     "systemPrompt" in parentContext
       ? parentContext
@@ -420,7 +413,8 @@ export async function runAgent(
   // They differ only for SpawnOptions.cwd spawns (config stays with the parent).
   const configCwd = options.configCwd ?? effectiveCwd;
 
-  const env = await detectEnv(options.pi, effectiveCwd);
+  const env = await detectEnv(options.pi, effectiveCwd, options.signal);
+  agentSession.assertAgentNotCancelled(options.signal);
 
   // Get parent system prompt for append-mode agents
   const parentSystemPrompt = parent.systemPrompt;
@@ -568,6 +562,7 @@ export async function runAgent(
   });
 
   await runAsSubagent(type, () => loader.reload());
+  agentSession.assertAgentNotCancelled(options.signal);
 
   // Plain entries in `tools:` are expected to be built-in names (extension tools
   // go through `ext:`), so an unknown name there is unambiguously a typo. Previously
@@ -702,7 +697,9 @@ export async function runAgent(
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
     modelsPath: join(agentDir, "models.json"),
+    signal: options.signal,
   });
+  agentSession.assertAgentNotCancelled(options.signal);
   for (const [providerId, provider] of parent.providers) {
     modelRuntime.registerProvider(providerId, provider);
   }
@@ -725,6 +722,7 @@ export async function runAgent(
   }
 
   const { session } = await createAgentSession(sessionOpts);
+  if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
 
   if (options.autoCompactionThreshold !== undefined)
     installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
@@ -789,19 +787,19 @@ export async function runAgent(
     options.agentId ? `${baseSessionName}#${options.agentId.slice(0, 8)}` : baseSessionName,
   );
 
-  // Bind extensions so that session_start fires and extensions can initialize
-  // (e.g. loading credentials, setting up state). Tool gating already happened
-  // at session construction via the `tools:` allowlist above — no separate
-  // post-bind filter is needed. All ExtensionBindings fields are optional.
-  await session.bindExtensions({
-    onError: (err) => {
-      options.onToolActivity?.({
-        type: "end",
-        toolName: `extension-error:${err.extensionPath}`,
-      });
+  await agentSession.bindAgentSessionExtensions(
+    session,
+    {
+      onError: (err) => {
+        options.onToolActivity?.({
+          type: "end",
+          toolName: `extension-error:${err.extensionPath}`,
+        });
+      },
     },
-  });
-
+    options.signal,
+  );
+  if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
   emitDiagnostic(options.onDiagnostic, "session_created", {
     session_id: session.sessionManager.getSessionId(),
     provider: session.model?.provider,
@@ -868,6 +866,7 @@ export async function runAgent(
     prompt_bytes: Buffer.byteLength(effectivePrompt, "utf8"),
   });
   try {
+    if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
     await session.prompt(effectivePrompt);
     emitDiagnostic(options.onDiagnostic, "prompt_resolved", {
       request_count: requestIndex,

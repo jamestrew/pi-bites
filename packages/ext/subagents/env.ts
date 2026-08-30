@@ -5,13 +5,18 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { EnvInfo } from "./types.js";
 
-export async function detectEnv(pi: ExtensionAPI, cwd: string): Promise<EnvInfo> {
+export async function detectEnv(
+  pi: ExtensionAPI,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<EnvInfo> {
   let isGitRepo = false;
   let branch = "";
 
   try {
     const result = await pi.exec("git", ["rev-parse", "--is-inside-work-tree"], {
       cwd,
+      signal,
       timeout: 5000,
     });
     isGitRepo = result.code === 0 && result.stdout.trim() === "true";
@@ -21,7 +26,7 @@ export async function detectEnv(pi: ExtensionAPI, cwd: string): Promise<EnvInfo>
 
   if (!isGitRepo) {
     try {
-      const result = await pi.exec("jj", ["root"], { cwd, timeout: 5000 });
+      const result = await pi.exec("jj", ["root"], { cwd, signal, timeout: 5000 });
       isGitRepo = result.code === 0 && result.stdout.trim().length > 0;
     } catch {
       // Not a jj repo or jj not installed
@@ -30,7 +35,11 @@ export async function detectEnv(pi: ExtensionAPI, cwd: string): Promise<EnvInfo>
 
   if (isGitRepo) {
     try {
-      const result = await pi.exec("git", ["branch", "--show-current"], { cwd, timeout: 5000 });
+      const result = await pi.exec("git", ["branch", "--show-current"], {
+        cwd,
+        signal,
+        timeout: 5000,
+      });
       branch = result.code === 0 ? result.stdout.trim() : "unknown";
     } catch {
       branch = "unknown";

@@ -58,6 +58,7 @@ export default function registerAutoCompaction(
   let compactionPending = false;
 
   const compactAtThreshold = (ctx: ExtensionContext, resume: boolean) => {
+    if (ctx.mode === "print" || ctx.mode === "json") return;
     const threshold =
       configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD;
     const tokens = ctx.getContextUsage()?.tokens;
