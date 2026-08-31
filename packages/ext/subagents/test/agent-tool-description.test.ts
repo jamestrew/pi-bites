@@ -8,6 +8,7 @@ import {
   getAgentToolParameters,
 } from "../agent-tool-description.js";
 import { registerAgents, setDefaultsDisabled } from "../agent-types.js";
+import { WAIT_AGENT_TIMEOUT_GUIDANCE } from "../register-wait-agent.js";
 import { type AgentConfig } from "../types.js";
 
 const testAgent: AgentConfig = {
@@ -90,9 +91,10 @@ describe("Agent tool descriptions", () => {
     const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
     expect(guidelines).toContain("Agent returns an agent ID immediately");
     expect(guidelines).toContain("Wait only for blocking results");
-    expect(guidelines).toContain("After a maximum timeout");
-    expect(guidelines).toContain("request a concise status with MessageAgent");
-    expect(guidelines).toContain("continue working");
+    expect(guidelines).toContain(WAIT_AGENT_TIMEOUT_GUIDANCE);
+    expect(guidelines).toContain("another maximum-length WaitAgent call");
+    expect(guidelines).not.toContain("progress checkpoint");
+    expect(guidelines).not.toContain("wrap up");
     expect(getAgentToolParameters().properties).not.toHaveProperty("run_in_background");
   });
 

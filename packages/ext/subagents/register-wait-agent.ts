@@ -9,6 +9,8 @@ import { renderWaitAgent } from "./ui/wait-agent-render.js";
 export const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 export const MIN_WAIT_TIMEOUT_MS = 10_000;
 export const MAX_WAIT_TIMEOUT_MS = 4 * 60_000;
+export const WAIT_AGENT_TIMEOUT_GUIDANCE =
+  "A timeout ends only that wait, not the agent's assignment. If the result still blocks progress after a maximum-length timeout, continue useful work, then use another maximum-length WaitAgent call. Change or stop the assignment only for reasons independent of the timeout.";
 
 type WaitAgentDeps = {
   waitFor: (
@@ -47,7 +49,7 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
       promptSnippet: "Wait for selected subagents only when their results block progress",
       promptGuidelines: [
         "Use WaitAgent only when selected subagent results are required before continuing; do useful independent work instead when possible.",
-        "After a maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status through its MessageAgent and continue working; wait for that reply, then decide whether the agent should continue or wrap up.",
+        WAIT_AGENT_TIMEOUT_GUIDANCE,
         "Do not poll with repeated short WaitAgent calls or sleep with shell commands.",
       ],
       parameters: Type.Object(

@@ -8,6 +8,7 @@ vi.mock("../agent-runner.js", async () => {
 import { MAX_RETAINED_TOOL_CALLS } from "../agent-manager.js";
 import { runAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
+import { WAIT_AGENT_TIMEOUT_GUIDANCE } from "../register-wait-agent.js";
 
 function makeHarness() {
   const tools = new Map<string, any>();
@@ -137,6 +138,10 @@ describe("spawn-and-wait orchestration", () => {
       minimum: 10_000,
       maximum: 240_000,
     });
+    const waitGuidelines = harness.tools.get("WaitAgent").promptGuidelines.join("\n");
+    expect(waitGuidelines).toContain(WAIT_AGENT_TIMEOUT_GUIDANCE);
+    expect(waitGuidelines).not.toContain("progress checkpoint");
+    expect(waitGuidelines).not.toContain("wrap up");
 
     const result = await spawn(harness.tools, harness.ctx);
 

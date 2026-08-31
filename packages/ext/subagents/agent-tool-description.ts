@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { getModelLabelFromConfig } from "./model-resolver.js";
+import { WAIT_AGENT_TIMEOUT_GUIDANCE } from "./register-wait-agent.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { type ToolDescriptionMode } from "./settings.js";
 
@@ -64,7 +65,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Keep review, design, cross-file auditing, root-cause analysis, and other judgment-heavy work in the primary agent.",
     "Read decisive files and own the synthesis.",
   ].join(" "),
-  "Agent returns an agent ID immediately. Wait only for blocking results; otherwise continue useful work or respond and accept automatic delivery. MessageAgent reaches running agents only and cannot resume completed agents. After a maximum timeout, request a concise status with MessageAgent, continue working, then wait for that reply. Use long waits rather than polling or sleeping.",
+  `Agent returns an agent ID immediately. Wait only for blocking results; otherwise continue useful work or respond and accept automatic delivery. MessageAgent reaches running agents only and cannot resume completed agents. ${WAIT_AGENT_TIMEOUT_GUIDANCE} Never poll or sleep.`,
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",
 ];
 
