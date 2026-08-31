@@ -6,118 +6,65 @@ import { getModelLabelFromConfig } from "./model-resolver.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { type ToolDescriptionMode } from "./settings.js";
 
-const COMPACT_DESCRIPTION = `Launch an autonomous agent when delegation has a concrete benefit. Agent types:
+const COMPACT_DESCRIPTION = `Launch an autonomous agent when delegation has a concrete benefit. Each call starts a
+fresh agent with no conversation memory and immediately returns an agent ID for WaitAgent or MessageAgent.
+
+Agent types:
 {{compactTypeList}}
 
 Custom agents: .pi/agents/<name>.md (project) or {{agentDir}}/agents/<name>.md (global).
 
 Notes:
-- description: 3-5 words (shown in UI). Prompts must be self-contained — the agent has not seen this
-  conversation.
-- Handle ordinary implementation requests directly. Use general when the user requests it, independent work
-  can run in parallel, or delegation has another concrete stated benefit; complexity alone is not a reason.
-- Start bounded lookups with direct tools. Escalate to Explore when 2-4 targeted calls fail and broader retrieval
-  is needed; include what was already checked. Use Explore immediately for clearly high-fanout searches or
-  explicit requests to locate, trace, or factually map code. Do not delegate code review, design or plan evaluation,
-  cross-file consistency audits, root-cause analysis, or other judgment-heavy work; synthesize the evidence yourself.
-- Agent always spawns concurrently and returns an identity. Use WaitAgent only when selected findings block
-  progress; otherwise continue useful work or respond and accept automatic completion delivery. After a
-  maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status through its MessageAgent
-  and continue working. Wait for that reply, then decide whether the agent should continue or wrap up. Never poll
-  with short waits or sleep.
-- The result is not shown to the user — summarize it for them. Verify an agent's claimed code changes before
-  reporting work done.
-- MessageAgent sends a message to a running agent; it does not resume completed agents.
-- isolation: "worktree" runs the agent in an isolated git worktree; changes land on a branch.`;
+- Use a 3-5 word description; it is shown in the UI.
+- Prompts are self-contained: include the goal, relevant context and prior checks, expected work, and deliverable.
+- Launch independent agents together. Wait only for blocking results; otherwise accept automatic delivery.
+- MessageAgent reaches running agents only; it cannot resume completed agents.
+- "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
+- Agent output is hidden from the user. Summarize relevant results and verify claimed edits.`;
 
-const FULL_DESCRIPTION = `Launch a new agent when delegation has a concrete benefit. Each agent type has specific
-capabilities and tools available to it.
+const FULL_DESCRIPTION = `Launch an autonomous agent when delegation has a concrete benefit. Each call starts a
+fresh agent with no conversation memory and immediately returns an agent ID for WaitAgent or MessageAgent.
 
-Available agent types and the tools they have access to:
+Agent types:
 {{typeList}}
 
-Custom agents can be defined in .pi/agents/<name>.md (project) or {{agentDir}}/agents/<name>.md (global) —
-they are picked up automatically. Project-level agents override global ones. Creating a .md file with the same
-name as a default agent overrides it.
-
-When using the Agent tool, specify a subagent_type parameter to select which agent type to use.
-
-## When not to use
-
-Handle ordinary implementation requests directly in the primary agent. Use a general subagent when the user
-explicitly requests one, independent work can run in parallel, or delegation has another concrete, stated
-benefit. Do not spawn a general subagent merely because a task is complex or multi-step. Continue to use
-specialized agents when their specialization provides a clear benefit.
-
-Start bounded lookups with direct tools — \`read\` for a known path, \`grep\`/\`find\` for a specific symbol or string.
-If 2-4 targeted tool calls do not locate the answer and the next step requires broader retrieval, delegate to
-Explore and include what was already checked. Use Explore immediately for broad, high-fanout searches likely to
-produce excessive output, or when the user explicitly asks to locate, trace, or factually map code. Do not use
-Explore for code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other
-judgment-heavy work. The primary agent must read decisive files and perform synthesis, evaluation, recommendations,
-and final technical conclusions.
+Custom agents live in .pi/agents/<name>.md (project) or {{agentDir}}/agents/<name>.md (global). Custom agents override
+defaults; project agents override global agents with the same name.
 
 ## Usage notes
 
-- Always include a short (3-5 word) description summarizing what the agent will do (shown in UI).
-- Launch independent agents together when parallel tool calls are available; every Agent call returns immediately
-  with a stable identity and agents run subject to the configured concurrency limit.
-- When the agent is done, it returns a single message back to you. The result is not visible to the user — to
-  show the user, send a text message with a concise summary.
-- Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an
-  agent writes or edits code, check the actual changes before reporting work as done.
-- Use WaitAgent when selected findings are required before you can proceed, using a long timeout after useful
-  parallel work. After a maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status
-  through its MessageAgent and continue working. Use WaitAgent to receive that reply, then decide whether the agent
-  should continue or wrap up. Never poll with repeated short waits or sleep with shell commands.
-- If an agent's result does not block progress, continue or respond. Unconsumed results are delivered automatically.
-- Every Agent call starts a fresh agent with no memory of prior runs, so the prompt must be self-contained.
-- Use MessageAgent to send mid-run messages to a running agent.
-- Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, etc.),
-  since it is not aware of the user's intent.
-- Do not duplicate delegated exploration. Pass prior findings into the prompt, then use the result to narrow any
-  source files you need to read yourself.
-- Use model to specify a different model (as "provider/modelId", or fuzzy e.g. "haiku", "sonnet").
-- Use thinking to control extended thinking level.
-- Use isolation: "worktree" to run the agent in an isolated git worktree (safe parallel file modifications). The
-  worktree is automatically cleaned up if the agent makes no changes; otherwise the path and branch are returned
-  in the result.
+- Use a 3-5 word description; it is shown in the UI.
+- Launch independent agents together. Wait only when a result blocks progress; otherwise keep working and accept
+  automatic delivery.
+- MessageAgent reaches running agents only; it cannot resume completed agents.
+- "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
+- Agent output is hidden from the user. Summarize relevant results, and verify claimed edits before reporting them.
+- Keep synthesis in the primary agent: avoid duplicating delegated searches, read decisive files yourself, and
+  give write-capable agents concrete changes rather than asking them to infer a fix from their research.
 
 ## Writing the prompt
 
-Provide clear, detailed prompts so the agent can work autonomously. Brief it like a smart colleague who just
-walked into the room — it hasn't seen this conversation, doesn't know what you've tried, doesn't understand why
-this task matters.
+Prompts are self-contained: state the goal and why it matters, relevant paths and constraints, prior findings or
+failed checks, whether to research or edit, and a checkable deliverable. Specify output length when useful.
 
-- Explain what you're trying to accomplish and why.
-- Describe what you've already learned or ruled out.
-- Give enough context about the surrounding problem that the agent can make judgment calls rather than just
-  following a narrow instruction.
-- If you need a short response, say so ("report in under 200 words").
-- Lookups: hand over the exact command. Investigations: hand over the question — prescribed steps become dead
-  weight when the premise is wrong.
-
-Terse command-style prompts produce shallow, generic work.
-
-**Never delegate understanding.** Don't write "based on your findings, fix the bug" or "based on the research,
-implement it." Those phrases push synthesis onto the agent instead of doing it yourself. Write prompts that prove
-you understood: include file paths, line numbers, what specifically to change.`;
+For a lookup, provide the exact command. For an investigation, provide the question and decision context rather
+than brittle steps.`;
 
 export const AGENT_PROMPT_GUIDELINES = [
   [
-    "Use Agent with specialized agents when the task matches an agent type's description.",
-    "Use general only when the user explicitly requests it, independent work can run in parallel, or delegation has another concrete stated benefit.",
-    "Handle ordinary implementation requests directly; complexity alone is not a reason to spawn a general subagent.",
+    "Use a specialized Agent when its description matches the task.",
+    "Use general when the user requests a subagent, work can run independently in parallel, or delegation has another concrete benefit.",
+    "Handle ordinary implementation directly; complexity alone does not justify general.",
     "Avoid duplicating work that subagents are already doing.",
   ].join(" "),
   [
-    "Start bounded lookups with direct tools (read, grep, find).",
-    "If 2-4 targeted tool calls do not locate the answer and broader retrieval is needed, delegate to Explore and pass along what was already checked.",
-    "Use Explore immediately for broad high-fanout searches, symbol or reference retrieval, and explicit requests to locate, trace, or factually map code.",
-    "Do not delegate code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy work to Explore.",
-    "The primary agent must read decisive files and perform synthesis, evaluation, and recommendations.",
+    "Use direct tools for bounded lookups.",
+    "Use Explore immediately for high-fanout factual retrieval, substantial documentation and third-party source reading, or when the user explicitly asks to explore; otherwise use it after 2-4 targeted calls fail, including prior checks.",
+    "Keep known-path reads, direct searches likely to answer the question, and a few decisive files in the primary agent.",
+    "Keep review, design, cross-file auditing, root-cause analysis, and other judgment-heavy work in the primary agent.",
+    "Read decisive files and own the synthesis.",
   ].join(" "),
-  "Agent returns immediately with a stable identity. Use WaitAgent only when selected findings block progress; otherwise continue useful work or respond and accept automatic completion delivery. After a maximum-length timeout, use MessageAgent to ask the agent to reply with a concise status through its MessageAgent and continue working. Wait for that reply, then decide whether the agent should continue or wrap up. Never poll with short waits or sleep.",
+  "Agent returns an agent ID immediately. Wait only for blocking results; otherwise continue useful work or respond and accept automatic delivery. MessageAgent reaches running agents only and cannot resume completed agents. After a maximum timeout, request a concise status with MessageAgent, continue working, then wait for that reply. Use long waits rather than polling or sleeping.",
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",
 ];
 
@@ -146,7 +93,7 @@ export function getAgentToolParameters() {
       isolation: Type.Optional(
         Type.Literal("worktree", {
           description:
-            'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Changes are saved to a branch on completion.',
+            'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Unchanged worktrees are removed automatically; changes are saved to a branch on completion.',
         }),
       ),
     },

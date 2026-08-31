@@ -55,31 +55,44 @@ describe("Agent tool descriptions", () => {
     expect(getAgentToolDescription("compact")).toContain(
       "- scout: Researches code. (Tools: read, grep)",
     );
+    expect(getAgentToolDescription("full").length).toBeLessThan(3_000);
+    expect(getAgentToolDescription("compact").length).toBeLessThan(2_000);
   });
 
-  it("keeps Explore retrieval-only in full, compact, and injected guidance", () => {
+  it("keeps fresh-agent and isolation mechanics visible", () => {
     for (const mode of ["full", "compact"] as const) {
       const description = getAgentToolDescription(mode);
-      expect(description).toContain("high-fanout searches");
-      expect(description).toContain("code review");
-      expect(description).toContain("root-cause analysis");
-      expect(description).toContain("judgment-heavy work");
+      expect(description).toContain("no conversation memory");
+      expect(description).toContain("cannot resume completed agents");
+      expect(description).toContain('"worktree" isolation');
+      expect(description).toContain("changes are saved to a branch");
     }
 
+    expect(JSON.stringify(getAgentToolParameters().properties.isolation)).toContain(
+      "removed automatically",
+    );
+  });
+
+  it("keeps Explore retrieval-only in injected guidance", () => {
     const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
-    expect(guidelines).toContain("symbol or reference retrieval");
-    expect(guidelines).toContain("code review");
+    expect(guidelines).toContain("high-fanout factual retrieval");
+    expect(guidelines).toContain("documentation and third-party source reading");
+    expect(guidelines).toContain("user explicitly asks to explore");
+    expect(guidelines).toContain("after 2-4 targeted calls fail");
+    expect(guidelines).toContain("known-path reads");
+    expect(guidelines).toContain("direct searches likely to answer");
+    expect(guidelines).toContain("review");
     expect(guidelines).toContain("judgment-heavy work");
-    expect(guidelines).toContain("primary agent must read decisive files");
+    expect(guidelines).toContain("Read decisive files");
   });
 
   it("describes composable spawn-and-wait work", () => {
     const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
-    expect(guidelines).toContain("Agent returns immediately with a stable identity");
-    expect(guidelines).toContain("Use WaitAgent only when selected findings block progress");
-    expect(guidelines).toContain("After a maximum-length timeout");
-    expect(guidelines).toContain("reply with a concise status through its MessageAgent");
-    expect(guidelines).toContain("continue or wrap up");
+    expect(guidelines).toContain("Agent returns an agent ID immediately");
+    expect(guidelines).toContain("Wait only for blocking results");
+    expect(guidelines).toContain("After a maximum timeout");
+    expect(guidelines).toContain("request a concise status with MessageAgent");
+    expect(guidelines).toContain("continue working");
     expect(getAgentToolParameters().properties).not.toHaveProperty("run_in_background");
   });
 

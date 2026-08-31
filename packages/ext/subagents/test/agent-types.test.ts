@@ -52,6 +52,9 @@ describe("agent type registry", () => {
     expect(config.builtinToolNames).toEqual(["read", "ls", "bash"]);
     expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
     expect(agent?.description).toContain("files, symbols, definitions, references, call paths");
+    expect(agent?.description).toContain("documentation or third-party source reading");
+    expect(agent?.description).toContain("after 2-4 direct lookups fail");
+    expect(agent?.description).toContain("known-path reads");
     expect(agent?.description).toContain("Do not delegate code review");
     expect(agent?.description).toContain("root-cause analysis");
     expect(agent?.systemPrompt).toContain("Do not perform code review");
