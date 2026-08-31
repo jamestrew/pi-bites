@@ -53,6 +53,8 @@ describe("agent type registry", () => {
     expect(agent?.description).toContain("documentation or third-party source reading");
     expect(agent?.description).toContain("after 2-4 direct lookups fail");
     expect(agent?.description).toContain("known-path reads");
+    expect(agent?.description).toContain("do not repeat its searches or reads while it runs");
+    expect(agent?.description).toContain("continue only non-overlapping work");
     expect(agent?.description).toContain("Do not delegate code review");
     expect(agent?.description).toContain("root-cause analysis");
     expect(agent?.thinking).toBe("low");

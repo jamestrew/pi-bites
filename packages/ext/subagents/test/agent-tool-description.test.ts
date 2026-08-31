@@ -85,6 +85,14 @@ describe("Agent tool descriptions", () => {
     expect(guidelines).toContain("review");
     expect(guidelines).toContain("judgment-heavy work");
     expect(guidelines).toContain("Read decisive files");
+    expect(guidelines).toContain("do not repeat its searches or reads while it runs");
+    expect(guidelines).toContain("continue only non-overlapping work");
+
+    for (const mode of ["full", "compact"] as const) {
+      expect(getAgentToolDescription(mode)).toContain(
+        "do not repeat its searches or reads while it runs",
+      );
+    }
   });
 
   it("describes composable spawn-and-wait work", () => {

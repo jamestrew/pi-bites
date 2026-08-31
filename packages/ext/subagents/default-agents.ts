@@ -43,6 +43,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
         "Read-only agent for high-fanout factual retrieval of files, symbols, definitions, references, call paths, or excerpts; substantial documentation or third-party source reading; and user-requested exploration.",
         "Use after 2-4 direct lookups fail for other broad searches; include prior checks.",
         "Keep known-path reads, direct searches likely to answer, and a few decisive files in the primary agent.",
+        "After launching Explore, do not repeat its searches or reads while it runs; continue only non-overlapping work, or wait if its result blocks progress.",
         "Do not delegate code review, design or plan evaluation, cross-file audits, root-cause analysis, or other judgment-heavy work; the primary agent owns synthesis.",
       ].join(" "),
       builtinToolNames: ["read", "ls", "bash"],

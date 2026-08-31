@@ -21,6 +21,7 @@ Notes:
   semantic completion condition ("done when ...").
 - Launch independent agents together. Wait only for blocking results; otherwise accept automatic delivery.
 - You own child lifecycle; request wrap-up when a result is sufficient or further work is unnecessary.
+- After launching Explore, only do non-overlapping work, or wait if its result blocks progress.
 - MessageAgent reaches running agents only; it cannot resume completed agents.
 - "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
 - Agent output is hidden from the user. Summarize relevant results and verify claimed edits.`;
@@ -40,6 +41,7 @@ defaults; project agents override global agents with the same name.
 - Launch independent agents together. Wait only when a result blocks progress; otherwise keep working and accept
   automatic delivery.
 - You own child lifecycle; request wrap-up when a result is sufficient or further work is unnecessary.
+- After launching Explore, continue only non-overlapping work, or wait if its result blocks progress.
 - MessageAgent reaches running agents only; it cannot resume completed agents.
 - "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
 - Agent output is hidden from the user. Summarize relevant results, and verify claimed edits before reporting them.
@@ -60,7 +62,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Use a specialized Agent when its description matches the task.",
     "Use general when the user requests a subagent, work can run independently in parallel, or delegation has another concrete benefit.",
     "Handle ordinary implementation directly; complexity alone does not justify general.",
-    "Avoid duplicating work that subagents are already doing.",
+    "After launching Explore, continue only non-overlapping work, or wait if its result blocks progress.",
   ].join(" "),
   'For investigations, favor a concrete question and semantic completion condition ("done when ...") in the prompt.',
   [
