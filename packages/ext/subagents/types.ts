@@ -32,9 +32,6 @@ export function isMissingFinalResponse(status: string, result?: string): boolean
   return status === "completed" && !result?.trim();
 }
 
-/** Memory scope for persistent agent memory. */
-export type MemoryScope = "user" | "project" | "local";
-
 /** Isolation mode for agent execution. */
 export type IsolationMode = "worktree";
 
@@ -72,8 +69,6 @@ export interface AgentConfig {
   isolated?: boolean;
   /** Gated bash policy for this subagent. */
   bashGatePolicy?: BashGatePolicy;
-  /** Persistent memory scope — agents with memory get a persistent directory and MEMORY.md */
-  memory?: MemoryScope;
   /** Isolation mode — "worktree" runs the agent in a temporary git worktree */
   isolation?: IsolationMode;
   /** true = this is an embedded default agent (informational) */

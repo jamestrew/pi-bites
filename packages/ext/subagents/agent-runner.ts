@@ -19,17 +19,14 @@ import {
   BUILTIN_TOOL_NAMES,
   getAgentConfig,
   getConfig,
-  getMemoryToolNames,
-  getReadOnlyMemoryToolNames,
   getToolNamesForType,
 } from "./agent-types.js";
 import { createChildMessageAgent } from "./child-message-agent.js";
 import { extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
-import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
-import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
+import { buildAgentPrompt } from "./prompts.js";
 import {
   abortReason,
   emitDiagnostic,
@@ -242,8 +239,8 @@ export interface RunOptions {
   /** Override working directory (e.g. for worktree isolation). */
   cwd?: string;
   /**
-   * Where .pi config is discovered (project extensions, skills, pi settings,
-   * agent memory). Default: same as the working directory. The manager sets
+   * Where .pi config is discovered (project extensions, skills, pi settings).
+   * Default: same as the working directory. The manager sets
    * this to the parent session's cwd when `SpawnOptions.cwd` points the
    * working directory elsewhere — the agent works *there* but carries the
    * parent project's config (the target's `.pi` extensions never execute).
@@ -419,9 +416,6 @@ export async function runAgent(
   // Get parent system prompt for append-mode agents
   const parentSystemPrompt = parent.systemPrompt;
 
-  // Build prompt extras (memory, skill preloading)
-  const extras: PromptExtras = {};
-
   // Resolve extensions/skills: isolated overrides to false
   const extensions = options.isolated ? false : config.extensions;
   // Nulling excludes under isolated also suppresses the orphaned-exclude warning —
@@ -429,45 +423,20 @@ export async function runAgent(
   const excludeExtensions = options.isolated ? undefined : config.excludeExtensions;
   const skills = options.isolated ? false : config.skills;
 
-  // Skill preloading: when skills is string[], preload their content into prompt
-  if (Array.isArray(skills)) {
-    const loaded = preloadSkills(skills, configCwd);
-    if (loaded.length > 0) {
-      extras.skillBlocks = loaded;
-    }
-  }
+  const preloadedSkills = Array.isArray(skills) ? preloadSkills(skills, configCwd) : undefined;
 
-  let toolNames = getToolNamesForType(type);
-
-  // Persistent memory: detect write capability and branch accordingly.
-  // Account for disallowedTools — a tool in the base set but on the denylist is not truly available.
-  if (agentConfig?.memory) {
-    const existingNames = new Set(toolNames);
-    const denied = agentConfig.disallowedTools ? new Set(agentConfig.disallowedTools) : undefined;
-    const effectivelyHas = (name: string) => existingNames.has(name) && !denied?.has(name);
-    const hasWriteTools = effectivelyHas("write") || effectivelyHas("edit");
-
-    if (hasWriteTools) {
-      // Read-write memory: add any missing memory tool names (read/write/edit)
-      const extraNames = getMemoryToolNames(existingNames);
-      if (extraNames.length > 0) toolNames = [...toolNames, ...extraNames];
-      extras.memoryBlock = buildMemoryBlock(agentConfig.name, agentConfig.memory, configCwd);
-    } else {
-      // Read-only memory: only add read tool name, use read-only prompt
-      const extraNames = getReadOnlyMemoryToolNames(existingNames);
-      if (extraNames.length > 0) toolNames = [...toolNames, ...extraNames];
-      extras.memoryBlock = buildReadOnlyMemoryBlock(
-        agentConfig.name,
-        agentConfig.memory,
-        configCwd,
-      );
-    }
-  }
+  const toolNames = getToolNamesForType(type);
 
   // Build system prompt from agent config
   let systemPrompt: string;
   if (agentConfig) {
-    systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parentSystemPrompt, extras);
+    systemPrompt = buildAgentPrompt(
+      agentConfig,
+      effectiveCwd,
+      env,
+      parentSystemPrompt,
+      preloadedSkills,
+    );
   } else {
     // Unknown type fallback: spread the canonical general config (defensive —
     // unreachable in practice since index.ts resolves unknown types before calling runAgent).
@@ -478,7 +447,7 @@ export async function runAgent(
       effectiveCwd,
       env,
       parentSystemPrompt,
-      extras,
+      preloadedSkills,
     );
   }
 

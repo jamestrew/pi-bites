@@ -4,14 +4,6 @@
 
 import type { AgentConfig, EnvInfo } from "./types.js";
 
-/** Extra sections to inject into the system prompt (memory, skills, etc.). */
-export interface PromptExtras {
-  /** Persistent memory content to inject (first 200 lines of MEMORY.md + instructions). */
-  memoryBlock?: string;
-  /** Preloaded skill contents to inject. */
-  skillBlocks?: { name: string; content: string }[];
-}
-
 /**
  * Build the system prompt for an agent from its config.
  *
@@ -27,14 +19,14 @@ export interface PromptExtras {
  * session (the LLM's KV cache can then reuse those tokens across every spawn).
  *
  * @param parentSystemPrompt  The parent agent's effective system prompt (for append mode).
- * @param extras  Optional extra sections to inject (memory, preloaded skills).
+ * @param skills  Optional preloaded skills to inject.
  */
 export function buildAgentPrompt(
   config: AgentConfig,
   cwd: string,
   env: EnvInfo,
   parentSystemPrompt?: string,
-  extras?: PromptExtras,
+  skills?: { name: string; content: string }[],
 ): string {
   const activeAgentTag = `<active_agent name="${config.name}"/>\n\n`;
 
@@ -43,17 +35,9 @@ Working directory: ${cwd}
 ${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
 Platform: ${env.platform}`;
 
-  // Build optional extras suffix
-  const extraSections: string[] = [];
-  if (extras?.memoryBlock) {
-    extraSections.push(extras.memoryBlock);
-  }
-  if (extras?.skillBlocks?.length) {
-    for (const skill of extras.skillBlocks) {
-      extraSections.push(`\n# Preloaded Skill: ${skill.name}\n${skill.content}`);
-    }
-  }
-  const extrasSuffix = extraSections.length > 0 ? "\n\n" + extraSections.join("\n") : "";
+  const skillsSuffix = skills?.length
+    ? `\n\n${skills.map((skill) => `\n# Preloaded Skill: ${skill.name}\n${skill.content}`).join("\n")}`
+    : "";
 
   if (config.promptMode === "append") {
     const identity = parentSystemPrompt || genericBase;
@@ -81,7 +65,7 @@ You are operating as a sub-agent invoked to handle a specific task.
     // with the parent session, maximising KV cache hits. The <active_agent>
     // tag and env block vary per call and are placed after the cached prefix.
     return (
-      identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock + customSection + extrasSuffix
+      identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock + customSection + skillsSuffix
     );
   }
 
@@ -91,7 +75,7 @@ You have been invoked to handle a specific task autonomously.
 
 ${envBlock}`;
 
-  return activeAgentTag + replaceHeader + "\n\n" + config.systemPrompt + extrasSuffix;
+  return activeAgentTag + replaceHeader + "\n\n" + config.systemPrompt + skillsSuffix;
 }
 
 /** Fallback base prompt when parent system prompt is unavailable in append mode. */

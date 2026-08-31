@@ -19,15 +19,34 @@
  */
 
 import type { Dirent } from "node:fs";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { isSymlink, isUnsafeName, safeReadFile } from "./memory.js";
 
 export interface PreloadedSkill {
   name: string;
   content: string;
+}
+
+function isUnsafeName(name: string): boolean {
+  return !name || name.length > 128 || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name);
+}
+
+function isSymlink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function safeReadFile(path: string): string | undefined {
+  try {
+    return isSymlink(path) ? undefined : readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 export function preloadSkills(skillNames: string[], cwd: string): PreloadedSkill[] {

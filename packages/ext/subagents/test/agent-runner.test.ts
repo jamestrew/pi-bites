@@ -99,8 +99,6 @@ vi.mock("../agent-types.js", () => ({
     inheritContext: false,
     isolated: false,
   })),
-  getMemoryToolNames: vi.fn(() => []),
-  getReadOnlyMemoryToolNames: vi.fn(() => []),
   getToolNamesForType: vi.fn(() => ["read"]),
 }));
 
@@ -110,11 +108,6 @@ vi.mock("../env.js", () => ({
 
 vi.mock("../prompts.js", () => ({
   buildAgentPrompt: vi.fn(() => "system prompt"),
-}));
-
-vi.mock("../memory.js", () => ({
-  buildMemoryBlock: vi.fn(() => ""),
-  buildReadOnlyMemoryBlock: vi.fn(() => ""),
 }));
 
 vi.mock("../skill-loader.js", () => ({

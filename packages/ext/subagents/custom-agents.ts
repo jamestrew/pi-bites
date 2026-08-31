@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { BUILTIN_TOOL_NAMES } from "./agent-types.js";
-import type { AgentConfig, BashGatePolicy, MemoryScope } from "./types.js";
+import type { AgentConfig, BashGatePolicy } from "./types.js";
 
 /**
  * Scan for custom agent .md files from multiple locations.
@@ -75,7 +75,6 @@ function loadFromDir(
       inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
       isolated: fm.isolated != null ? fm.isolated === true : undefined,
       bashGatePolicy: parseBashGatePolicy(fm.bash_gate),
-      memory: parseMemory(fm.memory),
       isolation: fm.isolation === "worktree" ? "worktree" : undefined,
       enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
@@ -149,15 +148,6 @@ function parseToolsField(val: unknown): {
  */
 function csvListOptional(val: unknown): string[] | undefined {
   return parseCsvField(val);
-}
-
-/**
- * Parse a memory scope field.
- * omitted → undefined; "user"/"project"/"local" → MemoryScope.
- */
-function parseMemory(val: unknown): MemoryScope | undefined {
-  if (val === "user" || val === "project" || val === "local") return val;
-  return undefined;
 }
 
 function parseBashGatePolicy(val: unknown): BashGatePolicy | undefined {

@@ -3,8 +3,6 @@ import {
   getAgentConfig,
   getAvailableTypes,
   getConfig,
-  getMemoryToolNames,
-  getReadOnlyMemoryToolNames,
   getUserAgentNames,
   isValidType,
   registerAgents,
@@ -141,26 +139,6 @@ describe("agent type registry", () => {
 
       expect(isValidType("auditor")).toBe(false);
       expect(getAvailableTypes()).not.toContain("auditor");
-    });
-  });
-
-  describe("getMemoryToolNames", () => {
-    it("returns read, write, edit when none exist", () => {
-      expect(getMemoryToolNames(new Set())).toEqual(["read", "write", "edit"]);
-    });
-
-    it("skips tools that already exist", () => {
-      expect(getMemoryToolNames(new Set(["read", "edit"]))).toEqual(["write"]);
-    });
-  });
-
-  describe("getReadOnlyMemoryToolNames", () => {
-    it("returns only read when missing", () => {
-      expect(getReadOnlyMemoryToolNames(new Set())).toEqual(["read"]);
-    });
-
-    it("returns empty when read already exists", () => {
-      expect(getReadOnlyMemoryToolNames(new Set(["read"]))).toEqual([]);
     });
   });
 });

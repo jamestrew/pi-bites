@@ -554,63 +554,6 @@ All tools.`,
     expect(result.get("unrestricted")!.disallowedTools).toBeUndefined();
   });
 
-  it("parses memory scope", () => {
-    writeAgent(
-      "rememberer",
-      `---
-description: Agent with memory
-memory: project
----
-
-Remember things.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("rememberer")!.memory).toBe("project");
-  });
-
-  it("parses memory: user scope", () => {
-    writeAgent(
-      "global-mem",
-      `---
-memory: user
----
-
-User memory.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("global-mem")!.memory).toBe("user");
-  });
-
-  it("memory defaults to undefined when omitted", () => {
-    writeAgent(
-      "no-mem",
-      `---
-description: No memory
----
-
-Stateless.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("no-mem")!.memory).toBeUndefined();
-  });
-
-  it("rejects invalid memory scope", () => {
-    writeAgent(
-      "bad-mem",
-      `---
-memory: invalid
----
-
-Bad memory.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("bad-mem")!.memory).toBeUndefined();
-  });
-
   it("parses isolation: worktree", () => {
     writeAgent(
       "isolated-wt",
