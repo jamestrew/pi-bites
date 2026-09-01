@@ -53,8 +53,8 @@ export interface AgentConfig {
   /** Extension-name denylist applied after the `extensions:` include set. Exclude wins.
    * Plain canonical names only (case-insensitive); no paths, no wildcard. */
   excludeExtensions?: string[];
-  /** true = inherit all, string[] = only listed, false = none */
-  skills: true | string[] | false;
+  /** Whether Pi should discover skills normally for this subagent. */
+  skills: boolean;
   model?: string;
   thinking?: string;
   /** Persist this subagent as a normal pi session instead of keeping it in memory only. */

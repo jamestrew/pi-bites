@@ -129,7 +129,7 @@ export function getConfig(type: string): {
   builtinToolNames: string[];
   extensions: true | string[] | false;
   excludeExtensions?: string[];
-  skills: true | string[] | false;
+  skills: boolean;
   promptMode: "replace" | "append";
 } {
   const key = resolveKey(type);

@@ -110,10 +110,6 @@ vi.mock("../prompts.js", () => ({
   buildAgentPrompt: vi.fn(() => "system prompt"),
 }));
 
-vi.mock("../skill-loader.js", () => ({
-  preloadSkills: vi.fn(() => []),
-}));
-
 import {
   extensionCanonicalName,
   getAgentConversation,
@@ -839,7 +835,7 @@ function makeAgentConfig(overrides: Record<string, unknown> = {}) {
     description: "Test",
     builtinToolNames: BUILTINS_7,
     extensions: true as boolean | string[],
-    skills: false as boolean | string[],
+    skills: false,
     systemPrompt: "Test.",
     promptMode: "replace" as const,
     inheritContext: false,
@@ -854,7 +850,7 @@ function makeConfig(overrides: Record<string, unknown> = {}) {
     description: "Test",
     builtinToolNames: BUILTINS_7,
     extensions: true as boolean | string[],
-    skills: false as boolean | string[],
+    skills: false,
     promptMode: "replace" as const,
     ...overrides,
   };
@@ -879,6 +875,19 @@ function lastToolsPassed(): string[] {
 function lastLoaderOpts(): Record<string, unknown> {
   return defaultResourceLoaderCtor.mock.calls[0]![0]!;
 }
+
+describe("agent-runner skills", () => {
+  it("lets Pi discover skills normally when enabled", async () => {
+    vi.mocked(getConfig).mockReturnValueOnce(makeConfig({ skills: true }));
+    vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ skills: true }));
+    const { session } = createSession("OK");
+    createAgentSession.mockResolvedValue({ session });
+
+    await runAgent(ctx, "Explore", "go", { pi, messageParent });
+
+    expect(lastLoaderOpts().noSkills).toBe(false);
+  });
+});
 
 describe("agent-runner session persistence", () => {
   it("uses an in-memory session by default", async () => {

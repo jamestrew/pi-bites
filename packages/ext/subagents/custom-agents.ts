@@ -65,7 +65,7 @@ function loadFromDir(
       disallowedTools: csvListOptional(fm.disallowed_tools),
       extensions: inheritField(fm.extensions ?? fm.inherit_extensions),
       excludeExtensions: csvListOptional(fm.exclude_extensions),
-      skills: inheritField(fm.skills ?? fm.inherit_skills),
+      skills: inheritField(fm.skills ?? fm.inherit_skills) !== false,
       model: str(fm.model),
       thinking: str(fm.thinking),
       persistSession: fm.persist_session != null ? fm.persist_session === true : undefined,
@@ -156,7 +156,7 @@ function parseBashGatePolicy(val: unknown): BashGatePolicy | undefined {
 }
 
 /**
- * Parse an inherit field (extensions, skills).
+ * Parse an inherited resource field.
  * omitted/true → true (inherit all); false/"none"/empty → false; csv → listed names.
  */
 function inheritField(val: unknown): true | string[] | false {

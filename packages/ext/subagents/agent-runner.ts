@@ -38,7 +38,6 @@ import {
 } from "./runner-diagnostics.js";
 import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
-import { preloadSkills } from "./skill-loader.js";
 import { runAsSubagent } from "./subagent-context.js";
 import { createSubagentEventBus } from "./subagent-event-bus.js";
 import {
@@ -421,22 +420,14 @@ export async function runAgent(
   // Nulling excludes under isolated also suppresses the orphaned-exclude warning —
   // isolation is an intentional override, not a misconfiguration.
   const excludeExtensions = options.isolated ? undefined : config.excludeExtensions;
-  const skills = options.isolated ? false : config.skills;
-
-  const preloadedSkills = Array.isArray(skills) ? preloadSkills(skills, configCwd) : undefined;
+  const noSkills = options.isolated || !config.skills;
 
   const toolNames = getToolNamesForType(type);
 
   // Build system prompt from agent config
   let systemPrompt: string;
   if (agentConfig) {
-    systemPrompt = buildAgentPrompt(
-      agentConfig,
-      effectiveCwd,
-      env,
-      parentSystemPrompt,
-      preloadedSkills,
-    );
+    systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parentSystemPrompt);
   } else {
     // Unknown type fallback: spread the canonical general config (defensive —
     // unreachable in practice since index.ts resolves unknown types before calling runAgent).
@@ -447,13 +438,8 @@ export async function runAgent(
       effectiveCwd,
       env,
       parentSystemPrompt,
-      preloadedSkills,
     );
   }
-
-  // When skills is string[], we've already preloaded them into the prompt.
-  // Still pass noSkills: true since we don't need the skill loader to load them again.
-  const noSkills = skills === false || Array.isArray(skills);
 
   const agentDir = getAgentDir();
 
