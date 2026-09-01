@@ -55,6 +55,7 @@ describe("agent type registry", () => {
     expect(agent?.description).toContain("known-path reads");
     expect(agent?.description).toContain("Do not delegate code review");
     expect(agent?.description).toContain("root-cause analysis");
+    expect(agent?.thinking).toBe("low");
     expect(agent?.systemPrompt).toContain("Do not perform code review");
     expect(agent?.systemPrompt).toContain(
       "Treat the working directory you were given as the default search root",

@@ -65,6 +65,12 @@ describe("resolveAgentInvocationConfig", () => {
     });
   });
 
+  it("uses an explicit agent thinking level when the tool call omits one", () => {
+    const resolved = resolveAgentInvocationConfig(makeConfig({ thinking: "high" }), {});
+
+    expect(resolved.thinking).toBe("high");
+  });
+
   it("defaults boolean options when config and params omit them", () => {
     const resolved = resolveAgentInvocationConfig(
       makeConfig({ inheritContext: undefined, isolated: undefined }),

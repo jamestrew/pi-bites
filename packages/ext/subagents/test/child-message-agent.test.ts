@@ -13,6 +13,11 @@ it("records a normal parent-scoped call/result with sent or failed status", asyn
     expect.stringMatching(/^Use MessageAgent only for/),
     expect.stringContaining("final response"),
   ]);
+  expect(tool.promptGuidelines?.join("\n")).toContain("likely to change the parent's behavior");
+  expect(tool.promptGuidelines?.join("\n")).toContain("requires a decision");
+  expect(tool.promptGuidelines?.join("\n")).toContain("incremental or supporting findings");
+  expect(tool.promptGuidelines?.join("\n")).toContain("acknowledgements");
+  expect(tool.promptGuidelines?.join("\n")).toContain("wait for the final response");
   expect(tool.description).toContain("queued");
   expect(tool.description).toContain("does not interrupt");
   expect(tool.description).toContain("does not replace your required final response");

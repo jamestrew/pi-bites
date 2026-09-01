@@ -49,6 +49,7 @@ export const DEFAULT_AGENTS: Map<string, AgentConfig> = new Map([
       extensions: [SELF_EXTENSION],
       skills: true,
       model: DEFAULT_EXPLORE_MODEL,
+      thinking: "low",
       systemPrompt: `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
 
 Your job is to search the repository efficiently and return factual evidence to the parent agent. Do not perform code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy analysis.

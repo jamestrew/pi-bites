@@ -17,8 +17,10 @@ Custom agents: .pi/agents/<name>.md (project) or {{agentDir}}/agents/<name>.md (
 
 Notes:
 - Use a 3-5 word description; it is shown in the UI.
-- Prompts are self-contained: include the goal, relevant context and prior checks, expected work, and deliverable.
+- Prompts are self-contained. For investigations, include relevant context, prior checks, a concrete question, and a
+  semantic completion condition ("done when ...").
 - Launch independent agents together. Wait only for blocking results; otherwise accept automatic delivery.
+- You own child lifecycle; request wrap-up when a result is sufficient or further work is unnecessary.
 - MessageAgent reaches running agents only; it cannot resume completed agents.
 - "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
 - Agent output is hidden from the user. Summarize relevant results and verify claimed edits.`;
@@ -37,6 +39,7 @@ defaults; project agents override global agents with the same name.
 - Use a 3-5 word description; it is shown in the UI.
 - Launch independent agents together. Wait only when a result blocks progress; otherwise keep working and accept
   automatic delivery.
+- You own child lifecycle; request wrap-up when a result is sufficient or further work is unnecessary.
 - MessageAgent reaches running agents only; it cannot resume completed agents.
 - "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
 - Agent output is hidden from the user. Summarize relevant results, and verify claimed edits before reporting them.
@@ -46,7 +49,8 @@ defaults; project agents override global agents with the same name.
 ## Writing the prompt
 
 Prompts are self-contained: state the goal and why it matters, relevant paths and constraints, prior findings or
-failed checks, whether to research or edit, and a checkable deliverable. Specify output length when useful.
+failed checks, whether to research or edit, and a checkable deliverable. Specify a concrete question and semantic
+completion condition ("done when ...") for investigations, and output length when useful.
 
 For a lookup, provide the exact command. For an investigation, provide the question and decision context rather
 than brittle steps.`;
@@ -58,6 +62,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Handle ordinary implementation directly; complexity alone does not justify general.",
     "Avoid duplicating work that subagents are already doing.",
   ].join(" "),
+  'For investigations, favor a concrete question and semantic completion condition ("done when ...") in the prompt.',
   [
     "Use direct tools for bounded lookups.",
     "Use Explore immediately for high-fanout factual retrieval, substantial documentation and third-party source reading, or when the user explicitly asks to explore; otherwise use it after 2-4 targeted calls fail, including prior checks.",
@@ -66,6 +71,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Read decisive files and own the synthesis.",
   ].join(" "),
   `Agent returns an agent ID immediately. Wait only for blocking results; otherwise continue useful work or respond and accept automatic delivery. MessageAgent reaches running agents only and cannot resume completed agents. ${WAIT_AGENT_TIMEOUT_GUIDANCE} Never poll or sleep.`,
+  "The main agent owns child lifecycle. If an intermediate result answers the delegated question or your own work makes further exploration unnecessary, use MessageAgent to request wrap-up. A wrap-up request is not a completed stop; only terminal status confirms that the child stopped or completed.",
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",
 ];
 

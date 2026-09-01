@@ -91,11 +91,27 @@ describe("Agent tool descriptions", () => {
     const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
     expect(guidelines).toContain("Agent returns an agent ID immediately");
     expect(guidelines).toContain("Wait only for blocking results");
+    expect(guidelines).toContain("owns child lifecycle");
+    expect(guidelines).toContain("request wrap-up");
+    expect(guidelines.toLowerCase()).toContain("only terminal status confirms");
     expect(guidelines).toContain(WAIT_AGENT_TIMEOUT_GUIDANCE);
     expect(guidelines).toContain("another maximum-length WaitAgent call");
     expect(guidelines).not.toContain("progress checkpoint");
-    expect(guidelines).not.toContain("wrap up");
     expect(getAgentToolParameters().properties).not.toHaveProperty("run_in_background");
+  });
+
+  it("asks for a concrete question and semantic completion without enforcing either", () => {
+    const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
+    expect(guidelines).toContain("concrete question");
+    expect(guidelines).toContain("done when");
+
+    for (const mode of ["full", "compact"] as const) {
+      const description = getAgentToolDescription(mode);
+      expect(description).toContain("concrete question");
+      expect(description).toContain("done when");
+    }
+
+    expect(getAgentToolParameters().properties.prompt.type).toBe("string");
   });
 
   it("uses project then global custom templates and falls back to full", () => {

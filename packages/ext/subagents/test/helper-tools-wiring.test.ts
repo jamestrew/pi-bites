@@ -324,6 +324,9 @@ describe("background helper tools", () => {
     });
     const messageTool = tools.get("MessageAgent");
     expect(messageTool.description).toContain("assistant response's tool-call batch");
+    expect(messageTool.description).toContain("request wrap-up");
+    expect(messageTool.description).toContain("does not confirm");
+    expect(messageTool.description).toContain("terminal status");
     expect(
       messageTool
         .renderCall(

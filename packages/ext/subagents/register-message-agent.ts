@@ -24,7 +24,9 @@ export function registerMessageAgent(pi: ExtensionAPI, manager: AgentManager) {
       label: "MessageAgent",
       description:
         "Send a message to a running agent. The agent receives it after its current assistant response's tool-call batch. " +
-        "Messages are queued while the agent session initializes. Completed agents cannot be resumed.",
+        "Messages are queued while the agent session initializes. Use it to provide behavior-changing context, ask a " +
+        "question requiring a decision, or request wrap-up. A wrap-up request does not confirm the agent stopped; only " +
+        "terminal status does. Completed agents cannot be resumed.",
       promptSnippet: "Send a message to a running agent",
       parameters: Type.Object(
         {
