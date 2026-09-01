@@ -7,6 +7,11 @@ import { WAIT_AGENT_TIMEOUT_GUIDANCE } from "./register-wait-agent.js";
 import { BUILTIN_TOOL_NAMES, getAgentConfig, getAvailableTypes } from "./agent-types.js";
 import { type ToolDescriptionMode } from "./settings.js";
 
+const EXPLORE_SCOPE_GUIDANCE =
+  "Partition Explore's scope before launching: keep files and searches you will handle out of its prompt. After launch, do not inspect delegated files or topics and do not repeat its searches or reads while it runs; continue only non-overlapping work, or wait if its result blocks progress.";
+const CHILD_LIFECYCLE_GUIDANCE =
+  "Use MessageAgent for a status check only when the reply informs a current decision. Do not use it to hurry an agent or request wrap-up because it seems slow. Reviews must reach their original completion criterion unless the user changes or cancels the task. Request wrap-up only when the task becomes unnecessary for a reason independent of elapsed time or a WaitAgent timeout.";
+
 const COMPACT_DESCRIPTION = `Launch an autonomous agent when delegation has a concrete benefit. Each call starts a
 fresh agent with no conversation memory and immediately returns an agent ID for WaitAgent or MessageAgent.
 
@@ -20,8 +25,8 @@ Notes:
 - Prompts are self-contained. For investigations, include relevant context, prior checks, a concrete question, and a
   semantic completion condition ("done when ...").
 - Launch independent agents together. Wait only for blocking results; otherwise accept automatic delivery.
-- You own child lifecycle; request wrap-up when a result is sufficient or further work is unnecessary.
-- After launching Explore, only do non-overlapping work, or wait if its result blocks progress.
+- ${CHILD_LIFECYCLE_GUIDANCE}
+- ${EXPLORE_SCOPE_GUIDANCE}
 - MessageAgent reaches running agents only; it cannot resume completed agents.
 - "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
 - Agent output is hidden from the user. Summarize relevant results and verify claimed edits.`;
@@ -40,8 +45,8 @@ defaults; project agents override global agents with the same name.
 - Use a 3-5 word description; it is shown in the UI.
 - Launch independent agents together. Wait only when a result blocks progress; otherwise keep working and accept
   automatic delivery.
-- You own child lifecycle; request wrap-up when a result is sufficient or further work is unnecessary.
-- After launching Explore, continue only non-overlapping work, or wait if its result blocks progress.
+- ${CHILD_LIFECYCLE_GUIDANCE}
+- ${EXPLORE_SCOPE_GUIDANCE}
 - MessageAgent reaches running agents only; it cannot resume completed agents.
 - "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
 - Agent output is hidden from the user. Summarize relevant results, and verify claimed edits before reporting them.
@@ -62,7 +67,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Use a specialized Agent when its description matches the task.",
     "Use general when the user requests a subagent, work can run independently in parallel, or delegation has another concrete benefit.",
     "Handle ordinary implementation directly; complexity alone does not justify general.",
-    "After launching Explore, continue only non-overlapping work, or wait if its result blocks progress.",
+    EXPLORE_SCOPE_GUIDANCE,
   ].join(" "),
   'For investigations, favor a concrete question and semantic completion condition ("done when ...") in the prompt.',
   [
@@ -73,7 +78,7 @@ export const AGENT_PROMPT_GUIDELINES = [
     "Read decisive files and own the synthesis.",
   ].join(" "),
   `Agent returns an agent ID immediately. Wait only for blocking results; otherwise continue useful work or respond and accept automatic delivery. MessageAgent reaches running agents only and cannot resume completed agents. ${WAIT_AGENT_TIMEOUT_GUIDANCE} Never poll or sleep.`,
-  "The main agent owns child lifecycle. If an intermediate result answers the delegated question or your own work makes further exploration unnecessary, use MessageAgent to request wrap-up. A wrap-up request is not a completed stop; only terminal status confirms that the child stopped or completed.",
+  CHILD_LIFECYCLE_GUIDANCE,
   "Trust but verify: check an agent's claimed code changes before reporting work as done.",
 ];
 

@@ -148,6 +148,8 @@ describe("spawn-and-wait orchestration", () => {
     expect(agentId(result)).toMatch(/\S+/);
     expect(result.details.status).toBe("running");
     expect(result.content[0].text).toContain(`Agent ID: ${agentId(result)}`);
+    expect(result.content[0].text).toContain("Do not duplicate its assigned work");
+    expect(result.content[0].text).toContain("decision-relevant status—not deadline pressure");
     harness.shutdown();
   });
 

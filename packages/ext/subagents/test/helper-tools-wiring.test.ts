@@ -324,7 +324,12 @@ describe("background helper tools", () => {
     });
     const messageTool = tools.get("MessageAgent");
     expect(messageTool.description).toContain("assistant response's tool-call batch");
-    expect(messageTool.description).toContain("request wrap-up");
+    expect(messageTool.description).toContain("Request wrap-up");
+    expect(messageTool.description).toContain("status check is appropriate");
+    expect(messageTool.description).toContain("informs a current decision");
+    expect(messageTool.description).toContain("hurry an agent");
+    expect(messageTool.description).toContain("cut a review short");
+    expect(messageTool.description).toContain("WaitAgent timed out");
     expect(messageTool.description).toContain("does not confirm");
     expect(messageTool.description).toContain("terminal status");
     expect(

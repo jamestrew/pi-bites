@@ -133,9 +133,10 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
         (status === "queued"
           ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n`
           : "") +
-        "\nUse WaitAgent only when this result blocks progress; otherwise continue useful work or respond. " +
+        "\nDo not duplicate its assigned work while it runs. Use WaitAgent only when this result blocks progress; " +
+        "otherwise continue only non-overlapping work or respond. " +
         "Unconsumed results are delivered automatically.\n" +
-        "Use MessageAgent to send additional context while the agent is running. Do not poll or sleep.",
+        "Use MessageAgent for new context, decisions, or decision-relevant status—not deadline pressure. Do not poll or sleep.",
       {
         displayName,
         description: params.description,

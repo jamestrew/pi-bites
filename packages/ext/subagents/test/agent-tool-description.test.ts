@@ -85,13 +85,15 @@ describe("Agent tool descriptions", () => {
     expect(guidelines).toContain("review");
     expect(guidelines).toContain("judgment-heavy work");
     expect(guidelines).toContain("Read decisive files");
+    expect(guidelines).toContain("Partition Explore's scope before launching");
+    expect(guidelines).toContain("delegated files or topics");
     expect(guidelines).toContain("do not repeat its searches or reads while it runs");
     expect(guidelines).toContain("continue only non-overlapping work");
 
     for (const mode of ["full", "compact"] as const) {
-      expect(getAgentToolDescription(mode)).toContain(
-        "do not repeat its searches or reads while it runs",
-      );
+      const description = getAgentToolDescription(mode);
+      expect(description).toContain("Partition Explore's scope before launching");
+      expect(description).toContain("delegated files or topics");
     }
   });
 
@@ -99,12 +101,20 @@ describe("Agent tool descriptions", () => {
     const guidelines = AGENT_PROMPT_GUIDELINES.join("\n");
     expect(guidelines).toContain("Agent returns an agent ID immediately");
     expect(guidelines).toContain("Wait only for blocking results");
-    expect(guidelines).toContain("owns child lifecycle");
-    expect(guidelines).toContain("request wrap-up");
-    expect(guidelines.toLowerCase()).toContain("only terminal status confirms");
+    expect(guidelines).toContain("status check only when the reply informs a current decision");
+    expect(guidelines).toContain("hurry an agent");
+    expect(guidelines).toContain("Reviews must reach their original completion criterion");
+    expect(guidelines).toContain("independent of elapsed time or a WaitAgent timeout");
+    expect(guidelines).not.toContain("intermediate result answers");
     expect(guidelines).toContain(WAIT_AGENT_TIMEOUT_GUIDANCE);
     expect(guidelines).toContain("another maximum-length WaitAgent call");
     expect(guidelines).not.toContain("progress checkpoint");
+
+    for (const mode of ["full", "compact"] as const) {
+      const description = getAgentToolDescription(mode);
+      expect(description).toContain("status check only when the reply informs a current decision");
+      expect(description).toContain("Reviews must reach their original completion criterion");
+    }
     expect(getAgentToolParameters().properties).not.toHaveProperty("run_in_background");
   });
 
