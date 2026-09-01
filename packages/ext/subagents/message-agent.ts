@@ -7,9 +7,9 @@ import {
   type MessageAgentStatus,
 } from "./ui/message-agent-render.js";
 
-type ChildMessageAgentDetails = { status: MessageAgentStatus };
+type MessageAgentDetails = { status: MessageAgentStatus };
 
-export function createChildMessageAgent(name: string, messageParent: (message: string) => boolean) {
+export function createMessageAgent(name: string, messageParent: (message: string) => boolean) {
   return defineTool({
     name,
     label: "MessageAgent",
@@ -33,12 +33,12 @@ export function createChildMessageAgent(name: string, messageParent: (message: s
     async execute(_toolCallId, { message }) {
       try {
         const status: MessageAgentStatus = messageParent(message) ? "sent" : "failed";
-        return textResult<ChildMessageAgentDetails>(
+        return textResult<MessageAgentDetails>(
           status === "sent" ? "Message sent to parent." : "Failed to message parent.",
           { status },
         );
       } catch {
-        return textResult<ChildMessageAgentDetails>("Failed to message parent.", {
+        return textResult<MessageAgentDetails>("Failed to message parent.", {
           status: "failed",
         });
       }

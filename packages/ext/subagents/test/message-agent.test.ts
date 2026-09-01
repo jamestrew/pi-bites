@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { createChildMessageAgent } from "../child-message-agent.js";
+import { createMessageAgent } from "../message-agent.js";
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -8,7 +8,7 @@ const theme = {
 
 it("records a normal parent-scoped call/result with sent or failed status", async () => {
   const send = vi.fn(() => true);
-  const tool = createChildMessageAgent("MessageAgent", send);
+  const tool = createMessageAgent("MessageAgent", send);
   expect(tool.promptGuidelines).toEqual([
     expect.stringMatching(/^Use MessageAgent only for/),
     expect.stringContaining("final response"),
@@ -39,7 +39,7 @@ it("records a normal parent-scoped call/result with sent or failed status", asyn
     tool.renderResult?.(sent, { expanded: false, isPartial: false }, theme, {} as any).render(80),
   ).toEqual(["  ⎿ sent"]);
 
-  const failedTool = createChildMessageAgent("MessageAgent", () => false);
+  const failedTool = createMessageAgent("MessageAgent", () => false);
   const failed = await failedTool.execute(
     "call",
     { message: "blocked" },

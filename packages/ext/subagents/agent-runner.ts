@@ -21,7 +21,7 @@ import {
   getConfig,
   getToolNamesForType,
 } from "./agent-types.js";
-import { createChildMessageAgent } from "./child-message-agent.js";
+import { createMessageAgent } from "./message-agent.js";
 import { extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
@@ -667,9 +667,7 @@ export async function runAgent(
     modelRuntime,
     model,
     tools: allowedTools,
-    customTools: [
-      createChildMessageAgent(SUBAGENT_TOOL_NAMES.MESSAGE_AGENT, options.messageParent),
-    ],
+    customTools: [createMessageAgent(SUBAGENT_TOOL_NAMES.MESSAGE_AGENT, options.messageParent)],
     resourceLoader: loader,
   };
   if (thinkingLevel) {
