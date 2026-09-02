@@ -9,10 +9,10 @@ import type {
 import { Type, type Static } from "typebox";
 
 import type { CodexAdapterConfig } from "../../config.js";
-import { sanitizeText } from "../../subagents/ui/text-lines.js";
 import { nativeBinaryRecoveryMessage } from "../native-binary-error.js";
 import { runBundledTool } from "../native/runner.js";
 import { getBundledWebRunPath } from "./binary.js";
+import { summarizeWebRunCall } from "./summary.js";
 
 const RESPONSES_APIS = new Set([
   "openai-responses",
@@ -353,46 +353,6 @@ async function defaultNativeRunner(input: WebRunNativeInput, binaryPath?: string
   return result.stdout;
 }
 
-function displayText(value: string): string {
-  return sanitizeText(value).replace(/\s+/gu, " ").trim();
-}
-
-function openTarget(refId: string): string {
-  const target = displayText(refId);
-  if (/^https?:\/\//iu.test(target)) return target;
-  if (/^turn\d+search\d+$/u.test(target)) return "search result";
-  if (/^turn\d+(?:view|fetch)\d+$/u.test(target)) return "page";
-  return "result";
-}
-
-function callSummary(params: WebRunParameters): string | undefined {
-  const searches = params.search_query;
-  if (searches?.[0]) {
-    const more = searches.length > 1 ? ` (+${searches.length - 1})` : "";
-    return `Search ${displayText(searches[0].q)}${more}`;
-  }
-  const images = params.image_query;
-  if (images?.[0]) {
-    const more = images.length > 1 ? ` (+${images.length - 1})` : "";
-    return `Images ${displayText(images[0].q)}${more}`;
-  }
-  const opens = params.open;
-  if (opens?.[0]) {
-    if (opens.length > 1) return `Open ${opens.length} results`;
-    const line = opens[0].lineno === undefined ? "" : ` at line ${opens[0].lineno}`;
-    return `Open ${openTarget(opens[0].ref_id)}${line}`;
-  }
-  const clicks = params.click;
-  if (clicks?.[0])
-    return clicks.length > 1 ? `Click ${clicks.length} links` : `Click link ${clicks[0].id}`;
-  const finds = params.find;
-  if (finds?.[0]) {
-    const more = finds.length > 1 ? ` (+${finds.length - 1})` : "";
-    return `Find ${displayText(finds[0].pattern)}${more}`;
-  }
-  return undefined;
-}
-
 function rememberCitationSources(output: WebRunOutput, sources: Map<string, string>): void {
   for (const key of ["search_results", "results"]) {
     const results = output[key];
@@ -522,7 +482,7 @@ export function createWebRunTool(options: CreateWebRunToolOptions): ToolDefiniti
     },
     renderShell: "self",
     renderCall(args, theme, context) {
-      const summary = callSummary(args);
+      const summary = summarizeWebRunCall(args);
       const component = context.state.call ?? new Box(0, 1);
       const background = context.isError
         ? "toolErrorBg"
