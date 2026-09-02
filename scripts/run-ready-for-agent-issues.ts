@@ -336,10 +336,6 @@ async function main() {
   if (!(await Bun.file(IMPLEMENT_SKILL).exists())) {
     throw new Error(`Missing implement skill: ${IMPLEMENT_SKILL}`);
   }
-  if ((await $`jj diff --summary`.text()).trim()) {
-    throw new Error("Working copy is not clean");
-  }
-
   const repository = JSON.parse(
     await $`gh repo view --json nameWithOwner,defaultBranchRef`.text(),
   ) as { nameWithOwner: string; defaultBranchRef: { name: string } };
