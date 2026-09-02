@@ -629,6 +629,25 @@ describe("web_run rendering", () => {
     ]);
   });
 
+  test("includes every operation in a multi-operation call summary", () => {
+    const tool = createWebRunTool({ getConfig: () => ({}) });
+    const call = tool.renderCall!(
+      {
+        search_query: [{ q: "docs" }],
+        image_query: [{ q: "cats" }],
+        open: [{ ref_id: "turn0view0" }],
+        click: [{ ref_id: "turn0view0", id: 2 }],
+        find: [{ ref_id: "turn0view0", pattern: "needle" }],
+      },
+      theme as never,
+      { state: {}, isPartial: false, isError: false } as never,
+    );
+
+    expect(call.render(200).join("\n")).toContain(
+      "Search docs · Images cats · Open page · Click link 2 · Find needle",
+    );
+  });
+
   test("renders web citation markers as links instead of internal protocol syntax", async () => {
     let transform!: (markdown: string, context: { messageType: string }) => string;
     let recordResult!: (event: { toolName: string; details: unknown }) => void;

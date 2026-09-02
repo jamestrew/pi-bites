@@ -331,6 +331,66 @@ describe("ConversationViewer", () => {
       expect(viewer.render(40).join("\n")).toContain("tail-sentinel");
     });
 
+    it("renders Codex adapter tool calls semantically at narrow widths", () => {
+      const patch = [
+        "*** Begin Patch",
+        "*** Add File: src/new.ts",
+        "+PATCH_PAYLOAD_SENTINEL",
+        "*** End Patch",
+      ].join("\n");
+      const messages = [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              name: "exec_command",
+              input: { cmd: "git status --short", tty: true, max_output_tokens: 10_000 },
+            },
+            {
+              type: "toolCall",
+              name: "write_stdin",
+              input: { session_id: 42, chars: "SECRET_INPUT" },
+            },
+            { type: "toolCall", name: "apply_patch", input: { input: patch } },
+            {
+              type: "toolCall",
+              name: "web_run",
+              input: {
+                search_query: [{ q: "official docs" }],
+                open: [{ ref_id: "turn1view0", lineno: 12 }],
+              },
+            },
+            { type: "toolCall", name: "view_image", input: { path: "images/cat.png" } },
+          ],
+        },
+      ];
+      const viewer = new ConversationViewer(
+        mockTui(80, 24),
+        mockSession(messages),
+        mockRecord({ status: "completed" }),
+        undefined,
+        ansiTheme(),
+        vi.fn(),
+      );
+
+      const lines = viewer.render(24);
+      const output = lines.join("\n");
+      assertAllLinesFit(lines, 24);
+      expect(output).toContain("→ Exec(git status");
+      expect(output).toContain("short · TTY)");
+      expect(output).toContain("→ Input(session 42)");
+      expect(output).toContain("→ ApplyPatch(Add");
+      expect(output).toContain("src/new.ts)");
+      expect(output).toContain("→ Web(Search official");
+      expect(output).toContain("docs · Open page at line");
+      expect(output).toContain("12)");
+      expect(output).toContain("→ View(images/cat.png)");
+      expect(output).not.toContain("max_output_tokens");
+      expect(output).not.toContain("SECRET_INPUT");
+      expect(output).not.toContain("PATCH_PAYLOAD_SENTINEL");
+    });
+
     it("no line exceeds width at narrow terminal", () => {
       const messages = [
         { role: "user", content: "Hello world, this is a normal sentence." },
@@ -555,7 +615,8 @@ describe("ConversationViewer", () => {
       );
 
       const output = viewer.render(40).join("\n");
-      expect(output).toContain("red text green title");
+      expect(output).toContain("red text green");
+      expect(output).not.toContain("title");
       expect(output).not.toContain("\u0001");
       expect(output).not.toContain("\u009b");
       expect(output).not.toContain("\u009d");

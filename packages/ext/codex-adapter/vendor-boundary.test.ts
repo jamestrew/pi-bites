@@ -14,7 +14,7 @@ const retainedGroups = [
   /^apply-patch\/(?:binary|executor|rendering|render-state|tool)\.ts$/,
   /^exec\/(?:binary|bridge-client|bridge-session|command-tool|format|output|results|session-manager|shell|wait|write-stdin-tool)\.ts$/,
   /^native\/runner\.ts$/,
-  /^web-run\/(?:binary|tool)\.ts$/,
+  /^web-run\/(?:binary|summary|tool)\.ts$/,
   /^view-image\/(?:binary|tool)\.ts$/,
   /^patch\/(?:parser|paths|types)\.ts$/,
   /^vendor\/apply-patch\/(?:Cargo\.(?:lock|toml)|LICENSE-APACHE-2\.0|LICENSE-path-absolutize|NOTICE)$/,
