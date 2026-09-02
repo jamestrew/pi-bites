@@ -15,7 +15,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxToolCall, type Context } from "@earendil-works/pi-ai/compat";
+import { fauxText, fauxToolCall, type Context } from "@earendil-works/pi-ai/compat";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentCall,
@@ -352,7 +352,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
             ? "Parent received the completion."
             : agentCall({
                 description: "compaction probe",
-                prompt: "Read large.txt twice, then report CHILD_RESUMED exactly.",
+                prompt: "Read large.txt, then report CHILD_RESUMED exactly.",
               });
         }
         if (!toolNames.has("read")) return "## Goal\nContinue the compaction probe.";
@@ -364,8 +364,8 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
         return hasReadResults
           ? "CHILD_RESUMED"
           : [
+              fauxText("Compaction context. ".repeat(2_000)),
               fauxToolCall("read", { path: "large.txt" }, { id: "read-large-1" }),
-              fauxToolCall("read", { path: "large.txt" }, { id: "read-large-2" }),
             ];
       },
     });
