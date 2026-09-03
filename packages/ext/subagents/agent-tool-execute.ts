@@ -6,7 +6,7 @@ import { getAgentConfig, resolveType } from "./agent-types.js";
 import { resolveAgentInvocationConfig } from "./invocation-config.js";
 import { modelKey, resolveModel } from "./model-resolver.js";
 import { textResult } from "./tool-result.js";
-import type { AgentInvocation, IsolationMode, SubagentType, ThinkingLevel } from "./types.js";
+import type { AgentInvocation, SubagentType, ThinkingLevel } from "./types.js";
 import {
   type AgentActivity,
   type AgentDetails,
@@ -22,7 +22,6 @@ type AgentToolParams = {
   model?: string;
   thinking?: string;
   isolated?: boolean;
-  isolation?: IsolationMode;
 };
 
 type AgentToolUpdate = (update: {
@@ -96,7 +95,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       thinking,
       isolated: resolvedConfig.isolated,
       inheritContext: resolvedConfig.inheritContext,
-      isolation: resolvedConfig.isolation,
     };
     const { tags } = buildInvocationTags(agentInvocation);
     const { state, callbacks } = createActivityTracker();
@@ -109,7 +107,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
         isolated: resolvedConfig.isolated,
         inheritContext: resolvedConfig.inheritContext,
         thinkingLevel: thinking,
-        isolation: resolvedConfig.isolation,
         invocation: agentInvocation,
         ...callbacks,
       });

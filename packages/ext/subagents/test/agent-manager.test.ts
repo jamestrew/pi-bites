@@ -7,12 +7,6 @@ vi.mock("../agent-runner.js", () => ({
   resumeAgent: vi.fn(),
 }));
 
-vi.mock("../worktree.js", () => ({
-  createWorktree: vi.fn(),
-  cleanupWorktree: vi.fn(() => ({ hasChanges: false })),
-  pruneWorktrees: vi.fn(),
-}));
-
 vi.mock("../usage.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../usage.js")>()),
   appendSubagentUsageRecord: vi.fn(() => Promise.resolve()),
@@ -529,39 +523,11 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
   });
 });
 
-// Regression: `isolation: "worktree"` MUST fail loud when the cwd can't host
-// a worktree. The previous behavior silently fell back to the main tree and
-// injected a warning into the LLM's prompt — invisible to the caller.
-describe("AgentManager — isolation: worktree fails loud, no silent fallback", () => {
-  let manager: AgentManager;
-
-  afterEach(() => manager.dispose());
-
-  it("spawn() throws when createWorktree returns undefined; no orphan record left behind", async () => {
-    const { createWorktree } = await import("../worktree.js");
-    vi.mocked(createWorktree).mockReturnValueOnce(undefined);
-    vi.mocked(runAgent).mockClear();
-
-    manager = new AgentManager();
-    expect(() =>
-      manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-        description: "test",
-        isolation: "worktree",
-      }),
-    ).toThrow(/isolation: "worktree"/);
-
-    // Cleaned up — no orphan in listAgents()
-    expect(manager.listAgents()).toEqual([]);
-    // runAgent never invoked — strict, no silent fallback
-    expect(runAgent).not.toHaveBeenCalled();
-  });
-});
-
 describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
   let manager: AgentManager;
   afterEach(() => manager.dispose());
 
-  it("passes cwd to runAgent as the working dir, parent cwd as configCwd", async () => {
+  it("runs in the caller-supplied shared directory and keeps parent config", async () => {
     resolvedRun();
     manager = new AgentManager();
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
@@ -578,7 +544,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     );
   });
 
-  it("without cwd, configCwd stays unset — existing behavior untouched", async () => {
+  it("shares the parent session's working directory when cwd is omitted", async () => {
     // mockClear + lastCall: toHaveBeenCalledWith would scan the file's whole
     // accumulated call history, where earlier no-cwd spawns already match.
     vi.mocked(runAgent).mockClear();
@@ -590,6 +556,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
     await manager.getRecord(id)!.promise;
 
     const opts = vi.mocked(runAgent).mock.lastCall![3];
+    expect(vi.mocked(runAgent).mock.lastCall![0]).toMatchObject({ cwd: "/tmp" });
     expect(opts.cwd).toBeUndefined();
     expect(opts.configCwd).toBeUndefined();
   });
@@ -606,91 +573,6 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
 
     const opts = vi.mocked(runAgent).mock.lastCall![3];
     expect(opts.cwd).toBeUndefined();
-    expect(opts.configCwd).toBeUndefined();
-  });
-
-  it("cwd + isolation: worktree — worktree created FROM cwd, session runs at the copy's workPath, cleanup targets cwd's repo", async () => {
-    const { createWorktree, cleanupWorktree } = await import("../worktree.js");
-    vi.mocked(createWorktree).mockReturnValueOnce({
-      path: "/wt/copy",
-      branch: "pi-agent-x",
-      baseSha: "abc",
-      workPath: "/wt/copy/packages/api",
-    });
-    resolvedRun();
-
-    manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      cwd: "/",
-      isolation: "worktree",
-    });
-    await manager.getRecord(id)!.promise;
-
-    expect(createWorktree).toHaveBeenCalledWith("/", id);
-    // Worktree wins for the working dir — at workPath, so subdirectory scoping
-    // survives isolation. Config still anchored to the parent.
-    expect(runAgent).toHaveBeenCalledWith(
-      expect.objectContaining({ cwd: "/tmp", sessionId: "parent-session" }),
-      "general-purpose",
-      "test",
-      expect.objectContaining({ cwd: "/wt/copy/packages/api", configCwd: "/tmp" }),
-    );
-    expect(cleanupWorktree).toHaveBeenCalledWith("/", expect.anything(), "test");
-  });
-
-  it("keeps worktree recovery instructions on a missing-final error", async () => {
-    const { createWorktree, cleanupWorktree } = await import("../worktree.js");
-    vi.mocked(createWorktree).mockReturnValueOnce({
-      path: "/wt/copy",
-      branch: "pi-agent-x",
-      baseSha: "abc",
-      workPath: "/wt/copy",
-    });
-    vi.mocked(cleanupWorktree).mockReturnValueOnce({
-      hasChanges: true,
-      branch: "pi-agent-result",
-    });
-    vi.mocked(runAgent).mockResolvedValueOnce({ responseText: "", session: mockSession() });
-
-    manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isolation: "worktree",
-    });
-    await manager.getRecord(id)!.promise;
-
-    expect(manager.getRecord(id)).toMatchObject({
-      status: "error",
-      result: undefined,
-      error: expect.stringContaining("Agent completed without a final response."),
-    });
-    expect(manager.getRecord(id)?.error).toContain("pi-agent-result");
-  });
-
-  it("plain worktree (no cwd) keeps the historical root working dir even when workPath differs", async () => {
-    // Parent session sitting in a repo subdirectory: workPath would point at
-    // the copied subdir. Without SpawnOptions.cwd the agent must stay at the
-    // copy's root — moving it would also move .pi config discovery.
-    const { createWorktree } = await import("../worktree.js");
-    vi.mocked(createWorktree).mockReturnValueOnce({
-      path: "/wt/copy",
-      branch: "pi-agent-x",
-      baseSha: "abc",
-      workPath: "/wt/copy/sub/dir",
-    });
-    vi.mocked(runAgent).mockClear();
-    resolvedRun();
-
-    manager = new AgentManager();
-    const id = manager.spawn(mockPi, mockCtx, "general-purpose", "test", {
-      description: "test",
-      isolation: "worktree",
-    });
-    await manager.getRecord(id)!.promise;
-
-    const opts = vi.mocked(runAgent).mock.lastCall![3];
-    expect(opts.cwd).toBe("/wt/copy");
     expect(opts.configCwd).toBeUndefined();
   });
 

@@ -75,7 +75,6 @@ function loadFromDir(
       inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
       isolated: fm.isolated != null ? fm.isolated === true : undefined,
       bashGatePolicy: parseBashGatePolicy(fm.bash_gate),
-      isolation: fm.isolation === "worktree" ? "worktree" : undefined,
       enabled: fm.enabled !== false, // default true; explicitly false disables
       source,
     });

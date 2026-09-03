@@ -460,26 +460,30 @@ describe("agent-runner final output capture", () => {
     const { session } = createSession("CONFIGURED");
     createAgentSession.mockResolvedValue({ session });
 
-    await runAgent(ctx, "Explore", "Say CONFIGURED", { pi, messageParent, cwd: "/tmp/worktree" });
+    await runAgent(ctx, "Explore", "Say CONFIGURED", {
+      pi,
+      messageParent,
+      cwd: "/tmp/shared-project",
+    });
 
     expect(getAgentDir).toHaveBeenCalledTimes(1);
     expect(defaultResourceLoaderCtor).toHaveBeenCalledWith(
       expect.objectContaining({
-        cwd: "/tmp/worktree",
+        cwd: "/tmp/shared-project",
         agentDir: "/mock/agent-dir",
         eventBus: expect.objectContaining({ emit: expect.any(Function), on: expect.any(Function) }),
       }),
     );
     expect(defaultResourceLoaderCtor.mock.calls[0]?.[0].eventBus).not.toBe(pi.events);
-    expect(settingsManagerCreate).toHaveBeenCalledWith("/tmp/worktree", "/mock/agent-dir");
-    expect(sessionManagerInMemory).toHaveBeenCalledWith("/tmp/worktree");
+    expect(settingsManagerCreate).toHaveBeenCalledWith("/tmp/shared-project", "/mock/agent-dir");
+    expect(sessionManagerInMemory).toHaveBeenCalledWith("/tmp/shared-project");
     expect(modelRuntimeCreate).toHaveBeenCalledWith({
       authPath: "/mock/agent-dir/auth.json",
       modelsPath: "/mock/agent-dir/models.json",
     });
     expect(createAgentSession).toHaveBeenCalledWith(
       expect.objectContaining({
-        cwd: "/tmp/worktree",
+        cwd: "/tmp/shared-project",
         agentDir: "/mock/agent-dir",
         modelRuntime: await modelRuntimeCreate.mock.results[0]!.value,
       }),

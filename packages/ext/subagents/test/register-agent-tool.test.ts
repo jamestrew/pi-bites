@@ -47,7 +47,6 @@ describe("Agent call rendering", () => {
       "prompt",
       "model",
       "thinking",
-      "isolation",
     ]);
   });
 

@@ -60,18 +60,16 @@ describe("Agent tool descriptions", () => {
     expect(getAgentToolDescription("compact").length).toBeLessThan(2_000);
   });
 
-  it("keeps fresh-agent and isolation mechanics visible", () => {
+  it("describes fresh agents on the shared filesystem", () => {
     for (const mode of ["full", "compact"] as const) {
       const description = getAgentToolDescription(mode);
       expect(description).toContain("no conversation memory");
       expect(description).toContain("cannot resume completed agents");
-      expect(description).toContain('"worktree" isolation');
-      expect(description).toContain("changes are saved to a branch");
+      expect(description).toContain("share the parent session's filesystem");
+      expect(description).not.toContain("worktree");
     }
 
-    expect(JSON.stringify(getAgentToolParameters().properties.isolation)).toContain(
-      "removed automatically",
-    );
+    expect(getAgentToolParameters().properties).not.toHaveProperty("isolation");
   });
 
   it("keeps Explore retrieval-only in injected guidance", () => {

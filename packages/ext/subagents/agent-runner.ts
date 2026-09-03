@@ -83,8 +83,7 @@ export function extensionCanonicalName(extPath: string): string {
  * Path entries are resolved (`~` expanded, made absolute against `cwd`) into `paths`
  * — and their canonical name is also added to `names` for diagnostics. `bareNames`
  * contains only name entries: path entries must match their resolved path, otherwise
- * another discovered copy with the same generic canonical name (for example, two
- * worktree copies of `ext/index.ts`) would also be admitted.
+ * another discovered copy with the same generic canonical name would also be admitted.
  */
 export function parseExtensionsSpec(
   entries: string[],
@@ -235,7 +234,7 @@ export interface RunOptions {
   thinkingLevel?: ThinkingLevel;
   /** Pi-bites threshold policy captured by the owning parent extension. */
   autoCompactionThreshold?: number;
-  /** Override working directory (e.g. for worktree isolation). */
+  /** Override working directory. */
   cwd?: string;
   /**
    * Where .pi config is discovered (project extensions, skills, pi settings).
@@ -247,8 +246,6 @@ export interface RunOptions {
    * WARNING for future callers: if you pass `cwd` pointing at a directory the
    * user didn't open, you almost certainly must pass `configCwd` too —
    * omitting it makes the target's `.pi` extensions execute in this process.
-   * (Worktree isolation is the one intentional exception: its copy IS the
-   * parent's repo, so config resolving inside it is correct.)
    */
   configCwd?: string;
   /** Called on tool start/end with activity info. */
@@ -403,7 +400,7 @@ export async function runAgent(
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
 
-  // Resolve working directory: worktree override > parent cwd
+  // Resolve working directory: caller override > parent cwd
   const effectiveCwd = options.cwd ?? parent.cwd;
   // Filesystem work happens in effectiveCwd; config discovery in configCwd.
   // They differ only for SpawnOptions.cwd spawns (config stays with the parent).
