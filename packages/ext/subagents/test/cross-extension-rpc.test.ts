@@ -114,6 +114,7 @@ describe("cross-extension RPC", () => {
     it.each([
       ["cwd", { cwd: 42 }],
       ["removed isolation", { isolation: "worktree" }],
+      ["removed conversation inheritance", { inheritContext: true }],
       ["isolated", { isolated: "yes" }],
       ["retired execution mode", { isBackground: true }],
       ["callbacks", { onTextDelta: () => {} }],

@@ -60,8 +60,6 @@ export interface AgentConfig {
   sessionDir?: string;
   systemPrompt: string;
   promptMode: "replace" | "append";
-  /** Default for spawn: fork parent conversation. undefined = caller decides. */
-  inheritContext?: boolean;
   /** Default for spawn: no extension tools. undefined = caller decides. */
   isolated?: boolean;
   /** Gated bash policy for this subagent. */
@@ -140,7 +138,6 @@ export interface AgentInvocation {
   modelName?: string;
   thinking?: ThinkingLevel;
   isolated?: boolean;
-  inheritContext?: boolean;
 }
 
 export interface WaitAgentResult {

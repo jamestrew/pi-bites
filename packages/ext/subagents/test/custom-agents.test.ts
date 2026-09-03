@@ -43,7 +43,6 @@ thinking: high
 persist_session: true
 session_dir: .seams/pi-sessions/seam-plan-reviewer
 prompt_mode: replace
-inherit_context: true
 isolated: true
 bash_gate: prompt
 ---
@@ -63,7 +62,6 @@ You are a security auditor.`,
     expect(agent.persistSession).toBe(true);
     expect(agent.sessionDir).toBe(".seams/pi-sessions/seam-plan-reviewer");
     expect(agent.promptMode).toBe("replace");
-    expect(agent.inheritContext).toBe(true);
     expect(agent.isolated).toBe(true);
     expect(agent.bashGatePolicy).toBe("prompt");
     expect(agent.systemPrompt).toBe("You are a security auditor.");
@@ -91,7 +89,6 @@ Just a prompt.`,
     expect(agent.persistSession).toBeUndefined();
     expect(agent.sessionDir).toBeUndefined();
     expect(agent.promptMode).toBe("replace");
-    expect(agent.inheritContext).toBeUndefined();
     expect(agent.isolated).toBeUndefined();
     expect(agent.bashGatePolicy).toBeUndefined();
     expect(agent.systemPrompt).toBe("Just a prompt.");

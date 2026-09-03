@@ -21,14 +21,7 @@ function isModelRegistry(value: unknown): value is ModelRegistry {
   return isRecord(value) && typeof value.find === "function" && typeof value.getAll === "function";
 }
 
-const RPC_SPAWN_OPTION_KEYS = new Set([
-  "description",
-  "model",
-  "isolated",
-  "inheritContext",
-  "thinkingLevel",
-  "cwd",
-]);
+const RPC_SPAWN_OPTION_KEYS = new Set(["description", "model", "isolated", "thinkingLevel", "cwd"]);
 const THINKING_LEVELS = {
   off: true,
   minimal: true,
@@ -69,12 +62,11 @@ export function decodeSpawnOptions(raw: unknown, registry?: ModelRegistry): Spaw
     if (typeof model === "string") throw new Error(model);
     options.model = model;
   }
-  for (const key of ["isolated", "inheritContext"] as const) {
-    if (input[key] === undefined) continue;
-    if (typeof input[key] !== "boolean") {
-      throw new Error(`Spawn RPC option ${key} must be a boolean`);
+  if (input.isolated !== undefined) {
+    if (typeof input.isolated !== "boolean") {
+      throw new Error("Spawn RPC option isolated must be a boolean");
     }
-    options[key] = input[key];
+    options.isolated = input.isolated;
   }
   if (input.thinkingLevel !== undefined) {
     if (!isThinkingLevel(input.thinkingLevel)) {
@@ -99,7 +91,7 @@ export interface EventBus {
 export type RpcReply<T = void> = { success: true; data?: T } | { success: false; error: string };
 
 /** RPC protocol version — bumped when the envelope or method contracts change. */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Minimal AgentManager interface needed by the spawn/stop RPCs. */
 export interface SpawnCapable {

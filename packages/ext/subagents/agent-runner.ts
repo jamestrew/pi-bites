@@ -22,7 +22,7 @@ import {
   getToolNamesForType,
 } from "./agent-types.js";
 import { createMessageAgent } from "./message-agent.js";
-import { extractText } from "./context.js";
+import { extractText } from "./message-text.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
@@ -230,7 +230,6 @@ export interface RunOptions {
   model?: Model<Api>;
   signal?: AbortSignal;
   isolated?: boolean;
-  inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
   /** Pi-bites threshold policy captured by the owning parent extension. */
   autoCompactionThreshold?: number;
@@ -387,16 +386,13 @@ function resolveConfiguredSessionDir(
 }
 
 export async function runAgent(
-  parentContext: ParentSnapshot | ExtensionContext,
+  parentSource: ParentSnapshot | ExtensionContext,
   type: SubagentType,
   prompt: string,
   options: RunOptions,
 ): Promise<RunResult> {
   agentSession.assertAgentNotCancelled(options.signal);
-  const parent =
-    "systemPrompt" in parentContext
-      ? parentContext
-      : snapshotParent(parentContext, options.inheritContext === true);
+  const parent = "systemPrompt" in parentSource ? parentSource : snapshotParent(parentSource);
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
 
@@ -451,8 +447,8 @@ export async function runAgent(
   // Suppress AGENTS.md/CLAUDE.md and APPEND_SYSTEM.md — upstream's
   // buildSystemPrompt() re-appends both AFTER systemPromptOverride, which
   // would defeat prompt_mode: replace and isolated: true. Parent context, if
-  // wanted, reaches the subagent via prompt_mode: append (parentSystemPrompt
-  // is embedded in systemPromptOverride) or inherit_context (conversation).
+  // reaches the subagent via prompt_mode: append (parentSystemPrompt is
+  // embedded in systemPromptOverride).
   // `ext:` selectors from the `tools:` CSV narrow which extension tools surface to
   // the LLM. They do NOT control loading — `extensions:` is the sole authority for
   // which extensions load. `ext:foo` against an extension that `extensions:` excluded
@@ -803,21 +799,14 @@ export async function runAgent(
     });
   });
 
-  // Build the effective prompt: optionally prepend parent context
-  let effectivePrompt = prompt;
-  if (options.inheritContext && parent.parentContext) {
-    effectivePrompt = parent.parentContext + prompt;
-  }
-
   const invocationStart = session.messages.length;
   emitDiagnostic(options.onDiagnostic, "prompt_start", {
     invocation_start: invocationStart,
-    inherited_context: options.inheritContext === true,
-    prompt_bytes: Buffer.byteLength(effectivePrompt, "utf8"),
+    prompt_bytes: Buffer.byteLength(prompt, "utf8"),
   });
   try {
     if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
-    await session.prompt(effectivePrompt);
+    await session.prompt(prompt);
     emitDiagnostic(options.onDiagnostic, "prompt_resolved", {
       request_count: requestIndex,
       manager_signal_aborted: options.signal?.aborted ?? false,

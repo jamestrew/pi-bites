@@ -71,7 +71,6 @@ export interface SpawnOptions {
   description: string;
   model?: Model<Api>;
   isolated?: boolean;
-  inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
   /**
    * Working directory for the agent (absolute path). Default: parent session
@@ -259,7 +258,7 @@ export class AgentManager {
     assertValidSpawnCwd(options.cwd);
 
     const id = randomUUID().slice(0, 17);
-    const parent = snapshotParent(ctx, options.inheritContext === true);
+    const parent = snapshotParent(ctx);
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
@@ -340,7 +339,6 @@ export class AgentManager {
     this.recordDiagnostic(record, "started", {
       cwd: customCwd ?? parent.cwd,
       isolated: options.isolated === true,
-      inherit_context: options.inheritContext === true,
       queue_duration_ms: record.startedAt - queuedAt,
       manager_running_count: this.runningCount,
       manager_queue_length: this.queue.length,
@@ -368,7 +366,6 @@ export class AgentManager {
       agentId: id,
       model: options.model,
       isolated: options.isolated,
-      inheritContext: options.inheritContext,
       thinkingLevel: options.thinkingLevel,
       autoCompactionThreshold: this.getAutoCompactionThreshold?.(),
       cwd: customCwd,

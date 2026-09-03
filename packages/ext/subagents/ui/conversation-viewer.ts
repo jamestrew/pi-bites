@@ -14,7 +14,7 @@ import {
   truncateToWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { extractText } from "../context.js";
+import { extractText } from "../message-text.js";
 import { formatToolCall } from "./tool-call-format.js";
 import { sanitizeText } from "./text-lines.js";
 import type { AgentRecord } from "../types.js";

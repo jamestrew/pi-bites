@@ -547,7 +547,7 @@ describe("ConversationViewer", () => {
       const viewer = new ConversationViewer(
         mockTui(40, 80),
         mockSession([
-          { role: "user", content: `Inherited context\n${"Investigate the failure."}` },
+          { role: "user", content: "Investigate the failure." },
           {
             role: "assistant",
             content: [
@@ -579,7 +579,6 @@ describe("ConversationViewer", () => {
       const output = viewer.render(80).join("\n");
       expect(output).toContain("Investigate the failure.");
       expect(output).toContain("---");
-      expect(output).not.toContain("Inherited context");
       expect(output).toContain("I found the cause.");
       expect(output).toContain("→ Read(a.ts)");
       expect(output).toContain('→ Edit({"path":"b.ts"})');

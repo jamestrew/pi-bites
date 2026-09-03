@@ -92,7 +92,6 @@ describe("agent-runner end-to-end (real pi-mono session + real extension)", () =
             skills: false,
             systemPrompt: "You are e2e.",
             promptMode: "replace",
-            inheritContext: false,
             isolated: false,
             ...cfg,
           } as AgentConfig,

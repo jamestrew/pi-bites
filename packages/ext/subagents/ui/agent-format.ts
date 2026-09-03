@@ -136,7 +136,6 @@ export function buildInvocationTags(invocation: AgentInvocation | undefined): {
   if (!invocation) return { tags };
   if (invocation.thinking) tags.push(`thinking: ${invocation.thinking}`);
   if (invocation.isolated) tags.push("isolated");
-  if (invocation.inheritContext) tags.push("inherit context");
   return { modelName: invocation.modelName, tags };
 }
 

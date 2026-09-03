@@ -101,7 +101,6 @@ it("real child session does not reuse text before a tool-only empty terminal res
         cwd,
         sessionId: "parent",
         systemPrompt: "parent",
-        parentContext: "",
         model,
         availableModels: [model],
         providers: [
@@ -217,7 +216,6 @@ it("real child session preserves an empty terminal provider error", async () => 
         cwd,
         sessionId: "parent",
         systemPrompt: "parent",
-        parentContext: "",
         model,
         availableModels: [model],
         providers: [
