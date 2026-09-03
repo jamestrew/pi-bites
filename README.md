@@ -53,9 +53,6 @@ Example:
   "autoCompaction": {
     "thresholdTokens": 150000
   },
-  "ponytail": {
-    "defaultMode": "full"
-  },
   "bashGate": {
     "rules": [{ "cmd": "bun", "subcommands": ["check", "test"] }, { "cmd": "pytest" }]
   },

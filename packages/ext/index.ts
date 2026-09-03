@@ -78,9 +78,7 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("spotme")) registerSpotme(pi);
   if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
     registerInlineReferences(pi);
-  const previewPonytailPrompt = disabled.has("ponytail")
-    ? undefined
-    : registerPonytail(pi, configRef);
+  const previewPonytailPrompt = disabled.has("ponytail") ? undefined : registerPonytail(pi);
   const previewSystemPrompt: ContextPromptPreview = (prompt, ctx) => {
     const withCodex =
       previewCodexPrompt?.(prompt, ctx.model, ctx.getSystemPromptOptions()) ?? prompt;

@@ -72,12 +72,11 @@ test("buildExtensionStatusLines gives session tracker its own line", () => {
     buildExtensionStatusLines(
       new Map([
         ["token-count", "codex: 5h: 4%"],
-        ["ponytail", "○ 🐴 ponytail: ⚡ FULL"],
         ["session-tracker", "pi-sessions: 1 · 1 idle"],
       ]),
       120,
     ),
-  ).toEqual(["○ 🐴 ponytail: ⚡ FULL codex: 5h: 4%", "pi-sessions: 1 · 1 idle"]);
+  ).toEqual(["codex: 5h: 4%", "pi-sessions: 1 · 1 idle"]);
 });
 
 test("SubagentUsageReader includes existing usage for its parent session", () => {

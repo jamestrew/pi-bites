@@ -1,43 +1,38 @@
 import { expect, test, vi } from "vitest";
-import registerPonytail, {
-  parsePonytailModeEntry,
-  previewPonytailPrompt,
-  resolveSessionMode,
-} from "./index.js";
+import registerPonytail, { previewPonytailPrompt, resolveSessionEnabled } from "./index.js";
 
-test("parses persisted Ponytail modes and rejects malformed entries", () => {
-  const entry = { mode: "full", futureField: true };
-  expect(parsePonytailModeEntry(entry)).toBe(entry);
-  expect(parsePonytailModeEntry({ mode: 42 })).toBeUndefined();
-  expect(parsePonytailModeEntry({ mode: "FULL" })).toBeUndefined();
-  expect(parsePonytailModeEntry({ mode: " full " })).toBeUndefined();
+test("restores whether Ponytail is enabled", () => {
+  expect(resolveSessionEnabled([])).toBe(true);
   expect(
-    resolveSessionMode([{ type: "custom", customType: "ponytail-mode", data: { mode: "ultra" } }]),
-  ).toBe("ultra");
-  expect(
-    resolveSessionMode([
-      { type: "custom", customType: "ponytail-mode", data: { mode: "invalid" } },
+    resolveSessionEnabled([
+      { type: "custom", customType: "ponytail-enabled", data: { enabled: true } },
+      { type: "custom", customType: "ponytail-enabled", data: { enabled: false } },
     ]),
-  ).toBe("full");
+  ).toBe(false);
+  expect(
+    resolveSessionEnabled([
+      { type: "custom", customType: "ponytail-enabled", data: { enabled: "no" } },
+    ]),
+  ).toBe(true);
 });
 
 test("replaces only Ponytail-owned prompt content wherever it appears", () => {
-  const full = "PONYTAIL MODE ACTIVE — level: full";
-  const lite = "PONYTAIL MODE ACTIVE — level: lite";
-  const applied = previewPonytailPrompt("Base prompt", full);
+  const first = "PONYTAIL ACTIVE\n\nfirst";
+  const second = "PONYTAIL ACTIVE\n\nsecond";
+  const applied = previewPonytailPrompt("Base prompt", first);
   const withLaterContent = `${applied}\n\nOther extension content`;
 
-  expect(previewPonytailPrompt(withLaterContent, full)).toBe(withLaterContent);
-  expect(previewPonytailPrompt(withLaterContent, lite)).toBe(
-    `${previewPonytailPrompt("Base prompt", lite)}\n\nOther extension content`,
+  expect(previewPonytailPrompt(withLaterContent, first)).toBe(withLaterContent);
+  expect(previewPonytailPrompt(withLaterContent, second)).toBe(
+    `${previewPonytailPrompt("Base prompt", second)}\n\nOther extension content`,
   );
   expect(previewPonytailPrompt(withLaterContent)).toBe("Base prompt\n\nOther extension content");
   expect(
-    previewPonytailPrompt(`${applied}${applied}`, full).match(/<pi-bites-ponytail>/g),
+    previewPonytailPrompt(`${applied}${applied}`, first).match(/<pi-bites-ponytail>/g),
   ).toHaveLength(1);
 });
 
-test("registration exposes a live prompt preview across prompt and mode lifecycle", async () => {
+test("registration exposes a live prompt preview across enablement", async () => {
   const handlers = new Map<string, Array<(event: never, ctx?: never) => unknown>>();
   const commands = new Map<string, { handler: (args: string, ctx: never) => Promise<void> }>();
   const pi = {
@@ -46,37 +41,61 @@ test("registration exposes a live prompt preview across prompt and mode lifecycl
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
     }),
     registerCommand: vi.fn((name: string, command: never) => commands.set(name, command)),
-    sendUserMessage: vi.fn(),
   };
   const preview = registerPonytail(pi as never);
   const ctx = {
-    cwd: "/tmp",
     ui: {
       notify: vi.fn(),
-      setStatus: vi.fn(),
-      theme: { fg: (_color: string, text: string) => text },
     },
   };
 
-  const beforeFirstPrompt = preview("Base prompt");
-  expect(beforeFirstPrompt).toContain("PONYTAIL MODE ACTIVE — level: full");
+  const activePrompt = preview("Base prompt");
+  expect(activePrompt).toContain("PONYTAIL ACTIVE");
 
   const beforeAgentStart = handlers.get("before_agent_start")?.[0];
-  const applied = (await beforeAgentStart?.({ systemPrompt: beforeFirstPrompt } as never)) as {
+  const applied = (await beforeAgentStart?.({ systemPrompt: activePrompt } as never)) as {
     systemPrompt: string;
   };
   expect(applied.systemPrompt.match(/<pi-bites-ponytail>/g)).toHaveLength(1);
 
   const withLaterContent = `${applied.systemPrompt}\n\nOther extension content`;
-  await commands.get("ponytail")?.handler("lite", ctx as never);
-  expect(preview(withLaterContent)).toContain("PONYTAIL MODE ACTIVE — level: lite");
-  expect(preview(withLaterContent)).toMatch(/<\/pi-bites-ponytail>\n\nOther extension content$/);
-
   await commands.get("ponytail")?.handler("off", ctx as never);
   expect(preview(withLaterContent)).toBe("Base prompt\n\nOther extension content");
-  expect(
-    (await beforeAgentStart?.({ systemPrompt: withLaterContent } as never)) as {
-      systemPrompt: string;
+  expect(pi.appendEntry).toHaveBeenLastCalledWith("ponytail-enabled", { enabled: false });
+
+  await commands.get("ponytail")?.handler("on", ctx as never);
+  expect(preview(withLaterContent)).toContain("PONYTAIL ACTIVE");
+  expect(preview(withLaterContent)).toMatch(/<\/pi-bites-ponytail>\n\nOther extension content$/);
+});
+
+test("input deactivation does not reuse a stale extension context", async () => {
+  const handlers = new Map<string, Array<(event: never, ctx?: never) => unknown>>();
+  const pi = {
+    appendEntry: vi.fn(),
+    on: vi.fn((name: string, handler: (event: never, ctx?: never) => unknown) => {
+      handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+    }),
+    registerCommand: vi.fn(),
+  };
+  const ui = { notify: vi.fn() };
+  let stale = false;
+  const ctx = {
+    get sessionManager() {
+      if (stale) throw new Error("stale context");
+      return { getBranch: () => [] };
     },
-  ).toEqual({ systemPrompt: "Base prompt\n\nOther extension content" });
+    get ui() {
+      if (stale) throw new Error("stale context");
+      return ui;
+    },
+  };
+
+  registerPonytail(pi as never);
+  await handlers.get("session_start")?.[0]?.({} as never, ctx as never);
+  stale = true;
+
+  await expect(
+    handlers.get("input")?.[0]?.({ source: "user", text: "stop ponytail" } as never),
+  ).resolves.toBeUndefined();
+  expect(pi.appendEntry).toHaveBeenLastCalledWith("ponytail-enabled", { enabled: false });
 });

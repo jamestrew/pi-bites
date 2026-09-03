@@ -23,7 +23,6 @@ describe("loadConfig", () => {
     writeFileSync(
       join(agentDir, "pi-bites.json"),
       JSON.stringify({
-        ponytail: { defaultMode: "lite" },
         autoCompaction: { thresholdTokens: 150_000 },
         smallModel: { model: "github-copilot/claude-haiku-4.5", thinking: "low" },
         codexAdapter: { providers: ["github-copilot"] },
@@ -33,7 +32,6 @@ describe("loadConfig", () => {
     writeFileSync(
       join(project, ".pi", "pi-bites.json"),
       JSON.stringify({
-        ponytail: { defaultMode: "ultra" },
         autoCompaction: { thresholdTokens: 120_000 },
         smallModel: { thinking: "minimal" },
         codexAdapter: { providers: ["aws-bedrock"] },
@@ -44,7 +42,6 @@ describe("loadConfig", () => {
     const { loadConfig, parseBitesConfig } = await import("./config.js");
     expect(
       parseBitesConfig({
-        ponytail: { defaultMode: "full" },
         autoMode: { enabled: true, thinking: "low" },
         codexAdapter: {
           providers: ["github-copilot", "aws-bedrock"],
@@ -65,7 +62,6 @@ describe("loadConfig", () => {
     expect(parseBitesConfig({ codexAdapter: { allowOpenAICodexFallback: "yes" } })).toBeUndefined();
 
     const config = loadConfig(project);
-    expect(config.ponytail?.defaultMode).toBe("ultra");
     expect(config.autoCompaction?.thresholdTokens).toBe(120_000);
     expect(config.smallModel).toEqual({
       model: "github-copilot/claude-haiku-4.5",
@@ -92,7 +88,6 @@ describe("loadConfig", () => {
         notifications: {},
         autoCompaction: {},
         autoMode: {},
-        ponytail: {},
         codexAdapter: {},
         subagents: {},
       });

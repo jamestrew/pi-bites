@@ -76,14 +76,6 @@ export interface AutoModeConfig {
   policy?: string;
 }
 
-export const PONYTAIL_MODES = ["off", "lite", "full", "ultra", "review"] as const;
-export type PonytailMode = (typeof PONYTAIL_MODES)[number];
-
-export interface PonytailConfig {
-  /** Default Ponytail mode for new sessions. */
-  defaultMode?: PonytailMode;
-}
-
 export interface CodexAdapterConfig {
   /** Provider IDs whose models should all use Codex-shaped tools. */
   providers?: string[];
@@ -156,7 +148,6 @@ export interface BitesConfig {
   notifications?: NotificationsConfig;
   autoCompaction?: AutoCompactionConfig;
   autoMode?: AutoModeConfig;
-  ponytail?: PonytailConfig;
   codexAdapter?: CodexAdapterConfig;
   subagents?: SubagentsConfig;
   /** Extension names disabled globally or for this project. */
@@ -182,10 +173,6 @@ function isStringList(value: unknown): boolean {
     typeof value === "string" ||
     (Array.isArray(value) && value.every((item) => typeof item === "string"))
   );
-}
-
-export function isPonytailMode(value: unknown): value is PonytailMode {
-  return PONYTAIL_MODES.some((mode) => mode === value);
 }
 
 function isSmallModelConfig(value: unknown): value is SmallModelConfig {
@@ -219,10 +206,6 @@ function isAutoModeConfig(value: unknown): value is AutoModeConfig {
     isOptional(value, "thinking", (field) => THINKING_LEVELS.some((level) => level === field)) &&
     isOptional(value, "policy", (field) => typeof field === "string")
   );
-}
-
-function isPonytailConfig(value: unknown): value is PonytailConfig {
-  return isRecord(value) && isOptional(value, "defaultMode", isPonytailMode);
 }
 
 function isCodexAdapterConfig(value: unknown): value is CodexAdapterConfig {
@@ -284,7 +267,6 @@ function isBitesConfig(value: unknown): value is BitesConfig {
     isOptional(value, "notifications", isNotificationsConfig) &&
     isOptional(value, "autoCompaction", isAutoCompactionConfig) &&
     isOptional(value, "autoMode", isAutoModeConfig) &&
-    isOptional(value, "ponytail", isPonytailConfig) &&
     isOptional(value, "codexAdapter", isCodexAdapterConfig) &&
     isOptional(value, "subagents", isSubagentsConfig) &&
     isOptional(value, "disable", (field) => Array.isArray(field) && field.every(isExtensionName))
@@ -330,7 +312,6 @@ export function loadConfig(cwd: string): BitesConfig {
     notifications: { ...global.notifications, ...project.notifications },
     autoCompaction: { ...global.autoCompaction, ...project.autoCompaction },
     autoMode: { ...global.autoMode, ...project.autoMode },
-    ponytail: { ...global.ponytail, ...project.ponytail },
     codexAdapter: { ...global.codexAdapter, ...project.codexAdapter },
     subagents: { ...global.subagents, ...project.subagents },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
@@ -358,16 +339,6 @@ function readConfigFile(filePath: string): BitesConfig {
 function writeConfigFile(filePath: string, config: BitesConfig): void {
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-}
-
-export function writePonytailDefaultMode(
-  cwd: string,
-  defaultMode: PonytailConfig["defaultMode"],
-): void {
-  const targetPath = resolveWritePath(cwd);
-  const config = readConfigFile(targetPath);
-  config.ponytail = { ...config.ponytail, defaultMode };
-  writeConfigFile(targetPath, config);
 }
 
 // ---------------------------------------------------------------------------

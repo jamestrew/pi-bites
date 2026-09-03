@@ -114,13 +114,13 @@ describe("Codex adapter prompt guidance", () => {
         disableModelInvocation: false,
       },
     ];
-    const prompt = setup().preview("base\n<pi-bites-ponytail>full</pi-bites-ponytail>", codex, {
+    const prompt = setup().preview("base\n<pi-bites-ponytail>active</pi-bites-ponytail>", codex, {
       cwd: "/tmp",
       selectedTools: ["exec_command"],
       skills,
     });
 
-    expect(prompt).toContain("<pi-bites-ponytail>full</pi-bites-ponytail>");
+    expect(prompt).toContain("<pi-bites-ponytail>active</pi-bites-ponytail>");
     expect(prompt).toContain("<available_skills>");
     expect(prompt).toContain("<name>review</name>");
   });
