@@ -5,6 +5,7 @@ export interface BashSimpleCommand {
   name?: string;
   subcommand?: string;
   argv: string[];
+  dynamicArgIndexes?: number[];
   flags: string[];
 }
 
@@ -35,6 +36,14 @@ interface TSParser {
 
 const SKIP_SUBTREE_TYPES = new Set(["comment", "heredoc_body", "heredoc_end"]);
 const ARG_NODE_TYPES = new Set(["word", "concatenation", "string", "raw_string"]);
+const DOUBLE_QUOTED_ESCAPES = new Set(["$", "`", '"', "\\"]);
+const DYNAMIC_ARG_NODE_TYPES = new Set([
+  "arithmetic_expansion",
+  "command_substitution",
+  "expansion",
+  "process_substitution",
+  "simple_expansion",
+]);
 const URL_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i;
 const REGEX_METACHAR_PATTERN = /\.\*|\.\+|\\\||\\\(|\\\)|\[.*?\]|\^\//;
 
@@ -59,10 +68,30 @@ function getParser(): Promise<TSParser> {
   return parserPromise;
 }
 
+function unescapeShellText(text: string, escapable?: ReadonlySet<string>): string {
+  let result = "";
+  for (let index = 0; index < text.length; index++) {
+    const next = text[index + 1];
+    if (text[index] !== "\\" || next === undefined) {
+      result += text[index];
+    } else if (next === "\n") {
+      index++;
+    } else if (!escapable || escapable.has(next)) {
+      result += next;
+      index++;
+    } else {
+      result += "\\";
+    }
+  }
+  return result;
+}
+
 function resolveNodeText(node: TSNode): string {
   switch (node.type) {
     case "word":
+      return unescapeShellText(node.text);
     case "string_content":
+      return unescapeShellText(node.text, DOUBLE_QUOTED_ESCAPES);
     case "simple_expansion":
     case "expansion":
       return node.text;
@@ -88,16 +117,64 @@ function resolveNodeText(node: TSNode): string {
   }
 }
 
-function extractArgv(node: TSNode): string[] {
+function hasDynamicArgNode(node: TSNode): boolean {
+  if (DYNAMIC_ARG_NODE_TYPES.has(node.type)) return true;
+  for (let index = 0; index < node.childCount; index++) {
+    const child = node.child(index);
+    if (child && hasDynamicArgNode(child)) return true;
+  }
+  return false;
+}
+
+function hasUnescapedPattern(text: string): boolean {
+  let escaped = false;
+  for (const char of text) {
+    if (escaped) {
+      escaped = false;
+    } else if (char === "\\") {
+      escaped = true;
+    } else if (char === "*" || char === "?" || char === "[" || char === "{") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasDynamicPattern(node: TSNode): boolean {
+  if (node.type === "raw_string" || node.type === "string") return false;
+  if (node.type === "word") return hasUnescapedPattern(node.text);
+  for (let index = 0; index < node.childCount; index++) {
+    const child = node.child(index);
+    if (child && hasDynamicPattern(child)) return true;
+  }
+  return false;
+}
+
+function isDynamicArg(node: TSNode): boolean {
+  if (hasDynamicArgNode(node)) return true;
+  if (node.type !== "raw_string" && node.type !== "string" && node.text.startsWith("~"))
+    return true;
+  return hasDynamicPattern(node);
+}
+
+function extractArgv(node: TSNode): { argv: string[]; dynamicArgIndexes: number[] } {
   const argv: string[] = [];
+  const dynamicArgIndexes: number[] = [];
   let consumedImplicitCommandName = false;
+
+  const append = (child: TSNode) => {
+    const text = resolveNodeText(child);
+    if (!text) return;
+    if (isDynamicArg(child)) dynamicArgIndexes.push(argv.length);
+    argv.push(text);
+  };
 
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
     if (!child) continue;
 
     if (child.type === "command_name") {
-      argv.push(resolveNodeText(child));
+      append(child);
       consumedImplicitCommandName = true;
       continue;
     }
@@ -106,17 +183,17 @@ function extractArgv(node: TSNode): string[] {
 
     if (ARG_NODE_TYPES.has(child.type)) {
       if (!consumedImplicitCommandName) {
-        argv.push(resolveNodeText(child));
+        append(child);
         consumedImplicitCommandName = true;
         continue;
       }
 
-      argv.push(resolveNodeText(child));
+      append(child);
       continue;
     }
   }
 
-  return argv.filter(Boolean);
+  return { argv, dynamicArgIndexes };
 }
 
 function extractCommandName(argv: string[]): string | undefined {
@@ -194,11 +271,12 @@ function walk(node: TSNode, facts: BashFacts): void {
   }
 
   if (node.type === "command") {
-    const argv = extractArgv(node);
+    const { argv, dynamicArgIndexes } = extractArgv(node);
     facts.commands.push({
       name: extractCommandName(argv),
       subcommand: argv[1],
       argv,
+      dynamicArgIndexes,
       flags: argv.filter((arg, index) => index > 0 && arg.startsWith("-")),
     });
 

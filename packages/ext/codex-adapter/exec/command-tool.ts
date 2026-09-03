@@ -1,4 +1,5 @@
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
+import { basename, dirname } from "node:path";
 import {
   getAgentDir,
   getShellConfig,
@@ -13,6 +14,7 @@ import { Type, type Static } from "typebox";
 
 import { sanitizeText } from "../../subagents/ui/text-lines.js";
 import { consumeRtkExecInput } from "../../rtk.js";
+import { extractBashFacts, type BashSimpleCommand } from "../../bash-gate/bash-command-facts.js";
 import { formatUnifiedExecResult } from "./format.js";
 import type { ExecSessionManager, UnifiedExecResult } from "./session-manager.js";
 
@@ -194,8 +196,100 @@ function toolResult(
   };
 }
 
+function catOperandIndexes(argv: string[]): number[] {
+  const operands: number[] = [];
+  let options = true;
+  for (let index = 1; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === undefined) continue;
+    if (options && arg === "--") {
+      options = false;
+    } else if (!options || !arg.startsWith("-")) {
+      operands.push(index);
+    }
+  }
+  return operands;
+}
+
+function sedOperandIndexes(argv: string[]): number[] {
+  const operands: number[] = [];
+  let hasScript = false;
+  let quiet = false;
+  let options = true;
+
+  for (let index = 1; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === undefined) continue;
+    if (options && arg === "--") {
+      options = false;
+      continue;
+    }
+    if (options && arg.startsWith("--")) {
+      if (arg === "--quiet" || arg === "--silent") quiet = true;
+      else if (arg === "--expression" || arg === "--file" || arg === "--line-length") {
+        if (arg !== "--line-length") hasScript = true;
+        index++;
+      } else if (arg.startsWith("--expression=") || arg.startsWith("--file=")) {
+        hasScript = true;
+      } else if (arg === "--in-place" || arg.startsWith("--in-place=")) {
+        return [];
+      }
+      continue;
+    }
+    if (options && arg.startsWith("-") && arg !== "-") {
+      const flags = arg.slice(1);
+      for (let offset = 0; offset < flags.length; offset++) {
+        const flag = flags[offset];
+        if (flag === "n") quiet = true;
+        else if (flag === "e" || flag === "f") {
+          hasScript = true;
+          if (offset + 1 === flags.length) index++;
+          break;
+        } else if (flag === "i") {
+          return [];
+        } else if (flag === "l") {
+          if (offset + 1 === flags.length) index++;
+          break;
+        }
+      }
+      continue;
+    }
+    if (!hasScript) {
+      hasScript = true;
+    } else {
+      operands.push(index);
+    }
+  }
+  return quiet ? operands : [];
+}
+
+function skillOperands(command: BashSimpleCommand): string[] {
+  let indexes: number[] = [];
+  if (command.name === "cat") indexes = catOperandIndexes(command.argv);
+  else if (command.name === "sed") indexes = sedOperandIndexes(command.argv);
+  const dynamic = new Set(command.dynamicArgIndexes ?? []);
+  return indexes.flatMap((index) => {
+    const operand = command.argv[index];
+    return operand === undefined || dynamic.has(index) ? [] : [operand];
+  });
+}
+
+async function skillNames(
+  command: string,
+  analyzeCommand: typeof extractBashFacts,
+): Promise<string[]> {
+  const facts = await analyzeCommand(command);
+  const names = facts.commands.flatMap(skillOperands).flatMap((path) => {
+    if (basename(path) !== "SKILL.md") return [];
+    const name = basename(dirname(path));
+    return name && name !== "." ? [name] : [];
+  });
+  return [...new Set(names)];
+}
+
 export function createExecCommandTool(
   sessions: ExecSessionManager,
+  analyzeCommand: typeof extractBashFacts = extractBashFacts,
 ): ToolDefinition<typeof parameters, UnifiedExecResult, { startedAt?: number; endedAt?: number }> {
   return {
     name: "exec_command",
@@ -211,6 +305,7 @@ export function createExecCommandTool(
       // first await so continuations cannot dereference a replaced session.
       const cwd = ctx.cwd;
       const projectTrusted = ctx.isProjectTrusted();
+      const ui = ctx.hasUI ? ctx.ui : undefined;
       const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
       const defaultShell = getShellConfig(settings.getShellPath()).shell;
       const originalCommand = consumeRtkExecInput(params);
@@ -221,6 +316,15 @@ export function createExecCommandTool(
         displayCommand,
         filterRtkOutput: originalCommand !== undefined,
       };
+      if (ui) {
+        void skillNames(displayCommand, analyzeCommand)
+          .then((names) => {
+            if (names.length) ui.notify(`[skill] ${names.join(", ")}`, "info");
+          })
+          .catch(() => {
+            // Skill classification is display-only; command execution must fail open.
+          });
+      }
       const result = await sessions.exec(input, cwd, signal, (update) =>
         onUpdate?.(toolResult(update, displayCommand)),
       );
