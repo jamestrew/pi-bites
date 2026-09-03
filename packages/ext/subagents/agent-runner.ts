@@ -1,5 +1,4 @@
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
@@ -15,15 +14,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { installTurnBoundaryAutoCompaction } from "../auto-compaction.js";
 import * as agentSession from "./agent-session-shutdown.js";
-import {
-  BUILTIN_TOOL_NAMES,
-  getAgentConfig,
-  getConfig,
-  getToolNamesForType,
-} from "./agent-types.js";
+import { resolveAgent } from "./agent-types.js";
 import { createMessageAgent } from "./message-agent.js";
 import { extractText } from "./message-text.js";
-import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import { buildAgentPrompt } from "./prompts.js";
@@ -57,104 +50,6 @@ export const SUBAGENT_TOOL_NAMES = {
 
 /** Names of tools registered by this extension that subagents must NOT inherit. */
 const EXCLUDED_TOOL_NAMES: string[] = Object.values(SUBAGENT_TOOL_NAMES);
-
-/**
- * Canonical name of an extension for `extensions: [...]` allowlist matching.
- * Lowercased — extension names match case-insensitively so `extensions: [Mcp]`
- * resolves the same as `[mcp]`. Tool names within `ext:foo/bar` are not affected.
- * Directory extensions (`foo/index.ts`) resolve to the parent directory name;
- * single-file extensions to the basename minus `.ts`/`.js`.
- */
-export function extensionCanonicalName(extPath: string): string {
-  const base = basename(extPath);
-  const name =
-    base === "index.ts" || base === "index.js"
-      ? basename(dirname(extPath))
-      : base.replace(/\.(ts|js)$/, "");
-  return name.toLowerCase();
-}
-
-/**
- * Classify `extensions: string[]` frontmatter entries for the loader-level filter.
- *
- * An entry is a PATH iff it contains a path separator or starts with `~`; otherwise
- * it is a NAME. `"*"` sets the wildcard flag (keep all default-discovered extensions).
- *
- * Path entries are resolved (`~` expanded, made absolute against `cwd`) into `paths`
- * — and their canonical name is also added to `names` for diagnostics. `bareNames`
- * contains only name entries: path entries must match their resolved path, otherwise
- * another discovered copy with the same generic canonical name would also be admitted.
- */
-export function parseExtensionsSpec(
-  entries: string[],
-  cwd: string,
-): { names: Set<string>; bareNames: Set<string>; paths: string[]; wildcard: boolean } {
-  const names = new Set<string>();
-  const bareNames = new Set<string>();
-  const paths: string[] = [];
-  let wildcard = false;
-  for (const entry of entries) {
-    if (!entry) continue;
-    if (entry === "*") {
-      wildcard = true;
-      continue;
-    }
-    const isPathEntry = entry.includes("/") || entry.includes("\\") || entry.startsWith("~");
-    if (!isPathEntry) {
-      const name = entry.toLowerCase();
-      names.add(name);
-      bareNames.add(name);
-      continue;
-    }
-    let p = entry;
-    if (p === "~" || p.startsWith("~/") || p.startsWith("~\\")) {
-      p = homedir() + p.slice(1);
-    }
-    const abs = isAbsolute(p) ? p : resolve(cwd, p);
-    paths.push(abs);
-    names.add(extensionCanonicalName(abs));
-  }
-  return { names, bareNames, paths, wildcard };
-}
-
-/**
- * Parse raw `ext:` selector strings (from the `tools:` CSV) into the set of
- * extension names to keep loaded and a per-extension tool-narrowing map.
- *
- * `ext:foo` → `extNames` has `foo`, no narrowing entry (all of foo's tools).
- * `ext:foo/bar` → `extNames` has `foo`, `narrowing.foo` has `bar` (only `bar`).
- * A name lands in `narrowing` only when a `/tool` form is seen, so a bare
- * `ext:foo` alongside `ext:foo/bar` leaves narrowing in effect (narrowing wins).
- * The split is on the first `/`; extension canonical names never contain `/`.
- */
-export function parseExtSelectors(entries: string[]): {
-  extNames: Set<string>;
-  narrowing: Map<string, Set<string>>;
-} {
-  const extNames = new Set<string>();
-  const narrowing = new Map<string, Set<string>>();
-  for (const raw of entries) {
-    if (!raw) continue;
-    const body = raw.slice("ext:".length);
-    const slash = body.indexOf("/");
-    // Extension name matches case-insensitively (matches the loader-side canonical
-    // name). Tool names are case-preserved — they're matched against pi-mono's
-    // registered identifiers, which are case-sensitive.
-    const name = (slash === -1 ? body : body.slice(0, slash)).trim().toLowerCase();
-    if (!name) continue;
-    extNames.add(name);
-    if (slash === -1) continue;
-    const tool = body.slice(slash + 1).trim();
-    if (!tool) continue;
-    let set = narrowing.get(name);
-    if (!set) {
-      set = new Set();
-      narrowing.set(name, set);
-    }
-    set.add(tool);
-  }
-  return { extNames, narrowing };
-}
 
 /**
  * Try to find the right model for an agent type.
@@ -374,17 +269,6 @@ function forwardAbortSignal(
   return () => signal.removeEventListener("abort", listener);
 }
 
-function resolveConfiguredSessionDir(
-  sessionDir: string | undefined,
-  cwd: string,
-): string | undefined {
-  if (!sessionDir) return undefined;
-  if (sessionDir === "~" || sessionDir.startsWith("~/"))
-    return resolve(homedir(), sessionDir.slice(2));
-  if (isAbsolute(sessionDir)) return sessionDir;
-  return resolve(cwd, sessionDir);
-}
-
 export async function runAgent(
   parentSource: ParentSnapshot | ExtensionContext,
   type: SubagentType,
@@ -393,8 +277,7 @@ export async function runAgent(
 ): Promise<RunResult> {
   agentSession.assertAgentNotCancelled(options.signal);
   const parent = "systemPrompt" in parentSource ? parentSource : snapshotParent(parentSource);
-  const config = getConfig(type);
-  const agentConfig = getAgentConfig(type);
+  const agentConfig = resolveAgent(type).config;
 
   // Resolve working directory: caller override > parent cwd
   const effectiveCwd = options.cwd ?? parent.cwd;
@@ -405,103 +288,32 @@ export async function runAgent(
   const env = await detectEnv(options.pi, effectiveCwd, options.signal);
   agentSession.assertAgentNotCancelled(options.signal);
 
-  // Get parent system prompt for append-mode agents
-  const parentSystemPrompt = parent.systemPrompt;
-
-  // Resolve extensions/skills: isolated overrides to false
-  const extensions = options.isolated ? false : config.extensions;
-  // Nulling excludes under isolated also suppresses the orphaned-exclude warning —
-  // isolation is an intentional override, not a misconfiguration.
-  const excludeExtensions = options.isolated ? undefined : config.excludeExtensions;
-  const noSkills = options.isolated || !config.skills;
-
-  const toolNames = getToolNamesForType(type);
-
-  // Build system prompt from agent config
-  let systemPrompt: string;
-  if (agentConfig) {
-    systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parentSystemPrompt);
-  } else {
-    // Unknown type fallback: spread the canonical general config (defensive —
-    // unreachable in practice since index.ts resolves unknown types before calling runAgent).
-    const fallback = DEFAULT_AGENTS.get("general");
-    if (!fallback) throw new Error(`No fallback config available for unknown type "${type}"`);
-    systemPrompt = buildAgentPrompt(
-      { ...fallback, name: type },
-      effectiveCwd,
-      env,
-      parentSystemPrompt,
-    );
-  }
+  const noExtensions = options.isolated === true;
+  const extensionPaths = noExtensions ? [] : agentConfig.extensions.map((path) => resolve(path));
+  const allowedExtensionPaths = new Set(extensionPaths);
+  const extensionsOverride = noExtensions
+    ? undefined
+    : (base: LoadExtensionsResult): LoadExtensionsResult => ({
+        ...base,
+        extensions: base.extensions.filter((extension) =>
+          allowedExtensionPaths.has(resolve(extension.path)),
+        ),
+      });
+  const toolNames = [...agentConfig.builtinToolNames];
+  const systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parent.systemPrompt);
 
   const agentDir = getAgentDir();
 
-  // Extension loading:
-  // - true  → all default-discovered extensions
-  // - false → none (noExtensions)
-  // - string[] → loader-level allowlist. Bare names keep the matching
-  //   default-discovered extension; path entries load that extension fresh;
-  //   "*" keeps all default-discovered extensions. Excluded extensions never
-  //   bind handlers or register tools (their factory still runs once).
-  //
-  // Suppress AGENTS.md/CLAUDE.md and APPEND_SYSTEM.md — upstream's
-  // buildSystemPrompt() re-appends both AFTER systemPromptOverride, which
-  // would defeat prompt_mode: replace and isolated: true. Parent context, if
-  // reaches the subagent via prompt_mode: append (parentSystemPrompt is
-  // embedded in systemPromptOverride).
-  // `ext:` selectors from the `tools:` CSV narrow which extension tools surface to
-  // the LLM. They do NOT control loading — `extensions:` is the sole authority for
-  // which extensions load. `ext:foo` against an extension that `extensions:` excluded
-  // is an orphan and warns after reload. `isolated` means no extension tools at all.
-  const { extNames, narrowing } = parseExtSelectors(
-    options.isolated ? [] : (agentConfig?.extSelectors ?? []),
-  );
-  const noExtensions = extensions === false;
-
-  const extensionsSpec = Array.isArray(extensions)
-    ? parseExtensionsSpec(extensions, configCwd)
-    : undefined;
-  const keepNames = extensionsSpec?.names ?? new Set<string>();
-  const keepBareNames = extensionsSpec?.bareNames ?? new Set<string>();
-  const keepPaths = new Set(extensionsSpec?.paths.map((path) => resolve(path)) ?? []);
-  // `exclude_extensions:` is a denylist applied AFTER the include set — exclude wins.
-  // Plain canonical names only (case-insensitive). Note: excluded extensions'
-  // factories still run once during reload() (see comment above) — exclusion
-  // suppresses handler binding and tool registration; it is not a sandbox.
-  const excludeNames = new Set((excludeExtensions ?? []).map((n) => n.toLowerCase()));
-  const hasExcludes = excludeNames.size > 0;
-  // The override filters loaded extensions down to `keepNames` minus `excludeNames`.
-  // It's only needed when we're neither loading everything without excludes
-  // (`extensions: true` or a `"*"` wildcard) nor nothing (`noExtensions`).
-  const loadAll = extensions === true || extensionsSpec?.wildcard === true;
-  const additionalExtensionPaths = extensionsSpec?.paths.length ? extensionsSpec.paths : undefined;
-  // Pre-filter discovered set, captured by the override — the exclude-typo warning
-  // must compare against this, not the surviving set (absence from survivors is
-  // an exclude *succeeding*).
-  let discoveredNames: Set<string> | undefined;
-  const extensionsOverride: ((base: LoadExtensionsResult) => LoadExtensionsResult) | undefined =
-    noExtensions || (loadAll && !hasExcludes)
-      ? undefined
-      : (base) => {
-          discoveredNames = new Set(base.extensions.map((e) => extensionCanonicalName(e.path)));
-          return {
-            ...base,
-            extensions: base.extensions.filter((e) => {
-              const name = extensionCanonicalName(e.path);
-              if (excludeNames.has(name)) return false; // exclude wins
-              return loadAll || keepBareNames.has(name) || keepPaths.has(resolve(e.path));
-            }),
-          };
-        };
-
+  // Embedded roles load only this extension, which provides MessageAgent and
+  // the parent-mediated bash gate. Isolated RPC spawns load no extensions.
   const loader = new DefaultResourceLoader({
     cwd: configCwd,
     agentDir,
     noExtensions,
-    additionalExtensionPaths,
+    additionalExtensionPaths: extensionPaths.length > 0 ? extensionPaths : undefined,
     extensionsOverride,
     eventBus: createSubagentEventBus(options.pi.events),
-    noSkills,
+    noSkills: options.isolated === true,
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
@@ -512,135 +324,27 @@ export async function runAgent(
   await runAsSubagent(type, () => loader.reload());
   agentSession.assertAgentNotCancelled(options.signal);
 
-  // Plain entries in `tools:` are expected to be built-in names (extension tools
-  // go through `ext:`), so an unknown name there is unambiguously a typo. Previously
-  // this produced a silently broken agent (#75) — pi-mono accepted the bogus name
-  // into the allowlist, then dropped it at registration with no signal back.
-  if (agentConfig?.builtinToolNames?.length) {
-    const knownBuiltins = new Set(BUILTIN_TOOL_NAMES);
-    for (const name of agentConfig.builtinToolNames) {
-      if (!knownBuiltins.has(name)) {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `tools-error:tool "${name}" requested by agent "${type}" is not a known built-in`,
-        });
-      }
-    }
-  }
-
-  // A subagent spawns mid-task, so a bad `extensions:`/`ext:` entry warns rather
-  // than aborts. Two distinct misconfigurations to catch:
-  //   - `extensions: [foo]` but no extension named foo was discovered (typo or
-  //     path that failed to load — path entries fold their canonical name into
-  //     `keepNames`, so this covers them too).
-  //   - `tools: ext:foo` but foo isn't in the loaded set (because `extensions:`
-  //     didn't include it). Since v0.9, `ext:` no longer pulls extensions in;
-  //     loading is `extensions:`-authoritative.
-  // An exclude_extensions: alongside extensions: false is contradictory — nothing
-  // loads, so there is nothing to exclude.
-  if (hasExcludes && noExtensions) {
-    options.onToolActivity?.({
-      type: "end",
-      toolName: `extension-error:exclude_extensions has no effect for agent "${type}" — extensions: false loads nothing`,
-    });
-  }
-  // Exclude typo check: compares against the PRE-filter discovered set (an excluded
-  // name absent from the surviving set is the exclude working as intended). Also
-  // flags path-like and "*" entries — excludes are plain names only.
-  if (hasExcludes && discoveredNames) {
-    for (const name of excludeNames) {
-      if (!discoveredNames.has(name)) {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `extension-error:exclude_extensions: "${name}" for agent "${type}" did not match any discovered extension`,
-        });
-      }
-    }
-  }
-  if (keepNames.size > 0 || extNames.size > 0) {
-    const survivingNames = new Set(
-      loader.getExtensions().extensions.map((e) => extensionCanonicalName(e.path)),
-    );
-    for (const name of keepNames) {
-      if (!survivingNames.has(name)) {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: excludeNames.has(name)
-            ? `extension-error:extension "${name}" is in both extensions: and exclude_extensions: for agent "${type}" — exclude wins`
-            : `extension-error:extension "${name}" requested by agent "${type}" was not loaded`,
-        });
-      }
-    }
-    for (const name of extNames) {
-      if (!survivingNames.has(name)) {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `extension-error:ext:${name} referenced by agent "${type}" but extension "${name}" is not loaded (check extensions:/exclude_extensions:)`,
-        });
-      }
-    }
-  }
-
   // Resolve model: explicit option > config.model > parent model
   const model =
-    options.model ?? resolveDefaultModel(parent.model, parent.availableModels, agentConfig?.model);
+    options.model ?? resolveDefaultModel(parent.model, parent.availableModels, agentConfig.model);
 
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
-  const configuredThinking = options.thinkingLevel ?? agentConfig?.thinking;
+  const configuredThinking = options.thinkingLevel ?? agentConfig.thinking;
   const thinkingLevel = isThinkingLevel(configuredThinking) ? configuredThinking : undefined;
 
-  const disallowedSet = agentConfig?.disallowedTools
-    ? new Set(agentConfig.disallowedTools)
-    : undefined;
-
-  // Enumerate extension-registered tool names from the loaded resource loader.
-  // Extensions populate `extension.tools` during `loader.reload()` and the set
-  // is stable afterwards — `bindExtensions` does not register new tools.
-  //
-  // Opt-in flip: when any `ext:` selector is present, extension tools become an
-  // explicit allowlist — a loaded extension not named by a selector contributes
-  // no tools (its handlers still ran), and `ext:foo/bar` narrows `foo` to `bar`.
-  const extensionToolNames: string[] = [];
-  if (!noExtensions) {
-    const optInActive = extNames.size > 0;
-    for (const extension of loader.getExtensions().extensions) {
-      const canon = extensionCanonicalName(extension.path);
-      if (optInActive && !extNames.has(canon)) continue;
-      const narrowed = narrowing.get(canon);
-      for (const toolName of extension.tools.keys()) {
-        if (narrowed && !narrowed.has(toolName)) continue;
-        extensionToolNames.push(toolName);
-      }
-    }
-  }
-
-  // Build the master tool allowlist applied at session construction.
-  // pi-mono's `allowedToolNames` gates BOTH registration and the initial active
-  // set, so listing the exact final set here means the session is correctly
-  // scoped from the first instant — no post-construction narrowing required.
-  const builtinToolNameSet = new Set(toolNames);
+  const extensionToolNames = noExtensions
+    ? []
+    : loader.getExtensions().extensions.flatMap((extension) => [...extension.tools.keys()]);
   const allowedTools = [
     ...new Set([
-      ...[...toolNames, ...extensionToolNames].filter((t) => {
-        if (EXCLUDED_TOOL_NAMES.includes(t)) return false;
-        if (disallowedSet?.has(t)) return false;
-        if (builtinToolNameSet.has(t)) return true;
-        // Reached only for extension tools. The extension set was already filtered
-        // at the loader (extensionsOverride / noExtensions) and at enumeration
-        // (`ext:` opt-in flip), so any extension tool in `extensionToolNames` is allowed.
-        return !noExtensions;
-      }),
+      ...toolNames,
+      ...extensionToolNames.filter((name) => !EXCLUDED_TOOL_NAMES.includes(name)),
       SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
     ]),
   ];
 
   const settingsManager = SettingsManager.create(configCwd, agentDir);
-  const configuredSessionDir = resolveConfiguredSessionDir(agentConfig?.sessionDir, effectiveCwd);
-  const defaultSessionDir =
-    process.env.PI_CODING_AGENT_SESSION_DIR ?? settingsManager.getSessionDir();
-  const sessionManager = agentConfig?.persistSession
-    ? SessionManager.create(effectiveCwd, configuredSessionDir ?? defaultSessionDir)
-    : SessionManager.inMemory(effectiveCwd);
+  const sessionManager = SessionManager.inMemory(effectiveCwd);
 
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
@@ -724,11 +428,11 @@ export async function runAgent(
   sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
     agentId: options.agentId,
     type,
-    title: agentConfig?.displayName ?? agentConfig?.name ?? type,
-    bashGatePolicy: agentConfig?.bashGatePolicy,
+    title: agentConfig.displayName ?? agentConfig.name,
+    bashGatePolicy: agentConfig.bashGatePolicy,
   } satisfies SubagentMetadata);
 
-  const baseSessionName = agentConfig?.name ?? type;
+  const baseSessionName = agentConfig.name;
   session.setSessionName(
     options.agentId ? `${baseSessionName}#${options.agentId.slice(0, 8)}` : baseSessionName,
   );

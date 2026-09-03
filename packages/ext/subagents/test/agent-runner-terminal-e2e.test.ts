@@ -10,7 +10,6 @@ import {
 import { createEventBus, ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
 import { runAgent } from "../agent-runner.js";
-import { registerAgents } from "../agent-types.js";
 
 function response(
   model: Parameters<StreamFunction>[0],
@@ -75,23 +74,6 @@ it("real child session does not reuse text before a tool-only empty terminal res
   const model = runtime.getModel("terminal-test", "model");
   if (!model) throw new Error("test model missing");
 
-  registerAgents(
-    new Map([
-      [
-        "empty-terminal",
-        {
-          name: "empty-terminal",
-          description: "empty terminal response fixture",
-          builtinToolNames: [],
-          extensions: false,
-          skills: false,
-          systemPrompt: "Send the finding, then finish.",
-          promptMode: "replace",
-        },
-      ],
-    ]),
-  );
-
   const messages: string[] = [];
   let childSession: AgentSession | undefined;
   let request = 0;
@@ -125,7 +107,7 @@ it("real child session does not reuse text before a tool-only empty terminal res
           ],
         ],
       },
-      "empty-terminal",
+      "general",
       "go",
       {
         pi: {
@@ -192,23 +174,6 @@ it("real child session preserves an empty terminal provider error", async () => 
   const model = runtime.getModel("terminal-test", "model");
   if (!model) throw new Error("test model missing");
 
-  registerAgents(
-    new Map([
-      [
-        "terminal-error",
-        {
-          name: "terminal-error",
-          description: "terminal provider error fixture",
-          builtinToolNames: [],
-          extensions: false,
-          skills: false,
-          systemPrompt: "Finish.",
-          promptMode: "replace",
-        },
-      ],
-    ]),
-  );
-
   let childSession: AgentSession | undefined;
   try {
     const run = runAgent(
@@ -240,7 +205,7 @@ it("real child session preserves an empty terminal provider error", async () => 
           ],
         ],
       },
-      "terminal-error",
+      "general",
       "go",
       {
         pi: {

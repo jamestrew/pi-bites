@@ -28,10 +28,8 @@
  *
  * ONE PARAMETERIZED RUNNER
  * ------------------------
- * The same `runPrintMode()` covers built-in agent types, `.pi/agents/*.md`
- * frontmatter agents, and inline-instruction agents — the difference is purely
- * what you register in `beforeRun` and which `subagent_type` the `Agent` call
- * names. See `test/subagents-print-mode-e2e.test.ts` for usage.
+ * The same `runPrintMode()` covers built-in agent types and inline-instruction
+ * agents. See `test/subagents-print-mode-e2e.test.ts` for usage.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -113,8 +111,7 @@ export interface RunPrintModeOptions {
   /** The user prompt that kicks off the parent turn. */
   prompt: string;
   /**
-   * Working directory for the run. Defaults to a fresh temp dir that `dispose()`
-   * removes. Pass a fixtures dir to make `.pi/agents/*.md` discoverable.
+   * Working directory for the run. Defaults to a fresh temp dir that `dispose()` removes.
    */
   cwd?: string;
   /** Parent host system prompt. Default: a minimal orchestrator prompt. */
@@ -132,11 +129,6 @@ export interface RunPrintModeOptions {
   hold?: boolean;
   /** Drive the turn and shutdown through Pi's exported production print-mode host. */
   usePiPrintMode?: boolean;
-  /**
-   * Run before the parent turn, after globals are isolated — e.g.
-   * `registerAgents(loadCustomAgents(cwd))` to install frontmatter agents.
-   */
-  beforeRun?: () => void | Promise<void>;
   /**
    * Isolate global discovery (PI_CODING_AGENT_DIR + HOME → temp) so the dev's
    * real agents/extensions can't bleed into the run. Default true in faux mode,
@@ -260,10 +252,8 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
   const ownsCwd = options.cwd == null;
   const cwd = options.cwd ?? makeTempDir("subagents-print-");
 
-  // chdir into cwd: the extension discovers .pi/agents/*.md from process.cwd()
-  // (not ctx.cwd), and re-reads it on every Agent invocation — so a custom agent
-  // is only spawnable if process.cwd() points at the dir holding it. Restored on
-  // dispose. (Vitest isolates test files per process, so this doesn't race.)
+  // The extension resolves project settings from process.cwd(). Restore it on
+  // dispose. Vitest isolates test files per process, so this does not race.
   const prevCwd = process.cwd();
   const prevArgv = process.argv;
   process.chdir(cwd);
@@ -331,10 +321,6 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
     noContextFiles: true,
   });
   await loader.reload();
-
-  // Run any test-supplied registration (e.g. loadCustomAgents) now that globals
-  // are isolated but before the parent turn spawns anything.
-  await options.beforeRun?.();
 
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),

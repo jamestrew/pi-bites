@@ -60,7 +60,7 @@ export default function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("sessionTracker"))
     registerSessionTracker(pi, configRef, autoMode);
   if (!disabled.has("subagents"))
-    registerSubagents(pi, configRef, autoMode, bashGate, () =>
+    registerSubagents(pi, autoMode, bashGate, () =>
       configRef.current.disable?.includes("autoCompaction")
         ? undefined
         : (configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD),

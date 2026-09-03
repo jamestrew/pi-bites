@@ -5,7 +5,7 @@ import {
   formatTaskNotification,
   registerNotificationRenderer,
 } from "../notifications.js";
-import type { NotificationDetails } from "../types.js";
+import type { AgentRecord, NotificationDetails } from "../types.js";
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -117,7 +117,7 @@ describe("asynchronous completion notification rendering", () => {
   });
 
   it("exposes a missing final response as the same model and UI error", () => {
-    const record = {
+    const record: AgentRecord = {
       id: "agent-1",
       type: "general",
       parentSessionId: "parent",

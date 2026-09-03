@@ -12,6 +12,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";
+import { resolveAgent } from "./agent-types.js";
 import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import type { SubagentSender } from "./subagent-messages.js";
@@ -247,11 +248,12 @@ export class AgentManager {
   spawn(
     pi: ExtensionAPI,
     ctx: ExtensionContext,
-    type: SubagentType,
+    requestedType: string,
     prompt: string,
     options: SpawnOptions,
   ): string {
     if (this.closing) throw new Error("AgentManager is shutting down.");
+    const { type } = resolveAgent(requestedType);
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.

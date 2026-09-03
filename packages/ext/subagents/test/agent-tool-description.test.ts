@@ -7,20 +7,7 @@ import {
   getAgentToolDescription,
   getAgentToolParameters,
 } from "../agent-tool-description.js";
-import { registerAgents, setDefaultsDisabled } from "../agent-types.js";
 import { WAIT_AGENT_TIMEOUT_GUIDANCE } from "../register-wait-agent.js";
-import { type AgentConfig } from "../types.js";
-
-const testAgent: AgentConfig = {
-  name: "scout",
-  description: "Researches code. Includes extra detail.",
-  builtinToolNames: ["read", "grep"],
-  extensions: false,
-  skills: false,
-  model: "anthropic/claude-haiku-4-5-20251001",
-  systemPrompt: "Research the codebase.",
-  promptMode: "replace",
-};
 
 describe("Agent tool descriptions", () => {
   let projectDir: string;
@@ -35,28 +22,25 @@ describe("Agent tool descriptions", () => {
     originalAgentDir = process.env.PI_CODING_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = globalDir;
     process.chdir(projectDir);
-    setDefaultsDisabled(true);
-    registerAgents(new Map([[testAgent.name, testAgent]]));
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
     if (originalAgentDir == null) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
-    setDefaultsDisabled(false);
-    registerAgents(new Map());
     rmSync(projectDir, { recursive: true, force: true });
     rmSync(globalDir, { recursive: true, force: true });
   });
 
-  it("renders dynamic agent lists in full and compact templates", () => {
-    expect(getAgentToolDescription("full")).toContain(
-      "- scout: Researches code. Includes extra detail. (claude-haiku-4-5) (Tools: read, grep)",
-    );
-    expect(getAgentToolDescription("compact")).toContain(
-      "- scout: Researches code. (Tools: read, grep)",
-    );
-    expect(getAgentToolDescription("full").length).toBeLessThan(3_000);
+  it("renders only the embedded agent roles", () => {
+    for (const mode of ["full", "compact"] as const) {
+      const description = getAgentToolDescription(mode);
+      expect(description).toContain("- general:");
+      expect(description).toContain("- explore:");
+      expect(description).not.toContain("Custom agents");
+      expect(description).not.toContain(".pi/agents");
+    }
+    expect(getAgentToolDescription("full").length).toBeLessThan(4_000);
     expect(getAgentToolDescription("compact").length).toBeLessThan(2_000);
   });
 
@@ -138,15 +122,15 @@ describe("Agent tool descriptions", () => {
     writeFileSync(projectTemplate, "project: {{typeList}} @ {{agentDir}}");
     writeFileSync(globalTemplate, "global: {{compactTypeList}}");
 
-    expect(getAgentToolDescription("custom")).toBe(
-      `project: - scout: Researches code. Includes extra detail. ` +
-        `(claude-haiku-4-5) (Tools: read, grep) @ ${globalDir}`,
-    );
+    const projectDescription = getAgentToolDescription("custom");
+    expect(projectDescription).toContain("project: - general:");
+    expect(projectDescription).toContain("- explore:");
+    expect(projectDescription).toContain(`@ ${globalDir}`);
 
     unlinkSync(projectTemplate);
-    expect(getAgentToolDescription("custom")).toBe(
-      "global: - scout: Researches code. (Tools: read, grep)",
-    );
+    const globalDescription = getAgentToolDescription("custom");
+    expect(globalDescription).toContain("global: - general:");
+    expect(globalDescription).toContain("- explore:");
 
     unlinkSync(globalTemplate);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

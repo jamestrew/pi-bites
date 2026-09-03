@@ -2,11 +2,11 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createActivityTracker } from "./activity-tracker.js";
 import type { AgentManager } from "./agent-manager.js";
-import { getAgentConfig, resolveType } from "./agent-types.js";
+import { resolveAgent } from "./agent-types.js";
 import { resolveAgentInvocationConfig } from "./invocation-config.js";
 import { modelKey, resolveModel } from "./model-resolver.js";
 import { textResult } from "./tool-result.js";
-import type { AgentInvocation, SubagentType, ThinkingLevel } from "./types.js";
+import type { AgentInvocation, ThinkingLevel } from "./types.js";
 import {
   type AgentActivity,
   type AgentDetails,
@@ -21,7 +21,6 @@ type AgentToolParams = {
   prompt: string;
   model?: string;
   thinking?: string;
-  isolated?: boolean;
 };
 
 type AgentToolUpdate = (update: {
@@ -34,13 +33,12 @@ type AgentToolExecuteDeps = {
   manager: AgentManager;
   agentActivity: Map<string, AgentActivity>;
   fleet: FleetList;
-  reloadCustomAgents: () => void;
   isScopeModelsEnabled: () => boolean;
   setRenderMetadata?: (toolCallId: string, model: string, thinking: ThinkingLevel) => void;
 };
 
 export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
-  const { pi, manager, agentActivity, fleet, reloadCustomAgents, isScopeModelsEnabled } = deps;
+  const { pi, manager, agentActivity, fleet, isScopeModelsEnabled } = deps;
   return async (
     toolCallId: string,
     params: AgentToolParams,
@@ -48,14 +46,12 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     _onUpdate: AgentToolUpdate | undefined,
     ctx: ExtensionContext,
   ) => {
-    reloadCustomAgents();
-
-    const rawType = params.subagent_type as SubagentType;
-    const resolved = resolveType(rawType);
-    const subagentType = resolved ?? "general";
+    const rawType = params.subagent_type;
+    const resolved = resolveAgent(rawType);
+    const subagentType = resolved.type;
     const displayName = getDisplayName(subagentType);
-    const customConfig = getAgentConfig(subagentType);
-    const resolvedConfig = resolveAgentInvocationConfig(customConfig, params);
+    const agentConfig = resolved.config;
+    const resolvedConfig = resolveAgentInvocationConfig(agentConfig, params);
 
     let model = ctx.model as Model<Api> | undefined;
     if (resolvedConfig.modelInput) {
@@ -80,7 +76,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
               `Allowed models (from session scope):\n${list}`,
           );
         }
-        const agentLabel = customConfig?.displayName ?? subagentType;
+        const agentLabel = agentConfig.displayName ?? subagentType;
         const modelLabel = resolvedConfig.modelInput ?? `${model.provider}/${model.id}`;
         ctx.ui.notify(`Agent "${agentLabel}" using out-of-scope model "${modelLabel}"`, "warning");
       }
@@ -93,7 +89,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     const agentInvocation: AgentInvocation = {
       modelName: model ? `${model.provider}/${model.id}` : undefined,
       thinking,
-      isolated: resolvedConfig.isolated,
     };
     const { tags } = buildInvocationTags(agentInvocation);
     const { state, callbacks } = createActivityTracker();
@@ -103,7 +98,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       id = manager.spawn(pi, ctx, subagentType, params.prompt, {
         description: params.description,
         model,
-        isolated: resolvedConfig.isolated,
         thinkingLevel: thinking,
         invocation: agentInvocation,
         ...callbacks,
@@ -119,7 +113,9 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     fleet.update();
 
     const status = record?.status === "queued" ? "queued" : "running";
-    const fallbackNote = resolved ? "" : `Note: Unknown agent type "${rawType}" — using general.\n`;
+    const fallbackNote = resolved.matched
+      ? ""
+      : `Note: Unknown agent type "${rawType}" — using general.\n`;
     return textResult(
       `${fallbackNote}Agent ${status === "queued" ? "queued" : "started"}.\n` +
         `Agent ID: ${id}\n` +
