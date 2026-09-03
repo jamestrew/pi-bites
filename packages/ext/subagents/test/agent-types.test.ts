@@ -18,7 +18,6 @@ function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     skills: false,
     systemPrompt: "You are a test agent.",
     promptMode: "replace",
-    inheritContext: false,
     isolated: false,
     ...overrides,
   };

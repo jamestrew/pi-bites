@@ -96,7 +96,6 @@ vi.mock("../agent-types.js", () => ({
     skills: false,
     systemPrompt: "You are Explore.",
     promptMode: "replace",
-    inheritContext: false,
     isolated: false,
   })),
   getToolNamesForType: vi.fn(() => ["read"]),
@@ -221,6 +220,28 @@ beforeEach(() => {
 });
 
 describe("agent-runner final output capture", () => {
+  it("prompts a new agent with only its assigned task", async () => {
+    const { session } = createSession("DONE");
+    createAgentSession.mockResolvedValue({ session });
+    const parent = {
+      ...ctx,
+      sessionManager: {
+        ...ctx.sessionManager,
+        getBranch: () => [
+          { type: "message", message: { role: "user", content: "unrelated parent history" } },
+        ],
+      },
+    } as any;
+
+    await runAgent(parent, "Explore", "assigned task", {
+      pi,
+      messageParent,
+      inheritContext: true,
+    } as any);
+
+    expect(session.prompt).toHaveBeenCalledWith("assigned task");
+  });
+
   it("records the effective provider timeout and request deadline", async () => {
     const { session } = createSession("DONE");
     session.settingsManager.getProviderRetrySettings.mockReturnValue({
@@ -842,7 +863,6 @@ function makeAgentConfig(overrides: Record<string, unknown> = {}) {
     skills: false,
     systemPrompt: "Test.",
     promptMode: "replace" as const,
-    inheritContext: false,
     isolated: false,
     ...overrides,
   };

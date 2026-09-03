@@ -94,7 +94,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       modelName: model ? `${model.provider}/${model.id}` : undefined,
       thinking,
       isolated: resolvedConfig.isolated,
-      inheritContext: resolvedConfig.inheritContext,
     };
     const { tags } = buildInvocationTags(agentInvocation);
     const { state, callbacks } = createActivityTracker();
@@ -105,7 +104,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
         description: params.description,
         model,
         isolated: resolvedConfig.isolated,
-        inheritContext: resolvedConfig.inheritContext,
         thinkingLevel: thinking,
         invocation: agentInvocation,
         ...callbacks,

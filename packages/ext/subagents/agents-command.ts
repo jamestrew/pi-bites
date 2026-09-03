@@ -381,7 +381,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     if (cfg.skills === false) fmFields.push("skills: false");
     if (cfg.disallowedTools?.length)
       fmFields.push(`disallowed_tools: ${cfg.disallowedTools.join(", ")}`);
-    if (cfg.inheritContext) fmFields.push("inherit_context: true");
     if (cfg.isolated) fmFields.push("isolated: true");
 
     const content = `---\n${fmFields.join("\n")}\n---\n\n${cfg.systemPrompt}\n`;

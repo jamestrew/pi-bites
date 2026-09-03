@@ -68,13 +68,12 @@ describe("AgentManager — detached lifecycle", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "general-purpose", "raw task", {
       description: "task",
-      inheritContext: true,
     });
 
     expect(manager.getRecord(id)?.prompt).toBe("raw task");
   });
 
-  it("snapshots a queued agent's parent context before the extension context goes stale", async () => {
+  it("snapshots a queued agent's stable dependencies before the extension context goes stale", async () => {
     manager = new AgentManager(undefined, 1);
     let resolveFirst!: (value: { responseText: string; session: any }) => void;
     vi.mocked(runAgent)

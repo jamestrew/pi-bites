@@ -11,7 +11,6 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     skills: false,
     systemPrompt: "Test agent",
     promptMode: "replace",
-    inheritContext: false,
     isolated: false,
     ...overrides,
   };
@@ -23,13 +22,11 @@ describe("resolveAgentInvocationConfig", () => {
       makeConfig({
         model: "provider/config-model",
         thinking: "high",
-        inheritContext: false,
         isolated: false,
       }),
       {
         model: "provider/param-model",
         thinking: "minimal",
-        inherit_context: true,
         isolated: true,
       },
     );
@@ -38,7 +35,6 @@ describe("resolveAgentInvocationConfig", () => {
       modelInput: "provider/param-model",
       modelFromParams: true,
       thinking: "minimal",
-      inheritContext: true,
       isolated: false,
     });
   });
@@ -47,7 +43,6 @@ describe("resolveAgentInvocationConfig", () => {
     const resolved = resolveAgentInvocationConfig(undefined, {
       model: "provider/param-model",
       thinking: "minimal",
-      inherit_context: true,
       isolated: true,
     });
 
@@ -55,7 +50,6 @@ describe("resolveAgentInvocationConfig", () => {
       modelInput: "provider/param-model",
       modelFromParams: true,
       thinking: "minimal",
-      inheritContext: true,
       isolated: true,
     });
   });
@@ -66,13 +60,9 @@ describe("resolveAgentInvocationConfig", () => {
     expect(resolved.thinking).toBe("high");
   });
 
-  it("defaults boolean options when config and params omit them", () => {
-    const resolved = resolveAgentInvocationConfig(
-      makeConfig({ inheritContext: undefined, isolated: undefined }),
-      {},
-    );
+  it("defaults isolation when config and params omit it", () => {
+    const resolved = resolveAgentInvocationConfig(makeConfig({ isolated: undefined }), {});
 
-    expect(resolved.inheritContext).toBe(false);
     expect(resolved.isolated).toBe(false);
   });
 });

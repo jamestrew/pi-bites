@@ -72,7 +72,6 @@ function loadFromDir(
       sessionDir: str(fm.session_dir),
       systemPrompt: body.trim(),
       promptMode: fm.prompt_mode === "append" ? "append" : "replace",
-      inheritContext: fm.inherit_context != null ? fm.inherit_context === true : undefined,
       isolated: fm.isolated != null ? fm.isolated === true : undefined,
       bashGatePolicy: parseBashGatePolicy(fm.bash_gate),
       enabled: fm.enabled !== false, // default true; explicitly false disables

@@ -3,7 +3,6 @@ import { isThinkingLevel, type AgentConfig, type ThinkingLevel } from "./types.j
 interface AgentInvocationParams {
   model?: string;
   thinking?: string;
-  inherit_context?: boolean;
   isolated?: boolean;
 }
 
@@ -14,7 +13,6 @@ export function resolveAgentInvocationConfig(
   modelInput?: string;
   modelFromParams: boolean;
   thinking?: ThinkingLevel;
-  inheritContext: boolean;
   isolated: boolean;
 } {
   return {
@@ -25,7 +23,6 @@ export function resolveAgentInvocationConfig(
       : isThinkingLevel(agentConfig?.thinking)
         ? agentConfig.thinking
         : undefined,
-    inheritContext: params.inherit_context ?? agentConfig?.inheritContext ?? false,
     isolated: agentConfig?.isolated ?? params.isolated ?? false,
   };
 }
