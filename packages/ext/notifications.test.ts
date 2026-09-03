@@ -81,6 +81,25 @@ it("notifies for bash-gate prompts while automode is disabled", () => {
   expect(spawn).toHaveBeenCalledWith("notify-send", ["Pi — /tmp"], { stdio: "ignore" });
 });
 
+it("does not notify for explicit non-human reviews while automode is disabled", () => {
+  const handlers = new Map<string, (data: unknown) => void>();
+  const pi = {
+    events: {
+      on: vi.fn((event: string, handler: (data: unknown) => void) => handlers.set(event, handler)),
+    },
+    on: vi.fn(),
+  };
+
+  registerNotifications(pi as never, { current: {} }, { isEnabled: () => false } as never);
+  handlers.get("bites:bash_gate")?.({
+    cwd: "/tmp",
+    command: "git push",
+    requiresHuman: false,
+  });
+
+  expect(spawn).not.toHaveBeenCalled();
+});
+
 it("ignores an unavailable desktop notification executable", () => {
   const child = new EventEmitter();
   spawn.mockReturnValue(child);

@@ -10,6 +10,7 @@
  *   /agents                 — Interactive agent management menu
  */
 
+import { randomUUID } from "node:crypto";
 import {
   type ExtensionAPI,
   type ExtensionContext,
@@ -33,7 +34,11 @@ import { type ToolDescriptionMode } from "./settings.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
-import { onSubagentApprovalRequest, type BashGateApprovalResult } from "../bash-gate/events.js";
+import {
+  onSubagentApprovalRequest,
+  type BashGateApprovalResult,
+  type BitesBashGatePayload,
+} from "../bash-gate/events.js";
 import type { BashGateController } from "../bash-gate/index.js";
 import { promptAutoModeEscalation } from "../bash-gate/automode-escalation.js";
 import {
@@ -274,44 +279,56 @@ export default function (
         ? `🔒 ${request.title} requests bash approval: ${request.command}\n${reasons} (${labels})`
         : `🔒 ${request.title} requests bash approval: ${request.command}\n${labels}`;
       const allowSession = `Allow for session ("${request.sessionAllowKey}")`;
-      for (;;) {
-        const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
-        const viewConversation = record?.session ? "View conversation" : undefined;
-        const choice = await ui.select(prompt, [
-          "Allow",
-          allowSession,
-          ...(viewConversation ? [viewConversation] : []),
-          "Deny",
-        ]);
-        const changedAfterPrompt = sessionChanged();
-        if (changedAfterPrompt) return changedAfterPrompt;
+      const manualGate = {
+        cwd,
+        command: request.command,
+        toolName: request.toolName,
+        requiresHuman: true,
+        waitId: randomUUID(),
+      } as const;
+      pi.events.emit("bites:bash_gate", manualGate);
+      try {
+        for (;;) {
+          const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
+          const viewConversation = record?.session ? "View conversation" : undefined;
+          const choice = await ui.select(prompt, [
+            "Allow",
+            allowSession,
+            ...(viewConversation ? [viewConversation] : []),
+            "Deny",
+          ]);
+          const changedAfterPrompt = sessionChanged();
+          if (changedAfterPrompt) return changedAfterPrompt;
 
-        if (choice === viewConversation && record?.session) {
-          const session = record.session;
-          await ui.custom<undefined>(
-            (tui, theme, keybindings, done) =>
-              new ConversationViewer(
-                tui,
-                session,
-                record,
-                agentActivity.get(record.id),
-                theme,
-                done,
-                undefined,
-                keybindings,
-              ),
-            CONVERSATION_OVERLAY_OPTIONS,
-          );
-          const changedAfterConversation = sessionChanged();
-          if (changedAfterConversation) return changedAfterConversation;
-          continue;
+          if (choice === viewConversation && record?.session) {
+            const session = record.session;
+            await ui.custom<undefined>(
+              (tui, theme, keybindings, done) =>
+                new ConversationViewer(
+                  tui,
+                  session,
+                  record,
+                  agentActivity.get(record.id),
+                  theme,
+                  done,
+                  undefined,
+                  keybindings,
+                ),
+              CONVERSATION_OVERLAY_OPTIONS,
+            );
+            const changedAfterConversation = sessionChanged();
+            if (changedAfterConversation) return changedAfterConversation;
+            continue;
+          }
+
+          return choice === allowSession
+            ? { outcome: "allow-session", authorization: "human-approved" }
+            : choice === "Allow"
+              ? { outcome: "allow", authorization: "human-approved" }
+              : { outcome: "deny", source: "manual" };
         }
-
-        return choice === allowSession
-          ? { outcome: "allow-session", authorization: "human-approved" }
-          : choice === "Allow"
-            ? { outcome: "allow", authorization: "human-approved" }
-            : { outcome: "deny", source: "manual" };
+      } finally {
+        pi.events.emit("bites:bash_gate_resolved", manualGate);
       }
     } catch (error) {
       return {
@@ -337,10 +354,18 @@ export default function (
 
   // Claude Code-style FleetView: navigable list of main + subagents above the editor.
   fleet = new FleetList(manager, agentActivity);
-  const unsubBashGateStarted = pi.events.on("bites:bash_gate", () => fleet.bashGateStarted());
-  const unsubBashGateResolved = pi.events.on("bites:bash_gate_resolved", () =>
-    fleet.bashGateResolved(),
-  );
+  const humanGate = (data: unknown) => {
+    const gate = data as BitesBashGatePayload;
+    return gate.requiresHuman ? gate : undefined;
+  };
+  const unsubBashGateStarted = pi.events.on("bites:bash_gate", (data) => {
+    const gate = humanGate(data);
+    if (gate) fleet.bashGateStarted(gate.waitId);
+  });
+  const unsubBashGateResolved = pi.events.on("bites:bash_gate_resolved", (data) => {
+    const gate = humanGate(data);
+    if (gate) fleet.bashGateResolved(gate.waitId);
+  });
 
   // Persist queued parent deliveries before aborting children and tearing down.
   pi.on("session_shutdown", async () => {

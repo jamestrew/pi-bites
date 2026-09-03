@@ -241,16 +241,18 @@ describe("FleetList navigation", () => {
     const h = harness([makeRecord()]);
     h.press(CTRL_UP);
 
-    h.fleet.bashGateStarted();
-    h.fleet.bashGateStarted();
+    h.fleet.bashGateStarted("gate-1");
+    h.fleet.bashGateStarted("gate-2");
     expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
     expect(h.press(ENTER)).toBeUndefined();
     expect(h.press(ESC)).toBeUndefined();
     expect(h.overlayOpened()).toBe(false);
 
-    h.fleet.bashGateResolved();
+    h.fleet.bashGateResolved("gate-1");
     expect(h.press(CTRL_UP)).toBeUndefined();
-    h.fleet.bashGateResolved();
+    h.fleet.bashGateResolved("unknown-gate");
+    expect(h.press(CTRL_UP)).toBeUndefined();
+    h.fleet.bashGateResolved("gate-2");
     expect(h.press(CTRL_UP)).toEqual({ consume: true });
   });
 
@@ -320,9 +322,9 @@ describe("FleetList rendering", () => {
     };
 
     expectStableRow();
-    h.fleet.bashGateStarted();
+    h.fleet.bashGateStarted("gate");
     expectStableRow();
-    h.fleet.bashGateResolved();
+    h.fleet.bashGateResolved("gate");
     expectStableRow();
   });
 
@@ -407,9 +409,9 @@ describe("FleetList overlay lifecycle", () => {
     h.press(CTRL_UP);
     h.press(ENTER);
 
-    h.fleet.bashGateStarted();
+    h.fleet.bashGateStarted("gate");
     expect(h.overlayClosed()).toBe(true);
-    h.fleet.bashGateResolved();
+    h.fleet.bashGateResolved("gate");
     await Promise.resolve();
     expect(h.press(CTRL_UP)).toEqual({ consume: true });
   });
