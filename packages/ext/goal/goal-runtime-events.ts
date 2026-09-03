@@ -23,5 +23,6 @@ export function registerGoalRuntimeEvents(
   pi.on("session_before_fork", (event, ctx) => controller.onSessionBeforeFork(event, ctx));
   pi.on("session_before_compact", (event, ctx) => controller.onSessionBeforeCompact(event, ctx));
   pi.on("session_compact", (event, ctx) => controller.onSessionCompact(event, ctx));
+  pi.on("session_compact_failed", (event, ctx) => controller.onSessionCompactFailed(event, ctx));
   pi.on("session_shutdown", (event, ctx) => controller.onSessionShutdown(event, ctx));
 }

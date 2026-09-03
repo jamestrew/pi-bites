@@ -30,6 +30,7 @@ export type MessageStartEvent = Extract<ExtensionEvent, { type: "message_start" 
 export type MessageUpdateEvent = Extract<ExtensionEvent, { type: "message_update" }>;
 export type MessageEndEvent = Extract<ExtensionEvent, { type: "message_end" }>;
 export type ToolExecutionEndEvent = Extract<ExtensionEvent, { type: "tool_execution_end" }>;
+export type SessionCompactFailedEvent = Extract<ExtensionEvent, { type: "session_compact_failed" }>;
 
 export interface GoalRuntimeEventHandlers {
   onInput: ExtensionHandler<InputEvent, InputEventResult>;
@@ -49,6 +50,7 @@ export interface GoalRuntimeEventHandlers {
   onSessionBeforeCompact: ExtensionHandler<SessionBeforeCompactEvent>;
   onSessionBeforeFork: ExtensionHandler<SessionBeforeForkEvent, { cancel: true } | undefined>;
   onSessionCompact: ExtensionHandler<SessionCompactEvent>;
+  onSessionCompactFailed: ExtensionHandler<SessionCompactFailedEvent>;
   onSessionShutdown: ExtensionHandler<SessionShutdownEvent>;
 }
 

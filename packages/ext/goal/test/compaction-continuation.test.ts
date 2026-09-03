@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { test, vi } from "vitest";
 
 import {
+  countGoalUsageEntries,
   createRuntimeHarness,
   flushContinuationScheduler,
+  sessionBeforeCompactEvent,
   sessionCompactEvent,
+  sessionCompactFailedEvent,
   type RuntimeHarness,
 } from "./support/runtime-harness.js";
 
@@ -40,6 +43,27 @@ test("willRetry session compaction falls back after grace when host retry never 
       kind: "continuation",
       goalId: goal?.goalId,
     });
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("failed compaction continues once without duplicating pre-compaction accounting", async () => {
+  vi.useFakeTimers();
+  try {
+    let now = 1_000;
+    const harness = createRuntimeHarness({ monotonicNow: () => now });
+    await startQueuedContinuation(harness);
+
+    now = 3_000;
+    await harness.emit("session_before_compact", sessionBeforeCompactEvent());
+    now = 5_000;
+    await harness.emit("session_compact_failed", sessionCompactFailedEvent());
+    flushContinuationScheduler();
+
+    assert.equal(harness.snapshot().goal?.usage.activeSeconds, 2);
+    assert.equal(countGoalUsageEntries(harness.entries), 1);
+    assert.equal(harness.sentMessages.length, 1);
   } finally {
     vi.useRealTimers();
   }

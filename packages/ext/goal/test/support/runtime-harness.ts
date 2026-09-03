@@ -5,6 +5,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
+  ExtensionEvent,
 } from "@earendil-works/pi-coding-agent";
 
 import goalExtension, { __testHooks } from "../../index.js";
@@ -72,6 +73,19 @@ export function sessionCompactEvent(options: CompactionEventOptions = {}): objec
     fromExtension: false,
     reason: options.reason ?? "manual",
     willRetry: options.willRetry ?? false,
+  };
+}
+
+export function sessionCompactFailedEvent(
+  options: Pick<CompactionEventOptions, "reason" | "willRetry"> = {},
+): Extract<ExtensionEvent, { type: "session_compact_failed" }> {
+  return {
+    type: "session_compact_failed",
+    reason: options.reason ?? "manual",
+    errorMessage: "Compaction failed: test failure",
+    aborted: false,
+    willRetry: options.willRetry ?? false,
+    fromExtension: false,
   };
 }
 

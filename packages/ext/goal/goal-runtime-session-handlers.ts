@@ -23,7 +23,10 @@ import {
 } from "./recovery-machine.js";
 import { applyStaleQueuedWorkEffects, runStaleQueuedWorkPlan } from "./goal-runtime-event-utils.js";
 import { isThreadGoal } from "./state.js";
-import type { GoalRuntimeSessionHandlerContext } from "./goal-runtime-event-handler-types.js";
+import type {
+  GoalRuntimeSessionHandlerContext,
+  SessionCompactFailedEvent,
+} from "./goal-runtime-event-handler-types.js";
 
 export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContext) {
   const {
@@ -61,6 +64,14 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
           }
         : fallbackOptions,
     );
+  };
+
+  const blockPendingOverflowRecovery = (ctx: ExtensionContext): boolean => {
+    if (!hasPendingOverflowRecovery(deps)) {
+      return false;
+    }
+    stateController.updateGoal("blocked", "runtime", ctx);
+    return true;
   };
 
   return {
@@ -230,6 +241,17 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       }
     }) satisfies ExtensionHandler<SessionCompactEvent>,
 
+    onSessionCompactFailed: (async (_event, ctx) => {
+      if (
+        runStaleQueuedWorkPlan(runtimeState.staleQueuedWorkGuard.planSessionCompact(), ctx, deps)
+      ) {
+        return;
+      }
+      if (!blockPendingOverflowRecovery(ctx)) {
+        continuation.maybeContinueAfterCurrentEvent(ctx);
+      }
+    }) satisfies ExtensionHandler<SessionCompactFailedEvent>,
+
     onSessionShutdown: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
       continuation.clearPassthroughContinuationInput();
@@ -241,10 +263,7 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       );
 
       goalAccounting.accountProgress(ctx, false, true);
-      if (hasPendingOverflowRecovery(deps)) {
-        clearActiveHostOverflowRecovery(runtimeState.recoveryState);
-        stateController.updateGoal("blocked", "runtime", ctx);
-      } else {
+      if (!blockPendingOverflowRecovery(ctx)) {
         resetErrorRecovery();
       }
       status.stopStatusRefresh();
