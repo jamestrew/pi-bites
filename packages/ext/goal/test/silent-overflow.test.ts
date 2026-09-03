@@ -4,10 +4,14 @@ import { test, vi } from "vitest";
 import { CUSTOM_ENTRY_TYPE } from "../types.js";
 import {
   assistantMessage,
+  countGoalSetEntries,
+  countGoalUsageEntries,
   createRuntimeHarness,
   emitHostSessionCompact,
   emitSilentContextOverflow,
   flushContinuationScheduler,
+  sessionBeforeCompactEvent,
+  sessionCompactFailedEvent,
   sessionShutdownEvent,
 } from "./support/runtime-harness.js";
 
@@ -72,6 +76,35 @@ test("host compaction clears pending overflow and a successful retry continues o
 
     assert.equal(harness.snapshot().goal?.status, "active");
     assert.equal(harness.sentMessages.length, 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("failed host compaction blocks pending overflow recovery without duplicate work", async () => {
+  vi.useFakeTimers();
+  try {
+    const harness = createRuntimeHarness({ contextWindow: 128_000 });
+    await startGoal(harness);
+    await emitSilentContextOverflow(harness, 0, silentOverflowMessage());
+
+    await harness.emit(
+      "session_before_compact",
+      sessionBeforeCompactEvent({ reason: "overflow", willRetry: true }),
+    );
+    await harness.emit("session_compact_failed", sessionCompactFailedEvent({ reason: "overflow" }));
+    flushContinuationScheduler();
+
+    assert.equal(harness.snapshot().goal?.status, "blocked");
+    assert.equal(harness.sentMessages.length, 0);
+    assert.equal(harness.footerStatuses.at(-1), "Goal blocked (/goal resume)");
+    assert.equal(
+      harness.footerStatuses.filter((status) => status === "Goal blocked (/goal resume)").length,
+      1,
+    );
+    assert.equal(countGoalSetEntries(harness.entries), 2);
+    assert.equal(countGoalUsageEntries(harness.entries), 1);
+    assert.equal(harness.compactCalls.length, 0);
   } finally {
     vi.useRealTimers();
   }
