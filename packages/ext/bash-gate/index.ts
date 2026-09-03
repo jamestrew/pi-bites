@@ -762,7 +762,8 @@ export default function registerBashGate(
       }
 
       const gateStartMs = Date.now();
-      pi.events.emit("bites:bash_gate", { cwd, command, toolName });
+      const subagentGate = { cwd, command, toolName, requiresHuman: false } as const;
+      pi.events.emit("bites:bash_gate", subagentGate);
       try {
         const reasons = matchedPatterns.flatMap((match) =>
           match.reason === undefined ? [] : [match.reason],
@@ -820,7 +821,7 @@ export default function registerBashGate(
           reason: "Bash gate: command was denied by parent approval.",
         });
       } finally {
-        pi.events.emit("bites:bash_gate_resolved", { cwd, command, toolName });
+        pi.events.emit("bites:bash_gate_resolved", subagentGate);
       }
     }
 

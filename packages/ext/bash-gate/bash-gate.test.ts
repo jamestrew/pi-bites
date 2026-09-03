@@ -662,6 +662,14 @@ describe("bash gate tool_call", () => {
         labels: ["rm"],
       }),
     );
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate",
+      expect.objectContaining({ command: "rm -rf tmp", requiresHuman: false }),
+    );
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate_resolved",
+      expect.objectContaining({ command: "rm -rf tmp", requiresHuman: false }),
+    );
   });
 
   test("prompt-policy allow for session is scoped to one subagent session", async () => {

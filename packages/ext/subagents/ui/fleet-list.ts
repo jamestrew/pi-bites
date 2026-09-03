@@ -84,8 +84,8 @@ export class FleetList {
   private active = false;
   /** 0 = `main`, 1..N = subagents. */
   private selectedIndex = 0;
-  /** Number of bash-gate dialogs currently waiting for input. */
-  private pendingBashGates = 0;
+  /** Bash-gate dialogs currently waiting for input. */
+  private pendingBashGates = new Set<string>();
   /** Set while a conversation overlay is open; calling it closes the overlay. */
   private viewerClose: (() => void) | undefined;
   private viewingAgentId: string | undefined;
@@ -121,16 +121,17 @@ export class FleetList {
     if (!this.timer) this.timer = setInterval(() => this.update(), TICK_MS);
   }
 
-  bashGateStarted(): void {
-    this.pendingBashGates += 1;
+  bashGateStarted(waitId: string): void {
+    if (this.pendingBashGates.has(waitId)) return;
+    this.pendingBashGates.add(waitId);
     this.viewerClose?.();
     this.viewerClose = undefined;
     this.viewingAgentId = undefined;
     this.deactivate();
   }
 
-  bashGateResolved(): void {
-    this.pendingBashGates = Math.max(0, this.pendingBashGates - 1);
+  bashGateResolved(waitId: string): void {
+    this.pendingBashGates.delete(waitId);
   }
 
   /**
@@ -163,7 +164,7 @@ export class FleetList {
     this.widgetRegistered = false;
     this.tui = undefined;
     this.active = false;
-    this.pendingBashGates = 0;
+    this.pendingBashGates.clear();
     this.pendingResults.clear();
     // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
@@ -255,7 +256,7 @@ export class FleetList {
 
   /** Returns `{consume:true}` to swallow a key, or undefined to let it through. */
   handleKey(data: string): { consume?: boolean; data?: string } | undefined {
-    if (!this.enabled || !this.ui || this.pendingBashGates > 0) return undefined;
+    if (!this.enabled || !this.ui || this.pendingBashGates.size > 0) return undefined;
     // Input listeners receive BOTH key-press and key-release (the kitty protocol
     // emits both, and matchesKey matches either) — act on press only, or every
     // tap would move/fire twice. Repeats still pass through for held-key nav.

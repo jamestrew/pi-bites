@@ -59,6 +59,7 @@ function makePi() {
 function uiCtx() {
   let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined;
   let fleetWidget: ((tui: any, theme: any) => { render(width: number): string[] }) | undefined;
+  let closeCustom: (() => void) | undefined;
   const tui = { requestRender: vi.fn(), terminal: { columns: 160, rows: 40 } };
   const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
   return {
@@ -77,8 +78,20 @@ function uiCtx() {
     getEditorText: vi.fn(() => ""),
     input: vi.fn(async () => undefined as string | undefined),
     select: vi.fn(async () => "Deny"),
-    custom: vi.fn(),
+    custom: vi.fn(
+      (factory: (...args: any[]) => unknown) =>
+        new Promise<undefined>((resolve) => {
+          const done = () => {
+            closeCustom = undefined;
+            resolve(undefined);
+          };
+          closeCustom = done;
+          factory(tui, theme, undefined, done);
+        }),
+    ),
     press: (data: string) => inputHandler?.(data),
+    customOpen: () => closeCustom !== undefined,
+    closeCustom: () => closeCustom?.(),
     renderFleet: (width = 160) => fleetWidget?.(tui, theme).render(width) ?? [],
   };
 }
@@ -110,7 +123,14 @@ function mockRunningAgent(): void {
   vi.mocked(runAgent).mockImplementation(
     (_parent, _type, _prompt, options) =>
       new Promise((resolve) => {
-        const finish = () => resolve({ responseText: "", session: { dispose: vi.fn() } as any });
+        const session = {
+          subscribe: () => () => {},
+          messages: [],
+          sessionManager: { getBranch: () => [] },
+          dispose: vi.fn(),
+        } as any;
+        options.onSessionCreated?.(session);
+        const finish = () => resolve({ responseText: "", session });
         if (options.signal?.aborted) finish();
         else options.signal?.addEventListener("abort", finish, { once: true });
       }),
@@ -246,6 +266,22 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(reply).toHaveBeenCalledWith({
       result: { outcome: "allow", authorization: "human-approved" },
     });
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate",
+      expect.objectContaining({
+        command: "rm build.txt",
+        requiresHuman: true,
+        waitId: expect.any(String),
+      }),
+    );
+    expect(pi.events.emit).toHaveBeenCalledWith(
+      "bites:bash_gate_resolved",
+      expect.objectContaining({
+        command: "rm build.txt",
+        requiresHuman: true,
+        waitId: expect.any(String),
+      }),
+    );
   });
 
   it("keeps the FleetView row stable while manual subagent approval is pending", async () => {
@@ -269,7 +305,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       );
     const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
 
-    pi.events.emit("bites:bash_gate", {});
+    pi.events.emit("bites:bash_gate", { requiresHuman: false });
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-manual-pending",
       agentId,
@@ -285,7 +321,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expectStableFleetRow(ui, "stable manual row", "git push origin main");
 
     resolveSelect("Deny");
-    pi.events.emit("bites:bash_gate_resolved", {});
+    pi.events.emit("bites:bash_gate_resolved", { requiresHuman: false });
     await flush();
     await lifecycle.get("session_shutdown")?.({}, ctx);
   });
@@ -376,7 +412,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       );
     const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
 
-    pi.events.emit("bites:bash_gate", {});
+    pi.events.emit("bites:bash_gate", { requiresHuman: false });
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-automode-pending",
       agentId,
@@ -390,10 +426,48 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     expect(review).toHaveBeenCalledOnce();
     expectStableFleetRow(ui, "stable Automode row", "rm build.txt");
+    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
 
     resolveReview({ outcome: "allow" });
-    pi.events.emit("bites:bash_gate_resolved", {});
+    pi.events.emit("bites:bash_gate_resolved", { requiresHuman: false });
     await flush();
+    await lifecycle.get("session_shutdown")?.({}, ctx);
+  });
+
+  it("keeps an open conversation visible during a non-human Automode review", async () => {
+    mockRunningAgent();
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review: vi.fn() });
+    const ui = uiCtx();
+    const ctx = ctxWith(ui);
+    await lifecycle.get("tool_execution_start")?.({}, ctx);
+    await tools
+      .get("Agent")
+      .execute(
+        "tc",
+        { prompt: "go", description: "viewed agent", subagent_type: "general-purpose" },
+        undefined,
+        undefined,
+        ctx,
+      );
+
+    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
+    expect(ui.press("\r")).toEqual({ consume: true });
+    expect(ui.customOpen()).toBe(true);
+
+    const gate = {
+      cwd: process.cwd(),
+      command: "rm build.txt",
+      toolName: "exec_command",
+      requiresHuman: false,
+    } as const;
+    pi.events.emit("bites:bash_gate", gate);
+    expect(ui.customOpen()).toBe(true);
+
+    ui.closeCustom();
+    await flush();
+    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
+    pi.events.emit("bites:bash_gate_resolved", gate);
     await lifecycle.get("session_shutdown")?.({}, ctx);
   });
 
@@ -707,12 +781,58 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     );
 
     expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
-    pi.events.emit("bites:bash_gate", {});
+    const gate = {
+      cwd: process.cwd(),
+      command: "rm build.txt",
+      requiresHuman: true,
+      waitId: "manual-gate",
+    } as const;
+    pi.events.emit("bites:bash_gate", gate);
     expect(ui.press("\r")).toBeUndefined();
     expect(ui.press("\x1b")).toBeUndefined();
     expect(ui.custom).not.toHaveBeenCalled();
 
-    pi.events.emit("bites:bash_gate_resolved", {});
+    pi.events.emit("bites:bash_gate_resolved", gate);
+    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
+    await lifecycle.get("session_shutdown")?.({}, ctx);
+  });
+
+  it("keeps input yielded until every overlapping human gate resolves", async () => {
+    mockRunningAgent();
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    const ui = uiCtx();
+    const ctx = ctxWith(ui);
+    await lifecycle.get("tool_execution_start")?.({}, ctx);
+    await tools
+      .get("Agent")
+      .execute(
+        "tc",
+        { prompt: "go", description: "live one", subagent_type: "general-purpose" },
+        undefined,
+        undefined,
+        ctx,
+      );
+    const humanGate = (waitId: string) => ({
+      cwd: process.cwd(),
+      command: "rm build.txt",
+      requiresHuman: true as const,
+      waitId,
+    });
+    const automaticGate = {
+      cwd: process.cwd(),
+      command: "rm build.txt",
+      requiresHuman: false,
+    } as const;
+
+    pi.events.emit("bites:bash_gate", automaticGate);
+    pi.events.emit("bites:bash_gate", humanGate("escalation"));
+    pi.events.emit("bites:bash_gate", humanGate("concurrent-manual"));
+    pi.events.emit("bites:bash_gate_resolved", automaticGate);
+    pi.events.emit("bites:bash_gate_resolved", humanGate("escalation"));
+    expect(ui.press("\x1b[1;5A")).toBeUndefined();
+
+    pi.events.emit("bites:bash_gate_resolved", humanGate("concurrent-manual"));
     expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
     await lifecycle.get("session_shutdown")?.({}, ctx);
   });

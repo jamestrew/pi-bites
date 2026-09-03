@@ -81,7 +81,7 @@ export default function registerNotifications(
 
   pi.events.on("bites:bash_gate", (data) => {
     const gate = data as BitesBashGatePayload;
-    if (autoMode?.isEnabled() && !gate.requiresHuman) return;
+    if (gate.requiresHuman === false || (autoMode?.isEnabled() && !gate.requiresHuman)) return;
     notify({ cwd: gate.cwd, message: `Waiting for bash approval: ${gate.command}` });
   });
 
