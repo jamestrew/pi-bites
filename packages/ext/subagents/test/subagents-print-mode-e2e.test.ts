@@ -2,7 +2,7 @@
  * subagents-print-mode-e2e.test.ts — REAL end-to-end subagent runs through the
  * headless print-mode host (`test/helpers/print-mode-runner.ts`).
  *
- * Unlike agent-runner-e2e / ext-templates-e2e (which assert on the gated tool
+ * Unlike agent-runner-e2e (which asserts on the gated tool
  * set captured at construction and never drive a turn), these tests drive a real
  * parent turn that calls the `Agent` tool, lets the extension spawn a real child
  * session via the real `runAgent`, and waits for it through the real subagent
@@ -34,7 +34,6 @@ import {
 vi.setConfig({ testTimeout: 30_000 });
 
 const LIVE = /^(1|true|yes)$/i.test(process.env.PI_E2E_LIVE ?? "");
-const CHILD_CLEANUP_KEY = Symbol.for("pi-bites:test:child-extension-cleanup");
 
 afterAll(cleanupPrintModeTempDirs);
 
@@ -46,7 +45,6 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     await run?.dispose();
     run = undefined;
     for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true });
-    Reflect.deleteProperty(globalThis, CHILD_CLEANUP_KEY);
   });
 
   it("finishes a print-mode tool loop after crossing the custom compaction threshold", async () => {
@@ -158,174 +156,6 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     expect(run.modelCalls).toBeGreaterThanOrEqual(3);
   });
 
-  it("waits for a running child to terminate during print-mode shutdown", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "print-child-shutdown-"));
-    tmpDirs.push(cwd);
-    mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
-    mkdirSync(join(cwd, ".pi", "extensions"), { recursive: true });
-    writeFileSync(
-      join(cwd, ".pi", "agents", "cleanup-probe.md"),
-      `---\ndescription: Tests child cleanup.\nextensions: true\n---\nWait for cancellation.\n`,
-    );
-    const cleanupState: { starts: number; shutdowns: number[]; childCtx?: { cwd: string } } = {
-      starts: 0,
-      shutdowns: [],
-    };
-    Reflect.set(globalThis, CHILD_CLEANUP_KEY, cleanupState);
-    writeFileSync(
-      join(cwd, ".pi", "extensions", "cleanup-probe.ts"),
-      `export default function (pi) {
-  let sessionNumber;
-  pi.on("session_start", (_event, ctx) => {
-    const state = globalThis[Symbol.for("pi-bites:test:child-extension-cleanup")];
-    sessionNumber = ++state.starts;
-    if (sessionNumber === 2) state.childCtx = ctx;
-  });
-  pi.on("session_shutdown", async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    globalThis[Symbol.for("pi-bites:test:child-extension-cleanup")].shutdowns.push(sessionNumber);
-  });
-}
-`,
-    );
-    let childStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      childStarted = resolve;
-    });
-    let childTerminated = false;
-
-    run = await runPrintMode({
-      cwd,
-      prompt: "Delegate work and finish.",
-      hold: false,
-      respond: async (ctx, state) => {
-        const isParent = (ctx.tools ?? []).some((tool) => tool.name === "Agent");
-        if (isParent) {
-          const spawned = ctx.messages.some(
-            (message) =>
-              message.role === "toolResult" &&
-              (message as { toolName?: string }).toolName === "Agent",
-          );
-          if (spawned) {
-            await started;
-            return "PARENT_DONE";
-          }
-          return agentCall({
-            subagent_type: "cleanup-probe",
-            description: "slow child",
-            prompt: "Wait for cancellation.",
-          });
-        }
-
-        childStarted();
-        await new Promise<void>((resolve) => {
-          if (state.signal?.aborted) resolve();
-          else state.signal?.addEventListener("abort", () => resolve(), { once: true });
-        });
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        childTerminated = true;
-        return "CHILD_CANCELLED";
-      },
-      usePiPrintMode: true,
-    });
-    await started;
-
-    await run.dispose();
-    run = undefined;
-
-    expect(childTerminated).toBe(true);
-    expect(cleanupState.shutdowns.sort((a, b) => a - b)).toEqual([1, 2]);
-    expect(() => cleanupState.childCtx!.cwd).toThrow(/stale/i);
-  });
-
-  it("disposes a child whose extension initialization stalls during print-mode shutdown", async () => {
-    const cwd = mkdtempSync(join(tmpdir(), "print-child-initializing-shutdown-"));
-    tmpDirs.push(cwd);
-    mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
-    mkdirSync(join(cwd, ".pi", "extensions"), { recursive: true });
-    writeFileSync(
-      join(cwd, ".pi", "agents", "cleanup-probe.md"),
-      `---\ndescription: Tests initializing child cleanup.\nextensions: true\n---\nWait for cancellation.\n`,
-    );
-    let childStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      childStarted = resolve;
-    });
-    let finishChildStart!: () => void;
-    const childStartFinished = new Promise<void>((resolve) => {
-      finishChildStart = resolve;
-    });
-    const cleanupState: {
-      starts: number;
-      shutdowns: number[];
-      childStarted: () => void;
-      release?: () => void;
-      childStartFinished: Promise<void>;
-      finishChildStart: () => void;
-      childCtx?: { cwd: string };
-    } = { starts: 0, shutdowns: [], childStarted, childStartFinished, finishChildStart };
-    Reflect.set(globalThis, CHILD_CLEANUP_KEY, cleanupState);
-    writeFileSync(
-      join(cwd, ".pi", "extensions", "cleanup-probe.ts"),
-      `export default function (pi) {
-  let sessionNumber;
-  pi.on("session_start", async (_event, ctx) => {
-    const state = globalThis[Symbol.for("pi-bites:test:child-extension-cleanup")];
-    sessionNumber = ++state.starts;
-    if (sessionNumber !== 2) return;
-    state.childCtx = ctx;
-    state.childStarted();
-    await new Promise((resolve) => { state.release = resolve; });
-    state.finishChildStart();
-  });
-  pi.on("session_shutdown", async () => {
-    const state = globalThis[Symbol.for("pi-bites:test:child-extension-cleanup")];
-    if (sessionNumber === 2) {
-      state.release();
-      await state.childStartFinished;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    state.shutdowns.push(sessionNumber);
-  });
-}
-`,
-    );
-
-    run = await runPrintMode({
-      cwd,
-      prompt: "Delegate work and finish.",
-      hold: false,
-      respond: async (ctx) => {
-        const isParent = (ctx.tools ?? []).some((tool) => tool.name === "Agent");
-        if (!isParent) return "CHILD_MUST_NOT_RUN";
-        const spawned = ctx.messages.some(
-          (message) =>
-            message.role === "toolResult" &&
-            (message as { toolName?: string }).toolName === "Agent",
-        );
-        if (spawned) {
-          await started;
-          return "PARENT_DONE";
-        }
-        return agentCall({
-          subagent_type: "cleanup-probe",
-          description: "initializing child",
-          prompt: "Wait for cancellation.",
-        });
-      },
-      usePiPrintMode: true,
-    });
-    await started;
-
-    await run.dispose();
-    run = undefined;
-
-    expect(cleanupState.shutdowns.sort((a, b) => a - b)).toEqual([1, 2]);
-    const childCtx = cleanupState.childCtx;
-    expect(childCtx).toBeDefined();
-    expect(() => childCtx!.cwd).toThrow(/stale/i);
-  });
-
   it("keeps a subagent invocation alive across turn-boundary compaction", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "subagents-compaction-"));
     tmpDirs.push(cwd);
@@ -399,46 +229,6 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     // Parent tool turn + immediate parent follow-up + child tool turn + one
     // summary + one resumed child turn + completion-triggered parent turn.
     expect(run.modelCalls).toBe(6);
-  });
-
-  it("spawns a FRONTMATTER-defined (.pi/agents/*.md) agent and its prompt reaches the child", async () => {
-    // A project agent whose body is a distinctive system prompt. Proving the
-    // child SAW it proves the full chain: the extension discovers the .md from
-    // process.cwd(), parses its frontmatter, and runAgent's buildAgentPrompt
-    // feeds the body into the real child session.
-    const MARKER = "SPYMARKER_FRONTMATTER_REACHED_CHILD";
-    const cwd = mkdtempSync(join(tmpdir(), "subagents-fm-"));
-    tmpDirs.push(cwd);
-    mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
-    writeFileSync(
-      join(cwd, ".pi", "agents", "echo-spy.md"),
-      `---\ndescription: "Echoes a marker proving its frontmatter prompt reached the child."\n---\n${MARKER}\n`,
-    );
-
-    run = await runPrintMode({
-      prompt: "Delegate to the echo-spy agent.",
-      cwd, // runner chdir's here so the extension discovers echo-spy.md
-      respond: routeBySession({
-        parentInitial: agentCall({
-          subagent_type: "echo-spy",
-          description: "echo",
-          prompt: "Report what you were told.",
-        }),
-        parentFinal: "Reported.",
-        // The child reflects whether the frontmatter body reached its own prompt.
-        subagent: (ctx: Context) =>
-          `child saw: ${ctx.systemPrompt?.includes(MARKER) ? MARKER : "MISSING"}`,
-      }),
-    });
-
-    const toolResults = agentToolResults(run.parentSession);
-    expect(toolResults).toHaveLength(1);
-    expect(toolResults[0]).toContain("Agent ID:");
-    const transcript = conversationText(run.parentSession);
-    expect(transcript).toContain(MARKER);
-    expect(transcript).not.toContain("child saw: MISSING");
-    // The custom type resolved — it did NOT silently fall back to general.
-    expect(toolResults[0]).not.toMatch(/Unknown agent type/i);
   });
 
   it("errors clearly when faux mode is given no script", async () => {

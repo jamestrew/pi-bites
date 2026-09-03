@@ -30,7 +30,7 @@ const FAKE_SESSION = { subscribe: () => () => {}, messages: [] };
 function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "a1",
-    type: "general-purpose",
+    type: "general",
     prompt: "Sleep then report",
     description: "Sleep then report 1",
     status: "running",

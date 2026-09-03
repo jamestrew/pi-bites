@@ -176,22 +176,6 @@ describe("settings persistence", () => {
       expect(loadSettings(projectDir).scopeModels).toBeUndefined();
     });
 
-    it("accepts disableDefaultAgents boolean (true and false)", () => {
-      writeProject({ disableDefaultAgents: true });
-      expect(loadSettings(projectDir)).toEqual({ disableDefaultAgents: true });
-      writeProject({ disableDefaultAgents: false });
-      expect(loadSettings(projectDir)).toEqual({ disableDefaultAgents: false });
-    });
-
-    it("drops non-boolean disableDefaultAgents", () => {
-      writeProject({ disableDefaultAgents: "yes" });
-      expect(loadSettings(projectDir).disableDefaultAgents).toBeUndefined();
-      writeProject({ disableDefaultAgents: 1 });
-      expect(loadSettings(projectDir).disableDefaultAgents).toBeUndefined();
-      writeProject({ disableDefaultAgents: null });
-      expect(loadSettings(projectDir).disableDefaultAgents).toBeUndefined();
-    });
-
     it("accepts all valid toolDescriptionMode values", () => {
       for (const mode of ["full", "compact", "custom"] as const) {
         writeProject({ toolDescriptionMode: mode });
@@ -292,7 +276,6 @@ describe("settings persistence", () => {
       appliers = {
         setMaxConcurrent: vi.fn(),
         setScopeModels: vi.fn(),
-        setDisableDefaultAgents: vi.fn(),
         setToolDescriptionMode: vi.fn(),
         setFleetView: vi.fn(),
       };
@@ -302,7 +285,6 @@ describe("settings persistence", () => {
       applySettings({}, appliers);
       expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
       expect(appliers.setScopeModels).not.toHaveBeenCalled();
-      expect(appliers.setDisableDefaultAgents).not.toHaveBeenCalled();
       expect(appliers.setToolDescriptionMode).not.toHaveBeenCalled();
     });
 
@@ -317,7 +299,6 @@ describe("settings persistence", () => {
         {
           maxConcurrent: 8,
           scopeModels: true,
-          disableDefaultAgents: true,
           toolDescriptionMode: "compact",
           fleetView: false,
         },
@@ -325,7 +306,6 @@ describe("settings persistence", () => {
       );
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(8);
       expect(appliers.setScopeModels).toHaveBeenCalledWith(true);
-      expect(appliers.setDisableDefaultAgents).toHaveBeenCalledWith(true);
       expect(appliers.setToolDescriptionMode).toHaveBeenCalledWith("compact");
       expect(appliers.setFleetView).toHaveBeenCalledWith(false);
     });
@@ -340,11 +320,6 @@ describe("settings persistence", () => {
     it("applies scopeModels: false", () => {
       applySettings({ scopeModels: false }, appliers);
       expect(appliers.setScopeModels).toHaveBeenCalledWith(false);
-    });
-
-    it("applies disableDefaultAgents: false", () => {
-      applySettings({ disableDefaultAgents: false }, appliers);
-      expect(appliers.setDisableDefaultAgents).toHaveBeenCalledWith(false);
     });
 
     it("applies toolDescriptionMode", () => {
@@ -376,7 +351,6 @@ describe("settings persistence", () => {
       appliers = {
         setMaxConcurrent: vi.fn(),
         setScopeModels: vi.fn(),
-        setDisableDefaultAgents: vi.fn(),
         setToolDescriptionMode: vi.fn(),
         setFleetView: vi.fn(),
       };

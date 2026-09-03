@@ -23,8 +23,8 @@ export function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === "string" && THINKING_LEVELS.has(value);
 }
 
-/** Agent type: any string name (built-in defaults or user-defined). */
-export type SubagentType = string;
+export const SUBAGENT_TYPES = ["general", "explore"] as const;
+export type SubagentType = (typeof SUBAGENT_TYPES)[number];
 
 export const MISSING_FINAL_RESPONSE_ERROR = "Agent completed without a final response.";
 
@@ -34,42 +34,19 @@ export function isMissingFinalResponse(status: string, result?: string): boolean
 
 export type BashGatePolicy = "deny" | "prompt";
 
-/** Unified agent configuration — used for both default and user-defined agents. */
+/** Configuration for an embedded agent role. */
 export interface AgentConfig {
-  name: string;
-  displayName?: string;
-  description: string;
-  builtinToolNames?: string[];
-  /** Raw `ext:` selector entries from the `tools:` CSV, e.g. ["ext:foo", "ext:bar/x"].
-   * Presence of any entry flips extension tools to an explicit allowlist. */
-  extSelectors?: string[];
-  /** Tool denylist — these tools are removed even if `builtinToolNames` or extensions include them. */
-  disallowedTools?: string[];
-  /** true = inherit all, string[] = only listed, false = none */
-  extensions: true | string[] | false;
-  /** Extension-name denylist applied after the `extensions:` include set. Exclude wins.
-   * Plain canonical names only (case-insensitive); no paths, no wildcard. */
-  excludeExtensions?: string[];
-  /** Whether Pi should discover skills normally for this subagent. */
-  skills: boolean;
-  model?: string;
-  thinking?: string;
-  /** Persist this subagent as a normal pi session instead of keeping it in memory only. */
-  persistSession?: boolean;
-  /** Optional session directory used when persistSession is true. Omitted = pi's normal session location. */
-  sessionDir?: string;
-  systemPrompt: string;
-  promptMode: "replace" | "append";
-  /** Default for spawn: no extension tools. undefined = caller decides. */
-  isolated?: boolean;
+  readonly name: SubagentType;
+  readonly displayName?: string;
+  readonly description: string;
+  readonly builtinToolNames: readonly string[];
+  readonly extensions: readonly string[];
+  readonly model?: string;
+  readonly thinking?: string;
+  readonly systemPrompt: string;
+  readonly promptMode: "replace" | "append";
   /** Gated bash policy for this subagent. */
-  bashGatePolicy?: BashGatePolicy;
-  /** true = this is an embedded default agent (informational) */
-  isDefault?: boolean;
-  /** false = agent is hidden from the registry */
-  enabled?: boolean;
-  /** Where this agent was loaded from */
-  source?: "default" | "project" | "global";
+  readonly bashGatePolicy?: BashGatePolicy;
 }
 
 export interface AgentRecord {
@@ -164,7 +141,7 @@ export interface WaitAgentResult {
 
 export interface WaitAgentSender {
   id: string;
-  type: string;
+  type: SubagentType;
   title: string;
   /** UI-only invocation metadata; omitted from the tool's text result. */
   model_name?: string;

@@ -89,7 +89,6 @@ describe("loadConfig", () => {
         autoCompaction: {},
         autoMode: {},
         codexAdapter: {},
-        subagents: {},
       });
       expect(error).toHaveBeenCalledWith(expect.stringContaining("failed to parse project-local"));
     } finally {

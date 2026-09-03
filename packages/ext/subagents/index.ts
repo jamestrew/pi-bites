@@ -15,12 +15,9 @@ import {
   type ExtensionContext,
   type SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { type BitesConfig } from "../config.js";
 import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
-import { getAgentConfig, registerAgents, setDefaultsDisabled } from "./agent-types.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
-import { loadCustomAgents } from "./custom-agents.js";
 import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig } from "./model-resolver.js";
@@ -46,7 +43,6 @@ import {
 
 export default function (
   pi: ExtensionAPI,
-  configRef: { current: BitesConfig } = { current: {} },
   autoMode?: Pick<AutoModeController, "isEnabled" | "review">,
   bashGate?: BashGateController,
   getAutoCompactionThreshold?: () => number | undefined,
@@ -55,21 +51,6 @@ export default function (
   registerNotificationRenderer(pi);
   registerSubagentMessageRenderer(pi);
   const parentMessenger = createSubagentMessenger(pi);
-
-  /** Reload agents from .pi/agents/*.md and merge with defaults (called on init and each Agent invocation). */
-  const reloadCustomAgents = () => {
-    const userAgents = loadCustomAgents(process.cwd());
-    registerAgents(userAgents);
-    for (const [type, cfg] of Object.entries(configRef.current.subagents ?? {})) {
-      if (cfg.model) {
-        const agent = getAgentConfig(type);
-        if (agent) agent.model = cfg.model;
-      }
-    }
-  };
-
-  // Initial load
-  reloadCustomAgents();
 
   // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
@@ -378,18 +359,6 @@ export default function (
     scopeModelsEnabled = enabled;
   }
 
-  // ---- Disable default agents configuration ----
-  // When enabled, the three hardcoded default agents (general, explore,
-  // Plan) are not registered. User-defined agents from .pi/agents/*.md are
-  // completely unaffected — only DEFAULT_AGENTS are suppressed.
-  // Defaults to false; opt-in via `/agents → Settings` or subagents.json.
-  // State lives in agent-types.ts (isDefaultsDisabled) because registerAgents
-  // needs it; this wrapper just re-registers after flipping it.
-  function setDisableDefaultAgents(b: boolean): void {
-    setDefaultsDisabled(b);
-    reloadCustomAgents(); // re-register with new setting
-  }
-
   // ---- Agent tool description mode ----
   // "full" (default) keeps the rich Claude Code-style description; "compact"
   // swaps in a ~75% smaller one for small/local models (#91). Read once at
@@ -412,11 +381,9 @@ export default function (
     manager,
     agentActivity,
     fleet,
-    reloadCustomAgents,
     isScopeModelsEnabled,
     getToolDescriptionMode,
     setScopeModelsEnabled,
-    setDisableDefaultAgents,
     setToolDescriptionMode,
     setFleetViewEnabled,
   });
@@ -432,11 +399,9 @@ export default function (
   registerAgentsCommand(pi, {
     manager,
     agentActivity,
-    reloadCustomAgents,
     getModelLabelFromConfig,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
-    setDisableDefaultAgents,
     getToolDescriptionMode,
     setToolDescriptionMode,
     isFleetViewEnabled,

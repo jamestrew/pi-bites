@@ -166,12 +166,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   it("inherits parent yolo mode without prompting or automode review", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "deny" });
-    subagentsExtension(
-      pi,
-      { current: {} },
-      { isEnabled: () => true, review },
-      { isYolo: () => true },
-    );
+    subagentsExtension(pi, { isEnabled: () => true, review }, { isYolo: () => true });
     await lifecycle.get("session_start")?.({}, { ...ctxWith(uiCtx()), hasUI: false });
 
     const reply = vi.fn();
@@ -194,7 +189,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("fails closed without dereferencing stale context during a session switch", async () => {
     const { pi, lifecycle } = makePi();
-    subagentsExtension(pi, { current: {} }, undefined, { isYolo: () => false });
+    subagentsExtension(pi, undefined, { isYolo: () => false });
     const ctx = ctxWith(uiCtx());
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("session_before_switch")?.({}, ctx);
@@ -227,7 +222,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const { pi, lifecycle } = makePi();
     const ui = uiCtx();
     ui.select.mockResolvedValue("Allow");
-    subagentsExtension(pi, { current: {} }, undefined, { isYolo: () => false });
+    subagentsExtension(pi, undefined, { isYolo: () => false });
     await lifecycle.get("session_start")?.({}, ctxWith(ui));
 
     const reply = vi.fn();
@@ -254,7 +249,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ui = uiCtx();
     let resolveSelect!: (choice: string) => void;
     ui.select.mockImplementation(() => new Promise<string>((resolve) => (resolveSelect = resolve)));
-    subagentsExtension(pi, { current: {} }, undefined, { isYolo: () => false });
+    subagentsExtension(pi, undefined, { isYolo: () => false });
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
@@ -262,7 +257,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       .get("Agent")
       .execute(
         "tc",
-        { prompt: "go", description: "stable manual row", subagent_type: "general-purpose" },
+        { prompt: "go", description: "stable manual row", subagent_type: "general" },
         undefined,
         undefined,
         ctx,
@@ -293,7 +288,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   it("routes subagent bash approvals through automode without UI", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ctx = { ...ctxWith(uiCtx()), hasUI: false };
     await lifecycle.get("session_start")?.({}, ctx);
 
@@ -329,7 +324,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const review = vi.fn(
       () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
     );
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ctx = { ...ctxWith(uiCtx()), hasUI: false };
     await lifecycle.get("session_start")?.({}, ctx);
     const reply = vi.fn();
@@ -360,7 +355,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const review = vi.fn(
       () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
     );
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
@@ -369,7 +364,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       .get("Agent")
       .execute(
         "tc",
-        { prompt: "go", description: "stable Automode row", subagent_type: "general-purpose" },
+        { prompt: "go", description: "stable Automode row", subagent_type: "general" },
         undefined,
         undefined,
         ctx,
@@ -400,7 +395,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   it("keeps a no-UI subagent Automode denial fail-closed", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
     const ctx = { ...ctxWith(ui), hasUI: false };
     await lifecycle.get("session_start")?.({}, ctx);
@@ -428,7 +423,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const review = vi
       .fn()
       .mockRejectedValue(Object.assign(new Error("request aborted"), { name: "AbortError" }));
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ctx = { ...ctxWith(uiCtx()), hasUI: false };
     await lifecycle.get("session_start")?.({}, ctx);
 
@@ -456,7 +451,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       stale = true;
       return { outcome: "deny", rationale: "not authorized" };
     });
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
     ui.select.mockResolvedValue("Allow once");
     const ctx = ctxWith(ui);
@@ -518,7 +513,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   it("keeps the original subagent denial when interactive escalation fails", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
     ui.select.mockRejectedValue(new Error("UI unavailable"));
     const ctx = ctxWith(ui);
@@ -550,7 +545,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
       childManager.appendCustomEntry("pi-bites:subagent", {
         agentId: options.agentId,
-        type: "general-purpose",
+        type: "general",
         title: "review context",
         bashGatePolicy: "prompt",
       });
@@ -606,7 +601,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       .fn()
       .mockResolvedValueOnce({ outcome: "deny", rationale: "needs human approval" })
       .mockResolvedValueOnce({ outcome: "allow" });
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review });
+    subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
@@ -615,7 +610,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       {
         prompt: "go",
         description: "review context",
-        subagent_type: "general-purpose",
+        subagent_type: "general",
       },
       undefined,
       undefined,
@@ -699,7 +694,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       {
         prompt: "go",
         description: "live one",
-        subagent_type: "general-purpose",
+        subagent_type: "general",
       },
       undefined,
       undefined,
@@ -734,7 +729,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       {
         prompt: "go",
         description: "live one",
-        subagent_type: "general-purpose",
+        subagent_type: "general",
       },
       undefined,
       undefined,
@@ -780,7 +775,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         {
           prompt: "go",
           description: "still delivering",
-          subagent_type: "general-purpose",
+          subagent_type: "general",
         },
         undefined,
         undefined,

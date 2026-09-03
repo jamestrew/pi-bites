@@ -141,7 +141,6 @@ describe("extension entrypoint", () => {
       );
       expect(loaded.registerSpies.get("./subagents/index.js")).toHaveBeenCalledWith(
         loaded.pi,
-        expect.any(Object),
         expect.objectContaining({ isEnabled: expect.any(Function) }),
         loaded.bashGate,
         expect.any(Function),

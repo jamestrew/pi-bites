@@ -24,9 +24,6 @@
  *       { "cmd": "npm", "subcommands": ["test"] },
  *       { "cmd": "pytest" }
  *     ]
- *   },
- *   "subagents": {
- *     "explore": { "model": "anthropic/claude-sonnet-4-5" }
  *   }
  * }
  * ```
@@ -83,11 +80,6 @@ export interface CodexAdapterConfig {
   webSearchProviders?: string[];
   /** Permit web_run to use stock openai-codex auth when the active provider cannot search. */
   allowOpenAICodexFallback?: boolean;
-}
-
-export interface SubagentsConfig {
-  /** Per-agent model overrides keyed by agent type. */
-  [agentType: string]: { model?: string };
 }
 
 export interface NotificationsConfig {
@@ -149,7 +141,6 @@ export interface BitesConfig {
   autoCompaction?: AutoCompactionConfig;
   autoMode?: AutoModeConfig;
   codexAdapter?: CodexAdapterConfig;
-  subagents?: SubagentsConfig;
   /** Extension names disabled globally or for this project. */
   disable?: ExtensionName[];
 }
@@ -220,16 +211,6 @@ function isCodexAdapterConfig(value: unknown): value is CodexAdapterConfig {
   );
 }
 
-function isSubagentsConfig(value: unknown): value is SubagentsConfig {
-  return (
-    isRecord(value) &&
-    Object.values(value).every(
-      (agent) =>
-        isRecord(agent) && isOptional(agent, "model", (field) => typeof field === "string"),
-    )
-  );
-}
-
 function isNotificationsConfig(value: unknown): value is NotificationsConfig {
   return isRecord(value) && isOptional(value, "command", (field) => typeof field === "string");
 }
@@ -268,7 +249,6 @@ function isBitesConfig(value: unknown): value is BitesConfig {
     isOptional(value, "autoCompaction", isAutoCompactionConfig) &&
     isOptional(value, "autoMode", isAutoModeConfig) &&
     isOptional(value, "codexAdapter", isCodexAdapterConfig) &&
-    isOptional(value, "subagents", isSubagentsConfig) &&
     isOptional(value, "disable", (field) => Array.isArray(field) && field.every(isExtensionName))
   );
 }
@@ -313,7 +293,6 @@ export function loadConfig(cwd: string): BitesConfig {
     autoCompaction: { ...global.autoCompaction, ...project.autoCompaction },
     autoMode: { ...global.autoMode, ...project.autoMode },
     codexAdapter: { ...global.codexAdapter, ...project.codexAdapter },
-    subagents: { ...global.subagents, ...project.subagents },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
 }

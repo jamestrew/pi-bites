@@ -13,10 +13,9 @@ export const SubagentsSettingsSchema = Type.Object({
   /**
    * Validate runtime subagent model choices against pi's resolved session scope from
    * CLI `--models` and global/project `enabledModels`. Empty scope is unrestricted.
-   * Caller-selected violations fail; frontmatter and inherited violations warn and proceed.
+   * Caller-selected violations fail; role defaults and inherited violations warn and proceed.
    */
   scopeModels: Type.Optional(Type.Boolean()),
-  disableDefaultAgents: Type.Optional(Type.Boolean()),
   toolDescriptionMode: Type.Optional(
     Type.Union([Type.Literal("full"), Type.Literal("compact"), Type.Literal("custom")]),
   ),
@@ -30,7 +29,6 @@ export type ToolDescriptionMode = NonNullable<SubagentsSettings["toolDescription
 export interface SettingsAppliers {
   setMaxConcurrent: (n: number) => void;
   setScopeModels: (enabled: boolean) => void;
-  setDisableDefaultAgents: (b: boolean) => void;
   setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setFleetView: (b: boolean) => void;
 }
@@ -58,8 +56,6 @@ export function parseSubagentsSettings(value: unknown): SubagentsSettings | unde
     settings.maxConcurrent = value.maxConcurrent;
   if ("scopeModels" in value && typeof value.scopeModels === "boolean")
     settings.scopeModels = value.scopeModels;
-  if ("disableDefaultAgents" in value && typeof value.disableDefaultAgents === "boolean")
-    settings.disableDefaultAgents = value.disableDefaultAgents;
   if (
     "toolDescriptionMode" in value &&
     (value.toolDescriptionMode === "full" ||
@@ -121,8 +117,6 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
-  if (typeof s.disableDefaultAgents === "boolean")
-    appliers.setDisableDefaultAgents(s.disableDefaultAgents);
   if (s.toolDescriptionMode) appliers.setToolDescriptionMode(s.toolDescriptionMode);
   if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);
 }

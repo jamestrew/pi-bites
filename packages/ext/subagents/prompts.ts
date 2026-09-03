@@ -50,16 +50,12 @@ You are operating as a sub-agent invoked to handle a specific task.
 - Be concise but complete
 </sub_agent_context>`;
 
-    const customSection = config.systemPrompt.trim()
-      ? `\n\n<agent_instructions>\n${config.systemPrompt}\n</agent_instructions>`
-      : "";
-
     // Place shared/stable content first so the LLM's KV cache can reuse the
     // inherited prefix across all subagent invocations. The parent prompt is
     // placed verbatim (no wrapper tag) so it forms an identical byte prefix
     // with the parent session, maximising KV cache hits. The <active_agent>
     // tag and env block vary per call and are placed after the cached prefix.
-    return identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock + customSection;
+    return identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock;
   }
 
   // "replace" mode — env header + the config's full system prompt

@@ -1,7 +1,6 @@
 import { Container, visibleWidth } from "@earendil-works/pi-tui";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getAgentToolParameters } from "../agent-tool-description.js";
-import { registerAgents } from "../agent-types.js";
 import { registerAgentTool } from "../register-agent-tool.js";
 
 const theme = {
@@ -20,11 +19,9 @@ function captureAgentTool() {
     manager: { setMaxConcurrent: noop } as any,
     agentActivity: new Map(),
     fleet: {} as any,
-    reloadCustomAgents: noop,
     isScopeModelsEnabled: () => false,
     getToolDescriptionMode: () => "full",
     setScopeModelsEnabled: noop,
-    setDisableDefaultAgents: noop,
     setToolDescriptionMode: noop,
     setFleetViewEnabled: noop,
   });
@@ -32,8 +29,6 @@ function captureAgentTool() {
 }
 
 describe("Agent call rendering", () => {
-  beforeEach(() => registerAgents(new Map()));
-
   it("exposes only composable spawn parameters", () => {
     const tool = captureAgentTool();
 

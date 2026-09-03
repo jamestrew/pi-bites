@@ -1,7 +1,7 @@
 /** Shared formatting/types for subagent inline results, FleetView, and notifications. */
 
-import { getConfig } from "../agent-types.js";
-import type { AgentInvocation, SubagentType, ThinkingLevel } from "../types.js";
+import { resolveAgent } from "../agent-types.js";
+import type { AgentInvocation, ThinkingLevel } from "../types.js";
 import { type LifetimeUsage, type SessionLike } from "../usage.js";
 
 // ---- Constants ----
@@ -122,9 +122,10 @@ export function formatDuration(startedAt: number, completedAt?: number): string 
   return `${formatMs(Date.now() - startedAt)} (running)`;
 }
 
-/** Get display name for any agent type (built-in or custom). */
-export function getDisplayName(type: SubagentType): string {
-  return getConfig(type).displayName;
+/** Get the display name for an embedded agent type. */
+export function getDisplayName(type: string): string {
+  const { config } = resolveAgent(type);
+  return config.displayName ?? config.name;
 }
 
 /** Format effective invocation metadata for user-facing displays. */

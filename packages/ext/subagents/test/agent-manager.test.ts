@@ -133,7 +133,7 @@ describe("AgentManager — detached lifecycle", () => {
 
     expect(pi.events.emit).toHaveBeenCalledWith("subagents:created", {
       id,
-      type: "general-purpose",
+      type: "general",
       description: "task",
     });
   });
@@ -537,7 +537,7 @@ describe("AgentManager — SpawnOptions.cwd passthrough (#96)", () => {
 
     expect(runAgent).toHaveBeenCalledWith(
       expect.objectContaining({ cwd: "/tmp", sessionId: "parent-session" }),
-      "general-purpose",
+      "general",
       "test",
       expect.objectContaining({ cwd: "/", configCwd: "/tmp" }),
     );

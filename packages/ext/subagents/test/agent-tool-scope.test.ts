@@ -1,22 +1,8 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import { createAgentToolExecute } from "../agent-tool-execute.js";
-import { registerAgents } from "../agent-types.js";
-import type { AgentConfig } from "../types.js";
 
 const inside = { provider: "test", id: "inside", name: "Inside", reasoning: false };
 const outside = { provider: "test", id: "outside", name: "Outside", reasoning: false };
-
-function config(name: string, model?: string): AgentConfig {
-  return {
-    name,
-    description: "test agent",
-    extensions: false,
-    skills: false,
-    systemPrompt: "test",
-    promptMode: "replace",
-    ...(model ? { model } : {}),
-  };
-}
 
 function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "high" }> = []) {
   const notify = vi.fn();
@@ -30,7 +16,6 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
     } as never,
     agentActivity: new Map(),
     fleet: { ensureTimer: vi.fn(), update: vi.fn() } as never,
-    reloadCustomAgents: vi.fn(),
     isScopeModelsEnabled: () => true,
   });
   const ctx = {
@@ -46,11 +31,11 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
     sessionManager: { getSessionId: () => "session" },
     ui: { notify },
   } as never;
-  const run = (subagentType: string, model?: string) =>
+  const run = (model?: string) =>
     execute(
       "call",
       {
-        subagent_type: subagentType,
+        subagent_type: "general",
         description: "check scope",
         prompt: "run",
         ...(model ? { model } : {}),
@@ -62,12 +47,10 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
   return { notify, run, spawn };
 }
 
-beforeEach(() => registerAgents(new Map([["inherited", config("inherited")]])));
-
 test("caller-selected out-of-scope models return the resolved allowed models", async () => {
   const { run, spawn } = harness([{ model: inside, thinkingLevel: "high" }]);
 
-  const result = await run("inherited", "test/outside");
+  const result = await run("test/outside");
 
   expect(result.content[0]?.text).toContain('Model not in scope: "test/outside"');
   expect(result.content[0]?.text).toContain("  test/inside");
@@ -77,36 +60,28 @@ test("caller-selected out-of-scope models return the resolved allowed models", a
 test("upstream-resolved scoped entries allow their model regardless of pinned thinking", async () => {
   const runtime = harness([{ model: outside, thinkingLevel: "high" }]);
 
-  await runtime.run("inherited", "test/outside");
+  await runtime.run("test/outside");
 
   expect(runtime.spawn).toHaveBeenCalledOnce();
   expect(runtime.notify).not.toHaveBeenCalled();
 });
 
-test("frontmatter and inherited out-of-scope models warn and proceed", async () => {
-  registerAgents(
-    new Map([
-      ["pinned", config("pinned", "test/outside")],
-      ["inherited", config("inherited")],
-    ]),
-  );
+test("an inherited out-of-scope model warns and proceeds", async () => {
   const runtime = harness([{ model: inside }]);
 
-  await runtime.run("pinned");
-  await runtime.run("inherited");
+  await runtime.run();
 
-  expect(runtime.notify).toHaveBeenCalledTimes(2);
   expect(runtime.notify).toHaveBeenCalledWith(
     expect.stringContaining("out-of-scope model"),
     "warning",
   );
-  expect(runtime.spawn).toHaveBeenCalledTimes(2);
+  expect(runtime.spawn).toHaveBeenCalledOnce();
 });
 
 test("empty upstream scope leaves model selection unrestricted", async () => {
   const runtime = harness();
 
-  await runtime.run("inherited", "test/outside");
+  await runtime.run("test/outside");
 
   expect(runtime.spawn).toHaveBeenCalledOnce();
   expect(runtime.notify).not.toHaveBeenCalled();
