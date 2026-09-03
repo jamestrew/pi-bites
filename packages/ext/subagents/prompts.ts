@@ -30,6 +30,7 @@ export function buildAgentPrompt(
 
   const envBlock = `# Environment
 Working directory: ${cwd}
+Filesystem: shared with the parent session and other agents
 ${env.isGitRepo ? `Git repository: yes\nBranch: ${env.branch}` : "Not a git repository"}
 Platform: ${env.platform}`;
 

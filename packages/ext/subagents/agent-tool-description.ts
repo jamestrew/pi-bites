@@ -28,7 +28,7 @@ Notes:
 - ${CHILD_LIFECYCLE_GUIDANCE}
 - ${EXPLORE_SCOPE_GUIDANCE}
 - MessageAgent reaches running agents only; it cannot resume completed agents.
-- "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
+- Agents share the parent session's filesystem; coordinate edits to avoid conflicts.
 - Agent output is hidden from the user. Summarize relevant results and verify claimed edits.`;
 
 const FULL_DESCRIPTION = `Launch an autonomous agent when delegation has a concrete benefit. Each call starts a
@@ -48,7 +48,7 @@ defaults; project agents override global agents with the same name.
 - ${CHILD_LIFECYCLE_GUIDANCE}
 - ${EXPLORE_SCOPE_GUIDANCE}
 - MessageAgent reaches running agents only; it cannot resume completed agents.
-- "worktree" isolation uses a temporary copy; unchanged copies are removed and changes are saved to a branch.
+- Agents share the parent session's filesystem; coordinate edits to avoid conflicts.
 - Agent output is hidden from the user. Summarize relevant results, and verify claimed edits before reporting them.
 - Keep synthesis in the primary agent: avoid duplicating delegated searches, read decisive files yourself, and
   give write-capable agents concrete changes rather than asking them to infer a fix from their research.
@@ -102,12 +102,6 @@ export function getAgentToolParameters() {
         Type.String({
           description:
             "Thinking level: off, minimal, low, medium, high, xhigh, max. Overrides agent default.",
-        }),
-      ),
-      isolation: Type.Optional(
-        Type.Literal("worktree", {
-          description:
-            'Set to "worktree" to run the agent in a temporary git worktree (isolated copy of the repo). Unchanged worktrees are removed automatically; changes are saved to a branch on completion.',
         }),
       ),
     },

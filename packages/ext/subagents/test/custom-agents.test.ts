@@ -552,49 +552,6 @@ All tools.`,
     expect(result.get("unrestricted")!.disallowedTools).toBeUndefined();
   });
 
-  it("parses isolation: worktree", () => {
-    writeAgent(
-      "isolated-wt",
-      `---
-description: Worktree agent
-isolation: worktree
----
-
-Isolated.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("isolated-wt")!.isolation).toBe("worktree");
-  });
-
-  it("isolation defaults to undefined when omitted", () => {
-    writeAgent(
-      "no-isolation",
-      `---
-description: Normal
----
-
-Normal.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("no-isolation")!.isolation).toBeUndefined();
-  });
-
-  it("rejects invalid isolation mode", () => {
-    writeAgent(
-      "bad-isolation",
-      `---
-isolation: docker
----
-
-Bad isolation.`,
-    );
-
-    const result = loadCustomAgents(tmpDir);
-    expect(result.get("bad-isolation")!.isolation).toBeUndefined();
-  });
-
   it("honors PI_CODING_AGENT_DIR for global custom agent discovery", () => {
     const altAgentDir = mkdtempSync(join(tmpdir(), "pi-alt-agent-"));
     const originalEnv = process.env.PI_CODING_AGENT_DIR;

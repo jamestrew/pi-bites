@@ -27,7 +27,6 @@ const RPC_SPAWN_OPTION_KEYS = new Set([
   "isolated",
   "inheritContext",
   "thinkingLevel",
-  "isolation",
   "cwd",
 ]);
 const THINKING_LEVELS = {
@@ -83,10 +82,6 @@ export function decodeSpawnOptions(raw: unknown, registry?: ModelRegistry): Spaw
     }
     options.thinkingLevel = input.thinkingLevel;
   }
-  if (input.isolation !== undefined) {
-    if (input.isolation !== "worktree") throw new Error("Spawn RPC option isolation is invalid");
-    options.isolation = input.isolation;
-  }
   if (input.cwd !== undefined && input.cwd !== null) {
     if (typeof input.cwd !== "string") throw new Error("Spawn RPC option cwd must be a string");
     options.cwd = input.cwd;
@@ -104,7 +99,7 @@ export interface EventBus {
 export type RpcReply<T = void> = { success: true; data?: T } | { success: false; error: string };
 
 /** RPC protocol version — bumped when the envelope or method contracts change. */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Minimal AgentManager interface needed by the spawn/stop RPCs. */
 export interface SpawnCapable {

@@ -25,14 +25,12 @@ describe("resolveAgentInvocationConfig", () => {
         thinking: "high",
         inheritContext: false,
         isolated: false,
-        isolation: "worktree",
       }),
       {
         model: "provider/param-model",
         thinking: "minimal",
         inherit_context: true,
         isolated: true,
-        isolation: "worktree",
       },
     );
 
@@ -42,7 +40,6 @@ describe("resolveAgentInvocationConfig", () => {
       thinking: "minimal",
       inheritContext: true,
       isolated: false,
-      isolation: "worktree",
     });
   });
 
@@ -52,7 +49,6 @@ describe("resolveAgentInvocationConfig", () => {
       thinking: "minimal",
       inherit_context: true,
       isolated: true,
-      isolation: "worktree",
     });
 
     expect(resolved).toMatchObject({
@@ -61,7 +57,6 @@ describe("resolveAgentInvocationConfig", () => {
       thinking: "minimal",
       inheritContext: true,
       isolated: true,
-      isolation: "worktree",
     });
   });
 

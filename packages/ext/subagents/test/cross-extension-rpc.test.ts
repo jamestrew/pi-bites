@@ -113,7 +113,7 @@ describe("cross-extension RPC", () => {
 
     it.each([
       ["cwd", { cwd: 42 }],
-      ["isolation", { isolation: "container" }],
+      ["removed isolation", { isolation: "worktree" }],
       ["isolated", { isolated: "yes" }],
       ["retired execution mode", { isBackground: true }],
       ["callbacks", { onTextDelta: () => {} }],

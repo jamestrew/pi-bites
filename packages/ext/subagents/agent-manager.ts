@@ -17,15 +17,8 @@ import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
-import type {
-  AgentInvocation,
-  AgentRecord,
-  IsolationMode,
-  SubagentType,
-  ThinkingLevel,
-} from "./types.js";
+import type { AgentInvocation, AgentRecord, SubagentType, ThinkingLevel } from "./types.js";
 import { addUsage, appendSubagentUsageRecord, type AssistantUsage } from "./usage.js";
-import { cleanupWorktree, createWorktree, pruneWorktrees } from "./worktree.js";
 
 export type OnAgentComplete = (record: AgentRecord) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
@@ -80,15 +73,11 @@ export interface SpawnOptions {
   isolated?: boolean;
   inheritContext?: boolean;
   thinkingLevel?: ThinkingLevel;
-  /** Isolation mode — "worktree" creates a temp git worktree for the agent. */
-  isolation?: IsolationMode;
   /**
    * Working directory for the agent (absolute path). Default: parent session
    * cwd. The agent's tools operate here, but .pi config (extensions, skills,
    * settings) still loads from the parent session's project — the
-   * target directory's `.pi` extensions never execute. With isolation:
-   * "worktree", the worktree is created FROM this directory and the result
-   * branch lands in that repo.
+   * target directory's `.pi` extensions never execute.
    */
   cwd?: string;
   /** Resolved invocation snapshot captured for UI display. */
@@ -116,10 +105,6 @@ export class AgentManager {
   private messageParent?: MessageParent;
   private getAutoCompactionThreshold?: () => number | undefined;
   private maxConcurrent: number;
-  /** Base repos worktrees were created from — so dispose() can prune them all,
-   *  not just the parent repo (caller-supplied cwd can target other repos). */
-  private worktreeRepos = new Set<string>();
-
   /** Queue of agents waiting to start. */
   private queue: { id: string; args: SpawnArgs }[] = [];
   /** Number of currently running agents. */
@@ -306,8 +291,8 @@ export class AgentManager {
       // Queue it — will be started when a running agent completes
       this.queue.push({ id, args });
     } else {
-      // startAgent can throw (e.g. strict worktree-isolation failure) — clean
-      // up the record so callers don't see an orphan in `listAgents()`.
+      // startAgent can throw — clean up the record so callers don't see an
+      // orphan in `listAgents()`.
       try {
         this.startAgent(id, record, args);
       } catch (err) {
@@ -345,33 +330,7 @@ export class AgentManager {
     // spawn()'s check, and the directory may be gone by then (TOCTOU). Same
     // curated errors; drainQueue parks a throw on the record as an error.
     assertValidSpawnCwd(options.cwd);
-    // Single resolution point for the caller-supplied cwd — the worktree base
-    // repo and both cleanup calls below MUST agree on this value forever.
     const customCwd = options.cwd ?? undefined; // null (RPC "unset") → undefined
-    const baseCwd = customCwd ?? parent.cwd;
-
-    // Worktree isolation: try to create a temporary git worktree. Strict —
-    // fail loud if not possible (no silent fallback to main tree). Done
-    // BEFORE state mutation so a throw doesn't leave the record half-running.
-    let worktreeCwd: string | undefined;
-    if (options.isolation === "worktree") {
-      const wt = createWorktree(baseCwd, id);
-      if (!wt) {
-        throw new Error(
-          'Cannot run with isolation: "worktree" — not a git repo, no commits yet, or `git worktree add` failed. ' +
-            "Initialize git and commit at least once, or omit `isolation`.",
-        );
-      }
-      record.worktree = wt;
-      // workPath preserves subdirectory scoping for caller-supplied cwds: a
-      // cwd deep in a monorepo maps to the same subdir inside the copy, not
-      // the copied repo's root. Plain worktree spawns keep the historical
-      // behavior (agent at the copy's root) — moving them to workPath would
-      // also move .pi config discovery when the parent session sits in a repo
-      // subdirectory, silently dropping extensions/skills.
-      worktreeCwd = customCwd !== undefined ? wt.workPath : wt.path;
-      this.worktreeRepos.add(baseCwd);
-    }
 
     record.status = "running";
     const queuedAt = record.startedAt;
@@ -379,10 +338,9 @@ export class AgentManager {
     this.runningCount++;
     this.onStart?.(record);
     this.recordDiagnostic(record, "started", {
-      cwd: baseCwd,
+      cwd: customCwd ?? parent.cwd,
       isolated: options.isolated === true,
       inherit_context: options.inheritContext === true,
-      isolation: options.isolation,
       queue_duration_ms: record.startedAt - queuedAt,
       manager_running_count: this.runningCount,
       manager_queue_length: this.queue.length,
@@ -413,12 +371,7 @@ export class AgentManager {
       inheritContext: options.inheritContext,
       thinkingLevel: options.thinkingLevel,
       autoCompactionThreshold: this.getAutoCompactionThreshold?.(),
-      // Worktree wins for the working dir (the agent must run in the copy —
-      // which, with a custom cwd, was created from that target). Config stays
-      // with the parent project when a caller-supplied cwd is in play; it must
-      // stay undefined otherwise so plain worktree runs keep resolving config
-      // (including relative extension paths) inside the worktree copy.
-      cwd: worktreeCwd ?? customCwd,
+      cwd: customCwd,
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,
       messageParent: (message) =>
@@ -498,20 +451,6 @@ export class AgentManager {
         record.session = session;
         record.completedAt ??= Date.now();
 
-        // Clean up worktree if used
-        if (record.worktree) {
-          const wtResult = cleanupWorktree(baseCwd, record.worktree, options.description);
-          record.worktreeResult = wtResult;
-          if (wtResult.hasChanges && wtResult.branch) {
-            // With a caller-supplied cwd the branch lives in THAT repo, not the
-            // parent session's — say so, or the orchestrator merges in the wrong repo.
-            const repoNote = customCwd !== undefined ? ` in \`${baseCwd}\`` : "";
-            const worktreeNote = `Changes saved to branch \`${wtResult.branch}\`${repoNote}. Merge with: \`git merge ${wtResult.branch}\`${customCwd !== undefined ? ` (run in \`${baseCwd}\`)` : ""}`;
-            if (record.result) record.result += `\n\n---\n${worktreeNote}`;
-            else record.error = `${record.error ?? "Agent failed."}\n\n${worktreeNote}`;
-          }
-        }
-
         this.settled.add(record);
         this.recordDiagnostic(record, "completed", {
           status: record.status,
@@ -541,16 +480,6 @@ export class AgentManager {
           manager_signal_aborted: abortController.signal.aborted,
         });
         record.completedAt ??= Date.now();
-
-        // Best-effort worktree cleanup on error
-        if (record.worktree) {
-          try {
-            const wtResult = cleanupWorktree(baseCwd, record.worktree, options.description);
-            record.worktreeResult = wtResult;
-          } catch {
-            /* ignore cleanup errors */
-          }
-        }
 
         this.settled.add(record);
         this.recordDiagnostic(record, "completed", {
@@ -586,8 +515,8 @@ export class AgentManager {
       try {
         this.startAgent(next.id, record, next.args);
       } catch (err) {
-        // Late failure (e.g. strict worktree-isolation) — surface on the record
-        // so the user/agent can see it via /agents, then keep draining.
+        // Surface late failures on the record so the user/agent can see them
+        // via /agents, then keep draining.
         record.status = "error";
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt = Date.now();
@@ -795,20 +724,5 @@ export class AgentManager {
       if (record.session) void this.teardownSession(record.session);
     }
     this.agents.clear();
-    // Prune any orphaned git worktrees (crash recovery)
-    try {
-      pruneWorktrees(process.cwd());
-    } catch {
-      /* ignore */
-    }
-    // Also prune repos that caller-supplied cwds created worktrees in — a clean
-    // exit with in-flight agents would otherwise leave stale registrations there.
-    for (const repo of this.worktreeRepos) {
-      try {
-        pruneWorktrees(repo);
-      } catch {
-        /* ignore */
-      }
-    }
   }
 }
