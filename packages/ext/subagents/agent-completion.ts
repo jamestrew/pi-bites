@@ -52,6 +52,7 @@ type AgentCompletionDeps = {
 type Waiter = {
   id: number;
   agentIds: string[];
+  generations: Map<string, number>;
   resolve: (outcome: WaitAgentOutcome) => void;
   timer?: ReturnType<typeof setTimeout>;
   signal?: AbortSignal;
@@ -65,17 +66,30 @@ export function createAgentCompletionHandler({
   onAgentResultPendingUI,
   scheduleAutomatic,
 }: AgentCompletionDeps) {
-  const owners = new WeakMap<AgentRecord, "automatic" | "wait">();
-  const completed = new WeakSet<AgentRecord>();
+  const owners = new WeakMap<AgentRecord, Map<number, "automatic" | "wait">>();
+  const completedGeneration = new WeakMap<AgentRecord, number>();
   const claims = new Map<string, number>();
   const waiters = new Map<number, Waiter>();
   let nextWaiterId = 1;
   let disposed = false;
 
+  const claimKey = (id: string, generation: number) => `${id}:${generation}`;
+  const getOwner = (record: AgentRecord, generation = record.generation) =>
+    owners.get(record)?.get(generation);
+  const setOwner = (record: AgentRecord, generation: number, owner: "automatic" | "wait") => {
+    let generations = owners.get(record);
+    if (!generations) owners.set(record, (generations = new Map<number, "automatic" | "wait">()));
+    generations.set(generation, owner);
+  };
+  const deleteOwner = (record: AgentRecord, generation: number) => {
+    owners.get(record)?.delete(generation);
+  };
+
   function release(waiter: Waiter): void {
     waiters.delete(waiter.id);
     for (const id of waiter.agentIds) {
-      if (claims.get(id) === waiter.id) claims.delete(id);
+      const key = claimKey(id, waiter.generations.get(id) ?? 0);
+      if (claims.get(key) === waiter.id) claims.delete(key);
     }
     if (waiter.timer) clearTimeout(waiter.timer);
     if (waiter.signal && waiter.onAbort) {
@@ -92,7 +106,11 @@ export function createAgentCompletionHandler({
     records: AgentRecord[],
     terminal = records.filter(isTerminal),
   ): WaitAgentOutcome {
-    for (const record of terminal) owners.set(record, "wait");
+    for (const record of terminal) {
+      const canonical = getRecord(record.id);
+      if (canonical?.generation === record.generation)
+        setOwner(canonical, record.generation, "wait");
+    }
     const terminalIds = new Set(terminal.map((record) => record.id));
     return {
       outcome: "terminal",
@@ -101,20 +119,24 @@ export function createAgentCompletionHandler({
     };
   }
 
-  function resolveWaiter(waiterId: number): void {
+  function resolveWaiter(waiterId: number, completedRecord?: AgentRecord): void {
     const waiter = waiters.get(waiterId);
     if (!waiter) return;
     const records = waiter.agentIds
-      .map(getRecord)
+      .map((id) => (id === completedRecord?.id ? completedRecord : getRecord(id)))
       .filter((record): record is AgentRecord => Boolean(record));
     const terminal = records
-      .filter(isTerminal)
-      .filter((record) => owners.get(record) !== "automatic");
+      .filter(
+        (record) => record.generation === waiter.generations.get(record.id) && isTerminal(record),
+      )
+      .filter((record) => getOwner(record) !== "automatic");
     if (terminal.length > 0) finish(waiter, terminalOutcome(records, terminal));
   }
 
   function onAgentMessage(sender: WaitAgentSender, message: string): boolean {
-    const waiterId = claims.get(sender.id);
+    const record = getRecord(sender.id);
+    if (!record) return false;
+    const waiterId = claims.get(claimKey(sender.id, record.generation));
     if (waiterId === undefined) return false;
     const waiter = waiters.get(waiterId);
     if (!waiter) return false;
@@ -145,12 +167,31 @@ export function createAgentCompletionHandler({
     );
   }
 
-  function onAgentComplete(record: AgentRecord): void {
-    if (disposed || completed.has(record)) return;
-    completed.add(record);
-    const failed = record.status === "error" || record.status === "stopped";
-    pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
+  function emitCompletionEvent(record: AgentRecord, failed: boolean): void {
+    try {
+      pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
+    } catch {
+      /* event listeners must not change completion delivery ownership */
+    }
+  }
+
+  function onAgentComplete(record: AgentRecord, generation = record.generation): void {
+    if (disposed || (completedGeneration.get(record) ?? 0) >= generation) return;
+    completedGeneration.set(record, generation);
+    for (const previous of owners.get(record)?.keys() ?? []) {
+      if (previous < generation) deleteOwner(record, previous);
+    }
+    const finished: AgentRecord = {
+      ...record,
+      generation,
+      toolCalls: [...record.toolCalls],
+      lifetimeUsage: { ...record.lifetimeUsage },
+      failureHistory: record.failureHistory.map((failure) => ({ ...failure })),
+      ...(record.abort ? { abort: { ...record.abort } } : {}),
+    };
+    const failed = finished.status === "error" || finished.status === "stopped";
     const notifyFinishedUI = () => {
+      if (getRecord(record.id)?.generation !== generation) return;
       try {
         onAgentFinishedUI(record.id);
       } catch {
@@ -158,11 +199,18 @@ export function createAgentCompletionHandler({
       }
     };
 
-    const waiterId = claims.get(record.id);
+    const waiterId = claims.get(claimKey(record.id, generation));
+    const existingOwner = getOwner(record, generation);
     if (waiterId !== undefined) {
       notifyFinishedUI();
-      resolveWaiter(waiterId);
+      resolveWaiter(waiterId, finished);
+      emitCompletionEvent(finished, failed);
+    } else if (existingOwner === "wait") {
+      notifyFinishedUI();
+      emitCompletionEvent(finished, failed);
     } else {
+      setOwner(record, generation, "automatic");
+      emitCompletionEvent(finished, failed);
       let finishedUI = false;
       const finishUI = () => {
         if (finishedUI) return;
@@ -170,11 +218,11 @@ export function createAgentCompletionHandler({
         notifyFinishedUI();
       };
       const cancelAutomatic = () => {
-        owners.delete(record);
+        deleteOwner(record, generation);
         finishUI();
       };
       try {
-        onAgentResultPendingUI?.(record.id);
+        if (getRecord(record.id)?.generation === generation) onAgentResultPendingUI?.(record.id);
       } catch {
         /* UI state must not block completion delivery */
       }
@@ -184,9 +232,9 @@ export function createAgentCompletionHandler({
               record.parentSessionId,
               () => {
                 try {
-                  emitAutomatic(record);
+                  emitAutomatic(finished);
                 } catch (error) {
-                  owners.delete(record);
+                  deleteOwner(record, generation);
                   throw error;
                 } finally {
                   finishUI();
@@ -194,10 +242,13 @@ export function createAgentCompletionHandler({
               },
               cancelAutomatic,
             )
-          : (emitAutomatic(record), finishUI(), true);
-        if (accepted) owners.set(record, "automatic");
-        else finishUI();
+          : (emitAutomatic(finished), finishUI(), true);
+        if (!accepted) {
+          deleteOwner(record, generation);
+          finishUI();
+        }
       } catch {
+        deleteOwner(record, generation);
         finishUI();
         /* automatic delivery failure leaves the completed result available to WaitAgent */
       }
@@ -232,7 +283,10 @@ export function createAgentCompletionHandler({
       });
     }
 
-    const claimed = uniqueIds.filter((id) => claims.has(id));
+    const generations = new Map(
+      (records as AgentRecord[]).map((record) => [record.id, record.generation]),
+    );
+    const claimed = uniqueIds.filter((id) => claims.has(claimKey(id, generations.get(id) ?? 0)));
     if (claimed.length > 0) {
       return Promise.resolve({
         outcome: "error",
@@ -243,7 +297,7 @@ export function createAgentCompletionHandler({
     }
 
     const deliveryClaimed = (records as AgentRecord[])
-      .filter((record) => owners.has(record))
+      .filter((record) => getOwner(record) !== undefined)
       .map((record) => record.id);
     if (deliveryClaimed.length > 0) {
       return Promise.resolve({
@@ -269,10 +323,13 @@ export function createAgentCompletionHandler({
       const waiter: Waiter = {
         id: nextWaiterId++,
         agentIds: uniqueIds,
+        generations,
         resolve,
         signal,
       };
-      for (const id of uniqueIds) claims.set(id, waiter.id);
+      for (const id of uniqueIds) {
+        claims.set(claimKey(id, generations.get(id) ?? 0), waiter.id);
+      }
       waiters.set(waiter.id, waiter);
       waiter.timer = setTimeout(() => {
         finish(waiter, {

@@ -317,6 +317,7 @@ it("real pi keeps idle and post-terminal mail for the next user turn", async () 
 it("real WaitAgent wakes once and exposes child mail only through its tool result", async () => {
   const record: AgentRecord = {
     id: sender.id,
+    generation: 1,
     type: sender.type,
     parentSessionId: "parent",
     prompt: "trace auth",

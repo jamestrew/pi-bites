@@ -89,6 +89,7 @@ export default function registerBashGate(
   const authorizations = new ShellAuthorizationTransactions(pi);
   const sessionAllowed = new Set<string>();
   const finishedSubagents = new Set<string>();
+  const activeSubagentGenerations = new Map<string, number>();
 
   function syncYoloStatus(ctx: ExtensionContext): void {
     ctx.ui.setStatus("bash-gate-yolo", pi.getFlag("yolo") || mainAgentYolo ? "🔥 YOLO" : undefined);
@@ -104,6 +105,7 @@ export default function registerBashGate(
     if (pi.getFlag("yolo") || mainAgentYolo) autoMode?.setEnabled(false, ctx);
     sessionAllowed.clear();
     finishedSubagents.clear();
+    activeSubagentGenerations.clear();
     syncYoloStatus(ctx);
   });
   function endSession(): void {
@@ -142,8 +144,15 @@ export default function registerBashGate(
     },
   });
 
-  function clearSubagentAllowances(eventData: { id: string }): void {
+  function clearSubagentAllowances(eventData: { id: string; generation?: number }): void {
     const agentId = eventData.id;
+    const activeGeneration = activeSubagentGenerations.get(agentId);
+    if (
+      eventData.generation !== undefined &&
+      activeGeneration !== undefined &&
+      activeGeneration !== eventData.generation
+    )
+      return;
     finishedSubagents.add(agentId);
     const prefix = `subagent:${agentId}:`;
     for (const key of sessionAllowed) {
@@ -151,8 +160,18 @@ export default function registerBashGate(
     }
   }
 
-  pi.events.on("subagents:completed", (data) => clearSubagentAllowances(data as { id: string }));
-  pi.events.on("subagents:failed", (data) => clearSubagentAllowances(data as { id: string }));
+  pi.events.on("subagents:started", (data) => {
+    const event = data as { id: string; generation: number };
+    if ((activeSubagentGenerations.get(event.id) ?? 0) > event.generation) return;
+    activeSubagentGenerations.set(event.id, event.generation);
+    finishedSubagents.delete(event.id);
+  });
+  pi.events.on("subagents:completed", (data) =>
+    clearSubagentAllowances(data as { id: string; generation?: number }),
+  );
+  pi.events.on("subagents:failed", (data) =>
+    clearSubagentAllowances(data as { id: string; generation?: number }),
+  );
 
   function captureSession(ctx: ExtensionContext): CommandAuthorizationSession {
     const ownerSignal = owner.signal;

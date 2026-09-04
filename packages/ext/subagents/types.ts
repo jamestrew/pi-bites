@@ -51,6 +51,8 @@ export interface AgentConfig {
 
 export interface AgentRecord {
   id: string;
+  /** Monotonic retained-session turn generation. The initial prompt is generation 1. */
+  generation: number;
   type: SubagentType;
   parentSessionId: string;
   /** Raw task supplied by the caller, without inherited parent context. */
@@ -106,7 +108,7 @@ export interface AgentFailure {
 
 export interface AgentAbort {
   timestamp: number;
-  source: "stop" | "cancel_and_steer" | "shutdown";
+  source: "stop" | "interrupt" | "cancel_and_steer" | "shutdown";
   reason?: string;
 }
 
