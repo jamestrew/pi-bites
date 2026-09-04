@@ -34,7 +34,7 @@ describe("Codex V1 subagent contract", () => {
     const serialized = serializeCodexV1Contract();
 
     expect(createHash("sha256").update(serialized).digest("hex")).toBe(
-      "7c131b82c1f7782f868b37a4220e9a251283f665bcf04363d377f8a12dd624bf",
+      "b7ce00fa797f6205c910a9659106552adc42b86063bd57997e8743bf990b378c",
     );
     expect(CODEX_V1_TOOL_NAMES).toEqual([
       "spawn_agent",
@@ -83,6 +83,19 @@ describe("Codex V1 subagent contract", () => {
     );
   });
 
+  it("pins the full default Codex spawn guidance before optimizing its size", () => {
+    const description = CODEX_V1_CONTRACT.tools.spawn_agent.description;
+
+    expect(description).toContain("No picker-visible model overrides are currently loaded.");
+    expect(description).toContain(
+      "This spawn_agent tool provides you access to sub-agents that inherit your current model by default.",
+    );
+    expect(description).toContain("### When to delegate vs. do the subtask yourself");
+    expect(description).toContain("### Designing delegated subtasks");
+    expect(description).toContain("### After you delegate");
+    expect(description).toContain("### Parallel delegation patterns");
+  });
+
   it("measures the complete serialized contract conservatively", () => {
     const serialized = serializeCodexV1Contract();
 
@@ -90,9 +103,9 @@ describe("Codex V1 subagent contract", () => {
       expect(serialized).toContain(`"${field}"`);
     }
     expect(serialized).toContain("Available roles:");
-    expect(estimateCodexV1ContractTokens()).toBe(1_902);
+    expect(estimateCodexV1ContractTokens()).toBe(2_902);
     expect(CODEX_V1_TOKEN_BUDGET).toEqual({ currentBaseline: 1_605, softFinal: 2_000 });
-    expect(estimateCodexV1ContractTokens()).toBeLessThanOrEqual(CODEX_V1_TOKEN_BUDGET.softFinal);
+    expect(estimateCodexV1ContractTokens()).toBeGreaterThan(CODEX_V1_TOKEN_BUDGET.softFinal);
   });
 
   it("does not register the future surface yet", () => {
