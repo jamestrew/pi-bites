@@ -11,7 +11,6 @@ import type {
   InputEventResult,
   SessionBeforeCompactEvent,
   SessionBeforeForkEvent,
-  SessionBeforeTreeEvent,
   SessionCompactEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -36,7 +35,6 @@ export interface GoalRuntimeEventHandlers {
   onInput: ExtensionHandler<InputEvent, InputEventResult>;
   onContext: ExtensionHandler<ContextEvent, ContextEventResult | undefined>;
   onSessionStart: ExtensionHandler<SessionStartEvent>;
-  onSessionBeforeTree: ExtensionHandler<SessionBeforeTreeEvent>;
   onSessionTree: ExtensionHandler<SessionTreeEvent>;
   onBeforeAgentStart: ExtensionHandler<BeforeAgentStartEvent, undefined>;
   onAgentStart: ExtensionHandler<AgentStartEvent>;

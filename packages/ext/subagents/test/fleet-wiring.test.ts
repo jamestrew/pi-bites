@@ -432,7 +432,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   it("keeps an open conversation visible during a non-human Automode review", async () => {
     mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi, { current: {} }, { isEnabled: () => true, review: vi.fn() });
+    subagentsExtension(pi, { isEnabled: () => true, review: vi.fn() });
     const ui = uiCtx();
     const ctx = ctxWith(ui);
     await lifecycle.get("tool_execution_start")?.({}, ctx);

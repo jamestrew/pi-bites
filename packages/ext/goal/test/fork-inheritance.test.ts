@@ -475,7 +475,9 @@ describe("goal fork inheritance through Pi runtime", () => {
       );
     };
 
-    await runtime.session.navigateTree(copiedAssistantId, { summarize: false });
+    expect(
+      (await runtime.session.navigateTree(copiedAssistantId, { summarize: false })).cancelled,
+    ).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, __testHooks.continuationRetryMs + 25));
     await runtime.session.agent.waitForIdle();
     expect(streamCalls).toBe(2);

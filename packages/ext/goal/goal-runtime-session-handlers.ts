@@ -4,7 +4,6 @@ import type {
   ExtensionHandler,
   SessionBeforeCompactEvent,
   SessionBeforeForkEvent,
-  SessionBeforeTreeEvent,
   SessionCompactEvent,
   SessionShutdownEvent,
   SessionStartEvent,
@@ -139,15 +138,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       }
       continuation.maybeContinue(ctx);
     }) satisfies ExtensionHandler<SessionStartEvent>,
-
-    onSessionBeforeTree: (async (_event, ctx) => {
-      if (!ctx.isIdle()) {
-        ctx.abort();
-      }
-      while (!ctx.isIdle()) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
-    }) satisfies ExtensionHandler<SessionBeforeTreeEvent>,
 
     onSessionTree: (async (_event, ctx) => {
       continuation.clearPostCompactContinuationFallback();
