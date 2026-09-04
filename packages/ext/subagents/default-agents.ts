@@ -13,7 +13,7 @@ const SELF_EXTENSION = path.join(
   `../index${path.extname(fileURLToPath(import.meta.url))}`,
 );
 
-const DEFAULT_EXPLORE_MODEL = "github-copilot/gpt-5.4-mini";
+const DEFAULT_EXPLORE_MODEL = "openai-codex/gpt-5.6-luna";
 
 export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Object.freeze({
   general: Object.freeze({
