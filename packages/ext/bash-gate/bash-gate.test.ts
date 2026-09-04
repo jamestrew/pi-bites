@@ -723,6 +723,30 @@ describe("bash gate tool_call", () => {
     },
   );
 
+  test("reopens a retained generation and ignores stale completion", async () => {
+    const entries = [
+      subagentEntry({ agentId: "agent-1", title: "General", bashGatePolicy: "prompt" }),
+    ];
+    const { pi, toolCall, ctx, eventHandlers } = createBashGateHarness(entries);
+    let approvals = 0;
+    eventHandlers.set("subagents:bash_gate:approval", (raw: any) => {
+      approvals++;
+      eventHandlers.get(`subagents:bash_gate:approval:ack:${raw.requestId}`)?.({});
+      eventHandlers.get(`subagents:bash_gate:approval:reply:${raw.requestId}`)?.({
+        result: { outcome: "allow", authorization: "human-approved" },
+      });
+    });
+    const command = () => toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
+
+    pi.events.emit("subagents:completed", { id: "agent-1", generation: 1 });
+    await expect(command()).resolves.toMatchObject({ block: true });
+    pi.events.emit("subagents:started", { id: "agent-1", generation: 2 });
+    await command();
+    pi.events.emit("subagents:failed", { id: "agent-1", generation: 1 });
+    await command();
+    expect(approvals).toBe(2);
+  });
+
   test.each(["allow", "allow-session"])(
     "rejects %s resolved after subagent completion",
     async (decision) => {

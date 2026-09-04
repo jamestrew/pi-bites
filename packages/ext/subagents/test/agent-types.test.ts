@@ -17,7 +17,7 @@ describe("embedded agent types", () => {
     expect(() => {
       (DEFAULT_AGENTS.explore as { model?: string }).model = "provider/override";
     }).toThrow();
-    expect(resolveAgent("explore").config.model).toBe("github-copilot/gpt-5.4-mini");
+    expect(resolveAgent("explore").config.model).toBe(DEFAULT_AGENTS.explore.model);
   });
 
   it("configures the built-in general agent", () => {

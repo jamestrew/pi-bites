@@ -226,20 +226,23 @@ describe("agent-runner final output capture", () => {
     });
     createAgentSession.mockResolvedValue({ session });
     const diagnostics: Array<{ event: string; details?: Record<string, unknown> }> = [];
+    session.prompt.mockImplementationOnce(async () => {
+      await session.agent.onPayload?.(
+        { input: ["secret prompt"] },
+        {
+          provider: "openai-codex",
+          id: "gpt-test",
+          api: "openai-codex-responses",
+        },
+      );
+      session.messages.push({ role: "assistant", content: [{ type: "text", text: "DONE" }] });
+    });
 
     await runAgent(ctx, "explore", "go", {
       pi,
       messageParent,
       onDiagnostic: (event, details) => diagnostics.push({ event, details }),
     });
-    await session.agent.onPayload?.(
-      { input: ["secret prompt"] },
-      {
-        provider: "openai-codex",
-        id: "gpt-test",
-        api: "openai-codex-responses",
-      },
-    );
 
     expect(diagnostics.find(({ event }) => event === "session_created")?.details).toMatchObject({
       http_idle_timeout_ms: 300_000,
@@ -249,6 +252,26 @@ describe("agent-runner final output capture", () => {
     expect(request).toMatchObject({ effective_timeout_ms: 120_000, input_count: 1 });
     expect((request?.timeout_deadline as number) - 120_000).toBeGreaterThan(0);
     expect(JSON.stringify(request)).not.toContain("secret prompt");
+  });
+
+  it("records provider diagnostics for resumed turns and restores hooks", async () => {
+    const { session } = createSession("RESUMED");
+    const diagnostics: string[] = [];
+    session.prompt.mockImplementationOnce(async () => {
+      const model = { provider: "openai-codex", id: "gpt-test", api: "responses" };
+      await session.agent.onPayload?.({ input: ["resume"] }, model);
+      await session.agent.onResponse?.({ status: 200, headers: {} }, model);
+      session.messages.push({ role: "assistant", content: [{ type: "text", text: "RESUMED" }] });
+    });
+
+    await resumeAgent(session as any, "continue", {
+      onDiagnostic: (event) => diagnostics.push(event),
+    });
+
+    expect(diagnostics).toContain("provider_request");
+    expect(diagnostics).toContain("provider_response");
+    expect(session.agent.onPayload).toBeUndefined();
+    expect(session.agent.onResponse).toBeUndefined();
   });
 
   it("reports an earlier quota failure before a terminal abort", async () => {
@@ -342,6 +365,20 @@ describe("agent-runner final output capture", () => {
     session.prompt.mockImplementationOnce(async () => {});
 
     await expect(resumeAgent(session as any, "continue")).resolves.toBe("");
+  });
+
+  it("does not prompt or dispose a retained session for a pre-cancelled resume", async () => {
+    const { session } = createSession("ABORTED");
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      resumeAgent(session as any, "continue", { signal: controller.signal }),
+    ).rejects.toThrow(/cancelled before prompt/i);
+
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(session.abort).not.toHaveBeenCalled();
+    expect(session.dispose).not.toHaveBeenCalled();
   });
 
   it("does not start initialization for a pre-cancelled child", async () => {

@@ -81,6 +81,7 @@ export default function (
       // Emit started event when agent transitions to running (including from queue)
       pi.events.emit("subagents:started", {
         id: record.id,
+        generation: record.generation,
         type: record.type,
         description: record.description,
       });

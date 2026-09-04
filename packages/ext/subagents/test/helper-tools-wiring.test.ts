@@ -7,6 +7,7 @@ vi.mock("../agent-runner.js", async () => {
 
 import { runAgent, steerAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
+import { registerMessageAgent } from "../register-message-agent.js";
 
 function makePi(active = ["Agent", "read"]) {
   const tools = new Map<string, any>();
@@ -296,6 +297,35 @@ describe("background helper tools", () => {
       id,
       message: "focus here",
     });
+  });
+
+  it("routes messages for queued retained turns through the manager", async () => {
+    const { pi, tools } = makePi();
+    const record = {
+      id: "retained",
+      description: "retained agent",
+      status: "queued",
+      session: { steer: vi.fn() },
+    };
+    const manager = {
+      getRecord: vi.fn(() => record),
+      steer: vi.fn(() => true),
+    };
+    registerMessageAgent(pi, manager as any);
+
+    const result = await tools
+      .get("MessageAgent")
+      .execute(
+        "msg",
+        { agent_id: record.id, message: "generation owned" },
+        undefined,
+        undefined,
+        ctx(),
+      );
+
+    expect(manager.steer).toHaveBeenCalledWith(record.id, "generation owned");
+    expect(steerAgent).not.toHaveBeenCalled();
+    expect(result.details.status).toBe("queued");
   });
 
   it("messages a live agent and rejects missing or completed agents", async () => {

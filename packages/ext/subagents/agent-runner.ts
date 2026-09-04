@@ -269,6 +269,85 @@ function forwardAbortSignal(
   return () => signal.removeEventListener("abort", listener);
 }
 
+const providerRequestCounts = new WeakMap<AgentSession, number>();
+
+function instrumentProviderDiagnostics(
+  session: AgentSession,
+  options: {
+    signal?: AbortSignal;
+    onDiagnostic?: (event: string, details?: Record<string, unknown>) => void;
+  },
+) {
+  let requestIndex: number | undefined;
+  let requestStartedAt: number | undefined;
+  const httpIdleTimeoutMs = session.settingsManager.getHttpIdleTimeoutMs();
+  const providerRetrySettings = session.settingsManager.getProviderRetrySettings();
+  const effectiveProviderTimeoutMs =
+    providerRetrySettings.timeoutMs ??
+    (httpIdleTimeoutMs === 0 ? 2_147_483_647 : httpIdleTimeoutMs);
+  const observedAgentSignals = new WeakSet<AbortSignal>();
+  const priorOnPayload = session.agent.onPayload;
+  const priorOnResponse = session.agent.onResponse;
+  const onPayload: NonNullable<typeof session.agent.onPayload> = async (payload, requestModel) => {
+    const transformed = priorOnPayload ? await priorOnPayload(payload, requestModel) : payload;
+    requestIndex = (providerRequestCounts.get(session) ?? 0) + 1;
+    providerRequestCounts.set(session, requestIndex);
+    requestStartedAt = Date.now();
+    observeAbortSignal(session.agent.signal, observedAgentSignals, (signal) => {
+      emitDiagnostic(options.onDiagnostic, "agent_signal_abort", {
+        request_index: requestIndex,
+        reason: abortReason(signal),
+        ...(signal.reason === undefined ? {} : errorInfo(signal.reason)),
+        manager_signal_aborted: options.signal?.aborted ?? false,
+        manager_abort_reason: abortReason(options.signal),
+      });
+    });
+    emitDiagnostic(options.onDiagnostic, "provider_request", {
+      request_index: requestIndex,
+      provider: requestModel.provider,
+      model: requestModel.id,
+      api: requestModel.api,
+      effective_timeout_ms: effectiveProviderTimeoutMs,
+      timeout_deadline: requestStartedAt + effectiveProviderTimeoutMs,
+      ...summarizeProviderPayload(transformed === undefined ? payload : transformed),
+    });
+    return transformed;
+  };
+  const onResponse: NonNullable<typeof session.agent.onResponse> = async (
+    response,
+    responseModel,
+  ) => {
+    emitDiagnostic(options.onDiagnostic, "provider_response", {
+      request_index: requestIndex,
+      provider: responseModel.provider,
+      model: responseModel.id,
+      ...summarizeProviderResponse(response),
+      ...(requestStartedAt === undefined ? {} : { elapsed_ms: Date.now() - requestStartedAt }),
+    });
+    await priorOnResponse?.(response, responseModel);
+  };
+  session.agent.onPayload = onPayload;
+  session.agent.onResponse = onResponse;
+  return {
+    get requestIndex() {
+      return requestIndex;
+    },
+    get requestStartedAt() {
+      return requestStartedAt;
+    },
+    get requestCount() {
+      return providerRequestCounts.get(session) ?? 0;
+    },
+    httpIdleTimeoutMs,
+    providerRetrySettings,
+    effectiveProviderTimeoutMs,
+    dispose() {
+      if (session.agent.onPayload === onPayload) session.agent.onPayload = priorOnPayload;
+      if (session.agent.onResponse === onResponse) session.agent.onResponse = priorOnResponse;
+    },
+  };
+}
+
 export async function runAgent(
   parentSource: ParentSnapshot | ExtensionContext,
   type: SubagentType,
@@ -377,53 +456,7 @@ export async function runAgent(
   if (options.autoCompactionThreshold !== undefined)
     installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
 
-  let requestIndex = 0;
-  let activeRequestIndex: number | undefined, activeRequestStartedAt: number | undefined;
-  const httpIdleTimeoutMs = session.settingsManager.getHttpIdleTimeoutMs();
-  const providerRetrySettings = session.settingsManager.getProviderRetrySettings();
-  const effectiveProviderTimeoutMs =
-    providerRetrySettings.timeoutMs ??
-    (httpIdleTimeoutMs === 0 ? 2_147_483_647 : httpIdleTimeoutMs);
-  const observedAgentSignals = new WeakSet<AbortSignal>();
-  const reportAgentSignalAbort = (signal: AbortSignal) => {
-    emitDiagnostic(options.onDiagnostic, "agent_signal_abort", {
-      request_index: activeRequestIndex,
-      reason: abortReason(signal),
-      ...(signal.reason === undefined ? {} : errorInfo(signal.reason)),
-      manager_signal_aborted: options.signal?.aborted ?? false,
-      manager_abort_reason: abortReason(options.signal),
-    });
-  };
-  const priorOnPayload = session.agent.onPayload;
-  const priorOnResponse = session.agent.onResponse;
-  session.agent.onPayload = async (payload, requestModel) => {
-    const transformed = priorOnPayload ? await priorOnPayload(payload, requestModel) : payload;
-    activeRequestIndex = ++requestIndex;
-    activeRequestStartedAt = Date.now();
-    observeAbortSignal(session.agent.signal, observedAgentSignals, reportAgentSignalAbort);
-    emitDiagnostic(options.onDiagnostic, "provider_request", {
-      request_index: activeRequestIndex,
-      provider: requestModel.provider,
-      model: requestModel.id,
-      api: requestModel.api,
-      effective_timeout_ms: effectiveProviderTimeoutMs,
-      timeout_deadline: activeRequestStartedAt + effectiveProviderTimeoutMs,
-      ...summarizeProviderPayload(transformed === undefined ? payload : transformed),
-    });
-    return transformed;
-  };
-  session.agent.onResponse = async (response, responseModel) => {
-    emitDiagnostic(options.onDiagnostic, "provider_response", {
-      request_index: activeRequestIndex,
-      provider: responseModel.provider,
-      model: responseModel.id,
-      ...summarizeProviderResponse(response),
-      ...(activeRequestStartedAt === undefined
-        ? {}
-        : { elapsed_ms: Date.now() - activeRequestStartedAt }),
-    });
-    await priorOnResponse?.(response, responseModel);
-  };
+  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
 
   sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
     agentId: options.agentId,
@@ -458,9 +491,9 @@ export async function runAgent(
     thinking: session.thinkingLevel,
     transport: session.settingsManager.getTransport(),
     retry: session.settingsManager.getRetrySettings(),
-    provider_retry: providerRetrySettings,
-    http_idle_timeout_ms: httpIdleTimeoutMs,
-    effective_provider_timeout_ms: effectiveProviderTimeoutMs,
+    provider_retry: providerDiagnostics.providerRetrySettings,
+    http_idle_timeout_ms: providerDiagnostics.httpIdleTimeoutMs,
+    effective_provider_timeout_ms: providerDiagnostics.effectiveProviderTimeoutMs,
     websocket_connect_timeout_ms: session.settingsManager.getWebSocketConnectTimeoutMs(),
     compaction: session.settingsManager.getCompactionSettings(),
   });
@@ -490,8 +523,8 @@ export async function runAgent(
       options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
     }
     recordSessionDiagnostic(session, event, options, {
-      requestIndex: activeRequestIndex,
-      requestStartedAt: activeRequestStartedAt,
+      requestIndex: providerDiagnostics.requestIndex,
+      requestStartedAt: providerDiagnostics.requestStartedAt,
     });
   });
 
@@ -499,7 +532,7 @@ export async function runAgent(
   const cleanupAbort = forwardAbortSignal(session, options.signal, () => {
     emitDiagnostic(options.onDiagnostic, "manager_signal_abort", {
       reason: abortReason(options.signal),
-      request_index: activeRequestIndex,
+      request_index: providerDiagnostics.requestIndex,
     });
   });
 
@@ -512,13 +545,13 @@ export async function runAgent(
     if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
     await session.prompt(prompt);
     emitDiagnostic(options.onDiagnostic, "prompt_resolved", {
-      request_count: requestIndex,
+      request_count: providerDiagnostics.requestCount,
       manager_signal_aborted: options.signal?.aborted ?? false,
     });
   } catch (error) {
     emitDiagnostic(options.onDiagnostic, "prompt_rejected", {
       ...errorInfo(error),
-      request_count: requestIndex,
+      request_count: providerDiagnostics.requestCount,
       manager_signal_aborted: options.signal?.aborted ?? false,
       manager_abort_reason: abortReason(options.signal),
     });
@@ -527,6 +560,7 @@ export async function runAgent(
     unsubTurns();
     collector.unsubscribe();
     cleanupAbort();
+    providerDiagnostics.dispose();
   }
 
   throwTerminalAssistantError(session, invocationStart);
@@ -543,6 +577,8 @@ export async function resumeAgent(
   prompt: string,
   options: {
     onToolActivity?: (activity: ToolActivity) => void;
+    onTurnEnd?: (turnCount: number) => void;
+    onTextDelta?: (delta: string, fullText: string) => void;
     onAssistantUsage?: (usage: AssistantUsage) => void;
     onCompaction?: (info: {
       reason: "manual" | "threshold" | "overflow";
@@ -553,16 +589,31 @@ export async function resumeAgent(
     signal?: AbortSignal;
   } = {},
 ): Promise<string> {
+  agentSession.assertAgentNotCancelled(options.signal);
+  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
   const collector = collectResponseText(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
 
+  let turnCount = 0;
+  let currentMessageText = "";
   const unsubEvents =
     options.onToolActivity ||
+    options.onTurnEnd ||
+    options.onTextDelta ||
     options.onAssistantUsage ||
     options.onCompaction ||
     options.onDiagnostic ||
     options.onAssistantFailure
       ? session.subscribe((event: AgentSessionEvent) => {
+          if (event.type === "turn_end") options.onTurnEnd?.(++turnCount);
+          if (event.type === "message_start") currentMessageText = "";
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent.type === "text_delta"
+          ) {
+            currentMessageText += event.assistantMessageEvent.delta;
+            options.onTextDelta?.(event.assistantMessageEvent.delta, currentMessageText);
+          }
           dispatchToolActivity(event, options.onToolActivity);
           if (event.type === "message_end" && event.message.role === "assistant") {
             options.onAssistantUsage?.(getAssistantUsage(event.message));
@@ -573,7 +624,11 @@ export async function resumeAgent(
               tokensBefore: event.result.tokensBefore,
             });
           }
-          recordSessionDiagnostic(session, event, options, { resumed: true });
+          recordSessionDiagnostic(session, event, options, {
+            resumed: true,
+            requestIndex: providerDiagnostics.requestIndex,
+            requestStartedAt: providerDiagnostics.requestStartedAt,
+          });
         })
       : () => {};
 
@@ -598,6 +653,7 @@ export async function resumeAgent(
     collector.unsubscribe();
     unsubEvents();
     cleanupAbort();
+    providerDiagnostics.dispose();
   }
 
   throwTerminalAssistantError(session, invocationStart);
