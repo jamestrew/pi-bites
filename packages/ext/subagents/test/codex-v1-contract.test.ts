@@ -34,7 +34,7 @@ describe("Codex V1 subagent contract", () => {
     const serialized = serializeCodexV1Contract();
 
     expect(createHash("sha256").update(serialized).digest("hex")).toBe(
-      "27948111f62cff69dab3c24c2c18eaf4bfdfc19028c568532cf9ced8906e62ef",
+      "7c131b82c1f7782f868b37a4220e9a251283f665bcf04363d377f8a12dd624bf",
     );
     expect(CODEX_V1_TOOL_NAMES).toEqual([
       "spawn_agent",
@@ -55,15 +55,32 @@ describe("Codex V1 subagent contract", () => {
     ]);
   });
 
-  it("records the plain-text, no-history pi adaptations", () => {
+  it("keeps plain-text input while adopting Codex history-fork semantics", () => {
     const spawn = CODEX_V1_CONTRACT.tools.spawn_agent.parameters;
     const send = CODEX_V1_CONTRACT.tools.send_input.parameters;
 
     expect(spawn.required).toEqual(["message"]);
     expect(spawn.properties).not.toHaveProperty("items");
-    expect(spawn.properties).not.toHaveProperty("fork_context");
+    expect(spawn.properties.fork_context).toEqual({
+      type: "boolean",
+      description:
+        "True forks the current thread history into the new agent; false or omitted starts with only the initial prompt.",
+    });
+    expect(spawn.properties.agent_type.description).toContain(
+      "Omit to inherit the parent agent type with a full-history fork; otherwise, `default` is used.",
+    );
     expect(send.required).toEqual(["target", "message"]);
     expect(send.properties).not.toHaveProperty("items");
+  });
+
+  it("adopts Codex role permissions and lifecycle guidance", () => {
+    expect(CODEX_V1_CONTRACT.roles.explorer).not.toContain("read-only");
+    expect(CODEX_V1_CONTRACT.tools.close_agent.description).toContain(
+      "Completed agents remain open and count toward the concurrency limit until closed.",
+    );
+    expect(CODEX_V1_CONTRACT.tools.wait_agent.description).toContain(
+      "a notification message will be received containing the same completed status.",
+    );
   });
 
   it("measures the complete serialized contract conservatively", () => {
@@ -73,7 +90,7 @@ describe("Codex V1 subagent contract", () => {
       expect(serialized).toContain(`"${field}"`);
     }
     expect(serialized).toContain("Available roles:");
-    expect(estimateCodexV1ContractTokens()).toBe(1_803);
+    expect(estimateCodexV1ContractTokens()).toBe(1_902);
     expect(CODEX_V1_TOKEN_BUDGET).toEqual({ currentBaseline: 1_605, softFinal: 2_000 });
     expect(estimateCodexV1ContractTokens()).toBeLessThanOrEqual(CODEX_V1_TOKEN_BUDGET.softFinal);
   });
