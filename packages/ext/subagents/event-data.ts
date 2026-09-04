@@ -3,6 +3,7 @@ import { getLifetimeTotal } from "./usage.js";
 
 export type AgentEventData = {
   id: string;
+  generation: number;
   type: string;
   description: string;
   result?: string;
@@ -33,6 +34,7 @@ export function buildEventData(record: AgentRecord): AgentEventData {
   const tokens = total > 0 ? { input: u.input, output: u.output, total } : undefined;
   return {
     id: record.id,
+    generation: record.generation,
     type: record.type,
     description: record.description,
     result: record.result,

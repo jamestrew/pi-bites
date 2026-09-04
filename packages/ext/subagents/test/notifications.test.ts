@@ -95,6 +95,7 @@ describe("asynchronous completion notification rendering", () => {
   it("strips terminal controls from the persisted notification payload", () => {
     const payload = formatTaskNotification({
       id: "agent-1",
+      generation: 1,
       type: "general",
       parentSessionId: "parent",
       prompt: "prompt",
@@ -119,6 +120,7 @@ describe("asynchronous completion notification rendering", () => {
   it("exposes a missing final response as the same model and UI error", () => {
     const record: AgentRecord = {
       id: "agent-1",
+      generation: 1,
       type: "general",
       parentSessionId: "parent",
       prompt: "prompt",

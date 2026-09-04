@@ -69,9 +69,10 @@ export function registerMessageAgent(pi: ExtensionAPI, manager: AgentManager) {
             "failed",
           );
         }
-        if (!record.session) {
-          if (!record.pendingSteers) record.pendingSteers = [];
-          record.pendingSteers.push(params.message);
+        if (record.status === "queued" || !record.session) {
+          if (!manager.steer(record.id, params.message)) {
+            return result(`Failed to queue message for agent ${record.id}.`, "failed");
+          }
           pi.events.emit("subagents:steered", { id: record.id, message: params.message });
           return result(
             `Message queued for agent ${record.id}. It will be delivered once the session initializes.`,

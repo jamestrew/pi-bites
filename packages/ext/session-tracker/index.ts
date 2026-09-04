@@ -648,8 +648,10 @@ export default function registerSessionTracker(
     (text, ctx) => inferNeedsInputFromAssistantText(text, ctx, configRef.current),
     (error) => logTrackerFailure(defaultCallOptions, "needs-input inference", error),
   );
+  const backgroundGenerations = new Map<string, number>();
   pi.on("session_start", async (_event, ctx) => {
     activeHumanBashGates.clear();
+    backgroundGenerations.clear();
     baseState = "idle";
     needsInputLifecycle.reset();
     currentCtx = ctx;
@@ -677,11 +679,22 @@ export default function registerSessionTracker(
       await setBaseState("working");
     }
   });
-  pi.events.on("subagents:created", (data) =>
-    needsInputLifecycle.backgroundAgentStarted((data as { id: string }).id),
-  );
-  const finishBackgroundAgent = (data: unknown) =>
-    needsInputLifecycle.backgroundAgentFinished((data as { id: string }).id);
+  const startBackgroundAgent = (data: unknown) => {
+    const event = data as { id: string; generation?: number };
+    const generation = event.generation ?? 1;
+    if (backgroundGenerations.get(event.id) === generation) return;
+    backgroundGenerations.set(event.id, generation);
+    void needsInputLifecycle.backgroundAgentStarted(event.id);
+  };
+  pi.events.on("subagents:created", startBackgroundAgent);
+  pi.events.on("subagents:started", startBackgroundAgent);
+  const finishBackgroundAgent = (data: unknown) => {
+    const event = data as { id: string; generation?: number };
+    if (event.generation !== undefined && backgroundGenerations.get(event.id) !== event.generation)
+      return;
+    backgroundGenerations.delete(event.id);
+    void needsInputLifecycle.backgroundAgentFinished(event.id);
+  };
   pi.events.on("subagents:completed", finishBackgroundAgent);
   pi.events.on("subagents:failed", finishBackgroundAgent);
   pi.on("agent_end", (event) => needsInputLifecycle.agentEnd(event));

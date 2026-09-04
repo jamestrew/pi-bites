@@ -19,6 +19,7 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
     compactionCount: 0,
     ...overrides,
+    generation: overrides.generation ?? 1,
     failureHistory: overrides.failureHistory ?? [],
   };
 }
@@ -280,6 +281,110 @@ describe("agent completion delivery", () => {
 
     expect(pi.sendMessage).toHaveBeenCalledOnce();
     expect(pi.appendEntry).not.toHaveBeenCalled();
+    completion.dispose();
+  });
+
+  it("delivers each retained-session generation once with its own result snapshot", () => {
+    const record = makeRecord("a", { generation: 1, result: "first result" });
+    const deliveries: Array<() => void> = [];
+    const { completion, pi } = makeHarness([record], (_parent, deliver) => {
+      deliveries.push(deliver);
+      return true;
+    });
+
+    completion.onAgentComplete(record, 1);
+    record.generation = 2;
+    record.result = "second result";
+    record.startedAt = 300;
+    record.completedAt = 400;
+    completion.onAgentComplete(record, 2);
+
+    expect(deliveries).toHaveLength(2);
+    deliveries.forEach((deliver) => deliver());
+    expect(pi.sendMessage).toHaveBeenCalledTimes(2);
+    expect(pi.sendMessage.mock.calls[0]?.[0].content).toContain("<result>first result</result>");
+    expect(pi.sendMessage.mock.calls[1]?.[0].content).toContain("<result>second result</result>");
+    completion.dispose();
+  });
+
+  it("resolves a claimed generation before completion events can start the next one", async () => {
+    const record = makeRecord("a", { status: "running" });
+    const { completion, pi } = makeHarness([record]);
+    const waiting = completion.waitFor([record.id], 30_000);
+    record.status = "completed";
+    pi.events.emit.mockImplementation(() => {
+      record.generation = 2;
+      record.status = "running";
+      record.result = undefined;
+    });
+
+    completion.onAgentComplete(record, 1);
+
+    await expect(waiting).resolves.toMatchObject({
+      outcome: "terminal",
+      agents: [expect.objectContaining({ id: "a", status: "completed", result: "result a" })],
+    });
+    completion.dispose();
+  });
+
+  it("keeps a waiter-delivered completion owned by the canonical record", async () => {
+    const record = makeRecord("a", { status: "running" });
+    const { completion } = makeHarness([record]);
+    const waiting = completion.waitFor([record.id], 30_000);
+    record.status = "completed";
+    completion.onAgentComplete(record, 1);
+
+    await expect(waiting).resolves.toMatchObject({ outcome: "terminal" });
+    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
+      outcome: "delivery_claimed",
+    });
+    completion.dispose();
+  });
+
+  it("reserves automatic ownership before completion event reentrancy", async () => {
+    const record = makeRecord("a");
+    const { completion, pi } = makeHarness([record]);
+    let reentrantWait!: Promise<unknown>;
+    pi.events.emit.mockImplementation(() => {
+      reentrantWait = completion.waitFor([record.id], 30_000);
+    });
+
+    completion.onAgentComplete(record, 1);
+
+    await expect(reentrantWait).resolves.toMatchObject({ outcome: "delivery_claimed" });
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
+    completion.dispose();
+  });
+
+  it("does not automatically redeliver a result already consumed by WaitAgent", async () => {
+    const record = makeRecord("a");
+    const { completion, pi } = makeHarness([record]);
+
+    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
+      outcome: "terminal",
+    });
+    completion.onAgentComplete(record, 1);
+
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.events.emit).toHaveBeenCalledOnce();
+    completion.dispose();
+  });
+
+  it("does not let a prior generation's deferred delivery own the current turn", async () => {
+    const record = makeRecord("a", { generation: 1 });
+    const { completion } = makeHarness([record], () => true);
+    completion.onAgentComplete(record, 1);
+
+    record.generation = 2;
+    record.status = "running";
+    record.result = undefined;
+    record.completedAt = undefined;
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(completion.waitFor([record.id], 30_000, controller.signal)).resolves.toMatchObject(
+      { outcome: "cancelled" },
+    );
     completion.dispose();
   });
 
