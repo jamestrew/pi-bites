@@ -63,6 +63,7 @@ function assertValidSpawnCwd(cwd: unknown): asserts cwd is string | undefined | 
 interface SpawnArgs {
   pi: ExtensionAPI;
   parent: ParentSnapshot;
+  parentEntries?: ReturnType<ExtensionContext["sessionManager"]["buildContextEntries"]>;
   type: SubagentType;
   prompt: string;
   options: SpawnOptions;
@@ -89,6 +90,8 @@ export interface SpawnOptions {
   model?: Model<Api>;
   isolated?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** Copy the active parent conversation into the child session. */
+  forkContext?: boolean;
   /**
    * Working directory for the agent (absolute path). Default: parent session
    * cwd. The agent's tools operate here, but .pi config (extensions, skills,
@@ -283,7 +286,10 @@ export class AgentManager {
     options: SpawnOptions,
   ): string {
     if (this.closing) throw new Error("AgentManager is shutting down.");
-    const { type } = resolveAgent(requestedType);
+    const resolved = resolveAgent(requestedType);
+    if (!requestedType.trim() || !resolved.matched)
+      throw new Error(`Unknown agent type '${requestedType}'.`);
+    const { type } = resolved;
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.
@@ -291,6 +297,9 @@ export class AgentManager {
 
     const id = randomUUID().slice(0, 17);
     const parent = snapshotParent(ctx);
+    const parentEntries = options.forkContext
+      ? structuredClone(ctx.sessionManager.buildContextEntries())
+      : undefined;
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
@@ -319,7 +328,7 @@ export class AgentManager {
       manager_max_concurrent: this.maxConcurrent,
     });
 
-    const args: SpawnArgs = { pi, parent, type, prompt, options };
+    const args: SpawnArgs = { pi, parent, parentEntries, type, prompt, options };
 
     const start = () => this.startAgent(id, record, args);
     if (this.runningCount >= this.maxConcurrent) {
@@ -535,7 +544,7 @@ export class AgentManager {
   private startAgent(
     id: string,
     record: AgentRecord,
-    { pi, parent, type, prompt, options }: SpawnArgs,
+    { pi, parent, parentEntries, type, prompt, options }: SpawnArgs,
   ) {
     const generation = record.generation;
     // Re-validate a caller-supplied cwd: queued spawns can start minutes after
@@ -567,6 +576,7 @@ export class AgentManager {
       model: options.model,
       isolated: options.isolated,
       thinkingLevel: options.thinkingLevel,
+      parentEntries,
       autoCompactionThreshold: this.getAutoCompactionThreshold?.(),
       cwd: customCwd,
       configCwd: customCwd !== undefined ? parent.cwd : undefined,

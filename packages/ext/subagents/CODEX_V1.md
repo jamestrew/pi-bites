@@ -45,7 +45,7 @@ and reasoning effort unless the caller explicitly overrides supported settings.
   parent role and rejects an `agent_type` override.
 - Without a full-history fork, omitting `agent_type` selects `default` and the child starts with only
   its initial prompt.
-- `explorer` is guidance, not a permission boundary; it receives the inherited tool set.
+- Pi keeps `explorer` read-only through its existing tool allowlist.
 - A spawned agent reserves concurrency until `close_agent`, including after completion. A spawn that
   cannot reserve a slot fails instead of entering an invisible queue.
 - `wait_agent` and the asynchronous completion notification are independent delivery channels. A
@@ -54,6 +54,7 @@ and reasoning effort unless the caller explicitly overrides supported settings.
 ## Intentional pi adaptations
 
 - Pi uses ordinary top-level tools rather than the Codex Responses `multi_agent_v1` namespace.
+- Pi keeps `explorer` read-only rather than treating the role as guidance only.
 - `items` is omitted from `spawn_agent` and `send_input`. Pi has no need for the Responses-specific
   structured text/image/audio/skill/mention union, so plain-text `message` is required.
 - Pi tool definitions cannot send output schemas to the model. The pinned output schemas therefore

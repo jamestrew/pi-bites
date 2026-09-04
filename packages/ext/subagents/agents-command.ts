@@ -14,11 +14,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { type AgentManager } from "./agent-manager.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
-import {
-  type SubagentsSettings,
-  saveAndEmitChanged,
-  type ToolDescriptionMode,
-} from "./settings.js";
+import { type SubagentsSettings, saveAndEmitChanged } from "./settings.js";
 import { type AgentRecord } from "./types.js";
 import { SUBAGENT_TYPES } from "./types.js";
 import { type AgentActivity, formatDuration, getDisplayName } from "./ui/agent-format.js";
@@ -29,8 +25,6 @@ type AgentsCommandDeps = {
   getModelLabelFromConfig: (model: string) => string;
   isScopeModelsEnabled: () => boolean;
   setScopeModelsEnabled: (enabled: boolean) => void;
-  getToolDescriptionMode: () => ToolDescriptionMode;
-  setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   isFleetViewEnabled: () => boolean;
   setFleetViewEnabled: (enabled: boolean) => void;
 };
@@ -42,8 +36,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     getModelLabelFromConfig,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
-    getToolDescriptionMode,
-    setToolDescriptionMode,
     isFleetViewEnabled,
     setFleetViewEnabled,
   } = deps;
@@ -137,7 +129,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     return {
       maxConcurrent: manager.getMaxConcurrent(),
       scopeModels: isScopeModelsEnabled(),
-      toolDescriptionMode: getToolDescriptionMode(),
       fleetView: isFleetViewEnabled(),
     };
   }
@@ -170,14 +161,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           currentValue: isFleetViewEnabled() ? "on" : "off",
           values: ["on", "off"],
         },
-        {
-          id: "toolDescriptionMode",
-          label: "Tool description",
-          description:
-            "Agent tool description sent to the LLM: full (rich, default), compact (~75% fewer tokens, for small/local models), or custom (.pi/agent-tool-description.md with {{placeholders}})",
-          currentValue: getToolDescriptionMode(),
-          values: ["full", "compact", "custom"],
-        },
       ];
     }
 
@@ -192,10 +175,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
         const enabled = value === "on";
         setScopeModelsEnabled(enabled);
         notifyApplied(ctx, `Scope models ${enabled ? "enabled" : "disabled"}`);
-      } else if (id === "toolDescriptionMode") {
-        if (value !== "full" && value !== "compact" && value !== "custom") return;
-        setToolDescriptionMode(value);
-        notifyApplied(ctx, `Tool description set to ${value}. Takes effect on next pi session.`);
       } else if (id === "fleetView") {
         const enabled = value === "on";
         setFleetViewEnabled(enabled);

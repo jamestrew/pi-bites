@@ -43,7 +43,7 @@ import type { AssistantUsage } from "./usage.js";
 
 /** Tool names shared by this extension's registration and subagent exclusion. */
 export const SUBAGENT_TOOL_NAMES = {
-  AGENT: "Agent",
+  SPAWN_AGENT: "spawn_agent",
   WAIT_AGENT: "WaitAgent",
   MESSAGE_AGENT: "MessageAgent",
 } as const;
@@ -126,6 +126,8 @@ export interface RunOptions {
   signal?: AbortSignal;
   isolated?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** Active parent conversation entries copied when spawn_agent requests a full-history fork. */
+  parentEntries?: ReturnType<ExtensionContext["sessionManager"]["buildContextEntries"]>;
   /** Pi-bites threshold policy captured by the owning parent extension. */
   autoCompactionThreshold?: number;
   /** Override working directory. */
@@ -423,7 +425,13 @@ export async function runAgent(
   ];
 
   const settingsManager = SettingsManager.create(configCwd, agentDir);
-  const sessionManager = SessionManager.inMemory(effectiveCwd);
+  const sessionManager = options.parentEntries
+    ? SessionManager.inMemory(
+        effectiveCwd,
+        { parentSession: parent.sessionId },
+        options.parentEntries,
+      )
+    : SessionManager.inMemory(effectiveCwd);
 
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),

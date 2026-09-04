@@ -59,7 +59,7 @@ describe("embedded agent runner (real pi session)", () => {
 
     let active: string[] = [];
     try {
-      await runAgent(ctx, "general", "go", {
+      await runAgent(ctx, "worker", "go", {
         pi: options.pi ?? makePi(),
         messageParent: () => false,
         agentId: "e2e-agent",
@@ -82,7 +82,7 @@ describe("embedded agent runner (real pi session)", () => {
     expect(active).toEqual(
       expect.arrayContaining(["read", "bash", "edit", "write", "MessageAgent"]),
     );
-    expect(active).not.toContain("Agent");
+    expect(active).not.toContain("spawn_agent");
     expect(active).not.toContain("WaitAgent");
     const definition = session.getToolDefinition("MessageAgent");
     expect(definition.parameters.required).toEqual(["message"]);

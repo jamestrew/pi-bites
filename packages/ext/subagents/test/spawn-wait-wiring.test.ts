@@ -43,7 +43,7 @@ function makeHarness() {
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getThinkingLevel: vi.fn(() => "off"),
-    getActiveTools: vi.fn(() => ["Agent", "WaitAgent", "MessageAgent", "read"]),
+    getActiveTools: vi.fn(() => ["spawn_agent", "WaitAgent", "MessageAgent", "read"]),
     setActiveTools: vi.fn(),
   } as any;
   const ctx = {
@@ -99,10 +99,10 @@ function deferredRun() {
 
 async function spawn(tools: Map<string, any>, ctx: any, description = "test agent") {
   return tools
-    .get("Agent")
+    .get("spawn_agent")
     .execute(
       "agent-call",
-      { subagent_type: "general", description, prompt: "do the work" },
+      { agent_type: "worker", message: description },
       undefined,
       undefined,
       ctx,
@@ -130,8 +130,8 @@ describe("spawn-and-wait orchestration", () => {
     deferredRun();
     const harness = makeHarness();
 
-    expect([...harness.tools.keys()]).toEqual(expect.arrayContaining(["Agent", "WaitAgent"]));
-    expect(harness.tools.get("Agent").parameters.properties).not.toHaveProperty(
+    expect([...harness.tools.keys()]).toEqual(expect.arrayContaining(["spawn_agent", "WaitAgent"]));
+    expect(harness.tools.get("spawn_agent").parameters.properties).not.toHaveProperty(
       "run_in_background",
     );
     expect(harness.tools.get("WaitAgent").parameters.properties.timeout_ms).toMatchObject({
@@ -147,9 +147,10 @@ describe("spawn-and-wait orchestration", () => {
 
     expect(agentId(result)).toMatch(/\S+/);
     expect(result.details.status).toBe("running");
-    expect(result.content[0].text).toContain(`Agent ID: ${agentId(result)}`);
-    expect(result.content[0].text).toContain("Do not duplicate its assigned work");
-    expect(result.content[0].text).toContain("decision-relevant status—not deadline pressure");
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      agent_id: agentId(result),
+      nickname: "test agent",
+    });
     harness.shutdown();
   });
 
@@ -298,7 +299,7 @@ describe("spawn-and-wait orchestration", () => {
       timed_out: false,
       sender: {
         id,
-        type: "general",
+        type: "worker",
         title: "trace auth flow",
         model_name: "openai/gpt-5",
         thinking: "off",
@@ -307,7 +308,7 @@ describe("spawn-and-wait orchestration", () => {
       agents: [expect.objectContaining({ id, status: "running" })],
     });
     expect(JSON.parse(result.content[0].text)).toMatchObject({
-      sender: { id, type: "general", title: "trace auth flow" },
+      sender: { id, type: "worker", title: "trace auth flow" },
       message: "exact\nmessage",
     });
     expect(result.content[0].text).not.toContain("model_name");

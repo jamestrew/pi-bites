@@ -5,7 +5,7 @@ import type { AgentRecord } from "../types.js";
 function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id,
-    type: "general",
+    type: "worker",
     parentSessionId: "parent-session",
     prompt: `task ${id}`,
     description: `agent ${id}`,
@@ -411,7 +411,7 @@ describe("agent completion delivery", () => {
     await expect(waiting).resolves.toEqual({
       outcome: "message",
       timed_out: false,
-      sender: { id: "b", type: "general", title: "agent b" },
+      sender: { id: "b", type: "worker", title: "agent b" },
       message: "exact\nmessage",
       agents: [
         expect.objectContaining({ id: "a", status: "running" }),

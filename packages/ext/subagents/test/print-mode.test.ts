@@ -83,13 +83,12 @@ describe("print mode completion notifications", () => {
     subagentsExtension(pi);
     handlers.get("session_start")?.({}, makeHeadlessCtx());
 
-    const agentTool = tools.get("Agent");
+    const agentTool = tools.get("spawn_agent");
     await agentTool.execute(
       "tool-call-1",
       {
-        prompt: "reply done",
-        description: "tiny child",
-        subagent_type: "general-purpose",
+        message: "tiny child",
+        agent_type: "worker",
       },
       undefined,
       undefined,

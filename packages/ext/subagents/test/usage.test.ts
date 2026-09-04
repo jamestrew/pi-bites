@@ -12,7 +12,7 @@ describe("usage", () => {
     expect(
       decodeSubagentUsageRecord({
         type: "subagent_usage",
-        subagent: "explore",
+        subagent: "explorer",
         sessionId: "subagent-session-1",
         parentSessionId: "session-1",
         timestamp: 123,
@@ -28,7 +28,7 @@ describe("usage", () => {
       }),
     ).toEqual({
       type: "subagent_usage",
-      subagent: "explore",
+      subagent: "explorer",
       sessionId: "subagent-session-1",
       parentSessionId: "session-1",
       timestamp: 123,
@@ -47,7 +47,7 @@ describe("usage", () => {
   it("rejects malformed records and defaults legacy partial usage", () => {
     const base = {
       type: "subagent_usage",
-      subagent: "explore",
+      subagent: "explorer",
       sessionId: "session-1",
       timestamp: 123,
       provider: "anthropic",
@@ -69,7 +69,7 @@ describe("usage", () => {
   it("normalizes non-finite persisted numbers", () => {
     const decoded = decodeSubagentUsageRecord({
       type: "subagent_usage",
-      subagent: "explore",
+      subagent: "explorer",
       sessionId: "session-1",
       timestamp: JSON.parse("1e400"),
       provider: "anthropic",
