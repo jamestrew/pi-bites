@@ -67,7 +67,7 @@ describe("status note reaches the parent through the real handlers", () => {
     subagentsExtension(pi);
 
     const lines = tools
-      .get("Agent")
+      .get("spawn_agent")
       .renderResult(
         {
           content: [{ type: "text", text: "" }],
@@ -75,7 +75,7 @@ describe("status note reaches the parent through the real handlers", () => {
         },
         { expanded: false, isPartial: true },
         plainTheme,
-        { args: { prompt: "go" } },
+        { args: { message: "go" } },
       )
       .render(80);
 
@@ -90,12 +90,11 @@ describe("status note reaches the parent through the real handlers", () => {
     const runCtx = ctx();
     handlers.get("session_start")?.({}, ctx());
 
-    const spawn = await tools.get("Agent").execute(
+    const spawn = await tools.get("spawn_agent").execute(
       "tc1",
       {
-        prompt: "go",
-        description: "d",
-        subagent_type: "general-purpose",
+        message: "d",
+        agent_type: "worker",
       },
       undefined,
       undefined,
@@ -123,18 +122,17 @@ describe("status note reaches the parent through the real handlers", () => {
     const parentCtx = ctx();
     handlers.get("session_start")?.({}, parentCtx);
 
-    const spawn = await tools.get("Agent").execute(
+    const spawn = await tools.get("spawn_agent").execute(
       "tc2",
       {
-        prompt: "go",
-        description: "d",
-        subagent_type: "general-purpose",
+        message: "d",
+        agent_type: "worker",
       },
       undefined,
       undefined,
       parentCtx,
     );
-    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
+    const id = JSON.parse(textOf(spawn)).agent_id;
     expect(id, "spawn should surface an agent id").toBeTruthy();
 
     // The user stops it — same path the viewer's stop key uses (manager.abort).

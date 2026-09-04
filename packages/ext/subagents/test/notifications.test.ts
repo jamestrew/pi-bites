@@ -96,7 +96,7 @@ describe("asynchronous completion notification rendering", () => {
     const payload = formatTaskNotification({
       id: "agent-1",
       generation: 1,
-      type: "general",
+      type: "worker",
       parentSessionId: "parent",
       prompt: "prompt",
       description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent",
@@ -121,7 +121,7 @@ describe("asynchronous completion notification rendering", () => {
     const record: AgentRecord = {
       id: "agent-1",
       generation: 1,
-      type: "general",
+      type: "worker",
       parentSessionId: "parent",
       prompt: "prompt",
       description: "tool-only child",

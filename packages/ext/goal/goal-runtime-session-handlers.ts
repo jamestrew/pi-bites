@@ -144,9 +144,6 @@ export function createSessionEventHandlers(deps: GoalRuntimeSessionHandlerContex
       if (!ctx.isIdle()) {
         ctx.abort();
       }
-      while (!ctx.isIdle()) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
     }) satisfies ExtensionHandler<SessionBeforeTreeEvent>,
 
     onSessionTree: (async (_event, ctx) => {

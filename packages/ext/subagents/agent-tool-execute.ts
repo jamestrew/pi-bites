@@ -2,11 +2,11 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createActivityTracker } from "./activity-tracker.js";
 import type { AgentManager } from "./agent-manager.js";
-import { resolveAgent } from "./agent-types.js";
+import { resolveSpawnAgent } from "./agent-types.js";
 import { resolveAgentInvocationConfig } from "./invocation-config.js";
 import { modelKey, resolveModel } from "./model-resolver.js";
 import { textResult } from "./tool-result.js";
-import type { AgentInvocation, ThinkingLevel } from "./types.js";
+import { isThinkingLevel, type AgentInvocation, type ThinkingLevel } from "./types.js";
 import {
   type AgentActivity,
   type AgentDetails,
@@ -14,13 +14,15 @@ import {
   getDisplayName,
 } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
+import { sanitizeText } from "./ui/text-lines.js";
+import { getActiveSubagent } from "./subagent-context.js";
 
 type AgentToolParams = {
-  subagent_type: string;
-  description: string;
-  prompt: string;
+  message: string;
+  agent_type?: string;
+  fork_context?: boolean;
   model?: string;
-  thinking?: string;
+  reasoning_effort?: string;
 };
 
 type AgentToolUpdate = (update: {
@@ -39,6 +41,7 @@ type AgentToolExecuteDeps = {
 
 export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
   const { pi, manager, agentActivity, fleet, isScopeModelsEnabled } = deps;
+  const parentAgentType = getActiveSubagent();
   return async (
     toolCallId: string,
     params: AgentToolParams,
@@ -46,18 +49,27 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     _onUpdate: AgentToolUpdate | undefined,
     ctx: ExtensionContext,
   ) => {
-    const rawType = params.subagent_type;
-    const resolved = resolveAgent(rawType);
+    if (!params.message.trim()) return failedResult("Empty message can't be sent to an agent.");
+    const role = resolveSpawnAgent(params.agent_type, params.fork_context, parentAgentType);
+    if ("error" in role) return failedResult(role.error);
+    const resolved = role.agent;
     const subagentType = resolved.type;
-    const displayName = getDisplayName(subagentType);
+    const description = deriveDisplayDescription(params.message);
+    const displayName = description || getDisplayName(subagentType);
     const agentConfig = resolved.config;
+    if (params.reasoning_effort !== undefined && !isThinkingLevel(params.reasoning_effort)) {
+      return failedResult(
+        `Unsupported reasoning_effort '${params.reasoning_effort}'.`,
+        subagentType,
+      );
+    }
     const resolvedConfig = resolveAgentInvocationConfig(agentConfig, params);
 
     let model = ctx.model as Model<Api> | undefined;
     if (resolvedConfig.modelInput) {
       const candidate = resolveModel(resolvedConfig.modelInput, ctx.modelRegistry);
       if (typeof candidate === "string") {
-        if (resolvedConfig.modelFromParams) return textResult(candidate);
+        if (resolvedConfig.modelFromParams) return failedResult(candidate, subagentType);
       } else {
         model = candidate;
       }
@@ -71,9 +83,10 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
             .sort()
             .map((name) => `  ${name}`)
             .join("\n");
-          return textResult(
+          return failedResult(
             `Model not in scope: "${resolvedConfig.modelInput}".\n\n` +
               `Allowed models (from session scope):\n${list}`,
+            subagentType,
           );
         }
         const agentLabel = agentConfig.displayName ?? subagentType;
@@ -95,15 +108,16 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
 
     let id: string;
     try {
-      id = manager.spawn(pi, ctx, subagentType, params.prompt, {
-        description: params.description,
+      id = manager.spawn(pi, ctx, subagentType, params.message, {
+        description: displayName,
         model,
         thinkingLevel: thinking,
+        forkContext: params.fork_context,
         invocation: agentInvocation,
         ...callbacks,
       });
     } catch (error) {
-      return textResult(error instanceof Error ? error.message : String(error));
+      return failedResult(error instanceof Error ? error.message : String(error), subagentType);
     }
 
     const record = manager.getRecord(id);
@@ -113,24 +127,11 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     fleet.update();
 
     const status = record?.status === "queued" ? "queued" : "running";
-    const fallbackNote = resolved.matched
-      ? ""
-      : `Note: Unknown agent type "${rawType}" — using general.\n`;
-    return textResult(
-      `${fallbackNote}Agent ${status === "queued" ? "queued" : "started"}.\n` +
-        `Agent ID: ${id}\n` +
-        `Type: ${displayName}\n` +
-        `Description: ${params.description}\n` +
-        (status === "queued"
-          ? `Position: queued (max ${manager.getMaxConcurrent()} concurrent)\n`
-          : "") +
-        "\nDo not duplicate its assigned work while it runs. Use WaitAgent only when this result blocks progress; " +
-        "otherwise continue only non-overlapping work or respond. " +
-        "Unconsumed results are delivered automatically.\n" +
-        "Use MessageAgent for new context, decisions, or decision-relevant status—not deadline pressure. Do not poll or sleep.",
+    return textResult<AgentDetails>(
+      JSON.stringify({ agent_id: id, nickname: displayName || null }),
       {
         displayName,
-        description: params.description,
+        description: displayName,
         subagentType,
         modelName: agentInvocation.modelName,
         thinking,
@@ -143,4 +144,26 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       },
     );
   };
+}
+
+function failedResult(message: string, subagentType = "default") {
+  return textResult<AgentDetails>(message, {
+    displayName: subagentType,
+    description: "",
+    subagentType,
+    toolUses: 0,
+    tokens: "",
+    durationMs: 0,
+    status: "error" as const,
+    error: message,
+  });
+}
+
+function deriveDisplayDescription(message: string): string {
+  const line = sanitizeText(message)
+    .split("\n")
+    .find((candidate) => candidate.trim().length > 0)
+    ?.trim();
+  if (!line) return "";
+  return line.length > 60 ? `${line.slice(0, 59)}…` : line;
 }

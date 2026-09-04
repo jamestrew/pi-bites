@@ -4,7 +4,7 @@
  *
  * Unlike agent-runner-e2e (which asserts on the gated tool
  * set captured at construction and never drive a turn), these tests drive a real
- * parent turn that calls the `Agent` tool, lets the extension spawn a real child
+ * parent turn that calls the `spawn_agent` tool, lets the extension spawn a real child
  * session via the real `runAgent`, and waits for it through the real subagent
  * hold condition — then asserts on what actually flowed back.
  *
@@ -78,9 +78,8 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       prompt: "Delegate the greeting to a subagent.",
       respond: routeBySession({
         parentInitial: agentCall({
-          subagent_type: "explore",
-          description: "greet",
-          prompt: "Say hello.",
+          agent_type: "explorer",
+          message: "Say hello.",
         }),
         // NON-circular: the parent's final answer reflects whether automatic
         // completion content actually reached its model-visible context.
@@ -102,7 +101,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     // through automatic completion and drove the parent's final answer.
     const toolResults = agentToolResults(run.parentSession);
     expect(toolResults).toHaveLength(1);
-    expect(toolResults[0]).toContain("Agent ID:");
+    expect(JSON.parse(toolResults[0]!).agent_id).toBeTruthy();
     expect(toolResults[0]).not.toContain("CHILD_GREETING_OK");
     expect(conversationText(run.parentSession)).toContain("CHILD_GREETING_OK");
     expect(run.responseText).toContain("CHILD_GREETING_OK");
@@ -121,19 +120,18 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     //     finishes → the child's own model turn actually runs (≥3 calls).
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const respond = async (ctx: Context) => {
-      const isParent = (ctx.tools ?? []).some((t) => t.name === "Agent");
+      const isParent = (ctx.tools ?? []).some((t) => t.name === "spawn_agent");
       if (!isParent) {
         await sleep(80); // child takes long enough that a non-held parent exits first
         return "CHILD_BG_RAN";
       }
       const spawned = ctx.messages.some(
-        (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent",
+        (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "spawn_agent",
       );
       return spawned
         ? "summarized"
         : agentCall({
-            description: "async work",
-            prompt: "Do asynchronous work.",
+            message: "Do asynchronous work.",
           });
     };
 
@@ -149,7 +147,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     run = await runPrintMode({ prompt: "go", hold: true, respond });
 
     // Agent returns its identity synchronously either way.
-    expect(agentToolResults(run.parentSession)[0]).toContain("Agent ID:");
+    expect(JSON.parse(agentToolResults(run.parentSession)[0]!).agent_id).toBeTruthy();
     // Awaiting is load-bearing only in this test host: production remains non-blocking.
     expect(abandonedCalls).toBe(2); // parent tool-call + summary; child never streamed
     expect(run.modelCalls).toBeGreaterThan(abandonedCalls);
@@ -172,17 +170,16 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       maxModelCalls: 8,
       respond: (ctx) => {
         const toolNames = new Set((ctx.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has("Agent")) {
+        if (toolNames.has("spawn_agent")) {
           const spawned = ctx.messages.some(
             (message) =>
               message.role === "toolResult" &&
-              (message as { toolName?: string }).toolName === "Agent",
+              (message as { toolName?: string }).toolName === "spawn_agent",
           );
           return spawned
             ? "Parent received the completion."
             : agentCall({
-                description: "compaction probe",
-                prompt: "Read large.txt, then report CHILD_RESUMED exactly.",
+                message: "Read large.txt, then report CHILD_RESUMED exactly.",
               });
         }
         if (!toolNames.has("read")) return "## Goal\nContinue the compaction probe.";
@@ -200,7 +197,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       },
     });
 
-    const agentId = agentToolResults(run.parentSession)[0]?.match(/Agent ID: ([^\s]+)/)?.[1];
+    const agentId = JSON.parse(agentToolResults(run.parentSession)[0]!).agent_id;
     const record = run.manager?.getRecord(agentId ?? "") as
       | {
           status: string;
@@ -241,7 +238,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
 //
 // These are SMOKE tests, not strict assertions: a live model decides whether and
 // how to call the tool, so we cover the subset it can be reliably steered into
-// (spawn + WaitAgent, automatic completion, and an Explore spawn)
+// (spawn_agent + WaitAgent, automatic completion, and an explorer spawn)
 // and assert robust invariants (a real spawn happened and produced output).
 // Per-feature determinism lives in the faux suite above, which scripts exact calls.
 const LIVE_TIMEOUT = 150_000;
@@ -258,13 +255,16 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
     async () => {
       run = await runPrintMode({
         prompt:
-          "Use Agent to spawn a general-purpose subagent whose only task is to reply with the exact " +
+          "Use spawn_agent with agent_type 'worker' to spawn a subagent whose only task is to reply with the exact " +
           "word PONG. Then use WaitAgent with its returned identity and tell me what it replied.",
         timeoutMs: LIVE_TIMEOUT,
       });
       expect(run.modelCalls).toBe(0); // live mode doesn't use the faux counter
       expect(invokedToolNames(run.parentSession)).toEqual(
-        expect.arrayContaining(["Agent", "WaitAgent"]),
+        expect.arrayContaining(["spawn_agent", "WaitAgent"]),
+      );
+      expect(agentToolCalls(run.parentSession)).toEqual(
+        expect.arrayContaining([expect.objectContaining({ agent_type: "worker" })]),
       );
       expect(conversationText(run.parentSession)).toMatch(/PONG/i);
       expect(run.responseText).toMatch(/PONG/i);
@@ -277,57 +277,57 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
     async () => {
       run = await runPrintMode({
         prompt:
-          "Spawn a general-purpose subagent whose only task is to reply with the exact word BGPONG. " +
+          "Use spawn_agent with agent_type 'worker' to spawn a subagent whose only task is to reply with the exact word BGPONG. " +
           "Do not call WaitAgent; continue useful work and handle its automatic completion, then tell " +
           "me exactly what it said.",
         timeoutMs: LIVE_TIMEOUT,
       });
       const calls = agentToolCalls(run.parentSession);
       expect(calls.length).toBeGreaterThan(0);
+      expect(calls).toEqual(
+        expect.arrayContaining([expect.objectContaining({ agent_type: "worker" })]),
+      );
       expect(calls.every((call) => !("run_in_background" in call))).toBe(true);
-      expect(agentToolResults(run.parentSession).join("\n")).toMatch(/Agent ID:/i);
+      expect(JSON.parse(agentToolResults(run.parentSession)[0]!).agent_id).toBeTruthy();
       expect(run.responseText).toMatch(/BGPONG/i);
     },
     LIVE_TIMEOUT,
   );
 
   it(
-    "Explore subagent_type — model dispatches a non-default agent type",
+    "explorer agent_type — model dispatches a non-default agent type",
     async () => {
       run = await runPrintMode({
         prompt:
-          "Use the Agent tool with subagent_type 'Explore' to look at the current working " +
+          "Use spawn_agent with agent_type 'explorer' to look at the current working " +
           "directory and report a one-line summary of what's there.",
         timeoutMs: LIVE_TIMEOUT,
       });
       const calls = agentToolCalls(run.parentSession);
-      // The non-default type was actually selected (case-insensitive per README).
-      expect(
-        calls.some(
-          (c) => typeof c.subagent_type === "string" && c.subagent_type.toLowerCase() === "explore",
-        ),
-      ).toBe(true);
+      expect(calls).toEqual(
+        expect.arrayContaining([expect.objectContaining({ agent_type: "explorer" })]),
+      );
       expect(run.responseText.length).toBeGreaterThan(0);
     },
     LIVE_TIMEOUT,
   );
 
   it(
-    "SELF-SMOKE — the agent drives a multi-feature smoke of its own Agent toolset",
+    "SELF-SMOKE — the agent drives a multi-feature smoke of its own spawn_agent toolset",
     async () => {
       // Agent-driven (not puppeted): one prompt, the model itself exercises three
-      // Agent capabilities in a single session and self-reports. We then assert it
+      // spawn_agent capabilities in a single session and self-reports. We then assert it
       // genuinely invoked each feature (not just that it claimed to in prose).
       run = await runPrintMode({
         prompt: [
-          "You are smoke-testing your own Agent toolset. Do these steps IN ORDER, then print a",
+          "You are smoke-testing your own spawn_agent toolset. Do these steps IN ORDER, then print a",
           "final report with one PASS/FAIL line per step:",
-          "1) WAIT: spawn a general-purpose subagent whose only task is to reply with the exact",
+          "1) WAIT: use spawn_agent with agent_type 'worker' for a subagent whose only task is to reply with the exact",
           "   token FG_OK. Use WaitAgent once with its identity and confirm you got FG_OK back.",
-          "2) AUTOMATIC: spawn another general-purpose subagent whose only task is to reply with",
+          "2) AUTOMATIC: use spawn_agent with agent_type 'worker' for another subagent whose only task is to reply with",
           "   the exact token BG_OK. Do not wait or poll; handle its automatic completion and",
           "   confirm you got BG_OK.",
-          "3) EXPLORE: spawn a subagent with subagent_type 'Explore' to summarize the current",
+          "3) EXPLORE: use spawn_agent with agent_type 'explorer' to summarize the current",
           "   working directory in one line.",
           "Finish with: 'SELF-SMOKE COMPLETE' followed by the PASS/FAIL lines.",
         ].join("\n"),
@@ -339,12 +339,9 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
       expect(calls.length).toBeGreaterThanOrEqual(3);
       expect(calls.every((call) => !("run_in_background" in call))).toBe(true);
       expect(invokedToolNames(run.parentSession)).toContain("WaitAgent");
-      // — the Explore type was dispatched
-      expect(
-        calls.some(
-          (c) => typeof c.subagent_type === "string" && c.subagent_type.toLowerCase() === "explore",
-        ),
-      ).toBe(true);
+      const roles = calls.map((call) => call.agent_type);
+      expect(roles.filter((role) => role === "worker").length).toBeGreaterThanOrEqual(2);
+      expect(roles).toContain("explorer");
       // — and the real child outputs materialized in the conversation (a
       //   WaitAgent result + an automatic completion message). We check the
       //   whole transcript, not the final message: the agent's closing report

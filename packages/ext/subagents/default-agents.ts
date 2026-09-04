@@ -13,12 +13,20 @@ const SELF_EXTENSION = path.join(
   `../index${path.extname(fileURLToPath(import.meta.url))}`,
 );
 
-const DEFAULT_EXPLORE_MODEL = "openai-codex/gpt-5.6-luna";
-
 export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Object.freeze({
-  general: Object.freeze({
-    name: "general",
-    displayName: "general",
+  default: Object.freeze({
+    name: "default",
+    displayName: "default",
+    description: "Default agent.",
+    builtinToolNames: Object.freeze(["read", "bash", "edit", "write"]),
+    extensions: Object.freeze([SELF_EXTENSION]),
+    systemPrompt: "",
+    promptMode: "append",
+    bashGatePolicy: "prompt",
+  }),
+  worker: Object.freeze({
+    name: "worker",
+    displayName: "worker",
     description: [
       "Write-capable agent for user-requested or independently parallel implementation work.",
       "Use when the user requests a subagent, work can run independently in parallel, or delegation has another concrete benefit; handle ordinary implementation directly.",
@@ -29,9 +37,9 @@ export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Objec
     promptMode: "append",
     bashGatePolicy: "prompt",
   }),
-  explore: Object.freeze({
-    name: "explore",
-    displayName: "explore",
+  explorer: Object.freeze({
+    name: "explorer",
+    displayName: "explorer",
     description: [
       "Read-only agent for high-fanout factual retrieval of files, symbols, definitions, references, call paths, or excerpts; substantial documentation or third-party source reading; and user-requested exploration.",
       "Use after 2-4 direct lookups fail for other broad searches; include prior checks.",
@@ -41,8 +49,6 @@ export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Objec
     ].join(" "),
     builtinToolNames: Object.freeze(["read", "ls", "bash"]),
     extensions: Object.freeze([SELF_EXTENSION]),
-    model: DEFAULT_EXPLORE_MODEL,
-    thinking: "low",
     systemPrompt: `You are Explore, a fast read-only codebase exploration subagent running in an isolated pi process.
 
 Your job is to search the repository efficiently and return factual evidence to the parent agent. Do not perform code review, design or plan evaluation, cross-file consistency auditing, root-cause analysis, or other judgment-heavy analysis.

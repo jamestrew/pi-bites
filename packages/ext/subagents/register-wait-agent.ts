@@ -58,7 +58,7 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
             minItems: 1,
             maxItems: 64,
             uniqueItems: true,
-            description: "Stable agent identities returned by Agent.",
+            description: "Stable agent identities returned by spawn_agent.",
           }),
           timeout_ms: Type.Optional(
             Type.Integer({
