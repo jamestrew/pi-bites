@@ -9,7 +9,7 @@ import { runAgent, steerAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
 import { registerMessageAgent } from "../register-message-agent.js";
 
-function makePi(active = ["Agent", "read"]) {
+function makePi(active = ["spawn_agent", "read"]) {
   const tools = new Map<string, any>();
   const handlers = new Map<string, (...args: any[]) => void>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
@@ -59,12 +59,11 @@ function ctx(idle = true) {
 const textOf = (result: any): string => result.content[0].text;
 
 async function spawnBackground(tools: Map<string, any>, parentCtx = ctx()) {
-  return tools.get("Agent").execute(
+  return tools.get("spawn_agent").execute(
     "bg",
     {
-      prompt: "go",
-      description: "bg",
-      subagent_type: "general-purpose",
+      message: "bg",
+      agent_type: "worker",
     },
     undefined,
     undefined,
@@ -82,9 +81,9 @@ describe("background helper tools", () => {
     subagentsExtension(pi);
     handlers.get("session_start")?.({}, ctx());
 
-    expect([...tools.keys()]).toContain("Agent");
-    expect(tools.get("Agent").parameters.properties).not.toHaveProperty("resume");
-    expect(tools.get("Agent").parameters.properties).not.toHaveProperty("inherit_context");
+    expect([...tools.keys()]).toContain("spawn_agent");
+    expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("resume");
+    expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("inherit_context");
     expect([...tools.keys()]).toContain("MessageAgent");
     expect([...tools.keys()]).not.toContain("get_subagent_result");
     expect([...tools.keys()]).not.toContain("steer_subagent");
@@ -281,7 +280,7 @@ describe("background helper tools", () => {
     const { pi, tools } = makePi();
     subagentsExtension(pi);
     const spawn = await spawnBackground(tools);
-    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
+    const id = JSON.parse(textOf(spawn)).agent_id;
 
     const result = await tools
       .get("MessageAgent")
@@ -340,7 +339,7 @@ describe("background helper tools", () => {
     subagentsExtension(pi);
     handlers.get("session_start")?.({}, ctx());
     const spawn = await spawnBackground(tools);
-    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
+    const id = JSON.parse(textOf(spawn)).agent_id;
 
     const sent = await tools
       .get("MessageAgent")

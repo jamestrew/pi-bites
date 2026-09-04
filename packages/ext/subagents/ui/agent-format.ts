@@ -41,7 +41,7 @@ export interface AgentActivity {
   toolCalls?: string[];
 }
 
-/** Metadata attached to Agent tool results for custom rendering. */
+/** Metadata attached to spawn_agent results for custom rendering. */
 export interface AgentDetails {
   displayName: string;
   description: string;

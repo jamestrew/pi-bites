@@ -12,7 +12,7 @@ const theme: Theme = {
 function agent(overrides: Partial<WaitAgentResult>): WaitAgentResult {
   return {
     id: "agent-1",
-    type: "explore",
+    type: "explorer",
     description: "Explore subagent UI flow",
     status: "running",
     tool_uses: 0,
@@ -168,7 +168,7 @@ describe("WaitAgent rendering", () => {
       timeout_ms: 30_000,
       sender: {
         id: "agent-1",
-        type: "explore",
+        type: "explorer",
         title: "trace auth flow",
         model_name: "openai/gpt-5.4",
         thinking: "high",
@@ -234,7 +234,7 @@ describe("WaitAgent rendering", () => {
         agents: [
           {
             id: "legacy",
-            type: "general",
+            type: "worker",
             description: "Legacy agent",
             status: "completed",
             result: "legacy result",

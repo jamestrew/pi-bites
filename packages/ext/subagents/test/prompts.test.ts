@@ -7,7 +7,7 @@ describe("buildAgentPrompt", () => {
     "tells %s-mode agents that they share the parent filesystem",
     (promptMode) => {
       const config: AgentConfig = {
-        name: "general",
+        name: "worker",
         description: "test",
         builtinToolNames: [],
         extensions: [],

@@ -2,7 +2,7 @@
  * pi-agents — A pi extension providing Claude Code-style autonomous sub-agents.
  *
  * Tools:
- *   Agent         — LLM-callable: spawn a sub-agent
+ *   spawn_agent   — LLM-callable: spawn a sub-agent
  *   WaitAgent     — LLM-callable: wait for selected sub-agents
  *   MessageAgent  — LLM-callable: send a message to a running agent
  *
@@ -27,7 +27,6 @@ import { createSubagentMessenger } from "./subagent-messages.js";
 import { registerAgentTool } from "./register-agent-tool.js";
 import { registerMessageAgent } from "./register-message-agent.js";
 import { registerWaitAgent } from "./register-wait-agent.js";
-import { type ToolDescriptionMode } from "./settings.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
@@ -385,32 +384,18 @@ export default function (
     scopeModelsEnabled = enabled;
   }
 
-  // ---- Agent tool description mode ----
-  // "full" (default) keeps the rich Claude Code-style description; "compact"
-  // swaps in a ~75% smaller one for small/local models (#91). Read once at
-  // tool registration — flipping it applies on the next pi session.
-  let toolDescriptionMode: ToolDescriptionMode = "full";
-  function getToolDescriptionMode(): ToolDescriptionMode {
-    return toolDescriptionMode;
-  }
-  function setToolDescriptionMode(mode: ToolDescriptionMode): void {
-    toolDescriptionMode = mode;
-  }
-
   // Grab UI context from first tool execution.
   pi.on("tool_execution_start", async (_event, ctx) => {
     fleet.setUICtx(ctx.ui);
   });
 
-  // ---- Agent tool ----
+  // ---- spawn_agent tool ----
   registerAgentTool(pi, {
     manager,
     agentActivity,
     fleet,
     isScopeModelsEnabled,
-    getToolDescriptionMode,
     setScopeModelsEnabled,
-    setToolDescriptionMode,
     setFleetViewEnabled,
   });
 
@@ -428,8 +413,6 @@ export default function (
     getModelLabelFromConfig,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
-    getToolDescriptionMode,
-    setToolDescriptionMode,
     isFleetViewEnabled,
     setFleetViewEnabled,
   });

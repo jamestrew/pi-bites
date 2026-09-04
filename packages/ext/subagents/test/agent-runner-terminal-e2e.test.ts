@@ -107,7 +107,7 @@ it("real child session does not reuse text before a tool-only empty terminal res
           ],
         ],
       },
-      "general",
+      "worker",
       "go",
       {
         pi: {
@@ -205,7 +205,7 @@ it("real child session preserves an empty terminal provider error", async () => 
           ],
         ],
       },
-      "general",
+      "worker",
       "go",
       {
         pi: {

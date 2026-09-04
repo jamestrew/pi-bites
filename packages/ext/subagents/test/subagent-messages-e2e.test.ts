@@ -34,7 +34,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const sender: SubagentSender = { id: "agent-1", type: "explore", title: "trace auth" };
+const sender: SubagentSender = { id: "agent-1", type: "explorer", title: "trace auth" };
 
 function deferred() {
   let resolve!: () => void;

@@ -108,7 +108,12 @@ describe("Codex V1 subagent contract", () => {
     expect(estimateCodexV1ContractTokens()).toBeGreaterThan(CODEX_V1_TOKEN_BUDGET.softFinal);
   });
 
-  it("does not register the future surface yet", () => {
-    expect(Object.values(SUBAGENT_TOOL_NAMES)).toEqual(["Agent", "WaitAgent", "MessageAgent"]);
+  it("activates the V1 spawn name without exposing the old Agent name", () => {
+    expect(Object.values(SUBAGENT_TOOL_NAMES)).toEqual([
+      "spawn_agent",
+      "WaitAgent",
+      "MessageAgent",
+    ]);
+    expect(Object.values(SUBAGENT_TOOL_NAMES)).not.toContain("Agent");
   });
 });
