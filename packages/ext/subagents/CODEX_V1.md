@@ -31,25 +31,28 @@ An agent status is one of `pending_init`, `running`, `interrupted`, `shutdown`, 
 an object containing nullable `completed` output or an `errored` message. The exact schemas and
 descriptions live in `codex-v1-contract.ts`; its serialized SHA-256 fixture makes drift explicit.
 
-The built-in roles are `default`, `worker`, and `explorer`. Omitting `agent_type` selects `default`.
-All roles inherit the parent model and reasoning effort unless the caller explicitly overrides them.
+The built-in roles are `default`, `worker`, and `explorer`. They inherit the parent's tools, model,
+and reasoning effort unless the caller explicitly overrides supported settings.
+
+## Lifecycle and role semantics
+
+- `fork_context: true` forks the parent's full thread history. A full-history fork inherits the
+  parent role and rejects an `agent_type` override.
+- Without a full-history fork, omitting `agent_type` selects `default` and the child starts with only
+  its initial prompt.
+- `explorer` is guidance, not a permission boundary; it receives the inherited tool set.
+- A spawned agent reserves concurrency until `close_agent`, including after completion. A spawn that
+  cannot reserve a slot fails instead of entering an invisible queue.
+- `wait_agent` and the asynchronous completion notification are independent delivery channels. A
+  waiter may therefore observe the same completed status that is also sent in a notification.
 
 ## Intentional pi adaptations
 
 - Pi uses ordinary top-level tools rather than the Codex Responses `multi_agent_v1` namespace.
 - `items` is omitted from `spawn_agent` and `send_input`. Pi has no need for the Responses-specific
   structured text/image/audio/skill/mention union, so plain-text `message` is required.
-- `fork_context` is omitted. Pi subagents start from their assigned message and role instructions;
-  they do not copy parent conversation history.
-- `agent_type` omission selects `default` rather than inheriting a parent role through a history fork.
-- Pi enforces `explorer` as read-only through its tool allowlist.
 - Pi tool definitions cannot send output schemas to the model. The pinned output schemas therefore
   specify and test the JSON returned by implementations and remain part of the budget measurement.
-- `close_agent` does not claim completed agents retain concurrency slots; pi releases a slot when an
-  active turn ends.
-- `wait_agent` omits the upstream promise of a duplicate final-status notification. Pi's existing
-  completion ownership delivers terminal content at most once, through the explicit wait or the
-  automatic notification path.
 
 ## Token budget
 
@@ -58,5 +61,5 @@ The pre-migration baseline is approximately **1,605 tokens**: `Agent` 1,200, `Wa
 
 The contract test serializes every tool name, description, parameter schema, output schema, and the
 role guidance embedded in `spawn_agent`, then applies Pi's conservative `ceil(characters / 4)`
-estimate. The pinned V1 contract currently measures **1,803 tokens**. Later migration issues should
+estimate. The pinned V1 contract currently measures **1,902 tokens**. Later migration issues should
 update the fixture and this number only for deliberate model-facing changes.

@@ -47,8 +47,7 @@ They must be used to ask specific, well-scoped questions on the codebase.
 Rules:
 - In order to avoid redundant work, you should avoid exploring the same problem that explorers have already covered. Typically, you should trust the explorer results without additional verification. You are still allowed to inspect the code yourself to gain the needed context!
 - You are encouraged to spawn up multiple explorers in parallel when you have multiple distinct questions to ask about the codebase that can be answered independently. This allows you to get more information faster without waiting for one question to finish before asking the next. While waiting for the explorer results, you can continue working on other local tasks that do not depend on those results. This parallelism is a key advantage of delegation, so use it whenever you have multiple questions to ask.
-- Reuse existing explorers for related questions.
-- Pi restricts explorers to read-only tools.`,
+- Reuse existing explorers for related questions.`,
   worker: `Use for execution and production work.
 Typical tasks:
 - Implement part of a feature
@@ -100,7 +99,12 @@ const tools = {
         },
         agent_type: {
           type: "string",
-          description: `Agent type for the new agent. Omit to use \`default\`.\n${formatRoleGuidance()}`,
+          description: `Agent type override for the new agent. Omit to inherit the parent agent type with a full-history fork; otherwise, \`default\` is used.\n${formatRoleGuidance()}`,
+        },
+        fork_context: {
+          type: "boolean",
+          description:
+            "True forks the current thread history into the new agent; false or omitted starts with only the initial prompt.",
         },
         model: {
           type: "string",
@@ -171,7 +175,7 @@ const tools = {
   wait_agent: {
     name: "wait_agent",
     description:
-      "Wait for agents to reach a final status. Completed statuses may include the agent's final message. Returns empty status when timed out.",
+      "Wait for agents to reach a final status. Completed statuses may include the agent's final message. Returns empty status when timed out. Once the agent reaches a final status, a notification message will be received containing the same completed status.",
     parameters: {
       type: "object",
       properties: {
@@ -211,7 +215,7 @@ const tools = {
   close_agent: {
     name: "close_agent",
     description:
-      "Close an agent and any open descendants when they are no longer needed, and return the target agent's previous status before shutdown was requested. Don't keep agents open for too long if they are not needed anymore.",
+      "Close an agent and any open descendants when they are no longer needed, and return the target agent's previous status before shutdown was requested. Completed agents remain open and count toward the concurrency limit until closed. Don't keep agents open for too long if they are not needed anymore.",
     parameters: {
       type: "object",
       properties: {
