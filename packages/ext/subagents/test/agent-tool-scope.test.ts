@@ -1,23 +1,29 @@
 import { expect, test, vi } from "vitest";
 import { createAgentToolExecute } from "../agent-tool-execute.js";
+import { runAsSubagent } from "../subagent-context.js";
 
 const inside = { provider: "test", id: "inside", name: "Inside", reasoning: false };
 const outside = { provider: "test", id: "outside", name: "Outside", reasoning: false };
 
-function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "high" }> = []) {
+function harness(
+  scopedModels: Array<{ model: typeof inside; thinkingLevel?: "high" }> = [],
+  parentAgentType?: string,
+) {
   const notify = vi.fn();
   const spawn = vi.fn(() => "agent-1");
-  const execute = createAgentToolExecute({
-    pi: { getThinkingLevel: () => "off" } as never,
-    manager: {
-      spawn,
-      getRecord: () => undefined,
-      getMaxConcurrent: () => 2,
-    } as never,
-    agentActivity: new Map(),
-    fleet: { ensureTimer: vi.fn(), update: vi.fn() } as never,
-    isScopeModelsEnabled: () => true,
-  });
+  const createExecute = () =>
+    createAgentToolExecute({
+      pi: { getThinkingLevel: () => "off" } as never,
+      manager: {
+        spawn,
+        getRecord: () => undefined,
+        getMaxConcurrent: () => 2,
+      } as never,
+      agentActivity: new Map(),
+      fleet: { ensureTimer: vi.fn(), update: vi.fn() } as never,
+      isScopeModelsEnabled: () => true,
+    });
+  const execute = parentAgentType ? runAsSubagent(parentAgentType, createExecute) : createExecute();
   const ctx = {
     cwd: "/tmp",
     model: outside,
@@ -31,14 +37,22 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
     sessionManager: { getSessionId: () => "session" },
     ui: { notify },
   } as never;
-  const run = (model?: string) =>
+  const run = (
+    model?: string,
+    overrides: Partial<{
+      message: string;
+      agent_type: string | undefined;
+      fork_context: boolean;
+      reasoning_effort: string;
+    }> = {},
+  ) =>
     execute(
       "call",
       {
-        subagent_type: "general",
-        description: "check scope",
-        prompt: "run",
+        agent_type: "worker",
+        message: "check scope",
         ...(model ? { model } : {}),
+        ...overrides,
       },
       undefined,
       undefined,
@@ -85,4 +99,52 @@ test("empty upstream scope leaves model selection unrestricted", async () => {
 
   expect(runtime.spawn).toHaveBeenCalledOnce();
   expect(runtime.notify).not.toHaveBeenCalled();
+});
+
+test("omitted agent_type uses default and derives display metadata from the message", async () => {
+  const runtime = harness();
+  const result = await runtime.run(undefined, { agent_type: undefined });
+
+  expect(runtime.spawn).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.anything(),
+    "default",
+    "check scope",
+    expect.objectContaining({ description: "check scope" }),
+  );
+  expect(JSON.parse(result.content[0]?.text ?? "")).toEqual({
+    agent_id: "agent-1",
+    nickname: "check scope",
+  });
+});
+
+test("rejects an explicit role on a full-history fork", async () => {
+  const runtime = harness();
+  const rejected = await runtime.run(undefined, { fork_context: true });
+
+  expect(rejected.content[0]?.text).toContain("inherit the parent agent type");
+  expect(runtime.spawn).not.toHaveBeenCalled();
+});
+
+test("a full-history fork inherits the parent agent type", async () => {
+  const runtime = harness([], "explorer");
+
+  await runtime.run(undefined, { agent_type: undefined, fork_context: true });
+
+  expect(runtime.spawn).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.anything(),
+    "explorer",
+    "check scope",
+    expect.objectContaining({ forkContext: true }),
+  );
+});
+
+test("rejects an unsupported reasoning effort without spawning", async () => {
+  const runtime = harness();
+
+  const result = await runtime.run(undefined, { reasoning_effort: "extreme" });
+
+  expect(result.content[0]?.text).toContain("Unsupported reasoning_effort 'extreme'");
+  expect(runtime.spawn).not.toHaveBeenCalled();
 });

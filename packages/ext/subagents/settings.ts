@@ -16,20 +16,15 @@ export const SubagentsSettingsSchema = Type.Object({
    * Caller-selected violations fail; role defaults and inherited violations warn and proceed.
    */
   scopeModels: Type.Optional(Type.Boolean()),
-  toolDescriptionMode: Type.Optional(
-    Type.Union([Type.Literal("full"), Type.Literal("compact"), Type.Literal("custom")]),
-  ),
   fleetView: Type.Optional(Type.Boolean()),
 });
 
 export type SubagentsSettings = Static<typeof SubagentsSettingsSchema>;
-export type ToolDescriptionMode = NonNullable<SubagentsSettings["toolDescriptionMode"]>;
 
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
   setMaxConcurrent: (n: number) => void;
   setScopeModels: (enabled: boolean) => void;
-  setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setFleetView: (b: boolean) => void;
 }
 
@@ -56,13 +51,6 @@ export function parseSubagentsSettings(value: unknown): SubagentsSettings | unde
     settings.maxConcurrent = value.maxConcurrent;
   if ("scopeModels" in value && typeof value.scopeModels === "boolean")
     settings.scopeModels = value.scopeModels;
-  if (
-    "toolDescriptionMode" in value &&
-    (value.toolDescriptionMode === "full" ||
-      value.toolDescriptionMode === "compact" ||
-      value.toolDescriptionMode === "custom")
-  )
-    settings.toolDescriptionMode = value.toolDescriptionMode;
   if ("fleetView" in value && typeof value.fleetView === "boolean")
     settings.fleetView = value.fleetView;
   return Value.Check(SubagentsSettingsSchema, settings) ? settings : undefined;
@@ -117,7 +105,6 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
-  if (s.toolDescriptionMode) appliers.setToolDescriptionMode(s.toolDescriptionMode);
   if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);
 }
 

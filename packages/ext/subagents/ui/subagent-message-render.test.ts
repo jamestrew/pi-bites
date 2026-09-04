@@ -11,7 +11,7 @@ const theme = {
 const details: SubagentMessageDetails = {
   sender: {
     id: "agent-1",
-    type: "explore",
+    type: "explorer",
     title: "trace auth flow",
     model_name: "openai/gpt-5.4",
     thinking: "high",

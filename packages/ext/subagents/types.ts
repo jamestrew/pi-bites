@@ -23,7 +23,7 @@ export function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === "string" && THINKING_LEVELS.has(value);
 }
 
-export const SUBAGENT_TYPES = ["general", "explore"] as const;
+export const SUBAGENT_TYPES = ["default", "worker", "explorer"] as const;
 export type SubagentType = (typeof SUBAGENT_TYPES)[number];
 
 export const MISSING_FINAL_RESPONSE_ERROR = "Agent completed without a final response.";
@@ -74,7 +74,7 @@ export interface AgentRecord {
   pendingSteers?: string[];
   /** Message to resume with after cancelling the current operation. */
   pendingCancelSteer?: string;
-  /** The tool_use_id from the original Agent tool call. */
+  /** The tool_use_id from the original spawn_agent tool call. */
   toolCallId?: string;
   /**
    * Lifetime usage breakdown, accumulated via `message_end` events. Survives

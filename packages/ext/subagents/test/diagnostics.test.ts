@@ -65,7 +65,7 @@ describe("subagent diagnostics", () => {
       timestamp: 123,
       agentId: "agent-1",
       parentSessionId: "parent-1",
-      subagent: "general",
+      subagent: "worker",
       pid: process.pid,
     };
 

@@ -9,7 +9,7 @@
  * never actually spawn a subagent or exercise asynchronous completion delivery.
  * This runner closes that gap: it boots a real headless pi session with the
  * pi-subagents extension loaded, drives a real assistant turn that calls the
- * `Agent` tool, and lets the extension spawn a real child session through the
+ * `spawn_agent` tool, and lets the extension spawn a real child session through the
  * real `runAgent` path. Tests can then await children and completion-triggered
  * parent turns without changing production orchestration.
  *
@@ -18,7 +18,7 @@
  *   - Faux (default): a scripted `registerFauxProvider` model drives both the
  *     parent and the spawned child deterministically — no network, CI-safe. You
  *     supply a `respond(context)` function (or raw `steps`) that emits the
- *     `Agent` tool call on the parent and a reply on the child. `routeBySession`
+ *     `spawn_agent` tool call on the parent and a reply on the child. `routeBySession`
  *     does the parent/child branching for the common single-spawn case.
  *   - Live (opt-in): set `PI_E2E_LIVE=1` or pass `live: {provider, model}`. A real
  *     model drives the turn; `respond`/`steps` are ignored. Non-deterministic,
@@ -172,19 +172,18 @@ export interface PrintModeRun {
 // --------------------------------------------------------------------------
 
 /**
- * Build an `Agent` tool call for a faux assistant turn. `subagent_type` defaults
- * to "general-purpose"; everything else is passed straight through as tool args.
+ * Build an `spawn_agent` tool call for a faux assistant turn. `agent_type` defaults
+ * to "worker"; everything else is passed straight through as tool args.
  */
 export function agentCall(
   args: {
-    prompt: string;
-    description: string;
-    subagent_type?: string;
+    message: string;
+    agent_type?: string;
     [k: string]: unknown;
   },
   opts?: { id?: string },
 ): ToolCall {
-  return fauxToolCall("Agent", { subagent_type: "general-purpose", ...args }, opts);
+  return fauxToolCall("spawn_agent", { agent_type: "worker", ...args }, opts);
 }
 
 function resolveReply(reply: FauxReply | ((ctx: Context) => FauxReply), ctx: Context): FauxReply {
@@ -194,10 +193,10 @@ function resolveReply(reply: FauxReply | ((ctx: Context) => FauxReply), ctx: Con
 /**
  * The common single-spawn flow as a responder. Routes by inspecting the calling
  * session's own context:
- *   - PARENT  (its tool set includes `Agent`):
- *       · `parentInitial` until an `Agent` tool result is in history (the spawn),
+ *   - PARENT  (its tool set includes `spawn_agent`):
+ *       · `parentInitial` until an `spawn_agent` tool result is in history (the spawn),
  *       · then `parentFinal` for later parent turns, including automatic completion.
- *   - SUBAGENT (no `Agent` tool): `subagent`.
+ *   - SUBAGENT (no `spawn_agent` tool): `subagent`.
  * Each route may be a value or a `(ctx) => value` function.
  */
 export function routeBySession(routes: {
@@ -206,10 +205,10 @@ export function routeBySession(routes: {
   subagent: FauxReply | ((ctx: Context) => FauxReply);
 }): FauxResponder {
   return (context) => {
-    const isParent = (context.tools ?? []).some((t) => t.name === "Agent");
+    const isParent = (context.tools ?? []).some((t) => t.name === "spawn_agent");
     if (!isParent) return resolveReply(routes.subagent, context);
     const spawned = context.messages.some(
-      (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "Agent",
+      (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "spawn_agent",
     );
     if (spawned) {
       return routes.parentFinal != null ? resolveReply(routes.parentFinal, context) : "Done.";
@@ -234,7 +233,7 @@ function toAssistantMessage(reply: FauxReply): AssistantMessage {
 // --------------------------------------------------------------------------
 
 const DEFAULT_SYSTEM_PROMPT =
-  "You are a headless orchestrator. Use the Agent tool to delegate, then report the result.";
+  "You are a headless orchestrator. Use spawn_agent to delegate, then report the result.";
 
 function isLive(options: RunPrintModeOptions): boolean {
   return Boolean(options.live) || /^(1|true|yes)$/i.test(process.env.PI_E2E_LIVE ?? "");
@@ -472,7 +471,7 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
 }
 
 /**
- * Extract the text of every `Agent` tool result in a session's history. Agent
+ * Extract the text of every `spawn_agent` tool result in a session's history. Agent
  * results are immediate spawn envelopes; terminal output arrives through
  * WaitAgent or an automatic completion message.
  */
@@ -480,7 +479,7 @@ export function agentToolResults(session: AgentSession): string[] {
   const out: string[] = [];
   for (const msg of session.messages) {
     if (msg.role !== "toolResult") continue;
-    if ((msg as { toolName?: string }).toolName !== "Agent") continue;
+    if ((msg as { toolName?: string }).toolName !== "spawn_agent") continue;
     const text = (msg.content as Array<{ type?: string; text?: string }>)
       .map((b) => (b.type === "text" ? (b.text ?? "") : ""))
       .join("");
@@ -524,8 +523,8 @@ export function invokedToolNames(session: AgentSession): string[] {
 }
 
 /**
- * The arguments of every `Agent` tool call the model actually made — lets a live
- * smoke assert which feature was exercised (for example `subagent_type`)
+ * The arguments of every `spawn_agent` tool call the model actually made — lets a live
+ * smoke assert which feature was exercised (for example `agent_type`)
  * rather than just that *some* spawn happened.
  */
 export function agentToolCalls(session: AgentSession): Array<Record<string, unknown>> {
@@ -537,7 +536,7 @@ export function agentToolCalls(session: AgentSession): Array<Record<string, unkn
       name?: string;
       arguments?: unknown;
     }>) {
-      if (block.type === "toolCall" && block.name === "Agent") {
+      if (block.type === "toolCall" && block.name === "spawn_agent") {
         out.push((block.arguments ?? {}) as Record<string, unknown>);
       }
     }

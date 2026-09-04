@@ -4,32 +4,34 @@ import { DEFAULT_AGENTS } from "../default-agents.js";
 import { SUBAGENT_TYPES } from "../types.js";
 
 describe("embedded agent types", () => {
-  it("only exposes general and explore", () => {
-    expect(SUBAGENT_TYPES).toEqual(["general", "explore"]);
-    expect(resolveAgent("general")).toMatchObject({ type: "general", matched: true });
-    expect(resolveAgent("EXPLORE")).toMatchObject({ type: "explore", matched: true });
-    expect(resolveAgent("nonexistent")).toMatchObject({ type: "general", matched: false });
+  it("exposes the Codex roles and defaults omitted roles", () => {
+    expect(SUBAGENT_TYPES).toEqual(["default", "worker", "explorer"]);
+    expect(resolveAgent()).toMatchObject({ type: "default", matched: true });
+    expect(resolveAgent("WORKER")).toMatchObject({ type: "worker", matched: true });
+    expect(resolveAgent("EXPLORER")).toMatchObject({ type: "explorer", matched: true });
+    expect(resolveAgent("nonexistent")).toMatchObject({ type: "default", matched: false });
   });
 
   it("keeps the embedded catalog immutable across extension instances", () => {
     expect(Object.isFrozen(DEFAULT_AGENTS)).toBe(true);
-    expect(Object.isFrozen(DEFAULT_AGENTS.explore)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_AGENTS.explorer)).toBe(true);
     expect(() => {
-      (DEFAULT_AGENTS.explore as { model?: string }).model = "provider/override";
+      (DEFAULT_AGENTS.explorer as { model?: string }).model = "provider/override";
     }).toThrow();
-    expect(resolveAgent("explore").config.model).toBe(DEFAULT_AGENTS.explore.model);
+    expect(resolveAgent("explorer").config.model).toBeUndefined();
+    expect(resolveAgent("explorer").config.thinking).toBeUndefined();
   });
 
-  it("configures the built-in general agent", () => {
-    const { config } = resolveAgent("general");
+  it("maps the write-capable behavior to worker", () => {
+    const { config } = resolveAgent("worker");
 
     expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
     expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
     expect(config.promptMode).toBe("append");
   });
 
-  it("keeps explore read-only and scoped to factual retrieval", () => {
-    const { config } = resolveAgent("explore");
+  it("keeps explorer read-only and scoped to factual retrieval", () => {
+    const { config } = resolveAgent("explorer");
 
     expect(config.builtinToolNames).toEqual(["read", "ls", "bash"]);
     expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
@@ -41,7 +43,8 @@ describe("embedded agent types", () => {
     expect(config.description).toContain("continue only non-overlapping work");
     expect(config.description).toContain("Do not delegate code review");
     expect(config.description).toContain("root-cause analysis");
-    expect(config.thinking).toBe("low");
+    expect(config.model).toBeUndefined();
+    expect(config.thinking).toBeUndefined();
     expect(config.systemPrompt).toContain("Do not perform code review");
     expect(config.systemPrompt).toContain(
       "Treat the working directory you were given as the default search root",

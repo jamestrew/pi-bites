@@ -30,7 +30,7 @@ const FAKE_SESSION = { subscribe: () => () => {}, messages: [] };
 function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "a1",
-    type: "general",
+    type: "worker",
     prompt: "Sleep then report",
     description: "Sleep then report 1",
     status: "running",
@@ -307,7 +307,7 @@ describe("FleetList rendering", () => {
     const agentLine = lines.find((l) => l.includes("Sleep then report 1"))!;
     expect(agentLine).not.toContain("⏺");
     expect(agentLine).not.toContain("◯");
-    expect(agentLine).toContain(getDisplayName("general-purpose"));
+    expect(agentLine).toContain(getDisplayName("worker"));
     expect(agentLine).toContain("↓ 13.1k tokens");
     expect(agentLine).toMatch(/\d+s · ↓/); // "<seconds>s · ↓ ..." (timing-agnostic)
   });

@@ -3,7 +3,7 @@ import { createSubagentMessenger, type SubagentSender } from "../subagent-messag
 
 const sender: SubagentSender = {
   id: "agent-1",
-  type: "explore",
+  type: "explorer",
   title: "trace auth flow",
 };
 

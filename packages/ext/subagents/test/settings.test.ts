@@ -90,7 +90,7 @@ describe("settings persistence", () => {
   it("round-trips values: saveSettings then loadSettings", () => {
     const settings = {
       maxConcurrent: 7,
-      toolDescriptionMode: "compact" as const,
+      scopeModels: true,
     };
     saveSettings(settings, projectDir);
     expect(loadSettings(projectDir)).toEqual(settings);
@@ -174,22 +174,6 @@ describe("settings persistence", () => {
       expect(loadSettings(projectDir).scopeModels).toBeUndefined();
       writeProject({ scopeModels: null });
       expect(loadSettings(projectDir).scopeModels).toBeUndefined();
-    });
-
-    it("accepts all valid toolDescriptionMode values", () => {
-      for (const mode of ["full", "compact", "custom"] as const) {
-        writeProject({ toolDescriptionMode: mode });
-        expect(loadSettings(projectDir)).toEqual({ toolDescriptionMode: mode });
-      }
-    });
-
-    it("drops invalid toolDescriptionMode", () => {
-      writeProject({ toolDescriptionMode: "tiny" });
-      expect(loadSettings(projectDir).toolDescriptionMode).toBeUndefined();
-      writeProject({ toolDescriptionMode: true });
-      expect(loadSettings(projectDir).toolDescriptionMode).toBeUndefined();
-      writeProject({ toolDescriptionMode: null });
-      expect(loadSettings(projectDir).toolDescriptionMode).toBeUndefined();
     });
 
     it("returns {} when the JSON root is not an object (array, string, null)", () => {
@@ -276,7 +260,6 @@ describe("settings persistence", () => {
       appliers = {
         setMaxConcurrent: vi.fn(),
         setScopeModels: vi.fn(),
-        setToolDescriptionMode: vi.fn(),
         setFleetView: vi.fn(),
       };
     });
@@ -285,7 +268,6 @@ describe("settings persistence", () => {
       applySettings({}, appliers);
       expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
       expect(appliers.setScopeModels).not.toHaveBeenCalled();
-      expect(appliers.setToolDescriptionMode).not.toHaveBeenCalled();
     });
 
     it("applies only the fields that are present", () => {
@@ -299,14 +281,12 @@ describe("settings persistence", () => {
         {
           maxConcurrent: 8,
           scopeModels: true,
-          toolDescriptionMode: "compact",
           fleetView: false,
         },
         appliers,
       );
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(8);
       expect(appliers.setScopeModels).toHaveBeenCalledWith(true);
-      expect(appliers.setToolDescriptionMode).toHaveBeenCalledWith("compact");
       expect(appliers.setFleetView).toHaveBeenCalledWith(false);
     });
 
@@ -320,11 +300,6 @@ describe("settings persistence", () => {
     it("applies scopeModels: false", () => {
       applySettings({ scopeModels: false }, appliers);
       expect(appliers.setScopeModels).toHaveBeenCalledWith(false);
-    });
-
-    it("applies toolDescriptionMode", () => {
-      applySettings({ toolDescriptionMode: "full" }, appliers);
-      expect(appliers.setToolDescriptionMode).toHaveBeenCalledWith("full");
     });
   });
 
@@ -351,7 +326,6 @@ describe("settings persistence", () => {
       appliers = {
         setMaxConcurrent: vi.fn(),
         setScopeModels: vi.fn(),
-        setToolDescriptionMode: vi.fn(),
         setFleetView: vi.fn(),
       };
     });
