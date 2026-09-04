@@ -31,6 +31,11 @@ An agent status is one of `pending_init`, `running`, `interrupted`, `shutdown`, 
 an object containing nullable `completed` output or an `errored` message. The exact schemas and
 descriptions live in `codex-v1-contract.ts`; its serialized SHA-256 fixture makes drift explicit.
 
+Tool and role prose starts from the pinned Codex wording rather than a Pi rewrite. The only wording
+change is where omitting Responses-only `items` makes Codex's “use either message or items” parameter
+text inaccurate. The `spawn_agent` description uses Codex's default no-custom-usage-hint rendering,
+with the deterministic “no picker-visible model overrides” variant; a live model catalog is dynamic.
+
 The built-in roles are `default`, `worker`, and `explorer`. They inherit the parent's tools, model,
 and reasoning effort unless the caller explicitly overrides supported settings.
 
@@ -61,5 +66,6 @@ The pre-migration baseline is approximately **1,605 tokens**: `Agent` 1,200, `Wa
 
 The contract test serializes every tool name, description, parameter schema, output schema, and the
 role guidance embedded in `spawn_agent`, then applies Pi's conservative `ceil(characters / 4)`
-estimate. The pinned V1 contract currently measures **1,902 tokens**. Later migration issues should
-update the fixture and this number only for deliberate model-facing changes.
+estimate. The wording-parity contract currently measures **2,902 tokens**, which is **902 tokens over**
+the soft final budget. Later optimization should begin from this baseline, record each deliberate
+deviation, and update the fixture rather than shortening the initial contract silently.
