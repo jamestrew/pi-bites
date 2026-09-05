@@ -27,7 +27,7 @@ type ListedIssue = Omit<Issue, "closedByPullRequestsReferences"> & {
 
 const nodes = <T>(value: NodeList<T>): ReadonlyArray<T> => ("nodes" in value ? value.nodes : value);
 
-const USAGE = `Usage: run-ready-for-agent-issues.ts [options]
+const USAGE = `Usage: loop.ts [options]
 
 Options:
   --limit N                    Maximum issues to process (default: 3)
@@ -274,7 +274,6 @@ async function prepareExtensionRuntime(options: RunOptions): Promise<ReadonlyArr
   await $`bun install --frozen-lockfile`.cwd(options.extensionRuntime);
   await $`bun check`.cwd(options.extensionRuntime);
   const extension = join(options.extensionRuntime, "packages/ext/index.ts");
-  await $`pi -n -e ${extension} --print Say OK`.quiet();
   return ["-n", "-e", extension, "--approve", "--yolo"];
 }
 
@@ -397,7 +396,7 @@ async function main() {
         console.log(issue.url);
         console.log(`Parent: ${parent}`);
 
-        const workspaceName = `issue-${issue.number}-${process.pid}`;
+        const workspaceName = `${issue.number}-${process.pid}`;
         const workspacePath = join(workspaceParent, workspaceName);
         await mkdir(workspaceParent, { recursive: true });
         await $`jj workspace add --name ${workspaceName} -r ${`${base}@origin`} ${workspacePath}`.quiet();

@@ -8,7 +8,7 @@ import {
   runCaptured,
   selectCandidates,
   shouldMergePullRequest,
-} from "./run-ready-for-agent-issues.ts";
+} from "./loop.ts";
 
 const issue = (
   number: number,

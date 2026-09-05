@@ -14,7 +14,7 @@
     "typecheck": "tsgo --noEmit",
     "test": "env -u PI_PACKAGE_DIR vitest run packages && env -u PI_PACKAGE_DIR bun --bun vitest run scripts",
     "check": "bun run lint && bun run fmt && bun run typecheck && bun run test",
-    "loop": "bun scripts/run-ready-for-agent-issues.ts",
+    "loop": "bun scripts/loop.ts",
     "smoke:goal-model": "./scripts/goal-model-smoke.sh",
     "update:pi": "./scripts/update-pi.sh"
   },
