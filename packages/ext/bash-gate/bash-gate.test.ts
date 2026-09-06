@@ -537,6 +537,29 @@ describe("bash gate tool_call", () => {
     );
   });
 
+  test("configured yolo mode starts in YOLO without locking the shortcut", async () => {
+    let enabled = true;
+    const review = vi.fn().mockResolvedValue({ outcome: "allow" });
+    const autoMode = {
+      isEnabled: () => enabled,
+      setEnabled: vi.fn((value: boolean) => (enabled = value)),
+      review,
+    };
+    const { toolCall, ctx, toggleYolo, ui } = createBashGateHarness([], false, autoMode, true, {
+      bashGate: { mode: "yolo" },
+    });
+
+    expect(enabled).toBe(false);
+    expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
+    ).resolves.toBeUndefined();
+    expect(review).not.toHaveBeenCalled();
+
+    await toggleYolo();
+    expect(enabled).toBe(true);
+  });
+
   test("an existing session allowance bypasses later automode review", async () => {
     let enabled = false;
     const review = vi.fn().mockResolvedValue({ outcome: "deny" });

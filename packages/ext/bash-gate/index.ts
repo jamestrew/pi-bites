@@ -13,6 +13,7 @@
  * ```json
  * {
  *   "bashGate": {
+ *     "mode": "yolo",
  *     "rules": [
  *       { "cmd": "bun", "subcommands": ["test"] },
  *       { "redirects": "any-write" }
@@ -661,8 +662,8 @@ export default function registerBashGate(
   pi.on("session_start", (_event, ctx) => {
     authorizations.sessionStarted();
     rules = resolveEffectiveRules(configRef.current);
-    mainAgentYolo = false;
-    if (pi.getFlag("yolo")) autoMode?.setEnabled(false, ctx);
+    mainAgentYolo = configRef.current.bashGate?.mode === "yolo";
+    if (pi.getFlag("yolo") || mainAgentYolo) autoMode?.setEnabled(false, ctx);
     sessionAllowed.clear();
     finishedSubagents.clear();
     syncYoloStatus(ctx);
