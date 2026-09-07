@@ -1,8 +1,13 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import type { WaitAgentDetails, WaitAgentResult, WaitAgentSender } from "../types.js";
+import type { WaitAgentDetails, WaitAgentResult } from "../types.js";
 import type { Theme } from "./agent-format.js";
 import { renderWaitAgent } from "./wait-agent-render.js";
+
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
+  keyHint: vi.fn(() => "ctrl+o to expand"),
+}));
 
 const theme: Theme = {
   fg: (_color, text) => text,
@@ -23,12 +28,7 @@ function agent(overrides: Partial<WaitAgentResult>): WaitAgentResult {
   };
 }
 
-function details(
-  overrides: Partial<WaitAgentDetails> & {
-    sender?: WaitAgentSender;
-    message?: string;
-  },
-): WaitAgentDetails {
+function details(overrides: Partial<WaitAgentDetails>): WaitAgentDetails {
   return {
     outcome: "waiting",
     timed_out: false,
@@ -38,12 +38,17 @@ function details(
   } as WaitAgentDetails;
 }
 
-describe("WaitAgent rendering", () => {
+describe("wait_agent rendering", () => {
   it("dims wait status while using whole seconds and minute timeouts", () => {
     vi.spyOn(Date, "now").mockReturnValue(10_500);
     const dimTheme: Theme = {
       ...theme,
-      fg: (color, text) => (color === "dim" ? `<dim>${text}</dim>` : text),
+      fg: (color, text) =>
+        color === "dim"
+          ? `<dim>${text}</dim>`
+          : color === "accent"
+            ? `<accent>${text}</accent>`
+            : text,
       bold: (text) => `<bold>${text}</bold>`,
     };
     const output = renderWaitAgent(
@@ -57,9 +62,9 @@ describe("WaitAgent rendering", () => {
       .render(120)
       .join("\n");
 
-    expect(output).toContain("<bold>WaitAgent</bold><dim> · waiting 0s / timeout 4m</dim>");
-    expect(output).toContain("<dim> └─ ✓ Explore subagent UI flow · Done");
-    expect(output).toContain("<dim>      answer</dim>");
+    expect(output).toContain("<bold>wait_agent</bold><accent> · waiting 0s / timeout 4m</accent>");
+    expect(output).toContain("\n\n<dim>└─ ✓ Explore subagent UI flow · Done");
+    expect(output).toContain("<dim>   answer</dim>");
     vi.restoreAllMocks();
   });
 
@@ -77,28 +82,8 @@ describe("WaitAgent rendering", () => {
       .render(120)
       .join("\n");
 
-    expect(output).toContain("WaitAgent · waited 4m / timeout 4m");
+    expect(output).toContain("wait_agent · waited 4m / timeout 4m");
     expect(output).not.toContain("240.1s");
-  });
-
-  it("renders an automatically claimed completion as done rather than failed", () => {
-    const output = renderWaitAgent(
-      details({
-        outcome: "delivery_claimed",
-        wait_ended_at: 10_000,
-        timeout_ms: 240_000,
-        agents: [agent({ status: "completed" })],
-      }),
-      false,
-      theme,
-    )
-      .render(120)
-      .join("\n");
-
-    expect(output).toContain("WaitAgent · delivery already claimed after 0s / timeout 4m");
-    expect(output).toContain("✓ Explore subagent UI flow · Done");
-    expect(output).not.toContain("failed");
-    expect(output).not.toContain("without a final response");
   });
 
   it("shows live elapsed time, configured timeout, and all selected agents", () => {
@@ -118,9 +103,9 @@ describe("WaitAgent rendering", () => {
       .join("\n");
 
     expect(output).toBe(
-      "WaitAgent · waiting 7s / timeout 20s\n" +
-        " ├─ ◷ Explore subagent UI flow (openai-codex/gpt-5.6-sol high)\n" +
-        " └─ ◷ Trace completion delivery",
+      "wait_agent · waiting 7s / timeout 20s\n" +
+        "\n├─ ◷ Explore subagent UI flow (openai-codex/gpt-5.6-sol high)\n" +
+        "└─ ◷ Trace completion delivery",
     );
     vi.restoreAllMocks();
   });
@@ -150,52 +135,14 @@ describe("WaitAgent rendering", () => {
       .render(120)
       .join("\n");
 
-    expect(output).toContain("WaitAgent · waited 15s / timeout 20s");
+    expect(output).toContain("wait_agent · waited 15s / timeout 20s");
     expect(output).toContain(
       "├─ ✓ Explore subagent UI flow · Done (openai-codex/gpt-5.6-sol high · 2 tool uses · ↑5.9k ↓900 · 12.5s)",
     );
-    expect(output).toContain("│    response three");
+    expect(output).toContain("│  response three");
     expect(output).not.toContain("response four");
     expect(output).toContain("└─ ◷ Trace completion delivery · still running");
     expect(output).toContain("(ctrl+o to expand)");
-  });
-
-  it("nests a three-line child message preview and expands the complete message", () => {
-    const message = "line one\nline two\nline three\nline four";
-    const received = details({
-      outcome: "message",
-      wait_ended_at: 22_400,
-      timeout_ms: 30_000,
-      sender: {
-        id: "agent-1",
-        type: "explorer",
-        title: "trace auth flow",
-        model_name: "openai/gpt-5.4",
-        thinking: "high",
-      },
-      message,
-      agents: [agent({})],
-    });
-
-    expect(renderWaitAgent(received, false, theme).render(100)).toEqual([
-      "WaitAgent · received message after 12.4s / timeout 30s",
-      "  └─ ↳ trace auth flow (openai/gpt-5.4 high)",
-      "      line one",
-      "      line two",
-      "      line three",
-      "  (ctrl+o to expand)",
-    ]);
-    const expanded = renderWaitAgent(received, true, theme).render(100).join("\n");
-    expect(expanded).toContain("      line four");
-    expect(expanded).not.toContain("ctrl+o");
-
-    for (const width of [1, 2, 3, 20]) {
-      expect(
-        renderWaitAgent(received, false, theme)
-          .render(width)
-          .every((line) => visibleWidth(line) <= width),
-      ).toBe(true);
-    }
   });
 
   it("caps collapsed output and metadata at every narrow width", () => {
@@ -219,7 +166,7 @@ describe("WaitAgent rendering", () => {
 
     for (const width of [1, 2, 3, 4, 5, 6, 20]) {
       const output = rendered(width);
-      expect(output).toHaveLength(7);
+      expect(output).toHaveLength(8);
       expect(output.every((line) => visibleWidth(line) <= width)).toBe(true);
       expect(output.every((line) => !line.includes("\n"))).toBe(true);
       expect(output.join("\n")).not.toContain("]52;");
@@ -231,6 +178,7 @@ describe("WaitAgent rendering", () => {
       {
         outcome: "terminal",
         timed_out: false,
+        status: { legacy: { completed: "legacy result" } },
         agents: [
           {
             id: "legacy",
@@ -294,6 +242,22 @@ describe("WaitAgent rendering", () => {
     expect(output).toContain("Stopped (2 tool uses");
   });
 
+  it("renders unknown targets as not found", () => {
+    const output = renderWaitAgent(
+      details({
+        outcome: "terminal",
+        wait_ended_at: 11_000,
+        agents: [agent({ id: "missing", description: "missing", status: "not_found" })],
+      }),
+      false,
+      theme,
+    )
+      .render(120)
+      .join("\n");
+
+    expect(output).toContain("✗ missing · Not found");
+  });
+
   it("shows full responses when expanded and background continuation after cancellation", () => {
     const output = renderWaitAgent(
       details({
@@ -314,10 +278,10 @@ describe("WaitAgent rendering", () => {
       .render(120)
       .join("\n");
 
-    expect(output).toContain("WaitAgent · cancelled after 7s");
-    expect(output).toContain("│    → Read(src/index.ts:4-6)");
-    expect(output).toContain("│    → Bash(bun check)");
-    expect(output).toContain("│    four");
+    expect(output).toContain("wait_agent · cancelled after 7s");
+    expect(output).toContain("│  → Read(src/index.ts:4-6)");
+    expect(output).toContain("│  → Bash(bun check)");
+    expect(output).toContain("│  four");
     expect(output).toContain("continues in background");
     expect(output).not.toContain("ctrl+o");
   });

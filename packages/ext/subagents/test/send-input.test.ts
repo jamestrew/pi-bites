@@ -101,11 +101,12 @@ describe("send_input", () => {
     ]);
   });
 
-  it("queues before session creation and reports invalid, unavailable, and terminal input", async () => {
+  it("queues before session creation, resumes completed agents, and rejects unavailable input", async () => {
     const pending = { id: "pending", description: "starting", status: "running" };
     const manager = {
       getRecord: vi.fn((id) => (id === pending.id ? pending : undefined)),
       steer: vi.fn(() => true),
+      startTurn: vi.fn(() => true),
       cancelAndSteer: vi.fn(),
     };
     const { tool } = register(manager);
@@ -153,7 +154,18 @@ describe("send_input", () => {
     );
     expect(textOf(missing)).toBe("agent with id missing not found");
 
-    for (const status of ["completed", "stopped", "error"] as const) {
+    pending.status = "completed";
+    const resumed = await tool.execute(
+      "completed",
+      { target: pending.id, message: "continue" },
+      undefined,
+      undefined,
+      staleCtx,
+    );
+    expect(JSON.parse(textOf(resumed))).toEqual({ submission_id: expect.any(String) });
+    expect(manager.startTurn).toHaveBeenCalledWith(pending.id, "continue");
+
+    for (const status of ["stopped", "error"] as const) {
       pending.status = status;
       const terminal = await tool.execute(
         status,
