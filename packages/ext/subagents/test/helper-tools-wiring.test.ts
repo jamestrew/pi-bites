@@ -7,7 +7,6 @@ vi.mock("../agent-runner.js", async () => {
 
 import { runAgent, steerAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
-import { registerMessageAgent } from "../register-message-agent.js";
 
 function makePi(active = ["spawn_agent", "read"]) {
   const tools = new Map<string, any>();
@@ -74,7 +73,7 @@ async function spawnBackground(tools: Map<string, any>, parentCtx = ctx()) {
 describe("background helper tools", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("keeps MessageAgent registered without changing active tools at runtime", async () => {
+  it("registers send_input instead of MessageAgent without changing active tools", async () => {
     let finish!: (value: any) => void;
     vi.mocked(runAgent).mockReturnValue(new Promise((resolve) => (finish = resolve)));
     const { pi, tools, handlers } = makePi();
@@ -84,7 +83,8 @@ describe("background helper tools", () => {
     expect([...tools.keys()]).toContain("spawn_agent");
     expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("resume");
     expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("inherit_context");
-    expect([...tools.keys()]).toContain("MessageAgent");
+    expect([...tools.keys()]).toContain("send_input");
+    expect([...tools.keys()]).not.toContain("MessageAgent");
     expect([...tools.keys()]).not.toContain("get_subagent_result");
     expect([...tools.keys()]).not.toContain("steer_subagent");
     expect(pi.setActiveTools).not.toHaveBeenCalled();
@@ -260,19 +260,19 @@ describe("background helper tools", () => {
     expect(messageParent?.("too late")).toBe(false);
   });
 
-  it("renders partial MessageAgent arguments while they stream", () => {
+  it("renders partial send_input arguments while they stream", () => {
     const { pi, tools } = makePi();
     subagentsExtension(pi);
 
     const component = tools
-      .get("MessageAgent")
+      .get("send_input")
       .renderCall(
         {},
         { fg: (_color: string, text: string) => text, bold: (text: string) => text },
         { state: {} },
       );
 
-    expect(component.render(80)).toEqual(["MessageAgent → ", "  "]);
+    expect(component.render(80)).toEqual(["send_input → ", "", ""]);
   });
 
   it("queues a message while the session initializes", async () => {
@@ -283,10 +283,10 @@ describe("background helper tools", () => {
     const id = JSON.parse(textOf(spawn)).agent_id;
 
     const result = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: id, message: "focus here" }, undefined, undefined, ctx());
+      .get("send_input")
+      .execute("msg", { target: id, message: "focus here" }, undefined, undefined, ctx());
 
-    expect(textOf(result)).toContain("Message queued");
+    expect(JSON.parse(textOf(result))).toEqual({ submission_id: expect.any(String) });
     expect(result.details).toMatchObject({
       status: "queued",
       recipient: "bg",
@@ -298,43 +298,13 @@ describe("background helper tools", () => {
     });
   });
 
-  it("routes messages for queued retained turns through the manager", async () => {
-    const { pi, tools } = makePi();
-    const record = {
-      id: "retained",
-      description: "retained agent",
-      status: "queued",
-      session: { steer: vi.fn() },
-    };
-    const manager = {
-      getRecord: vi.fn(() => record),
-      steer: vi.fn(() => true),
-    };
-    registerMessageAgent(pi, manager as any);
-
-    const result = await tools
-      .get("MessageAgent")
-      .execute(
-        "msg",
-        { agent_id: record.id, message: "generation owned" },
-        undefined,
-        undefined,
-        ctx(),
-      );
-
-    expect(manager.steer).toHaveBeenCalledWith(record.id, "generation owned");
-    expect(steerAgent).not.toHaveBeenCalled();
-    expect(result.details.status).toBe("queued");
-  });
-
-  it("messages a live agent and rejects missing or completed agents", async () => {
+  it("queues input for a live agent and rejects missing or completed agents", async () => {
     let finish!: (value: any) => void;
-    const session = { dispose: vi.fn() } as any;
+    const session = { steer: vi.fn(async () => {}), dispose: vi.fn() } as any;
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, options) => {
       options.onSessionCreated?.(session);
       return new Promise((resolve) => (finish = resolve));
     });
-    vi.mocked(steerAgent).mockResolvedValue(undefined);
     const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
     handlers.get("session_start")?.({}, ctx());
@@ -342,64 +312,27 @@ describe("background helper tools", () => {
     const id = JSON.parse(textOf(spawn)).agent_id;
 
     const sent = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: id, message: "focus here" }, undefined, undefined, ctx());
-    expect(textOf(sent)).toContain("Message sent");
-    expect(textOf(sent)).toContain("assistant response's tool-call batch");
+      .get("send_input")
+      .execute("msg", { target: id, message: "focus here" }, undefined, undefined, ctx());
+    expect(JSON.parse(textOf(sent))).toEqual({ submission_id: expect.any(String) });
     expect(sent.details).toMatchObject({
-      status: "sent",
+      status: "queued",
       recipient: "bg",
       message: "focus here",
     });
-    const messageTool = tools.get("MessageAgent");
-    expect(messageTool.description).toContain("assistant response's tool-call batch");
-    expect(messageTool.description).toContain("Request wrap-up");
-    expect(messageTool.description).toContain("status check is appropriate");
-    expect(messageTool.description).toContain("informs a current decision");
-    expect(messageTool.description).toContain("hurry an agent");
-    expect(messageTool.description).toContain("cut a review short");
-    expect(messageTool.description).toContain("WaitAgent timed out");
-    expect(messageTool.description).toContain("does not confirm");
-    expect(messageTool.description).toContain("terminal status");
-    expect(
-      messageTool
-        .renderCall(
-          { agent_id: id, message: "focus here" },
-          { fg: (_color: string, text: string) => text, bold: (text: string) => text },
-          { toolCallId: "live", state: {} },
-        )
-        .render(80),
-    ).toEqual(["MessageAgent → bg", "  focus here"]);
-
-    const restoredState = {};
-    const restored = messageTool.renderCall(
-      { agent_id: "cleaned-up", message: "persisted" },
-      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
-      { toolCallId: "restored", state: restoredState },
-    );
-    messageTool.renderResult(
-      {
-        content: [],
-        details: { status: "sent", recipient: "saved title", message: "persisted" },
-      },
-      { expanded: false, isPartial: false },
-      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
-      { toolCallId: "restored", state: restoredState },
-    );
-    expect(restored.render(80)[0]).toBe("MessageAgent → saved title");
     expect(steerAgent).toHaveBeenCalledWith(session, "focus here");
 
     const missing = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: "missing", message: "x" }, undefined, undefined, ctx());
-    expect(textOf(missing)).toContain("Agent not found");
+      .get("send_input")
+      .execute("msg", { target: "missing", message: "x" }, undefined, undefined, ctx());
+    expect(textOf(missing)).toContain("agent with id missing not found");
     expect(missing.details).toMatchObject({ status: "failed", message: "x" });
 
     finish({ responseText: "done", session });
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
     const completed = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: id, message: "again" }, undefined, undefined, ctx());
-    expect(textOf(completed)).toContain("is not running (status: completed)");
+      .get("send_input")
+      .execute("msg", { target: id, message: "again" }, undefined, undefined, ctx());
+    expect(textOf(completed)).toContain("unavailable (status: completed)");
   });
 });

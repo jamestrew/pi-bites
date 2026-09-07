@@ -411,6 +411,39 @@ describe("AgentManager — detached lifecycle", () => {
     expect(manager.getRecord(id)).toMatchObject({ status: "completed", result: "redirected" });
   });
 
+  it("retains every accepted redirect when interrupts arrive before cancellation settles", async () => {
+    manager = new AgentManager();
+    const session = { ...mockSession(), abort: vi.fn(async () => {}) };
+    let finishInitial!: () => void;
+    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      options.onSessionCreated?.(session);
+      await new Promise<void>((resolve) => (finishInitial = resolve));
+      return { responseText: "partial", session };
+    });
+    vi.mocked(resumeAgent)
+      .mockResolvedValueOnce("first redirect")
+      .mockResolvedValueOnce("second redirect");
+
+    const id = manager.spawn(mockPi, mockCtx, "worker", "first", {
+      description: "retained",
+    });
+    expect(manager.cancelAndSteer(id, "change once")).toBe(true);
+    expect(manager.cancelAndSteer(id, "change twice")).toBe(true);
+    finishInitial();
+    await manager.getRecord(id)!.promise;
+
+    expect(
+      vi
+        .mocked(resumeAgent)
+        .mock.calls.slice(-2)
+        .map((call) => call[1]),
+    ).toEqual(["change once", "change twice"]);
+    expect(manager.getRecord(id)).toMatchObject({
+      status: "completed",
+      result: "second redirect",
+    });
+  });
+
   it("drops steering owned by a cancelled queued generation", async () => {
     manager = new AgentManager(undefined, 1);
     const session = { ...mockSession(), steer: vi.fn(async () => {}), clearQueue: vi.fn() };

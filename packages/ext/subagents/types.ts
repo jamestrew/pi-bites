@@ -72,8 +72,8 @@ export interface AgentRecord {
   promise?: Promise<string>;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: string[];
-  /** Message to resume with after cancelling the current operation. */
-  pendingCancelSteer?: string;
+  /** Messages to resume with after cancelling the current operation. */
+  pendingCancelSteers?: string[];
   /** The tool_use_id from the original spawn_agent tool call. */
   toolCallId?: string;
   /**

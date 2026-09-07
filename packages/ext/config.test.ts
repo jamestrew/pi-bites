@@ -42,7 +42,8 @@ describe("loadConfig", () => {
     const { loadConfig, parseBitesConfig } = await import("./config.js");
     expect(
       parseBitesConfig({
-        autoMode: { enabled: true, thinking: "low" },
+        autoMode: { thinking: "low" },
+        bashGate: { mode: "auto" },
         codexAdapter: {
           providers: ["github-copilot", "aws-bedrock"],
           webSearchProviders: ["trusted-responses-proxy"],
@@ -53,6 +54,7 @@ describe("loadConfig", () => {
     ).toBeDefined();
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
     expect(parseBitesConfig({ autoCompaction: { thresholdTokens: 0 } })).toBeUndefined();
+    expect(parseBitesConfig({ bashGate: { mode: "automatic" } })).toBeUndefined();
     expect(parseBitesConfig({ codexAdapter: { providers: "github-copilot" } })).toBeUndefined();
     expect(parseBitesConfig({ codexAdapter: { providers: [""] } })).toBeUndefined();
     expect(
