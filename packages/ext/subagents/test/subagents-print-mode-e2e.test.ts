@@ -238,7 +238,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
 //
 // These are SMOKE tests, not strict assertions: a live model decides whether and
 // how to call the tool, so we cover the subset it can be reliably steered into
-// (spawn_agent + WaitAgent, automatic completion, and an explorer spawn)
+// (spawn_agent + wait_agent, automatic completion, and an explorer spawn)
 // and assert robust invariants (a real spawn happened and produced output).
 // Per-feature determinism lives in the faux suite above, which scripts exact calls.
 const LIVE_TIMEOUT = 150_000;
@@ -256,12 +256,12 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
       run = await runPrintMode({
         prompt:
           "Use spawn_agent with agent_type 'worker' to spawn a subagent whose only task is to reply with the exact " +
-          "word PONG. Then use WaitAgent with its returned identity and tell me what it replied.",
+          "word PONG. Then use wait_agent with its returned identity and tell me what it replied.",
         timeoutMs: LIVE_TIMEOUT,
       });
       expect(run.modelCalls).toBe(0); // live mode doesn't use the faux counter
       expect(invokedToolNames(run.parentSession)).toEqual(
-        expect.arrayContaining(["spawn_agent", "WaitAgent"]),
+        expect.arrayContaining(["spawn_agent", "wait_agent"]),
       );
       expect(agentToolCalls(run.parentSession)).toEqual(
         expect.arrayContaining([expect.objectContaining({ agent_type: "worker" })]),
@@ -278,7 +278,7 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
       run = await runPrintMode({
         prompt:
           "Use spawn_agent with agent_type 'worker' to spawn a subagent whose only task is to reply with the exact word BGPONG. " +
-          "Do not call WaitAgent; continue useful work and handle its automatic completion, then tell " +
+          "Do not call wait_agent; continue useful work and handle its automatic completion, then tell " +
           "me exactly what it said.",
         timeoutMs: LIVE_TIMEOUT,
       });
@@ -323,7 +323,7 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
           "You are smoke-testing your own spawn_agent toolset. Do these steps IN ORDER, then print a",
           "final report with one PASS/FAIL line per step:",
           "1) WAIT: use spawn_agent with agent_type 'worker' for a subagent whose only task is to reply with the exact",
-          "   token FG_OK. Use WaitAgent once with its identity and confirm you got FG_OK back.",
+          "   token FG_OK. Use wait_agent once with its identity and confirm you got FG_OK back.",
           "2) AUTOMATIC: use spawn_agent with agent_type 'worker' for another subagent whose only task is to reply with",
           "   the exact token BG_OK. Do not wait or poll; handle its automatic completion and",
           "   confirm you got BG_OK.",
@@ -338,12 +338,12 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
       // Each capability was actually exercised at the tool layer (not just narrated):
       expect(calls.length).toBeGreaterThanOrEqual(3);
       expect(calls.every((call) => !("run_in_background" in call))).toBe(true);
-      expect(invokedToolNames(run.parentSession)).toContain("WaitAgent");
+      expect(invokedToolNames(run.parentSession)).toContain("wait_agent");
       const roles = calls.map((call) => call.agent_type);
       expect(roles.filter((role) => role === "worker").length).toBeGreaterThanOrEqual(2);
       expect(roles).toContain("explorer");
       // — and the real child outputs materialized in the conversation (a
-      //   WaitAgent result + an automatic completion message). We check the
+      //   wait_agent result + an automatic completion message). We check the
       //   whole transcript, not the final message: the agent's closing report
       //   tends to summarize ("Step 1 PASS") rather than re-echo the raw tokens.
       const transcript = conversationText(run.parentSession);

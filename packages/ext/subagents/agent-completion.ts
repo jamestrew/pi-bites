@@ -7,7 +7,7 @@ import type {
   NotificationDetails,
   WaitAgentOutcome,
   WaitAgentResult,
-  WaitAgentSender,
+  WaitAgentStatus,
 } from "./types.js";
 import { getLifetimeTotal } from "./usage.js";
 
@@ -41,6 +41,34 @@ export function buildWaitAgentResult(record: AgentRecord, includeOutput: boolean
   };
 }
 
+function buildWaitAgentStatus(record: AgentRecord): WaitAgentStatus {
+  switch (record.status) {
+    case "queued":
+      return "pending_init";
+    case "running":
+      return "running";
+    case "completed":
+      return { completed: record.result?.trim() ? record.result : null };
+    case "error":
+      return { errored: record.error ?? "unknown error" };
+    case "stopped":
+      return "shutdown";
+  }
+}
+
+function buildMissingWaitAgentResult(id: string): WaitAgentResult {
+  return {
+    id,
+    type: "unknown",
+    description: id,
+    status: "not_found",
+    tool_uses: 0,
+    duration_ms: 0,
+    total_tokens: 0,
+    lifetime_usage: { input: 0, output: 0, cacheWrite: 0 },
+  };
+}
+
 type AgentCompletionDeps = {
   pi: ExtensionAPI;
   getRecord: (id: string) => AgentRecord | undefined;
@@ -66,31 +94,13 @@ export function createAgentCompletionHandler({
   onAgentResultPendingUI,
   scheduleAutomatic,
 }: AgentCompletionDeps) {
-  const owners = new WeakMap<AgentRecord, Map<number, "automatic" | "wait">>();
   const completedGeneration = new WeakMap<AgentRecord, number>();
-  const claims = new Map<string, number>();
   const waiters = new Map<number, Waiter>();
   let nextWaiterId = 1;
   let disposed = false;
 
-  const claimKey = (id: string, generation: number) => `${id}:${generation}`;
-  const getOwner = (record: AgentRecord, generation = record.generation) =>
-    owners.get(record)?.get(generation);
-  const setOwner = (record: AgentRecord, generation: number, owner: "automatic" | "wait") => {
-    let generations = owners.get(record);
-    if (!generations) owners.set(record, (generations = new Map<number, "automatic" | "wait">()));
-    generations.set(generation, owner);
-  };
-  const deleteOwner = (record: AgentRecord, generation: number) => {
-    owners.get(record)?.delete(generation);
-  };
-
   function release(waiter: Waiter): void {
     waiters.delete(waiter.id);
-    for (const id of waiter.agentIds) {
-      const key = claimKey(id, waiter.generations.get(id) ?? 0);
-      if (claims.get(key) === waiter.id) claims.delete(key);
-    }
     if (waiter.timer) clearTimeout(waiter.timer);
     if (waiter.signal && waiter.onAbort) {
       waiter.signal.removeEventListener("abort", waiter.onAbort);
@@ -102,56 +112,30 @@ export function createAgentCompletionHandler({
     waiter.resolve(outcome);
   }
 
-  function terminalOutcome(
-    records: AgentRecord[],
-    terminal = records.filter(isTerminal),
-  ): WaitAgentOutcome {
-    for (const record of terminal) {
-      const canonical = getRecord(record.id);
-      if (canonical?.generation === record.generation)
-        setOwner(canonical, record.generation, "wait");
-    }
-    const terminalIds = new Set(terminal.map((record) => record.id));
-    return {
-      outcome: "terminal",
-      timed_out: false,
-      agents: records.map((record) => buildWaitAgentResult(record, terminalIds.has(record.id))),
-    };
-  }
-
-  function resolveWaiter(waiterId: number, completedRecord?: AgentRecord): void {
-    const waiter = waiters.get(waiterId);
-    if (!waiter) return;
-    const records = waiter.agentIds
-      .map((id) => (id === completedRecord?.id ? completedRecord : getRecord(id)))
-      .filter((record): record is AgentRecord => Boolean(record));
-    const terminal = records
-      .filter(
-        (record) => record.generation === waiter.generations.get(record.id) && isTerminal(record),
-      )
-      .filter((record) => getOwner(record) !== "automatic");
-    if (terminal.length > 0) finish(waiter, terminalOutcome(records, terminal));
-  }
-
-  function onAgentMessage(sender: WaitAgentSender, message: string): boolean {
-    const record = getRecord(sender.id);
-    if (!record) return false;
-    const waiterId = claims.get(claimKey(sender.id, record.generation));
-    if (waiterId === undefined) return false;
-    const waiter = waiters.get(waiterId);
-    if (!waiter) return false;
-
-    finish(waiter, {
-      outcome: "message",
-      timed_out: false,
-      sender,
-      message,
-      agents: waiter.agentIds
-        .map(getRecord)
-        .filter((record): record is AgentRecord => Boolean(record))
-        .map((record) => buildWaitAgentResult(record, false)),
+  function terminalOutcome(agentIds: string[], completedRecord?: AgentRecord): WaitAgentOutcome {
+    const status: Record<string, WaitAgentStatus> = {};
+    const agents = agentIds.map((id) => {
+      const record = id === completedRecord?.id ? completedRecord : getRecord(id);
+      if (!record) {
+        status[id] = "not_found";
+        return buildMissingWaitAgentResult(id);
+      }
+      const terminal = isTerminal(record);
+      if (terminal) status[id] = buildWaitAgentStatus(record);
+      return buildWaitAgentResult(record, terminal);
     });
-    return true;
+    return { outcome: "terminal", timed_out: false, status, agents };
+  }
+
+  function resolveWaiters(completedRecord: AgentRecord): void {
+    for (const waiter of waiters.values()) {
+      if (
+        waiter.agentIds.includes(completedRecord.id) &&
+        waiter.generations.get(completedRecord.id) === completedRecord.generation
+      ) {
+        finish(waiter, terminalOutcome(waiter.agentIds, completedRecord));
+      }
+    }
   }
 
   function emitAutomatic(record: AgentRecord): void {
@@ -171,16 +155,13 @@ export function createAgentCompletionHandler({
     try {
       pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
     } catch {
-      /* event listeners must not change completion delivery ownership */
+      /* event listeners must not change completion delivery */
     }
   }
 
   function onAgentComplete(record: AgentRecord, generation = record.generation): void {
     if (disposed || (completedGeneration.get(record) ?? 0) >= generation) return;
     completedGeneration.set(record, generation);
-    for (const previous of owners.get(record)?.keys() ?? []) {
-      if (previous < generation) deleteOwner(record, previous);
-    }
     const finished: AgentRecord = {
       ...record,
       generation,
@@ -195,63 +176,42 @@ export function createAgentCompletionHandler({
       try {
         onAgentFinishedUI(record.id);
       } catch {
-        /* UI cleanup must not change completion delivery ownership */
+        /* UI cleanup must not change completion delivery */
       }
     };
 
-    const waiterId = claims.get(claimKey(record.id, generation));
-    const existingOwner = getOwner(record, generation);
-    if (waiterId !== undefined) {
+    resolveWaiters(finished);
+    emitCompletionEvent(finished, failed);
+
+    let finishedUI = false;
+    const finishUI = () => {
+      if (finishedUI) return;
+      finishedUI = true;
       notifyFinishedUI();
-      resolveWaiter(waiterId, finished);
-      emitCompletionEvent(finished, failed);
-    } else if (existingOwner === "wait") {
-      notifyFinishedUI();
-      emitCompletionEvent(finished, failed);
-    } else {
-      setOwner(record, generation, "automatic");
-      emitCompletionEvent(finished, failed);
-      let finishedUI = false;
-      const finishUI = () => {
-        if (finishedUI) return;
-        finishedUI = true;
-        notifyFinishedUI();
-      };
-      const cancelAutomatic = () => {
-        deleteOwner(record, generation);
-        finishUI();
-      };
-      try {
-        if (getRecord(record.id)?.generation === generation) onAgentResultPendingUI?.(record.id);
-      } catch {
-        /* UI state must not block completion delivery */
-      }
-      try {
-        const accepted = scheduleAutomatic
-          ? scheduleAutomatic(
-              record.parentSessionId,
-              () => {
-                try {
-                  emitAutomatic(finished);
-                } catch (error) {
-                  deleteOwner(record, generation);
-                  throw error;
-                } finally {
-                  finishUI();
-                }
-              },
-              cancelAutomatic,
-            )
-          : (emitAutomatic(finished), finishUI(), true);
-        if (!accepted) {
-          deleteOwner(record, generation);
-          finishUI();
-        }
-      } catch {
-        deleteOwner(record, generation);
-        finishUI();
-        /* automatic delivery failure leaves the completed result available to WaitAgent */
-      }
+    };
+    try {
+      if (getRecord(record.id)?.generation === generation) onAgentResultPendingUI?.(record.id);
+    } catch {
+      /* UI state must not block completion delivery */
+    }
+    try {
+      const accepted = scheduleAutomatic
+        ? scheduleAutomatic(
+            record.parentSessionId,
+            () => {
+              try {
+                emitAutomatic(finished);
+              } finally {
+                finishUI();
+              }
+            },
+            finishUI,
+          )
+        : (emitAutomatic(finished), finishUI(), true);
+      if (!accepted) finishUI();
+    } catch {
+      finishUI();
+      /* notification failure must not change explicit wait results */
     }
   }
 
@@ -261,61 +221,33 @@ export function createAgentCompletionHandler({
     signal?: AbortSignal,
   ): Promise<WaitAgentOutcome> {
     const uniqueIds = [...new Set(agentIds)];
-    if (uniqueIds.length !== agentIds.length) {
+    if (uniqueIds.length === 0) {
       return Promise.resolve({
         outcome: "error",
         timed_out: false,
-        message: "agent_ids must not contain duplicates",
+        status: {},
+        message: "agent ids must be non-empty",
         agents: [],
       });
     }
 
     const records = uniqueIds.map(getRecord);
-    const missing = uniqueIds.filter((_id, index) => !records[index]);
-    if (missing.length > 0) {
-      return Promise.resolve({
-        outcome: "error",
-        timed_out: false,
-        message: `Agent not found: ${missing.join(", ")}`,
-        agents: records
-          .filter((record): record is AgentRecord => Boolean(record))
-          .map((record) => buildWaitAgentResult(record, false)),
-      });
-    }
-
     const generations = new Map(
-      (records as AgentRecord[]).map((record) => [record.id, record.generation]),
+      records
+        .filter((record): record is AgentRecord => Boolean(record))
+        .map((record) => [record.id, record.generation]),
     );
-    const claimed = uniqueIds.filter((id) => claims.has(claimKey(id, generations.get(id) ?? 0)));
-    if (claimed.length > 0) {
-      return Promise.resolve({
-        outcome: "error",
-        timed_out: false,
-        message: `Agent already has an active waiter: ${claimed.join(", ")}`,
-        agents: (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false)),
-      });
+    if (records.some((record) => !record || isTerminal(record))) {
+      return Promise.resolve(terminalOutcome(uniqueIds));
     }
 
-    const deliveryClaimed = (records as AgentRecord[])
-      .filter((record) => getOwner(record) !== undefined)
-      .map((record) => record.id);
-    if (deliveryClaimed.length > 0) {
-      return Promise.resolve({
-        outcome: "delivery_claimed",
-        timed_out: false,
-        agents: (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false)),
-      });
-    }
-
-    const terminal = (records as AgentRecord[]).filter(isTerminal);
-    if (terminal.length > 0)
-      return Promise.resolve(terminalOutcome(records as AgentRecord[], terminal));
-
+    const agents = (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false));
     if (signal?.aborted) {
       return Promise.resolve({
         outcome: "cancelled",
         timed_out: false,
-        agents: (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false)),
+        status: {},
+        agents,
       });
     }
 
@@ -327,14 +259,12 @@ export function createAgentCompletionHandler({
         resolve,
         signal,
       };
-      for (const id of uniqueIds) {
-        claims.set(claimKey(id, generations.get(id) ?? 0), waiter.id);
-      }
       waiters.set(waiter.id, waiter);
       waiter.timer = setTimeout(() => {
         finish(waiter, {
           outcome: "timeout",
           timed_out: true,
+          status: {},
           agents: waiter.agentIds
             .map(getRecord)
             .filter((record): record is AgentRecord => Boolean(record))
@@ -346,6 +276,7 @@ export function createAgentCompletionHandler({
           finish(waiter, {
             outcome: "cancelled",
             timed_out: false,
+            status: {},
             agents: waiter.agentIds
               .map(getRecord)
               .filter((record): record is AgentRecord => Boolean(record))
@@ -359,7 +290,6 @@ export function createAgentCompletionHandler({
 
   return {
     waitFor,
-    onAgentMessage,
     onAgentComplete,
     dispose(): void {
       disposed = true;
@@ -367,13 +297,13 @@ export function createAgentCompletionHandler({
         finish(waiter, {
           outcome: "cancelled",
           timed_out: false,
+          status: {},
           agents: waiter.agentIds
             .map(getRecord)
             .filter((record): record is AgentRecord => Boolean(record))
             .map((record) => buildWaitAgentResult(record, false)),
         });
       }
-      claims.clear();
     },
   };
 }

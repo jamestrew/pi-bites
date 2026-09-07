@@ -59,11 +59,6 @@ export function registerSendInput(pi: ExtensionAPI, manager: AgentManager) {
         if (!record) return result(`agent with id ${params.target} not found`, "failed");
         if (!params.message.trim())
           return result("Empty message can't be sent to an agent", "failed");
-        if (record.status !== "running" && record.status !== "queued")
-          return result(
-            `agent with id ${params.target} is unavailable (status: ${record.status})`,
-            "failed",
-          );
         if (params.interrupt) {
           if (!record.session || record.status !== "running")
             return result(
@@ -81,7 +76,10 @@ export function registerSendInput(pi: ExtensionAPI, manager: AgentManager) {
             submissionId,
           );
         }
-        if (record.session && record.status === "running") {
+        if (record.status === "completed") {
+          if (!manager.startTurn(record.id, params.message))
+            return result(`input was not submitted to agent ${record.id}`, "failed");
+        } else if (record.session && record.status === "running") {
           try {
             await steerAgent(record.session, params.message);
           } catch (error) {
@@ -90,6 +88,11 @@ export function registerSendInput(pi: ExtensionAPI, manager: AgentManager) {
               "failed",
             );
           }
+        } else if (record.status !== "running" && record.status !== "queued") {
+          return result(
+            `agent with id ${params.target} is unavailable (status: ${record.status})`,
+            "failed",
+          );
         } else if (!manager.steer(record.id, params.message)) {
           return result(`input was not submitted to agent ${record.id}`, "failed");
         }

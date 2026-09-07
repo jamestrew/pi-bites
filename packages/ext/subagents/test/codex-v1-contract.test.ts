@@ -108,13 +108,14 @@ describe("Codex V1 subagent contract", () => {
     expect(estimateCodexV1ContractTokens()).toBeGreaterThan(CODEX_V1_TOKEN_BUDGET.softFinal);
   });
 
-  it("activates the V1 spawn and send names without exposing the old Agent name", () => {
+  it("activates the migrated V1 names without exposing old parent tool names", () => {
     expect(Object.values(SUBAGENT_TOOL_NAMES)).toEqual([
       "spawn_agent",
-      "WaitAgent",
+      "wait_agent",
       "send_input",
       "MessageAgent",
     ]);
     expect(Object.values(SUBAGENT_TOOL_NAMES)).not.toContain("Agent");
+    expect(Object.values(SUBAGENT_TOOL_NAMES)).not.toContain("WaitAgent");
   });
 });

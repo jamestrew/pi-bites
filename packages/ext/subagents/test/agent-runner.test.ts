@@ -949,7 +949,7 @@ describe("embedded agent runner configuration", () => {
       config: makeAgentConfig({ extensions: ["/ext/bites.ts"], builtinToolNames: ["read"] }),
     });
     withExtensions({
-      "/ext/bites.ts": ["spawn_agent", "WaitAgent", "MessageAgent", "ok_ext"],
+      "/ext/bites.ts": ["spawn_agent", "wait_agent", "MessageAgent", "ok_ext"],
     });
     const { session } = createSession("OK");
     createAgentSession.mockResolvedValue({ session });

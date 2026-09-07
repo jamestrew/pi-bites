@@ -3,7 +3,7 @@
  *
  * Tools:
  *   spawn_agent   — LLM-callable: spawn a sub-agent
- *   WaitAgent     — LLM-callable: wait for selected sub-agents
+ *   wait_agent    — LLM-callable: wait for selected sub-agents
  *   send_input    — LLM-callable: send input to a running sub-agent
  *
  * Commands:
@@ -96,9 +96,7 @@ export default function (
         compactionCount: record.compactionCount,
       });
     },
-    (parentSessionId, sender, message) =>
-      completion.onAgentMessage(sender, message) ||
-      parentMessenger.send(parentSessionId, sender, message),
+    (parentSessionId, sender, message) => parentMessenger.send(parentSessionId, sender, message),
     getAutoCompactionThreshold,
   );
 
@@ -399,7 +397,7 @@ export default function (
     setFleetViewEnabled,
   });
 
-  // ---- WaitAgent and send_input tools ----
+  // ---- wait_agent and send_input tools ----
   registerWaitAgent(pi, {
     waitFor: completion.waitFor,
     getRecord: (id) => manager.getRecord(id),

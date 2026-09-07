@@ -5,6 +5,7 @@ import type { AgentRecord } from "../types.js";
 function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id,
+    generation: 1,
     type: "worker",
     parentSessionId: "parent-session",
     prompt: `task ${id}`,
@@ -18,9 +19,8 @@ function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentReco
     completedAt: 200,
     lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
     compactionCount: 0,
+    failureHistory: [],
     ...overrides,
-    generation: overrides.generation ?? 1,
-    failureHistory: overrides.failureHistory ?? [],
   };
 }
 
@@ -31,12 +31,11 @@ function makeHarness(
   const byId = new Map(records.map((record) => [record.id, record]));
   const pi = {
     events: { emit: vi.fn() },
-    appendEntry: vi.fn(),
     sendMessage: vi.fn(),
   };
   const onAgentFinishedUI = vi.fn();
   const completion = createAgentCompletionHandler({
-    pi: pi as any,
+    pi: pi as never,
     getRecord: (id) => byId.get(id),
     onAgentFinishedUI,
     scheduleAutomatic,
@@ -45,31 +44,22 @@ function makeHarness(
 }
 
 describe("agent completion delivery", () => {
-  it("includes the chronological failure chain in a terminal result", async () => {
+  it("returns the chronological failure chain while mapping errors to V1 status", async () => {
     const record = makeRecord("a", {
       status: "error",
       result: undefined,
       error: "The operation was aborted.",
       abort: { timestamp: 30, source: "shutdown", reason: "shutdown" },
       failureHistory: [
-        {
-          timestamp: 10,
-          phase: "assistant",
-          message: "429 quota exceeded",
-          stop_reason: "error",
-        },
-        {
-          timestamp: 20,
-          phase: "assistant",
-          message: "The operation was aborted.",
-          stop_reason: "error",
-        },
+        { timestamp: 10, phase: "assistant", message: "429 quota exceeded" },
+        { timestamp: 20, phase: "assistant", message: "The operation was aborted." },
       ],
     });
     const { completion } = makeHarness([record]);
 
     const outcome = await completion.waitFor([record.id], 10_000);
 
+    expect(outcome.status).toEqual({ a: { errored: "The operation was aborted." } });
     expect(outcome.agents[0]?.failure_history?.map((failure) => failure.message)).toEqual([
       "429 quota exceeded",
       "The operation was aborted.",
@@ -79,208 +69,68 @@ describe("agent completion delivery", () => {
       source: "shutdown",
       reason: "shutdown",
     });
-  });
-
-  it("includes the original failure chain in automatic completion reports", () => {
-    const record = makeRecord("a", {
-      status: "error",
-      result: undefined,
-      error: "The operation was aborted.",
-      failureHistory: [
-        {
-          timestamp: 10,
-          phase: "assistant",
-          message: "429 quota exceeded",
-          stop_reason: "error",
-        },
-        {
-          timestamp: 20,
-          phase: "assistant",
-          message: "The operation was aborted.",
-          stop_reason: "error",
-        },
-      ],
-    });
-    const { completion, pi } = makeHarness([record]);
-
-    completion.onAgentComplete(record);
-
-    expect(pi.sendMessage.mock.calls[0]?.[0].content).toContain("429 quota exceeded");
-    expect(pi.sendMessage.mock.calls[0]?.[0].content).toContain("failure_history");
     completion.dispose();
   });
 
-  it("automatically queues an unconsumed completion at the safe steering boundary", () => {
-    const record = makeRecord("a");
-    const { completion, pi, onAgentFinishedUI } = makeHarness([record]);
-
-    completion.onAgentComplete(record);
-
-    expect(onAgentFinishedUI).toHaveBeenCalledWith("a");
-    expect(pi.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ customType: "subagent-notification", display: true }),
-      { deliverAs: "steer", triggerTurn: true },
-    );
-    completion.dispose();
-  });
-
-  it("notifies manager-spawned agents that have no inline result surface", () => {
-    const record = makeRecord("a");
-    const { completion, pi } = makeHarness([record]);
-
-    completion.onAgentComplete(record);
-
-    expect(pi.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.stringContaining("<task-id>a</task-id>") }),
-      { deliverAs: "steer", triggerTurn: true },
-    );
-    completion.dispose();
-  });
-
-  it("sends the full final response to both the agent and expandable renderer", () => {
-    const result = "x".repeat(1_000) + "final marker";
-    const record = makeRecord("a", { result });
-    const { completion, pi } = makeHarness([record]);
-
-    completion.onAgentComplete(record);
-
-    const notification = pi.sendMessage.mock.calls[0]?.[0];
-    expect(notification.content).toContain(`<result>${result}</result>`);
-    expect(notification.details.result).toBe(result);
-    completion.dispose();
-  });
-
-  it("removes terminal controls from persisted notification content and details", () => {
+  it("automatically delivers one full sanitized completion notification", () => {
     const record = makeRecord("a", {
       description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent",
-      result: "safe\u001b[31m result",
+      result: `safe\u001b[31m ${"x".repeat(1_000)}final marker`,
     });
     const { completion, pi } = makeHarness([record]);
 
     completion.onAgentComplete(record);
+    completion.onAgentComplete(record);
 
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
     const notification = pi.sendMessage.mock.calls[0]?.[0];
+    expect(notification.content).toContain("final marker</result>");
     expect(notification.content).not.toContain("\u001b");
     expect(notification.details.description).toBe("unsafe agent");
-    expect(notification.details.result).toBe("safe result");
     completion.dispose();
   });
 
-  it("claims a deferred automatic result before its final notification is delivered", async () => {
-    const record = makeRecord("a");
+  it("keeps explicit wait and automatic notification as independent delivery channels", async () => {
+    const record = makeRecord("a", { status: "running", result: undefined });
     let deliver!: () => void;
-    const scheduleAutomatic = vi.fn((_parentSessionId: string, callback: () => void) => {
+    const scheduleAutomatic = vi.fn((_parent: string, callback: () => void) => {
       deliver = callback;
       return true;
     });
     const { completion, pi } = makeHarness([record], scheduleAutomatic);
+    const waiting = completion.waitFor([record.id], 30_000);
 
+    record.status = "completed";
+    record.result = "final result";
+    record.completedAt = 300;
     completion.onAgentComplete(record);
-    expect(scheduleAutomatic).toHaveBeenCalledWith(
-      "parent-session",
-      expect.any(Function),
-      expect.any(Function),
-    );
+
+    await expect(waiting).resolves.toMatchObject({
+      status: { a: { completed: "final result" } },
+      agents: [expect.objectContaining({ result: "final result" })],
+    });
     expect(pi.sendMessage).not.toHaveBeenCalled();
-
-    const waited = await completion.waitFor([record.id], 30_000);
-    expect(waited).toMatchObject({ outcome: "delivery_claimed" });
-
     deliver();
     expect(pi.sendMessage).toHaveBeenCalledOnce();
+    expect(pi.sendMessage.mock.calls[0]?.[0].content).toContain("final result");
     completion.dispose();
   });
 
-  it("leaves a rejected automatic delivery available to WaitAgent", async () => {
-    const record = makeRecord("a");
-    const scheduleAutomatic = vi.fn(() => false);
-    const { completion, pi } = makeHarness([record], scheduleAutomatic);
-
-    completion.onAgentComplete(record);
-    completion.onAgentComplete(record);
-
-    expect(scheduleAutomatic).toHaveBeenCalledOnce();
-    expect(pi.events.emit).toHaveBeenCalledOnce();
-    expect(pi.sendMessage).not.toHaveBeenCalled();
-    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "terminal",
-      agents: [expect.objectContaining({ id: "a", result: "result a" })],
-    });
-    completion.dispose();
-  });
-
-  it("makes a deferred result waitable when its eventual delivery fails", async () => {
-    const record = makeRecord("a");
-    let deliver!: () => void;
-    const scheduleAutomatic = vi.fn((_parentSessionId: string, callback: () => void) => {
-      deliver = callback;
-      return true;
-    });
-    const { completion, pi } = makeHarness([record], scheduleAutomatic);
+  it("does not let notification failure change an explicit wait result", async () => {
+    const record = makeRecord("a", { status: "running", result: undefined });
+    const { completion, pi } = makeHarness([record]);
     pi.sendMessage.mockImplementation(() => {
       throw new Error("delivery failed");
     });
+    const waiting = completion.waitFor([record.id], 30_000);
 
-    completion.onAgentComplete(record);
-    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "delivery_claimed",
-    });
-    expect(deliver).toThrow("delivery failed");
-    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "terminal",
-      agents: [expect.objectContaining({ id: "a", result: "result a" })],
-    });
-    completion.dispose();
-  });
-
-  it("makes a deferred result waitable when session replacement cancels delivery", async () => {
-    const record = makeRecord("a");
-    let cancel!: () => void;
-    const scheduleAutomatic = vi.fn(
-      (_parentSessionId: string, _deliver: () => void, cancelDelivery: () => void) => {
-        cancel = cancelDelivery;
-        return true;
-      },
-    );
-    const { completion, onAgentFinishedUI } = makeHarness([record], scheduleAutomatic);
-
-    completion.onAgentComplete(record);
-    expect(onAgentFinishedUI).not.toHaveBeenCalled();
-    cancel();
-
-    expect(onAgentFinishedUI).toHaveBeenCalledWith("a");
-    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "terminal",
-      agents: [expect.objectContaining({ id: "a", result: "result a" })],
-    });
-    completion.dispose();
-  });
-
-  it("keeps a synchronously delivered result claimed when UI cleanup throws", async () => {
-    const record = makeRecord("a");
-    const { completion, pi, onAgentFinishedUI } = makeHarness([record]);
-    onAgentFinishedUI.mockImplementation(() => {
-      throw new Error("UI unavailable");
-    });
-
+    record.status = "completed";
+    record.result = "wait result";
     completion.onAgentComplete(record);
 
-    expect(pi.sendMessage).toHaveBeenCalledOnce();
-    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "delivery_claimed",
+    await expect(waiting).resolves.toMatchObject({
+      status: { a: { completed: "wait result" } },
     });
-    completion.dispose();
-  });
-
-  it("delivers the same terminal transition exactly once", () => {
-    const record = makeRecord("a");
-    const { completion, pi } = makeHarness([record]);
-
-    completion.onAgentComplete(record);
-    completion.onAgentComplete(record);
-
-    expect(pi.sendMessage).toHaveBeenCalledOnce();
-    expect(pi.appendEntry).not.toHaveBeenCalled();
     completion.dispose();
   });
 
@@ -299,7 +149,6 @@ describe("agent completion delivery", () => {
     record.completedAt = 400;
     completion.onAgentComplete(record, 2);
 
-    expect(deliveries).toHaveLength(2);
     deliveries.forEach((deliver) => deliver());
     expect(pi.sendMessage).toHaveBeenCalledTimes(2);
     expect(pi.sendMessage.mock.calls[0]?.[0].content).toContain("<result>first result</result>");
@@ -307,7 +156,7 @@ describe("agent completion delivery", () => {
     completion.dispose();
   });
 
-  it("resolves a claimed generation before completion events can start the next one", async () => {
+  it("resolves a generation snapshot before completion events can start the next turn", async () => {
     const record = makeRecord("a", { status: "running" });
     const { completion, pi } = makeHarness([record]);
     const waiting = completion.waitFor([record.id], 30_000);
@@ -321,129 +170,21 @@ describe("agent completion delivery", () => {
     completion.onAgentComplete(record, 1);
 
     await expect(waiting).resolves.toMatchObject({
-      outcome: "terminal",
-      agents: [expect.objectContaining({ id: "a", status: "completed", result: "result a" })],
+      status: { a: { completed: "result a" } },
+      agents: [expect.objectContaining({ status: "completed", result: "result a" })],
     });
     completion.dispose();
   });
 
-  it("keeps a waiter-delivered completion owned by the canonical record", async () => {
-    const record = makeRecord("a", { status: "running" });
-    const { completion } = makeHarness([record]);
-    const waiting = completion.waitFor([record.id], 30_000);
-    record.status = "completed";
-    completion.onAgentComplete(record, 1);
-
-    await expect(waiting).resolves.toMatchObject({ outcome: "terminal" });
-    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "delivery_claimed",
-    });
-    completion.dispose();
-  });
-
-  it("reserves automatic ownership before completion event reentrancy", async () => {
-    const record = makeRecord("a");
-    const { completion, pi } = makeHarness([record]);
-    let reentrantWait!: Promise<unknown>;
-    pi.events.emit.mockImplementation(() => {
-      reentrantWait = completion.waitFor([record.id], 30_000);
-    });
-
-    completion.onAgentComplete(record, 1);
-
-    await expect(reentrantWait).resolves.toMatchObject({ outcome: "delivery_claimed" });
-    expect(pi.sendMessage).toHaveBeenCalledOnce();
-    completion.dispose();
-  });
-
-  it("does not automatically redeliver a result already consumed by WaitAgent", async () => {
-    const record = makeRecord("a");
-    const { completion, pi } = makeHarness([record]);
-
-    await expect(completion.waitFor([record.id], 30_000)).resolves.toMatchObject({
-      outcome: "terminal",
-    });
-    completion.onAgentComplete(record, 1);
-
-    expect(pi.sendMessage).not.toHaveBeenCalled();
-    expect(pi.events.emit).toHaveBeenCalledOnce();
-    completion.dispose();
-  });
-
-  it("does not let a prior generation's deferred delivery own the current turn", async () => {
-    const record = makeRecord("a", { generation: 1 });
-    const { completion } = makeHarness([record], () => true);
-    completion.onAgentComplete(record, 1);
-
-    record.generation = 2;
-    record.status = "running";
-    record.result = undefined;
-    record.completedAt = undefined;
-    const controller = new AbortController();
-    controller.abort();
-
-    await expect(completion.waitFor([record.id], 30_000, controller.signal)).resolves.toMatchObject(
-      { outcome: "cancelled" },
-    );
-    completion.dispose();
-  });
-
-  it("wakes the claiming waiter on a message and releases eventual completion", async () => {
-    const first = makeRecord("a", {
-      status: "running",
-      result: undefined,
-      completedAt: undefined,
-    });
-    const second = makeRecord("b", {
-      status: "running",
-      result: undefined,
-      completedAt: undefined,
-    });
-    const { completion, pi } = makeHarness([first, second]);
-    const waiting = completion.waitFor([first.id, second.id], 30_000);
-
-    expect(
-      completion.onAgentMessage(
-        { id: second.id, type: second.type, title: second.description },
-        "exact\nmessage",
-      ),
-    ).toBe(true);
-    await expect(waiting).resolves.toEqual({
-      outcome: "message",
-      timed_out: false,
-      sender: { id: "b", type: "worker", title: "agent b" },
-      message: "exact\nmessage",
-      agents: [
-        expect.objectContaining({ id: "a", status: "running" }),
-        expect.objectContaining({ id: "b", status: "running" }),
-      ],
-    });
-    expect(
-      completion.onAgentMessage(
-        { id: first.id, type: first.type, title: first.description },
-        "later",
-      ),
-    ).toBe(false);
-
-    first.status = "completed";
-    first.result = "final";
-    first.completedAt = 300;
-    completion.onAgentComplete(first);
-    expect(pi.sendMessage).toHaveBeenCalledOnce();
-    completion.dispose();
-  });
-
-  it("emits a failed lifecycle event without duplicating its persisted response", () => {
+  it("emits a failed lifecycle event even when a listener throws", () => {
     const record = makeRecord("a", { status: "error", error: "boom" });
     const { completion, pi } = makeHarness([record]);
+    pi.events.emit.mockImplementation(() => {
+      throw new Error("listener failed");
+    });
 
-    completion.onAgentComplete(record);
-
-    expect(pi.events.emit).toHaveBeenCalledWith(
-      "subagents:failed",
-      expect.objectContaining({ id: "a", error: "boom" }),
-    );
-    expect(pi.appendEntry).not.toHaveBeenCalled();
+    expect(() => completion.onAgentComplete(record)).not.toThrow();
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
     completion.dispose();
   });
 });

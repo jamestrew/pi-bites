@@ -473,7 +473,7 @@ export async function runPrintMode(options: RunPrintModeOptions): Promise<PrintM
 /**
  * Extract the text of every `spawn_agent` tool result in a session's history. Agent
  * results are immediate spawn envelopes; terminal output arrives through
- * WaitAgent or an automatic completion message.
+ * wait_agent or an automatic completion message.
  */
 export function agentToolResults(session: AgentSession): string[] {
   const out: string[] = [];
@@ -491,7 +491,7 @@ export function agentToolResults(session: AgentSession): string[] {
 /**
  * All text across the whole conversation — assistant turns, user/nudge messages,
  * and every tool result. Use this to assert a child's output *materialized
- * somewhere* (a WaitAgent result or an automatic completion message),
+ * somewhere* (a wait_agent result or an automatic completion message),
  * rather than only in the parent's final message which may summarize it.
  */
 export function conversationText(session: AgentSession): string {
