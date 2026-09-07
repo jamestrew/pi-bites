@@ -54,10 +54,11 @@ Example:
     "thresholdTokens": 150000
   },
   "bashGate": {
+    "mode": "manual",
     "rules": [{ "cmd": "bun", "subcommands": ["check", "test"] }, { "cmd": "pytest" }]
   },
   "autoMode": {
-    "enabled": false
+    "thinking": "low"
   },
   "codexAdapter": {
     "providers": ["github-copilot"]
@@ -195,12 +196,14 @@ Press `Alt+Y` to cycle from Bash gate mode to YOLO mode, then Auto mode. Auto mo
 
 With an interactive UI, an explicit denial shows the rationale and lets the human allow once, export the exact command to a private temporary file, view a subagent conversation where available, or keep it denied. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt.
 
-Automode uses the active model by default. It can be enabled at startup and given a separate model, thinking level, or policy:
+Automode uses the active model by default. Select it as the initial bash permission mode and optionally give it a separate model, thinking level, or policy:
 
 ```json
 {
+  "bashGate": {
+    "mode": "auto"
+  },
   "autoMode": {
-    "enabled": true,
     "model": "anthropic/claude-sonnet-4-5",
     "thinking": "low",
     "policy": "Approve only actions authorized by the user and deny secret exposure or destructive actions."
@@ -208,7 +211,7 @@ Automode uses the active model by default. It can be enabled at startup and give
 }
 ```
 
-Automode reviews only commands that already reach an approval-producing bash gate; it does not expand Pi's permissions, override deny-policy subagents, or gate routine allowed tools. Without UI, gated commands fail closed unless Automode is enabled in configuration.
+Automode reviews only commands that already reach an approval-producing bash gate; it does not expand Pi's permissions, override deny-policy subagents, or gate routine allowed tools. Without UI, gated commands fail closed unless `bashGate.mode` is `"auto"`.
 
 ## Bash gate
 
@@ -217,6 +220,7 @@ The bash gate allows a conservative set of read-only and easily reversible comma
 ```json
 {
   "bashGate": {
+    "mode": "yolo",
     "rules": [
       { "cmd": "bun", "subcommands": ["check", "test"] },
       { "cmd": "sed", "flagAny": ["-i"] },
@@ -228,6 +232,9 @@ The bash gate allows a conservative set of read-only and easily reversible comma
 ```
 
 Configured rules extend the built-in destructive-command gate; they do not replace it.
+`bashGate.mode` sets the initial permission mode to `"manual"` (the default), `"auto"`, or
+`"yolo"`. Unlike the `--yolo` CLI flag, configured YOLO mode does not lock the mode, so
+`Alt+Y` can still change it.
 
 Supported rule fields:
 

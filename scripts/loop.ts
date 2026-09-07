@@ -27,7 +27,7 @@ type ListedIssue = Omit<Issue, "closedByPullRequestsReferences"> & {
 
 const nodes = <T>(value: NodeList<T>): ReadonlyArray<T> => ("nodes" in value ? value.nodes : value);
 
-const USAGE = `Usage: run-ready-for-agent-issues.ts [options]
+const USAGE = `Usage: loop.ts [options]
 
 Options:
   --limit N                    Maximum issues to process (default: 3)
@@ -118,6 +118,9 @@ export function pullRequestReference(
 
 const reviewApproved = (state: string, piOutput: string): boolean =>
   state === "MERGED" || piOutput.includes("RALPH_REVIEW: APPROVED");
+
+export const shouldMergePullRequest = (state: string, piOutput: string): boolean =>
+  state === "OPEN" && reviewApproved(state, piOutput);
 
 const FINDINGS_HEADING = "## Outstanding review findings";
 const FINDINGS_MARKER = "RALPH_FINDINGS";
@@ -232,7 +235,7 @@ The body stops at that line. The runner appends any outstanding findings itself.
 
 # Outcome
 
-When the final review round approved: merge with rebase semantics, then delete the local and remote branch.
+When the final review round approved: leave the pull request open. The runner merges with rebase semantics and deletes the local and remote branch.
 
 When the third round still requests changes: leave the pull request open for human review and report the findings it left standing.
 
@@ -271,7 +274,6 @@ async function prepareExtensionRuntime(options: RunOptions): Promise<ReadonlyArr
   await $`bun install --frozen-lockfile`.cwd(options.extensionRuntime);
   await $`bun check`.cwd(options.extensionRuntime);
   const extension = join(options.extensionRuntime, "packages/ext/index.ts");
-  await $`pi -n -e ${extension} --print Say OK`.quiet();
   return ["-n", "-e", extension, "--approve", "--yolo"];
 }
 
@@ -394,7 +396,7 @@ async function main() {
         console.log(issue.url);
         console.log(`Parent: ${parent}`);
 
-        const workspaceName = `issue-${issue.number}-${process.pid}`;
+        const workspaceName = `${issue.number}-${process.pid}`;
         const workspacePath = join(workspaceParent, workspaceName);
         await mkdir(workspaceParent, { recursive: true });
         await $`jj workspace add --name ${workspaceName} -r ${`${base}@origin`} ${workspacePath}`.quiet();
@@ -439,8 +441,14 @@ async function main() {
             );
           }
           const pullRequest = JSON.parse(
-            await $`gh pr view ${reference.number} -R ${repo} --json number,state,url,body`.text(),
-          ) as { body: string; number: number; state: string; url: string };
+            await $`gh pr view ${reference.number} -R ${repo} --json number,state,url,body,headRefOid`.text(),
+          ) as {
+            body: string;
+            headRefOid: string;
+            number: number;
+            state: string;
+            url: string;
+          };
           const updatedBody = pullRequestBodyAfterReview(
             issue.number,
             pullRequest.state,
@@ -453,7 +461,19 @@ async function main() {
 
           console.log(`Pull request #${pullRequest.number}: ${pullRequest.url}`);
           console.log(reviewReport(pullRequest.state, piOutput));
-          if (pullRequest.state === "MERGED") {
+          if (shouldMergePullRequest(pullRequest.state, piOutput)) {
+            await $`gh pr merge ${pullRequest.number} -R ${repo} --rebase --match-head-commit ${pullRequest.headRefOid}`.quiet();
+            const mergedState = (
+              await $`gh pr view ${pullRequest.number} -R ${repo} --json state --jq .state`.text()
+            ).trim();
+            if (mergedState !== "MERGED") {
+              throw new Error(
+                `Pull request #${pullRequest.number} is ${mergedState.toLowerCase()} after the merge command`,
+              );
+            }
+            console.log(`Merged pull request #${pullRequest.number}.`);
+            await deleteMergedBranch(workspacePath, repo, pullRequest.number);
+          } else if (pullRequest.state === "MERGED") {
             await deleteMergedBranch(workspacePath, repo, pullRequest.number);
           }
           finished = true;

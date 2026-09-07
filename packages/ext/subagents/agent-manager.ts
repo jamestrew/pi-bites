@@ -426,11 +426,12 @@ export class AgentManager {
   ): Promise<string> {
     while (
       record.generation === generation &&
-      record.pendingCancelSteer &&
+      record.pendingCancelSteers?.length &&
       record.status !== "stopped"
     ) {
-      const message = record.pendingCancelSteer;
-      record.pendingCancelSteer = undefined;
+      const message = record.pendingCancelSteers.shift();
+      if (!record.pendingCancelSteers.length) record.pendingCancelSteers = undefined;
+      if (!message) continue;
       record.status = "running";
       responseText = await resumeAgent(session, message, {
         signal: abortController.signal,
@@ -651,7 +652,7 @@ export class AgentManager {
   }
 
   /**
-   * Send a message to an agent from the UI (mirrors the MessageAgent tool).
+   * Queue input for an agent at its next safe message boundary.
    * A live session queues it for the boundary after the current assistant
    * response's tool-call batch, where it appears as a user message. If the
    * session isn't ready yet, the message is queued on `pendingSteers` and
@@ -673,7 +674,7 @@ export class AgentManager {
   cancelAndSteer(id: string, message: string): boolean {
     const record = this.agents.get(id);
     if (!record?.session || record.status !== "running") return false;
-    record.pendingCancelSteer = message;
+    (record.pendingCancelSteers ??= []).push(message);
     record.abort = {
       timestamp: Date.now(),
       source: "cancel_and_steer",
@@ -709,7 +710,7 @@ export class AgentManager {
     record.result = undefined;
     record.error = undefined;
     record.abort = undefined;
-    record.pendingCancelSteer = undefined;
+    record.pendingCancelSteers = undefined;
     record.pendingSteers = undefined;
     record.completedAt = undefined;
     record.startedAt = Date.now();
@@ -888,7 +889,7 @@ export class AgentManager {
       const record = this.agents.get(queued.id);
       if (record) {
         record.pendingSteers = undefined;
-        record.pendingCancelSteer = undefined;
+        record.pendingCancelSteers = undefined;
         record.status = "stopped";
         record.completedAt = Date.now();
         this.settledGeneration.set(record, record.generation);
@@ -907,7 +908,7 @@ export class AgentManager {
     for (const record of this.agents.values()) {
       if (record.status === "running") {
         record.pendingSteers = undefined;
-        record.pendingCancelSteer = undefined;
+        record.pendingCancelSteers = undefined;
         record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
         this.recordDiagnostic(record, "abort_requested", { source: "shutdown" });
         this.clearSessionQueue(record.session);
