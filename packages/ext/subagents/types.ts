@@ -73,7 +73,11 @@ export interface AgentRecord {
   /** Steering messages queued before the session was ready. */
   pendingSteers?: string[];
   /** Messages to resume with after cancelling the current operation. */
-  pendingCancelSteers?: string[];
+  pendingCancelSteers?: Array<{
+    message: string;
+    accepted?: boolean;
+    settled: Promise<void>;
+  }>;
   /** The tool_use_id from the original spawn_agent tool call. */
   toolCallId?: string;
   /**
@@ -123,7 +127,7 @@ export interface WaitAgentResult {
   id: string;
   type: string;
   description: string;
-  status: AgentRecord["status"];
+  status: AgentRecord["status"] | "not_found";
   result?: string;
   error?: string;
   tool_uses: number;
@@ -150,33 +154,38 @@ export interface WaitAgentSender {
   thinking?: ThinkingLevel;
 }
 
+export type WaitAgentStatus =
+  | "pending_init"
+  | "running"
+  | "interrupted"
+  | "shutdown"
+  | "not_found"
+  | { completed: string | null }
+  | { errored: string };
+
 export type WaitAgentOutcome =
   | {
-      outcome: "message";
+      outcome: "terminal";
       timed_out: false;
-      sender: WaitAgentSender;
-      message: string;
+      status: Record<string, WaitAgentStatus>;
       agents: WaitAgentResult[];
     }
   | {
-      outcome: "terminal" | "cancelled";
+      outcome: "cancelled";
       timed_out: false;
+      status: Record<string, never>;
       agents: WaitAgentResult[];
     }
   | {
       outcome: "timeout";
       timed_out: true;
-      agents: WaitAgentResult[];
-    }
-  | {
-      /** Another delivery path already owns the result; this wait must not duplicate it. */
-      outcome: "delivery_claimed";
-      timed_out: false;
+      status: Record<string, never>;
       agents: WaitAgentResult[];
     }
   | {
       outcome: "error";
       timed_out: false;
+      status: Record<string, never>;
       message: string;
       agents: WaitAgentResult[];
     };

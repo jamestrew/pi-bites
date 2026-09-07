@@ -289,7 +289,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     const id = manager.spawn(mockPi, mockCtx, "worker", "test", {
       description: "test",
     });
-    expect(manager.cancelAndSteer(id, "change course")).toBe(true);
+    await expect(manager.cancelAndSteer(id, "change course")).resolves.toBe(true);
     vi.mocked(appendSubagentUsageRecord).mockClear();
     finishInitialRun();
     await manager.getRecord(id)!.promise;

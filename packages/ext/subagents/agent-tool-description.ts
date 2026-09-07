@@ -32,3 +32,15 @@ export function getSendInputToolParameters() {
     { additionalProperties: false },
   );
 }
+
+/** Build Pi's TypeBox form of the pinned wait_agent parameter contract. */
+export function getWaitAgentToolParameters() {
+  const properties = CODEX_V1_CONTRACT.tools.wait_agent.parameters.properties;
+  return Type.Object(
+    {
+      targets: Type.Array(Type.String(), { description: properties.targets.description }),
+      timeout_ms: Type.Optional(Type.Number({ description: properties.timeout_ms.description })),
+    },
+    { additionalProperties: false },
+  );
+}

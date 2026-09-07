@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../agent-runner.js")>("../agent-runner.js");
-  return { ...actual, runAgent: vi.fn(), steerAgent: vi.fn() };
+  return { ...actual, runAgent: vi.fn(), resumeAgent: vi.fn(), steerAgent: vi.fn() };
 });
 
-import { runAgent, steerAgent } from "../agent-runner.js";
+import { resumeAgent, runAgent, steerAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
 
 function makePi(active = ["spawn_agent", "read"]) {
@@ -298,7 +298,7 @@ describe("background helper tools", () => {
     });
   });
 
-  it("queues input for a live agent and rejects missing or completed agents", async () => {
+  it("queues input for a live agent, rejects missing agents, and resumes completed agents", async () => {
     let finish!: (value: any) => void;
     const session = { steer: vi.fn(async () => {}), dispose: vi.fn() } as any;
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, options) => {
@@ -330,9 +330,13 @@ describe("background helper tools", () => {
 
     finish({ responseText: "done", session });
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
+    vi.mocked(resumeAgent).mockResolvedValue("continued");
     const completed = await tools
       .get("send_input")
       .execute("msg", { target: id, message: "again" }, undefined, undefined, ctx());
-    expect(textOf(completed)).toContain("unavailable (status: completed)");
+    expect(JSON.parse(textOf(completed))).toEqual({ submission_id: expect.any(String) });
+    await vi.waitFor(() =>
+      expect(resumeAgent).toHaveBeenCalledWith(session, "again", expect.any(Object)),
+    );
   });
 });

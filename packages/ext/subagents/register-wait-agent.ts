@@ -1,6 +1,7 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { buildWaitAgentResult } from "./agent-completion.js";
+import { getWaitAgentToolParameters } from "./agent-tool-description.js";
+import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
 import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { textResult } from "./tool-result.js";
 import type { AgentRecord, WaitAgentDetails, WaitAgentOutcome, WaitAgentResult } from "./types.js";
@@ -8,9 +9,7 @@ import { renderWaitAgent } from "./ui/wait-agent-render.js";
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
 export const MIN_WAIT_TIMEOUT_MS = 10_000;
-export const MAX_WAIT_TIMEOUT_MS = 4 * 60_000;
-export const WAIT_AGENT_TIMEOUT_GUIDANCE =
-  "A timeout ends only that wait, not the agent's assignment. If the result still blocks progress after a maximum-length timeout, continue useful work, then use another maximum-length WaitAgent call. Change or stop the assignment only for reasons independent of the timeout.";
+export const MAX_WAIT_TIMEOUT_MS = 60 * 60_000;
 
 type WaitAgentDeps = {
   waitFor: (
@@ -42,40 +41,15 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
   pi.registerTool(
     defineTool({
       name: SUBAGENT_TOOL_NAMES.WAIT_AGENT,
-      label: "WaitAgent",
-      description:
-        "Wait for any selected running agent to send a message or reach a terminal state. This is event-driven, not polling. " +
-        "A timeout returns current statuses without cancelling agents. Wait only when their findings block progress.",
-      promptSnippet: "Wait for selected subagents only when their results block progress",
-      promptGuidelines: [
-        "Use WaitAgent only when selected subagent results are required before continuing; do useful independent work instead when possible.",
-        WAIT_AGENT_TIMEOUT_GUIDANCE,
-        "Do not poll with repeated short WaitAgent calls or sleep with shell commands.",
-      ],
-      parameters: Type.Object(
-        {
-          agent_ids: Type.Array(Type.String(), {
-            minItems: 1,
-            maxItems: 64,
-            uniqueItems: true,
-            description: "Stable agent identities returned by spawn_agent.",
-          }),
-          timeout_ms: Type.Optional(
-            Type.Integer({
-              minimum: MIN_WAIT_TIMEOUT_MS,
-              maximum: MAX_WAIT_TIMEOUT_MS,
-              description: `Bounded wait in milliseconds. Defaults to ${DEFAULT_WAIT_TIMEOUT_MS}. Does not cancel agents.`,
-            }),
-          ),
-        },
-        { additionalProperties: false },
-      ),
+      label: "wait_agent",
+      description: CODEX_V1_CONTRACT.tools.wait_agent.description,
+      parameters: getWaitAgentToolParameters(),
       async execute(_toolCallId, params, signal, onUpdate) {
         const startedAt = Date.now();
         const details = (): WaitAgentDetails => ({
           outcome: "waiting",
           timed_out: false,
-          agents: params.agent_ids
+          agents: params.targets
             .map(deps.getRecord)
             .filter((record): record is AgentRecord => Boolean(record))
             .map((record) => withDisplayDetails(buildWaitAgentResult(record, false))),
@@ -92,11 +66,24 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
         timer?.unref();
 
         try {
-          const outcome = await deps.waitFor(
-            params.agent_ids,
-            params.timeout_ms ?? DEFAULT_WAIT_TIMEOUT_MS,
-            signal,
+          if (params.timeout_ms !== undefined && params.timeout_ms <= 0) {
+            const message = "timeout_ms must be greater than zero";
+            return textResult(message, {
+              outcome: "error",
+              timed_out: false,
+              status: {},
+              message,
+              agents: details().agents,
+              wait_started_at: startedAt,
+              wait_ended_at: Date.now(),
+              timeout_ms: params.timeout_ms,
+            });
+          }
+          const timeoutMs = Math.min(
+            MAX_WAIT_TIMEOUT_MS,
+            Math.max(MIN_WAIT_TIMEOUT_MS, params.timeout_ms ?? DEFAULT_WAIT_TIMEOUT_MS),
           );
+          const outcome = await deps.waitFor(params.targets, timeoutMs, signal);
           const finalDetails: WaitAgentDetails = {
             ...outcome,
             agents: outcome.agents.map(withDisplayDetails),
@@ -104,18 +91,11 @@ export function registerWaitAgent(pi: ExtensionAPI, deps: WaitAgentDeps): void {
             wait_ended_at: Date.now(),
             ...(params.timeout_ms === undefined ? {} : { timeout_ms: params.timeout_ms }),
           };
-          const modelOutcome =
-            outcome.outcome === "message"
-              ? {
-                  ...outcome,
-                  sender: {
-                    id: outcome.sender.id,
-                    type: outcome.sender.type,
-                    title: outcome.sender.title,
-                  },
-                }
-              : outcome;
-          return textResult(JSON.stringify(modelOutcome, null, 2), finalDetails);
+          if (outcome.outcome === "error") return textResult(outcome.message, finalDetails);
+          return textResult(
+            JSON.stringify({ status: outcome.status, timed_out: outcome.timed_out }),
+            finalDetails,
+          );
         } finally {
           if (timer) clearInterval(timer);
         }

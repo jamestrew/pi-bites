@@ -90,8 +90,9 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
   }
 
   async function viewAgentConversation(ctx: ExtensionCommandContext, record: AgentRecord) {
+    const ui = ctx.ui;
     if (!record.session) {
-      ctx.ui.notify(
+      ui.notify(
         `Agent is ${record.status === "queued" ? "queued" : "expired"} — no session available.`,
         "info",
       );
@@ -101,7 +102,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     const { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } =
       await import("./ui/conversation-viewer.js");
     const session = record.session;
-    await ctx.ui.custom<undefined>(
+    await ui.custom<undefined>(
       (tui, theme, keybindings, done) =>
         new ConversationViewer(
           tui,
@@ -111,14 +112,15 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           theme,
           done,
           () => {
-            if (manager.abort(record.id)) ctx.ui.notify(`Stopped "${record.description}".`, "info");
+            if (manager.abort(record.id)) ui.notify(`Stopped "${record.description}".`, "info");
           },
           keybindings,
           (message: string) => manager.steer(record.id, message),
           (message: string) => {
-            if (manager.cancelAndSteer(record.id, message)) {
-              ctx.ui.notify(`Canceled current operation for "${record.description}".`, "info");
-            }
+            void manager.cancelAndSteer(record.id, message).then((interrupted) => {
+              if (interrupted)
+                ui.notify(`Canceled current operation for "${record.description}".`, "info");
+            });
           },
         ),
       CONVERSATION_OVERLAY_OPTIONS,

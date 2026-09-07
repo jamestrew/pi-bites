@@ -44,7 +44,7 @@ import type { AssistantUsage } from "./usage.js";
 /** Tool names shared by this extension's registration and subagent exclusion. */
 export const SUBAGENT_TOOL_NAMES = {
   SPAWN_AGENT: "spawn_agent",
-  WAIT_AGENT: "WaitAgent",
+  WAIT_AGENT: "wait_agent",
   SEND_INPUT: "send_input",
   MESSAGE_AGENT: "MessageAgent",
 } as const;

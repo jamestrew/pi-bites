@@ -6,15 +6,15 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
-import { isAbsolute } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { AgentInterrupter } from "./agent-interruption.js";
 import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";
 import { resolveAgent } from "./agent-types.js";
 import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
+import { assertValidSpawnCwd } from "./spawn-cwd.js";
 import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
@@ -34,31 +34,6 @@ export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; toke
 /** Default max concurrent agents. */
 const DEFAULT_MAX_CONCURRENT = 4;
 export const MAX_RETAINED_TOOL_CALLS = 200;
-
-/**
- * Validate a caller-supplied SpawnOptions.cwd. `undefined`/`null` mean "unset"
- * (parent cwd). Anything else must be an absolute path to an existing
- * directory — curated errors instead of TypeErrors from path/fs internals
- * (RPC callers send arbitrary JSON: null, numbers, file paths).
- */
-function assertValidSpawnCwd(cwd: unknown): asserts cwd is string | undefined | null {
-  if (cwd == null) return;
-  if (typeof cwd !== "string") {
-    throw new Error(`SpawnOptions.cwd must be an absolute path`);
-  }
-  if (!isAbsolute(cwd)) {
-    throw new Error(`SpawnOptions.cwd must be an absolute path: "${cwd}"`);
-  }
-  let isDirectory = false;
-  try {
-    isDirectory = statSync(cwd).isDirectory();
-  } catch {
-    throw new Error(`SpawnOptions.cwd does not exist: "${cwd}"`);
-  }
-  if (!isDirectory) {
-    throw new Error(`SpawnOptions.cwd is not a directory: "${cwd}"`);
-  }
-}
 
 interface SpawnArgs {
   pi: ExtensionAPI;
@@ -131,6 +106,7 @@ export class AgentManager {
   private completedGeneration = new WeakMap<AgentRecord, number>();
   private releasedGeneration = new WeakMap<AgentRecord, number>();
   private settledGeneration = new WeakMap<AgentRecord, number>();
+  private interruptions: AgentInterrupter;
   private options = new WeakMap<AgentRecord, SpawnOptions>();
   private turnCounts = new WeakMap<AgentRecord, number>();
   private pendingAgents = new Set<Promise<string>>();
@@ -153,6 +129,21 @@ export class AgentManager {
     this.messageParent = messageParent;
     this.getAutoCompactionThreshold = getAutoCompactionThreshold;
     this.maxConcurrent = maxConcurrent;
+    this.interruptions = new AgentInterrupter({
+      isSettled: (record, generation) => (this.settledGeneration.get(record) ?? 0) >= generation,
+      onRequest: (record, source, generation) =>
+        this.recordDiagnostic(record, "abort_requested", { source, generation }),
+      onFailure: (record, error) => {
+        this.recordFailure(record, {
+          timestamp: Date.now(),
+          phase: "manager",
+          message: error instanceof Error ? error.message : String(error),
+          ...(error instanceof Error ? { name: error.name } : {}),
+          error_details: serializeDiagnosticError(error),
+          manager_signal_aborted: record.abortController?.signal.aborted ?? false,
+        });
+      },
+    });
     // Cleanup completed agents after 10 minutes (but keep sessions for resume)
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
     this.cleanupInterval.unref();
@@ -429,11 +420,14 @@ export class AgentManager {
       record.pendingCancelSteers?.length &&
       record.status !== "stopped"
     ) {
-      const message = record.pendingCancelSteers.shift();
+      const redirect = record.pendingCancelSteers.shift();
       if (!record.pendingCancelSteers.length) record.pendingCancelSteers = undefined;
-      if (!message) continue;
+      if (!redirect) continue;
+      await redirect.settled;
+      if (!redirect.accepted) continue;
+      if (record.generation !== generation || record.status !== "running") break;
       record.status = "running";
-      responseText = await resumeAgent(session, message, {
+      responseText = await resumeAgent(session, redirect.message, {
         signal: abortController.signal,
         ...hooks,
       });
@@ -671,19 +665,10 @@ export class AgentManager {
     return true;
   }
 
-  cancelAndSteer(id: string, message: string): boolean {
+  async cancelAndSteer(id: string, message: string): Promise<boolean> {
     const record = this.agents.get(id);
     if (!record?.session || record.status !== "running") return false;
-    (record.pendingCancelSteers ??= []).push(message);
-    record.abort = {
-      timestamp: Date.now(),
-      source: "cancel_and_steer",
-      reason: "cancel_and_steer",
-    };
-    this.recordDiagnostic(record, "abort_requested", { source: "cancel_and_steer" });
-    this.clearSessionQueue(record.session);
-    record.session.abort().catch(() => {});
-    return true;
+    return this.interruptions.interrupt(record, record.session, "cancel_and_steer", message);
   }
 
   /** Start another turn on a retained, settled session. */
@@ -739,27 +724,30 @@ export class AgentManager {
     const queuedAt = record.startedAt;
     record.startedAt = Date.now();
     this.runningCount++;
-    this.recordDiagnostic(record, "started", {
-      resumed: true,
-      generation,
-      queue_duration_ms: record.startedAt - queuedAt,
-      manager_running_count: this.runningCount,
-      manager_queue_length: this.queue.length,
-      manager_max_concurrent: this.maxConcurrent,
-    });
-
-    const hooks = this.createTurnHooks(record, options, generation, "increment");
-    this.clearSessionQueue(session);
-    if (record.pendingSteers?.length) {
-      for (const message of record.pendingSteers) session.steer(message).catch(() => {});
-      record.pendingSteers = undefined;
+    try {
+      this.recordDiagnostic(record, "started", {
+        resumed: true,
+        generation,
+        queue_duration_ms: record.startedAt - queuedAt,
+        manager_running_count: this.runningCount,
+        manager_queue_length: this.queue.length,
+        manager_max_concurrent: this.maxConcurrent,
+      });
+      const hooks = this.createTurnHooks(record, options, generation, "increment");
+      this.clearSessionQueue(session);
+      if (record.pendingSteers?.length) {
+        for (const message of record.pendingSteers) session.steer(message).catch(() => {});
+        record.pendingSteers = undefined;
+      }
+      const started = resumeAgent(session, prompt, {
+        signal: abortController.signal,
+        ...hooks,
+      }).then((responseText) => ({ responseText, session }));
+      this.manageGeneration(record, generation, abortController, started, hooks);
+      this.notifyStart(record);
+    } catch (error) {
+      this.failGeneration(record, generation, abortController, error);
     }
-    const started = resumeAgent(session, prompt, {
-      signal: abortController.signal,
-      ...hooks,
-    }).then((responseText) => ({ responseText, session }));
-    this.manageGeneration(record, generation, abortController, started, hooks);
-    this.notifyStart(record);
   }
 
   /** Abort the active turn after session creation without disposing the retained session. */
@@ -767,41 +755,10 @@ export class AgentManager {
     const record = this.agents.get(id);
     if (!record?.session || record.status !== "running" || !record.promise) return false;
 
-    const generation = record.generation;
     const session = record.session;
     const promise = record.promise;
-    record.status = "stopped";
-    record.error = "interrupted";
-    record.abort = { timestamp: Date.now(), source: "interrupt", reason: "interrupt" };
-    this.recordDiagnostic(record, "abort_requested", { source: "interrupt", generation });
-    const clearedMessages = session.clearQueue();
-
-    try {
-      await session.abort();
-    } catch (error) {
-      if (
-        record.generation === generation &&
-        record.promise === promise &&
-        (this.settledGeneration.get(record) ?? 0) < generation
-      ) {
-        this.recordFailure(record, {
-          timestamp: Date.now(),
-          phase: "manager",
-          message: error instanceof Error ? error.message : String(error),
-          ...(error instanceof Error ? { name: error.name } : {}),
-          error_details: serializeDiagnosticError(error),
-          manager_signal_aborted: record.abortController?.signal.aborted ?? false,
-        });
-        record.status = "running";
-        record.error = undefined;
-        record.abort = undefined;
-        for (const message of clearedMessages.steering)
-          await session.steer(message).catch(() => {});
-        for (const message of clearedMessages.followUp)
-          await session.followUp(message).catch(() => {});
-      }
-      return false;
-    }
+    const interrupted = await this.interruptions.interrupt(record, session, "interrupt");
+    if (!interrupted) return false;
     await promise;
     return true;
   }
@@ -837,6 +794,7 @@ export class AgentManager {
     }
 
     if (record.status !== "running") return false;
+    record.pendingCancelSteers = undefined;
     record.status = "stopped";
     record.error = "aborted";
     record.completedAt = Date.now();
