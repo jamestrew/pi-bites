@@ -45,6 +45,7 @@ import type { AssistantUsage } from "./usage.js";
 export const SUBAGENT_TOOL_NAMES = {
   SPAWN_AGENT: "spawn_agent",
   WAIT_AGENT: "WaitAgent",
+  SEND_INPUT: "send_input",
   MESSAGE_AGENT: "MessageAgent",
 } as const;
 
