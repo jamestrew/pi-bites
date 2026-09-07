@@ -4,7 +4,7 @@
  * Tools:
  *   spawn_agent   — LLM-callable: spawn a sub-agent
  *   WaitAgent     — LLM-callable: wait for selected sub-agents
- *   MessageAgent  — LLM-callable: send a message to a running agent
+ *   send_input    — LLM-callable: send input to a running sub-agent
  *
  * Commands:
  *   /agents                 — Interactive agent management menu
@@ -25,7 +25,7 @@ import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import { createSubagentMessenger } from "./subagent-messages.js";
 import { registerAgentTool } from "./register-agent-tool.js";
-import { registerMessageAgent } from "./register-message-agent.js";
+import { registerSendInput } from "./register-send-input.js";
 import { registerWaitAgent } from "./register-wait-agent.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
@@ -399,12 +399,12 @@ export default function (
     setFleetViewEnabled,
   });
 
-  // ---- WaitAgent and MessageAgent tools ----
+  // ---- WaitAgent and send_input tools ----
   registerWaitAgent(pi, {
     waitFor: completion.waitFor,
     getRecord: (id) => manager.getRecord(id),
   });
-  registerMessageAgent(pi, manager);
+  registerSendInput(pi, manager);
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {

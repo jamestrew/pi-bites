@@ -139,7 +139,7 @@ function createAuthorizationIntegrationHarness() {
       getEntries: () => branch,
     },
   };
-  const configRef = { current: { autoMode: { enabled: true } } as any };
+  const configRef = { current: { bashGate: { mode: "auto" } } as any };
   const autoMode = registerAutoMode(pi as any, configRef);
   registerBashGate(pi as any, configRef, autoMode);
   for (const start of lifecycle.get("session_start") ?? []) start({}, ctx);
@@ -156,7 +156,7 @@ beforeEach(() => {
 describe("automode registration state", () => {
   test("loads config on session startup and allows the bash gate to change modes", () => {
     const { configRef, controller, ctx, lifecycle, pi, ui } = createAutoModeHarness({
-      autoMode: { enabled: true },
+      bashGate: { mode: "auto" },
     });
     const start = lifecycle.get("session_start")!;
 
@@ -171,7 +171,7 @@ describe("automode registration state", () => {
     controller.setEnabled(true, ctx);
     expect(controller.isEnabled()).toBe(true);
 
-    configRef.current = { autoMode: { enabled: false } };
+    configRef.current = { bashGate: { mode: "manual" } };
     start({}, ctx);
     expect(controller.isEnabled()).toBe(false);
     expect(ui.setStatus).toHaveBeenLastCalledWith("automode", undefined);

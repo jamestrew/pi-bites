@@ -6,8 +6,10 @@ version=$(pi -v)
 
 bun update --latest \
   "@earendil-works/pi-coding-agent@$version" \
+  "@earendil-works/pi-server@$version" \
   "@earendil-works/pi-tui@$version"
 
 bun pm pkg set \
   'peerDependencies.@earendil-works/pi-coding-agent=*' \
+  'peerDependencies.@earendil-works/pi-server=*' \
   'peerDependencies.@earendil-works/pi-tui=*'

@@ -7,7 +7,8 @@ import {
   reviewReport,
   runCaptured,
   selectCandidates,
-} from "./run-ready-for-agent-issues.ts";
+  shouldMergePullRequest,
+} from "./loop.ts";
 
 const issue = (
   number: number,
@@ -116,6 +117,12 @@ describe("review findings", () => {
 });
 
 describe("review report", () => {
+  it("merges an open pull request after Pi approves the review", () => {
+    expect(shouldMergePullRequest("OPEN", "RALPH_REVIEW: APPROVED")).toBe(true);
+    expect(shouldMergePullRequest("OPEN", "RALPH_REVIEW: CHANGES REQUESTED")).toBe(false);
+    expect(shouldMergePullRequest("MERGED", "RALPH_REVIEW: APPROVED")).toBe(false);
+  });
+
   it("shows the decision and preserves failed-review findings", () => {
     expect(reviewReport("OPEN", "RALPH_REVIEW: APPROVED")).toContain("approved");
     expect(reviewReport("OPEN", "Fix the race condition.")).toContain("Fix the race condition.");

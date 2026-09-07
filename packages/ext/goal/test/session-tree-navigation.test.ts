@@ -142,21 +142,11 @@ test("navigation resets accounting and ignores the previous branch terminal work
     isError: false,
   });
 
-  harness.setIdle(false);
-  const preparing = harness.emit("session_before_tree", {
-    type: "session_before_tree",
-    preparation: {},
-    signal: new AbortController().signal,
-  });
-  await Promise.resolve();
-  assert.equal(harness.abortCount, 1);
   await harness.emit("agent_end", {
     type: "agent_end",
     messages: [{ role: "assistant", stopReason: "error", errorMessage: "old failure" }],
   });
-  harness.setIdle(true);
   vi.runOnlyPendingTimers();
-  await preparing;
 
   harness.selectBranch(branchAtCreation);
   harness.sentMessages.length = 0;

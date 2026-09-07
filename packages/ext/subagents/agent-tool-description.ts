@@ -19,3 +19,16 @@ export function getAgentToolParameters() {
     { additionalProperties: false },
   );
 }
+
+/** Build Pi's TypeBox form of the pinned send_input parameter contract. */
+export function getSendInputToolParameters() {
+  const properties = CODEX_V1_CONTRACT.tools.send_input.parameters.properties;
+  return Type.Object(
+    {
+      target: Type.String({ description: properties.target.description }),
+      message: Type.String({ description: properties.message.description }),
+      interrupt: Type.Optional(Type.Boolean({ description: properties.interrupt.description })),
+    },
+    { additionalProperties: false },
+  );
+}

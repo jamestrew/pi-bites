@@ -342,7 +342,7 @@ export default function registerAutoMode(
     ctx.ui.setStatus("automode", enabled ? "🤖 AUTO" : undefined);
 
   pi.on("session_start", (_event, ctx) => {
-    enabled = configRef.current.autoMode?.enabled ?? false;
+    enabled = configRef.current.bashGate?.mode === "auto";
     setStatus(ctx);
   });
 

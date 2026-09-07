@@ -19,6 +19,7 @@
  *     "thresholdTokens": 150000
  *   },
  *   "bashGate": {
+ *     "mode": "yolo",
  *     "rules": [
  *       { "cmd": "bun", "subcommands": ["test"] },
  *       { "cmd": "npm", "subcommands": ["test"] },
@@ -63,8 +64,6 @@ export interface AutoCompactionConfig {
 }
 
 export interface AutoModeConfig {
-  /** Route bash-gate prompts to a reviewer model by default. */
-  enabled?: boolean;
   /** Reviewer model. Defaults to the active model. */
   model?: string;
   /** Reviewer thinking level. Defaults to low. */
@@ -88,6 +87,8 @@ export interface NotificationsConfig {
 }
 
 export type OneOrMany<T> = T | T[];
+export const BASH_GATE_MODES = ["manual", "auto", "yolo"] as const;
+export type BashGateMode = (typeof BASH_GATE_MODES)[number];
 export const BASH_GATE_REDIRECT_RULES = ["any-write", "append", "truncate"] as const;
 export type BashGateRedirectRule = (typeof BASH_GATE_REDIRECT_RULES)[number];
 
@@ -100,6 +101,8 @@ export interface BashGateRule {
 }
 
 export interface BashGateConfig {
+  /** Initial permission mode for each session. Defaults to manual. */
+  mode?: BashGateMode;
   /** Extra rules added to the built-in destructive-command rules. */
   rules?: BashGateRule[];
 }
@@ -192,7 +195,6 @@ function isAutoCompactionConfig(value: unknown): value is AutoCompactionConfig {
 function isAutoModeConfig(value: unknown): value is AutoModeConfig {
   return (
     isRecord(value) &&
-    isOptional(value, "enabled", (field) => typeof field === "boolean") &&
     isOptional(value, "model", (field) => typeof field === "string") &&
     isOptional(value, "thinking", (field) => THINKING_LEVELS.some((level) => level === field)) &&
     isOptional(value, "policy", (field) => typeof field === "string")
@@ -231,6 +233,7 @@ function isBashGateRule(value: unknown): value is BashGateRule {
 function isBashGateConfig(value: unknown): value is BashGateConfig {
   return (
     isRecord(value) &&
+    isOptional(value, "mode", (field) => BASH_GATE_MODES.some((mode) => mode === field)) &&
     isOptional(value, "rules", (rules) => Array.isArray(rules) && rules.every(isBashGateRule))
   );
 }
