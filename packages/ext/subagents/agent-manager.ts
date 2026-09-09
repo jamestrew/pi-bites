@@ -63,6 +63,8 @@ interface TurnHooks {
 
 export interface SpawnOptions {
   description: string;
+  /** Explicitly wait for another agent to close when capacity is exhausted. */
+  queueIfBusy?: boolean;
   model?: Model<Api>;
   isolated?: boolean;
   thinkingLevel?: ThinkingLevel;
@@ -147,8 +149,6 @@ export class AgentManager {
     });
     this.closer = new AgentCloser(this.agents, {
       abort: (id) => void this.abort(id),
-      canRemove: (record) => this.canRemove(record),
-      hasSlot: (record) => this.reservations.has(record),
       teardown: async (record) => {
         if (record.session) await this.teardownSession(record.session);
       },
@@ -290,7 +290,7 @@ export class AgentManager {
 
   /**
    * Spawn an agent and return its ID immediately.
-   * If the concurrency limit is reached, the agent is queued.
+   * Rejects at capacity unless the caller explicitly opts into queuing.
    */
   spawn(
     pi: ExtensionAPI,
@@ -308,6 +308,9 @@ export class AgentManager {
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.
     assertValidSpawnCwd(options.cwd);
+    if (!options.queueIfBusy && this.reservedCount >= this.maxConcurrent) {
+      throw new Error("No concurrency slot is available. Close an agent before spawning another.");
+    }
 
     const id = randomUUID().slice(0, 17);
     const parent = snapshotParent(ctx);
@@ -862,14 +865,13 @@ export class AgentManager {
     record.error = "aborted";
     record.completedAt = Date.now();
     record.abort = { timestamp: Date.now(), source: "stop", reason: "stop" };
-    this.recordDiagnostic(record, "abort_requested", { source: "stop" });
-    this.clearSessionQueue(record.session);
-    record.abortController?.abort(record.abort.reason);
+    try {
+      this.recordDiagnostic(record, "abort_requested", { source: "stop" });
+      this.clearSessionQueue(record.session);
+    } finally {
+      record.abortController?.abort(record.abort.reason);
+    }
     return true;
-  }
-
-  private canRemove(record: AgentRecord): boolean {
-    return !record.promise || (this.settledGeneration.get(record) ?? 0) >= record.generation;
   }
 
   /** Whether any agents are still running or queued. */

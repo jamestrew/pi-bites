@@ -48,6 +48,11 @@ and reasoning effort unless the caller explicitly overrides supported settings.
 - Pi keeps `explorer` read-only through its existing tool allowlist.
 - A spawned agent reserves concurrency until `close_agent`, including after completion. A spawn that
   cannot reserve a slot fails instead of entering an invisible queue.
+  Direct manager callers may explicitly opt into queued work with `queueIfBusy: true`.
+  The global `Symbol.for("pi-subagents:manager")` registry exposes `close(id)` to release slots.
+  RPC protocol version 6 adds `subagents:rpc:close` with `{ requestId, agentId }`, returning
+  `{ previous_status }` in the success envelope. `subagents:rpc:stop` still only interrupts work;
+  it does not release the reservation.
 - `wait_agent` and the asynchronous completion notification are independent delivery channels. A
   waiter may therefore observe the same completed status that is also sent in a notification.
 - `close_agent` snapshots the target status, stops its manager-known open subtree, tears down each

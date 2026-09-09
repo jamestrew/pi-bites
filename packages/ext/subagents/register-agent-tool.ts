@@ -75,7 +75,10 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
             if (!context.expanded && promptLines.slice(3).some((line) => line.trim().length > 0))
               lines.push(fitLine(theme.fg("dim", `(${expandHint()})`), width));
             if (effective?.error) {
-              lines.push("", fitLine(theme.fg("dim", `Error: ${effective.error}`), width));
+              lines.push(
+                "",
+                fitLine(theme.fg("dim", `Error: ${sanitizeSingleLine(effective.error)}`), width),
+              );
             }
             return lines;
           },
@@ -94,6 +97,15 @@ export function registerAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps)
             thinking,
             subagentType: details?.subagentType,
             error: details?.error,
+          });
+        }
+        if (context.isError) {
+          renderMetadata.set(context.toolCallId, {
+            ...renderMetadata.get(context.toolCallId),
+            error: result.content
+              .filter((block) => block.type === "text")
+              .map((block) => block.text)
+              .join("\n"),
           });
         }
         return new Container();

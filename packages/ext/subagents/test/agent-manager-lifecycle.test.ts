@@ -91,6 +91,7 @@ describe("AgentManager — detached lifecycle", () => {
       description: "first",
     });
     const second = manager.spawn(mockPi, parent, "worker", "second", {
+      queueIfBusy: true,
       description: "second",
     });
     goStale();
@@ -125,6 +126,7 @@ describe("AgentManager — detached lifecycle", () => {
 
     manager.spawn(mockPi, parent, "worker", "blocker", { description: "blocker" });
     manager.spawn(mockPi, parent, "default", "forked", {
+      queueIfBusy: true,
       description: "forked",
       forkContext: true,
     });
@@ -220,6 +222,7 @@ describe("AgentManager — detached lifecycle", () => {
       () => new Promise((resolve) => (finishBlocker = resolve)),
     );
     const blocker = manager.spawn(mockPi, mockCtx, "worker", "block", {
+      queueIfBusy: true,
       description: "blocker",
     });
     vi.mocked(resumeAgent).mockResolvedValue("second result");
@@ -621,6 +624,7 @@ describe("AgentManager — detached lifecycle", () => {
       .mockImplementationOnce(() => new Promise((resolve) => (finishBlocker = resolve)))
       .mockResolvedValueOnce({ responseText: "follower result", session: mockSession() });
     const blocker = manager.spawn(mockPi, mockCtx, "worker", "block", {
+      queueIfBusy: true,
       description: "blocker",
     });
     retainedSession.clearQueue.mockImplementationOnce(() => {
@@ -628,6 +632,7 @@ describe("AgentManager — detached lifecycle", () => {
     });
     expect(manager.startTurn(retained, "second")).toBe(true);
     const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
+      queueIfBusy: true,
       description: "follower",
     });
 
@@ -666,6 +671,7 @@ describe("AgentManager — detached lifecycle", () => {
       .mockImplementationOnce(() => new Promise((resolve) => (finishBlocker = resolve)))
       .mockResolvedValueOnce({ responseText: "follower result", session: mockSession() });
     const blocker = manager.spawn(mockPi, mockCtx, "worker", "block", {
+      queueIfBusy: true,
       description: "blocker",
     });
     const recordDiagnostic = (manager as any).recordDiagnostic.bind(manager);
@@ -679,6 +685,7 @@ describe("AgentManager — detached lifecycle", () => {
     };
     expect(manager.startTurn(retained, "second")).toBe(true);
     const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
+      queueIfBusy: true,
       description: "follower",
     });
 
@@ -730,6 +737,7 @@ describe("AgentManager — detached lifecycle", () => {
       description: "first",
     });
     const queued = manager.spawn(mockPi, mockCtx, "worker", "queued", {
+      queueIfBusy: true,
       description: "queued",
     });
 

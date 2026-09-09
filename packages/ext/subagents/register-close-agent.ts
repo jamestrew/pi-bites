@@ -1,4 +1,4 @@
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI, keyHint } from "@earendil-works/pi-coding-agent";
 import { Container, type Component } from "@earendil-works/pi-tui";
 import type { AgentManager } from "./agent-manager.js";
 import { getCloseAgentToolParameters } from "./agent-tool-description.js";
@@ -7,7 +7,7 @@ import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
 import { textResult } from "./tool-result.js";
 import type { WaitAgentStatus } from "./types.js";
 import type { Theme } from "./ui/agent-format.js";
-import { fitLine, sanitizeSingleLine } from "./ui/text-lines.js";
+import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./ui/text-lines.js";
 
 type CloseAgentDetails = {
   target?: string;
@@ -30,41 +30,37 @@ export function registerCloseAgent(pi: ExtensionAPI, manager: AgentManager): voi
           state.target = target;
           state.recipient = manager.getRecord(target)?.description ?? target;
         }
-        return renderCloseAgent(state, theme);
+        return renderCloseAgent(state, context.expanded, theme);
       },
       renderResult(result, _options, _theme, context) {
         const details = result.details as CloseAgentDetails | undefined;
         if (details) Object.assign(context.state, details);
+        if (context.isError) {
+          Object.assign(context.state, {
+            status: "failed",
+            error: result.content
+              .filter((block) => block.type === "text")
+              .map((block) => block.text)
+              .join("\n"),
+          });
+        }
         return new Container();
       },
       async execute(_toolCallId, { target }) {
         const recipient = manager.getRecord(target)?.description ?? target;
-        try {
-          const previousStatus = await manager.close(target);
-          return textResult<CloseAgentDetails>(
-            JSON.stringify({ previous_status: previousStatus }),
-            {
-              target,
-              recipient,
-              status: "closed",
-              previousStatus,
-            },
-          );
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return textResult<CloseAgentDetails>(message, {
-            target,
-            recipient,
-            status: "failed",
-            error: message,
-          });
-        }
+        const previousStatus = await manager.close(target);
+        return textResult<CloseAgentDetails>(JSON.stringify({ previous_status: previousStatus }), {
+          target,
+          recipient,
+          status: "closed",
+          previousStatus,
+        });
       },
     }),
   );
 }
 
-function renderCloseAgent(state: CloseAgentDetails, theme: Theme): Component {
+function renderCloseAgent(state: CloseAgentDetails, expanded: boolean, theme: Theme): Component {
   return {
     render(width: number): string[] {
       const metadata = [
@@ -72,13 +68,21 @@ function renderCloseAgent(state: CloseAgentDetails, theme: Theme): Component {
         state.status,
         state.previousStatus === undefined ? undefined : `was ${statusLabel(state.previousStatus)}`,
       ].filter(Boolean);
-      const suffix = metadata.length > 0 ? ` → ${metadata.join(" · ")}` : "";
+      const suffix = metadata.length > 0 ? ` ${metadata.join(" ")}` : "";
       const lines = [fitLine(theme.bold("close_agent") + theme.fg("accent", suffix), width)];
       if (state.error) {
+        const details = wrapDisplayLines(`Error: ${state.error}`, Math.max(1, width));
         lines.push(
           "",
-          fitLine(theme.fg("dim", `Error: ${sanitizeSingleLine(state.error)}`), width),
+          ...(expanded ? details : details.slice(0, 8)).map((line) =>
+            fitLine(theme.fg("dim", line), width),
+          ),
         );
+        if (!expanded && details.length > 8) {
+          lines.push(
+            fitLine(theme.fg("dim", `(${keyHint("app.tools.expand", "to expand")})`), width),
+          );
+        }
       }
       return lines;
     },

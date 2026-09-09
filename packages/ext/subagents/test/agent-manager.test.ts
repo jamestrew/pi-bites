@@ -339,6 +339,7 @@ describe("AgentManager — abort() state machine", () => {
 
     manager.spawn(mockPi, mockCtx, "worker", "blocker", { description: "block" });
     const queuedId = manager.spawn(mockPi, mockCtx, "worker", "queued", {
+      queueIfBusy: true,
       description: "q",
     });
     const queuedRecord = manager.getRecord(queuedId)!;
@@ -405,7 +406,10 @@ describe("AgentManager — abort() state machine", () => {
 
     const id = manager.spawn(mockPi, mockCtx, "worker", "p", { description: "r" });
     const record = manager.getRecord(id)!;
-    const queuedId = manager.spawn(mockPi, mockCtx, "worker", "q", { description: "queued" });
+    const queuedId = manager.spawn(mockPi, mockCtx, "worker", "q", {
+      queueIfBusy: true,
+      description: "queued",
+    });
     expect(record.status).toBe("running");
     expect(manager.getRecord(queuedId)?.status).toBe("queued");
 
@@ -516,6 +520,7 @@ describe("AgentManager — abortAll", () => {
       description: "r",
     });
     const queued = manager.spawn(mockPi, mockCtx, "worker", "q", {
+      queueIfBusy: true,
       description: "q",
     });
     expect(manager.getRecord(running)?.status).toBe("running");
@@ -556,7 +561,7 @@ describe("AgentManager — hasRunning", () => {
     mockPendingRun();
 
     manager.spawn(mockPi, mockCtx, "worker", "r", { description: "r" });
-    manager.spawn(mockPi, mockCtx, "worker", "q", { description: "q" });
+    manager.spawn(mockPi, mockCtx, "worker", "q", { queueIfBusy: true, description: "q" });
     expect(manager.hasRunning()).toBe(true);
   });
 });

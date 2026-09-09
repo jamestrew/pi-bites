@@ -212,6 +212,19 @@ describe("spawn_agent", () => {
     expect(line).toContain("spawn_agent worker");
   });
 
+  it("shows thrown capacity failures from the host on the call row", () => {
+    const tool = captureAgentTool();
+    const context = { toolCallId: "capacity-error", isError: true };
+    const call = tool.renderCall({ message: "work" }, theme, context);
+    tool.renderResult(
+      { content: [{ type: "text", text: "No concurrency slot is available." }] },
+      { expanded: false, isPartial: false },
+      theme,
+      context,
+    );
+    expect(call.render(200).join("\n")).toContain("Error: No concurrency slot is available.");
+  });
+
   it("shows spawn failures on the call row", async () => {
     const tool = captureAgentTool();
     const context = { toolCallId: "failed-call" };

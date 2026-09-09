@@ -41,6 +41,7 @@ describe("AgentManager.close", () => {
     await manager.getRecord(completed)!.promise;
     const queued = manager.spawn(mockPi, mockCtx, "worker", "second", {
       description: "second",
+      queueIfBusy: true,
     });
 
     expect(manager.getRecord(queued)?.status).toBe("queued");
@@ -139,6 +140,7 @@ describe("AgentManager.close", () => {
     });
     const follower = manager.spawn(mockPi, mockCtx, "worker", "follower", {
       description: "follower",
+      queueIfBusy: true,
     });
     const first = manager.close(id);
     const repeated = manager.close(id);
@@ -157,6 +159,7 @@ describe("AgentManager.close", () => {
     expect(manager.getRecord(follower)?.status).toBe("running");
     const queued = manager.spawn(mockPi, mockCtx, "worker", "queued", {
       description: "queued",
+      queueIfBusy: true,
     });
     expect(manager.getClosedRecord(id)).toEqual({ id, recoverable: false });
     await expect(manager.close(id)).resolves.toBe("shutdown");
@@ -200,6 +203,7 @@ describe("AgentManager.close", () => {
     });
     const queued = manager.spawn(mockPi, mockCtx, "worker", "queued", {
       description: "queued",
+      queueIfBusy: true,
     });
 
     const closing = manager.close(queued);
@@ -230,7 +234,10 @@ describe("AgentManager.close", () => {
     const parent = manager.spawn(mockPi, mockCtx, "worker", "parent", {
       description: "parent",
     });
-    const child = manager.spawn(mockPi, mockCtx, "worker", "child", { description: "child" });
+    const child = manager.spawn(mockPi, mockCtx, "worker", "child", {
+      description: "child",
+      queueIfBusy: true,
+    });
     manager.getRecord(child)!.parentSessionId = "parent-agent-session";
 
     await manager.close(parent);
@@ -334,8 +341,13 @@ describe("AgentManager.close", () => {
     expect(manager.getClosedRecord(child)).toEqual({ id: child, recoverable: false });
     expect(manager.getRecord(parent)).toBeDefined();
 
+    const repeatedChild = await Promise.race([
+      manager.close(child),
+      Promise.resolve("still waiting"),
+    ]);
     rejectParent(new Error("aborted"));
     await expect(closing).resolves.toBe("running");
+    expect(repeatedChild).toBe("shutdown");
   });
 
   it("finishes descendant teardown when the target teardown fails", async () => {
@@ -374,12 +386,55 @@ describe("AgentManager.close", () => {
     const child = manager.spawn(mockPi, mockCtx, "worker", "child", { description: "child" });
     manager.getRecord(child)!.parentSessionId = "failing-parent-session";
 
-    await expect(manager.close(parent)).rejects.toThrow("dispose failed");
+    const closing = manager.close(parent);
+    const closingChild = manager.close(child);
+    // Attach the assertion before either operation can reject.
+    const childResult = expect(closingChild).resolves.toBe("shutdown");
+    await expect(closing).rejects.toThrow("dispose failed");
+    await childResult;
 
     expect(parentSession.dispose).toHaveBeenCalledOnce();
     expect(childSession.dispose).toHaveBeenCalledOnce();
     expect(manager.getClosedRecord(parent)).toEqual({ id: parent, recoverable: false });
     expect(manager.getClosedRecord(child)).toEqual({ id: child, recoverable: false });
     await expect(manager.close(parent)).resolves.toBe("shutdown");
+  });
+  it("cancels and closes the whole subtree even when clearing the target queue throws", async () => {
+    const completed = vi.fn();
+    manager = new AgentManager(completed, 2);
+    const parentSession = {
+      ...mockSession(),
+      clearQueue: vi.fn(() => {
+        throw new Error("clearQueue failed");
+      }),
+      sessionManager: { getSessionId: () => "parent-session-id" },
+    };
+    const childSession = mockSession();
+    const sessions = [parentSession, childSession];
+    vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
+      options.onSessionCreated?.(sessions.shift()!);
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+          once: true,
+        });
+      });
+    });
+    const parent = manager.spawn(mockPi, mockCtx, "worker", "parent", { description: "parent" });
+    const child = manager.spawn(mockPi, mockCtx, "worker", "child", { description: "child" });
+    manager.getRecord(child)!.parentSessionId = "parent-session-id";
+    const parentRecord = manager.getRecord(parent)!;
+
+    await expect(manager.close(parent)).rejects.toThrow("clearQueue failed");
+    const cancelled = parentRecord.abortController!.signal.aborted;
+    // Keep a failing regression from leaving its mocked runner pending during disposal.
+    parentRecord.abortController!.abort();
+    await parentRecord.promise;
+
+    expect(cancelled).toBe(true);
+    expect(parentSession.dispose).toHaveBeenCalledOnce();
+    expect(childSession.dispose).toHaveBeenCalledOnce();
+    expect(completed).toHaveBeenCalledTimes(2);
+    expect(manager.listAgents()).toEqual([]);
+    expect(manager.getClosedRecord(child)).toEqual({ id: child, recoverable: false });
   });
 });

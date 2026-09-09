@@ -118,6 +118,7 @@ export default function (
       options: Parameters<AgentManager["spawn"]>[4],
     ) => manager.spawn(piRef, ctx, type, prompt, options),
     getRecord: (id: string) => manager.getRecord(id),
+    close: (id: string) => manager.close(id),
   });
 
   // --- Cross-extension RPC via pi.events ---
@@ -370,6 +371,7 @@ export default function (
     unsubPing: unsubPingRpc,
     unsubSpawn: unsubSpawnRpc,
     unsubStop: unsubStopRpc,
+    unsubClose: unsubCloseRpc,
   } = registerRpcHandlers({
     events: pi.events,
     pi,
@@ -403,6 +405,7 @@ export default function (
     currentSessionToken = undefined;
     unsubSpawnRpc();
     unsubStopRpc();
+    unsubCloseRpc();
     unsubPingRpc();
     unsubBashGateApproval();
     unsubBashGateStarted();

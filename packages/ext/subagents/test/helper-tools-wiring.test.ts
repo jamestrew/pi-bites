@@ -6,22 +6,25 @@ vi.mock("../agent-runner.js", async () => {
 });
 
 import { resumeAgent, runAgent, steerAgent } from "../agent-runner.js";
+import type { AgentManager } from "../agent-manager.js";
 import subagentsExtension from "../index.js";
 
 function makePi(active = ["spawn_agent", "read"]) {
   const tools = new Map<string, any>();
-  const handlers = new Map<string, (...args: any[]) => void>();
+  const handlers = new Map<string, (...args: any[]) => unknown>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
   const pi = {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((tool: any) => tools.set(tool.name, tool)),
     registerCommand: vi.fn(),
-    on: vi.fn((event: string, handler: (...args: any[]) => void) => handlers.set(event, handler)),
+    on: vi.fn((event: string, handler: (...args: any[]) => unknown) =>
+      handlers.set(event, handler),
+    ),
     events: {
       emit: vi.fn((event: string, data: unknown) => eventHandlers.get(event)?.(data)),
       on: vi.fn((event: string, handler: (data: unknown) => void) => {
         eventHandlers.set(event, handler);
-        return vi.fn();
+        return vi.fn(() => eventHandlers.delete(event));
       }),
     },
     appendEntry: vi.fn(),
@@ -72,6 +75,50 @@ async function spawnBackground(tools: Map<string, any>, parentCtx = ctx()) {
 
 describe("background helper tools", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("rejects tool and registry spawns at capacity until the registry explicitly closes an agent", async () => {
+    vi.mocked(runAgent).mockImplementation(async () => ({
+      responseText: "done",
+      session: { dispose: vi.fn() } as any,
+    }));
+    const { pi, tools, handlers } = makePi();
+    subagentsExtension(pi);
+    const parentCtx = ctx();
+    handlers.get("session_start")?.({}, parentCtx);
+    const registry = Reflect.get(globalThis, Symbol.for("pi-subagents:manager")) as Pick<
+      AgentManager,
+      "spawn" | "close" | "getRecord" | "waitForAll"
+    >;
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      ids.push(registry.spawn(pi, parentCtx, "worker", "task", { description: "task" }));
+    }
+    await registry.waitForAll();
+    const error = "No concurrency slot is available. Close an agent before spawning another.";
+    await expect(spawnBackground(tools, parentCtx)).rejects.toThrow(error);
+    expect(() => registry.spawn(pi, parentCtx, "worker", "task", { description: "task" })).toThrow(
+      error,
+    );
+
+    await expect(registry.close(ids[0]!)).resolves.toEqual({ completed: "done" });
+    const spawned = JSON.parse(textOf(await spawnBackground(tools, parentCtx))).agent_id;
+    await registry.waitForAll();
+    expect(registry.getRecord(spawned)?.status).toBe("completed");
+    await registry.close(spawned);
+    const replacement = registry.spawn(pi, parentCtx, "worker", "replacement", {
+      description: "replacement",
+    });
+    expect(registry.getRecord(replacement)).toBeDefined();
+    await registry.waitForAll();
+    await handlers.get("session_shutdown")?.({}, parentCtx);
+
+    const reply = vi.fn();
+    pi.events.on("subagents:rpc:close:reply:shutdown", reply);
+    pi.events.emit("subagents:rpc:close", { requestId: "shutdown", agentId: replacement });
+    await Promise.resolve();
+    expect(reply).not.toHaveBeenCalled();
+    expect(Reflect.get(globalThis, Symbol.for("pi-subagents:manager"))).toBeUndefined();
+  });
 
   it("registers send_input instead of MessageAgent without changing active tools", async () => {
     let finish!: (value: any) => void;

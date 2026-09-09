@@ -1,7 +1,7 @@
 /**
  * Cross-extension RPC handlers for the subagents extension.
  *
- * Exposes ping, spawn, and stop RPCs over the pi.events event bus,
+ * Exposes ping, spawn, stop, and close RPCs over the pi.events event bus,
  * using per-request scoped reply channels.
  *
  * Reply envelope follows pi-mono convention:
@@ -9,7 +9,7 @@
  *   error   → { success: false, error: string }
  */
 
-import type { SpawnOptions } from "./agent-manager.js";
+import type { AgentManager, SpawnOptions } from "./agent-manager.js";
 import { type ModelRegistry, resolveModel } from "./model-resolver.js";
 import type { ThinkingLevel } from "./types.js";
 
@@ -91,12 +91,13 @@ export interface EventBus {
 export type RpcReply<T = void> = { success: true; data?: T } | { success: false; error: string };
 
 /** RPC protocol version — bumped when the envelope or method contracts change. */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
-/** Minimal AgentManager interface needed by the spawn/stop RPCs. */
+/** Minimal AgentManager interface needed by the lifecycle RPCs. */
 export interface SpawnCapable {
   spawn(pi: unknown, ctx: unknown, type: string, prompt: string, options: SpawnOptions): string;
   abort(id: string): boolean;
+  close: AgentManager["close"];
 }
 
 export interface RpcDeps {
@@ -110,6 +111,7 @@ export interface RpcHandle {
   unsubPing: () => void;
   unsubSpawn: () => void;
   unsubStop: () => void;
+  unsubClose: () => void;
 }
 
 /**
@@ -140,7 +142,7 @@ function handleRpc(
 }
 
 /**
- * Register ping, spawn, and stop RPC handlers on the event bus.
+ * Register ping, spawn, stop, and close RPC handlers on the event bus.
  * Returns unsub functions for cleanup.
  */
 export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
@@ -168,5 +170,10 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     if (!manager.abort(agentId)) throw new Error("Agent not found");
   });
 
-  return { unsubPing, unsubSpawn, unsubStop };
+  const unsubClose = handleRpc(events, "subagents:rpc:close", async ({ agentId }) => {
+    if (typeof agentId !== "string") throw new Error("Close RPC requires string agentId");
+    return { previous_status: await manager.close(agentId) };
+  });
+
+  return { unsubPing, unsubSpawn, unsubStop, unsubClose };
 }

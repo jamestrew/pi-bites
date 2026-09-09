@@ -14,15 +14,8 @@ export type ClosedAgentRecord =
 
 type CloseHooks = {
   abort: (id: string) => void;
-  canRemove: (record: AgentRecord) => boolean;
-  hasSlot: (record: AgentRecord) => boolean;
   teardown: (record: AgentRecord) => Promise<void>;
   releaseReservation: (record: AgentRecord) => void;
-};
-
-type PreparedClose = {
-  record: AgentRecord;
-  holdsReservation: boolean;
 };
 
 /** Owns subtree claims, teardown, and the minimal tombstones used by resume_agent. */
@@ -48,50 +41,15 @@ export class AgentCloser {
   }
 
   async close(id: string): Promise<WaitAgentStatus> {
-    const pending = this.closing.get(id);
-    if (pending) {
-      await pending;
-      return "shutdown";
-    }
     if (this.closed.has(id)) return "shutdown";
-
     const target = this.agents.get(id);
     if (!target) throw new Error(`agent with id ${id} not found`);
-    const previousStatus = getAgentStatus(target);
-    const records = this.openSubtree(target);
-    let operation!: Promise<void>;
-    operation = Promise.resolve().then(async () => {
-      const prepared = new Map<string, PreparedClose>();
-
-      // Preserve Codex's target-first shutdown order, but request every stop before
-      // awaiting any runner so a stalled parent cannot leave descendants running.
-      for (const record of records) {
-        const owner = this.closing.get(record.id);
-        if (owner === operation) prepared.set(record.id, this.prepareClose(record));
-      }
-
-      const results = await Promise.allSettled(
-        records.map((record) => {
-          const owner = this.closing.get(record.id);
-          const claimed = prepared.get(record.id);
-          return claimed ? this.finishClose(claimed) : (owner ?? Promise.resolve());
-        }),
-      );
-      const failure = results.find(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      if (failure) throw failure.reason;
-    });
-    for (const record of records) {
-      if (!this.closing.has(record.id)) this.closing.set(record.id, operation);
-    }
-    try {
-      await operation;
-    } finally {
-      for (const record of records) {
-        if (this.closing.get(record.id) === operation) this.closing.delete(record.id);
-      }
-    }
+    const previousStatus = this.isClosing(id) ? "shutdown" : getAgentStatus(target);
+    const results = await Promise.allSettled(
+      this.openSubtree(target).map((record) => this.closeRecord(record)),
+    );
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure) throw failure.reason;
     return previousStatus;
   }
 
@@ -119,26 +77,31 @@ export class AgentCloser {
     return result;
   }
 
-  private prepareClose(record: AgentRecord): PreparedClose {
-    const prepared = {
-      record,
-      holdsReservation: this.hooks.hasSlot(record),
-    };
-    if (record.status === "running" || record.status === "queued") this.hooks.abort(record.id);
-    return prepared;
+  private closeRecord(record: AgentRecord): Promise<void> {
+    const pending = this.closing.get(record.id);
+    if (pending) return pending;
+    const operation = this.finishClose(record).finally(() => this.closing.delete(record.id));
+    this.closing.set(record.id, operation);
+    return operation;
   }
 
-  private async finishClose({ record, holdsReservation }: PreparedClose): Promise<void> {
-    if (!this.hooks.canRemove(record) && record.promise) await record.promise;
+  private async finishClose(record: AgentRecord): Promise<void> {
+    // Defer stops until every record is claimed. Each stop runs before awaiting
+    // runners, so a stalled or failing parent cannot leave descendants running.
+    const stop = Promise.resolve().then(() => {
+      if (record.status === "running" || record.status === "queued") this.hooks.abort(record.id);
+    });
+    const results = await Promise.allSettled([stop, record.promise]);
     const tombstone = this.buildClosedRecord(record);
-
     try {
       if (record.session) await this.hooks.teardown(record);
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
     } finally {
-      if (holdsReservation) this.hooks.releaseReservation(record);
       record.session = undefined;
-      if (this.agents.get(record.id) === record) this.agents.delete(record.id);
+      this.agents.delete(record.id);
       this.closed.set(record.id, tombstone);
+      this.hooks.releaseReservation(record);
     }
   }
 

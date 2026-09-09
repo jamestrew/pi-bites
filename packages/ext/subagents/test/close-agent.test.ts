@@ -1,5 +1,11 @@
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
+vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
+  keyHint: () => "ctrl+o to expand",
+}));
+
 import { CODEX_V1_CONTRACT } from "../codex-v1-contract.js";
 import { registerCloseAgent } from "../register-close-agent.js";
 
@@ -31,7 +37,7 @@ describe("close_agent", () => {
     tool.renderCall({ target: "agent" }, theme, context);
     const complete = tool.renderCall({ target: "agent-1" }, theme, context);
 
-    expect(complete.render(80)[0]).toContain("→ worker");
+    expect(complete.render(80)[0]).toContain(" worker");
   });
 
   it("registers the pinned contract and returns the pre-shutdown status", async () => {
@@ -63,7 +69,7 @@ describe("close_agent", () => {
 
     expect(JSON.parse(textOf(result))).toEqual({ previous_status: "running" });
     expect(rendered.render(80)).toEqual([
-      "<bold>close_agent</bold><accent> → trace auth · closed · was running</accent>",
+      "<bold>close_agent</bold><accent> trace auth closed was running</accent>",
     ]);
   });
 
@@ -94,13 +100,13 @@ describe("close_agent", () => {
     );
     const queued = await tool.execute("queued", { target: "queued" });
     const repeated = await tool.execute("repeated", { target: "repeated" });
-    const missing = await tool.execute("missing", { target: "missing" });
+    await expect(tool.execute("missing", { target: "missing" })).rejects.toThrow(
+      "agent with id missing not found",
+    );
 
     expect(JSON.parse(textOf(completed))).toEqual({ previous_status: { completed: "done" } });
     expect(JSON.parse(textOf(queued))).toEqual({ previous_status: "pending_init" });
     expect(JSON.parse(textOf(repeated))).toEqual({ previous_status: "shutdown" });
-    expect(textOf(missing)).toBe("agent with id missing not found");
-    expect(missing.details).toMatchObject({ status: "failed", error: textOf(missing) });
   });
 
   it.each([
@@ -122,14 +128,30 @@ describe("close_agent", () => {
     tool.renderResult(result, { expanded: false }, theme, { toolCallId: "close", state });
 
     expect(call.render(80)).toEqual([
-      `<bold>close_agent</bold><accent> → worker · closed · ${label}</accent>`,
+      `<bold>close_agent</bold><accent> worker closed ${label}</accent>`,
     ]);
   });
 
-  it("renders a failed close with a bounded diagnostic detail", async () => {
+  it("restores a host error as one styled call row without result details", () => {
+    const tool = register({ getRecord: vi.fn() });
+    const context = { toolCallId: "restored-error", state: {}, expanded: false, isError: true };
+    tool.renderResult(
+      { content: [{ type: "text", text: "agent not found" }] },
+      { expanded: false, isPartial: false },
+      theme,
+      context,
+    );
+    expect(tool.renderCall({ target: "missing" }, theme, context).render(200)).toEqual([
+      "<bold>close_agent</bold><accent> missing failed</accent>",
+      "",
+      "<dim>Error: agent not found</dim>",
+    ]);
+  });
+
+  it.each([false, true])("renders host errors at bounded width (expanded=%s)", async (expanded) => {
     const tool = register({
       getRecord: vi.fn(),
-      close: vi.fn(async () => Promise.reject(new Error("x".repeat(100)))),
+      close: vi.fn(async () => Promise.reject(new Error("x".repeat(300)))),
     });
     const state = {};
     const plainTheme = {
@@ -141,13 +163,32 @@ describe("close_agent", () => {
       state,
       expanded: false,
     });
-    const result = await tool.execute("failed", { target: "missing" });
-    tool.renderResult(result, { expanded: false }, plainTheme, {
+    await expect(tool.execute("failed", { target: "missing" })).rejects.toThrow("x".repeat(300));
+    const result = { content: [{ type: "text", text: "x".repeat(300) }], details: undefined };
+    const renderedResult = tool.renderResult(result, { expanded }, plainTheme, {
       toolCallId: "failed",
       state,
+      isError: true,
     });
-
-    expect(call.render(24)).toHaveLength(3);
-    expect(call.render(24).every((line: string) => visibleWidth(line) <= 24)).toBe(true);
+    const rendered = tool
+      .renderCall({ target: "missing" }, plainTheme, {
+        toolCallId: "failed",
+        state,
+        expanded,
+      })
+      .render(24);
+    expect(renderedResult.render(24)).toEqual([]);
+    expect(stripVTControlCharacters(rendered[0])).toBe("close_agent missing fai…");
+    expect(rendered[1]).toBe("");
+    expect(rendered.every((line: string) => visibleWidth(line) <= 24)).toBe(true);
+    if (expanded) {
+      expect(rendered.slice(2).map(stripVTControlCharacters).join("")).toBe(
+        `Error:${"x".repeat(300)}`,
+      );
+    } else {
+      expect(rendered).toHaveLength(11);
+      expect(rendered.at(-1)).toBe("(ctrl+o to expand)");
+    }
+    expect(call.render(80)[0]).toContain("failed");
   });
 });

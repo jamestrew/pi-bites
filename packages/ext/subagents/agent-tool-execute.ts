@@ -106,19 +106,14 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     const { tags } = buildInvocationTags(agentInvocation);
     const { state, callbacks } = createActivityTracker();
 
-    let id: string;
-    try {
-      id = manager.spawn(pi, ctx, subagentType, params.message, {
-        description: displayName,
-        model,
-        thinkingLevel: thinking,
-        forkContext: params.fork_context,
-        invocation: agentInvocation,
-        ...callbacks,
-      });
-    } catch (error) {
-      return failedResult(error instanceof Error ? error.message : String(error), subagentType);
-    }
+    const id = manager.spawn(pi, ctx, subagentType, params.message, {
+      description: displayName,
+      model,
+      thinkingLevel: thinking,
+      forkContext: params.fork_context,
+      invocation: agentInvocation,
+      ...callbacks,
+    });
 
     const record = manager.getRecord(id);
     if (record) record.toolCallId = toolCallId;
