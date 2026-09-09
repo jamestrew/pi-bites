@@ -3,7 +3,7 @@ import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container } from "@earendil-works/pi-tui";
 import type { AgentManager } from "./agent-manager.js";
 import { getSendInputToolParameters } from "./agent-tool-description.js";
-import { steerAgent, SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
+import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
 import { textResult } from "./tool-result.js";
 import {
@@ -76,25 +76,14 @@ export function registerSendInput(pi: ExtensionAPI, manager: AgentManager) {
             submissionId,
           );
         }
-        if (record.status === "completed") {
-          if (!manager.startTurn(record.id, params.message))
+        try {
+          if (!(await manager.sendInput(record.id, params.message)))
             return result(`input was not submitted to agent ${record.id}`, "failed");
-        } else if (record.session && record.status === "running") {
-          try {
-            await steerAgent(record.session, params.message);
-          } catch (error) {
-            return result(
-              `input was not submitted to agent ${record.id}: ${error instanceof Error ? error.message : String(error)}`,
-              "failed",
-            );
-          }
-        } else if (record.status !== "running" && record.status !== "queued") {
+        } catch (error) {
           return result(
-            `agent with id ${params.target} is unavailable (status: ${record.status})`,
+            `input was not submitted to agent ${record.id}: ${error instanceof Error ? error.message : String(error)}`,
             "failed",
           );
-        } else if (!manager.steer(record.id, params.message)) {
-          return result(`input was not submitted to agent ${record.id}`, "failed");
         }
 
         const submissionId = randomUUID();

@@ -2,14 +2,15 @@
  * agent-manager.ts — Tracks concurrent agents, queued execution, and resume support.
  *
  * Agents are subject to a configurable concurrency limit (default: 4).
- * Excess agents are queued and auto-started as running agents complete.
+ * Excess agents are queued and auto-started as retained agents close.
  */
 
 import { randomUUID } from "node:crypto";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { AgentCloser, type ClosedAgentRecord } from "./agent-close.js";
 import { AgentInterrupter } from "./agent-interruption.js";
-import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { resumeAgent, runAgent, steerAgent, type ToolActivity } from "./agent-runner.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";
 import { resolveAgent } from "./agent-types.js";
 import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
@@ -92,7 +93,6 @@ export interface SpawnOptions {
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
-  private cleanupInterval: ReturnType<typeof setInterval>;
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
@@ -101,10 +101,11 @@ export class AgentManager {
   private maxConcurrent: number;
   /** Queue of agents waiting to start. */
   private queue: QueuedTurn[] = [];
-  /** Number of currently running agents. */
-  private runningCount = 0;
+  /** Number of open agents holding a concurrency slot, including completed agents. */
+  private reservedCount = 0;
+  private reservations = new WeakSet<AgentRecord>();
+  private closer: AgentCloser;
   private completedGeneration = new WeakMap<AgentRecord, number>();
-  private releasedGeneration = new WeakMap<AgentRecord, number>();
   private settledGeneration = new WeakMap<AgentRecord, number>();
   private interruptions: AgentInterrupter;
   private options = new WeakMap<AgentRecord, SpawnOptions>();
@@ -144,9 +145,24 @@ export class AgentManager {
         });
       },
     });
-    // Cleanup completed agents after 10 minutes (but keep sessions for resume)
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
-    this.cleanupInterval.unref();
+    this.closer = new AgentCloser(this.agents, {
+      abort: (id) => void this.abort(id),
+      canRemove: (record) => this.canRemove(record),
+      hasSlot: (record) => this.reservations.has(record),
+      teardown: async (record) => {
+        if (record.session) await this.teardownSession(record.session);
+      },
+      releaseReservation: (record) => this.releaseReservation(record),
+    });
+  }
+
+  /** Derived diagnostic count; reservations are the only concurrency accounting. */
+  private get runningCount(): number {
+    let count = 0;
+    for (const record of this.agents.values()) {
+      if (record.status === "running") count++;
+    }
+    return count;
   }
 
   private notifyComplete(record: AgentRecord, generation = record.generation): void {
@@ -171,10 +187,17 @@ export class AgentManager {
     (session as Partial<AgentSession> | undefined)?.clearQueue?.();
   }
 
-  private releaseSlot(record: AgentRecord, generation = record.generation): void {
-    if ((this.releasedGeneration.get(record) ?? 0) >= generation) return;
-    this.releasedGeneration.set(record, generation);
-    this.runningCount--;
+  private reserve(record: AgentRecord): boolean {
+    if (this.reservations.has(record)) return true;
+    if (this.reservedCount >= this.maxConcurrent) return false;
+    this.reservations.add(record);
+    this.reservedCount++;
+    return true;
+  }
+
+  private releaseReservation(record: AgentRecord): void {
+    if (!this.reservations.delete(record)) return;
+    this.reservedCount--;
     this.drainQueue();
   }
 
@@ -322,8 +345,8 @@ export class AgentManager {
     const args: SpawnArgs = { pi, parent, parentEntries, type, prompt, options };
 
     const start = () => this.startAgent(id, record, args);
-    if (this.runningCount >= this.maxConcurrent) {
-      // Queue it — will be started when a running agent completes
+    if (this.reservedCount >= this.maxConcurrent) {
+      // Queue it — will be started when a retained agent releases its slot.
       this.queue.push({ id, generation: record.generation, start });
     } else {
       // startAgent can throw — clean up the record so callers don't see an
@@ -342,6 +365,7 @@ export class AgentManager {
         this.recordDiagnostic(record, "start_rejected", {
           error: serializeDiagnosticError(err),
         });
+        this.releaseReservation(record);
         this.agents.delete(id);
         throw err;
       }
@@ -496,7 +520,6 @@ export class AgentManager {
       abort: record.abort,
     });
     this.notifyComplete(record, generation);
-    this.releaseSlot(record, generation);
   }
 
   private manageGeneration(
@@ -548,10 +571,10 @@ export class AgentManager {
     assertValidSpawnCwd(options.cwd);
     const customCwd = options.cwd ?? undefined; // null (RPC "unset") → undefined
 
+    if (!this.reserve(record)) throw new Error("No concurrency slot is available.");
     record.status = "running";
     const queuedAt = record.startedAt;
     record.startedAt = Date.now();
-    this.runningCount++;
     this.recordDiagnostic(record, "started", {
       cwd: customCwd ?? parent.cwd,
       isolated: options.isolated === true,
@@ -612,11 +635,17 @@ export class AgentManager {
   /** Start queued agents up to the concurrency limit. */
   private drainQueue() {
     if (this.closing) return;
-    while (this.queue.length > 0 && this.runningCount < this.maxConcurrent) {
+    while (this.queue.length > 0 && this.reservedCount < this.maxConcurrent) {
       const next = this.queue.shift();
       if (!next) break;
       const record = this.agents.get(next.id);
-      if (!record || record.status !== "queued" || record.generation !== next.generation) continue;
+      if (
+        !record ||
+        this.closer.isClosing(next.id) ||
+        record.status !== "queued" ||
+        record.generation !== next.generation
+      )
+        continue;
       try {
         next.start();
       } catch (err) {
@@ -641,6 +670,7 @@ export class AgentManager {
           failure_count: record.failureHistory.length,
         });
         this.notifyComplete(record);
+        this.releaseReservation(record);
       }
     }
   }
@@ -655,7 +685,12 @@ export class AgentManager {
    */
   steer(id: string, message: string): boolean {
     const record = this.agents.get(id);
-    if (!record || (record.status !== "running" && record.status !== "queued")) return false;
+    if (
+      !record ||
+      this.closer.isClosing(id) ||
+      (record.status !== "running" && record.status !== "queued")
+    )
+      return false;
     if (record.session && record.status === "running") {
       record.session.steer(message).catch(() => {});
     } else {
@@ -667,8 +702,20 @@ export class AgentManager {
 
   async cancelAndSteer(id: string, message: string): Promise<boolean> {
     const record = this.agents.get(id);
-    if (!record?.session || record.status !== "running") return false;
+    if (!record?.session || this.closer.isClosing(id) || record.status !== "running") return false;
     return this.interruptions.interrupt(record, record.session, "cancel_and_steer", message);
+  }
+
+  /** Submit ordinary input through the manager's close-aware lifecycle gate. */
+  async sendInput(id: string, message: string): Promise<boolean> {
+    const record = this.agents.get(id);
+    if (!record || this.closer.isClosing(id)) return false;
+    if (record.status === "completed") return this.startTurn(id, message);
+    if (record.session && record.status === "running") {
+      await steerAgent(record.session, message);
+      return true;
+    }
+    return this.steer(id, message);
   }
 
   /** Start another turn on a retained, settled session. */
@@ -677,6 +724,7 @@ export class AgentManager {
     const record = this.agents.get(id);
     if (
       !record?.session ||
+      this.closer.isClosing(id) ||
       record.status === "running" ||
       record.status === "queued" ||
       (this.settledGeneration.get(record) ?? 0) < record.generation
@@ -703,7 +751,7 @@ export class AgentManager {
     record.abortController = abortController;
     const start = () =>
       this.startRetainedTurn(record, session, prompt, options, abortController, generation);
-    if (this.runningCount >= this.maxConcurrent) {
+    if (!this.reservations.has(record) && this.reservedCount >= this.maxConcurrent) {
       this.queue.push({ id, generation, start });
     } else {
       start();
@@ -720,10 +768,10 @@ export class AgentManager {
     generation: number,
   ): void {
     if (record.generation !== generation || record.status !== "queued") return;
+    if (!this.reserve(record)) return;
     record.status = "running";
     const queuedAt = record.startedAt;
     record.startedAt = Date.now();
-    this.runningCount++;
     try {
       this.recordDiagnostic(record, "started", {
         resumed: true,
@@ -753,7 +801,13 @@ export class AgentManager {
   /** Abort the active turn after session creation without disposing the retained session. */
   async interruptTurn(id: string): Promise<boolean> {
     const record = this.agents.get(id);
-    if (!record?.session || record.status !== "running" || !record.promise) return false;
+    if (
+      !record?.session ||
+      this.closer.isClosing(id) ||
+      record.status !== "running" ||
+      !record.promise
+    )
+      return false;
 
     const session = record.session;
     const promise = record.promise;
@@ -769,6 +823,15 @@ export class AgentManager {
 
   listAgents(): AgentRecord[] {
     return [...this.agents.values()].sort((a, b) => b.startedAt - a.startedAt);
+  }
+
+  getClosedRecord(id: string): ClosedAgentRecord | undefined {
+    return this.closer.get(id);
+  }
+
+  /** Close a retained agent and every descendant represented by this manager. */
+  close(id: string) {
+    return this.closer.close(id);
   }
 
   abort(id: string): boolean {
@@ -807,31 +870,6 @@ export class AgentManager {
 
   private canRemove(record: AgentRecord): boolean {
     return !record.promise || (this.settledGeneration.get(record) ?? 0) >= record.generation;
-  }
-
-  /** Dispose a record's session and remove it from the map. */
-  private removeRecord(id: string, record: AgentRecord): void {
-    if (record.session) void this.teardownSession(record.session);
-    record.session = undefined;
-    this.agents.delete(id);
-  }
-
-  private cleanup() {
-    const cutoff = Date.now() - 10 * 60_000;
-    for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued") continue;
-      if ((record.completedAt ?? 0) >= cutoff || !this.canRemove(record)) continue;
-      this.removeRecord(id, record);
-    }
-  }
-
-  /** Remove terminal records whose child promises have settled. */
-  clearCompleted(): void {
-    for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued" || !this.canRemove(record))
-        continue;
-      this.removeRecord(id, record);
-    }
   }
 
   /** Whether any agents are still running or queued. */
@@ -881,8 +919,7 @@ export class AgentManager {
 
   /** Wait for every started agent to settle, including agents cancelled during shutdown. */
   async waitForAll(): Promise<void> {
-    // Loop because drainQueue respects the concurrency limit — as running
-    // agents finish they start queued ones, which need awaiting too.
+    // Loop because an available slot can start queued work that also needs awaiting.
     for (;;) {
       this.drainQueue();
       if (this.pendingAgents.size === 0) break;
@@ -902,6 +939,7 @@ export class AgentManager {
     await this.waitForAll();
     for (const record of this.agents.values()) {
       if (record.session) void this.teardownSession(record.session);
+      this.releaseReservation(record);
     }
     await this.waitForTeardowns();
     this.finalizeDispose();
@@ -916,11 +954,12 @@ export class AgentManager {
     if (this.disposed) return;
     this.closing = true;
     this.disposed = true;
-    clearInterval(this.cleanupInterval);
     this.abortAll();
     for (const record of this.agents.values()) {
       if (record.session) void this.teardownSession(record.session);
+      this.releaseReservation(record);
     }
     this.agents.clear();
+    this.closer.clear();
   }
 }

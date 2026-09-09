@@ -50,6 +50,12 @@ and reasoning effort unless the caller explicitly overrides supported settings.
   cannot reserve a slot fails instead of entering an invisible queue.
 - `wait_agent` and the asynchronous completion notification are independent delivery channels. A
   waiter may therefore observe the same completed status that is also sent in a notification.
+- `close_agent` snapshots the target status, stops its manager-known open subtree, tears down each
+  session once, and leaves a small closed-agent tombstone. Repeated close calls return `shutdown`;
+  unknown ids return an error.
+- Closing a persisted session retains its manager-owned session path and identity metadata for
+  `resume_agent`. Current child sessions use `SessionManager.inMemory`, so closing them is explicit
+  disposal: their tombstone is marked unrecoverable and a later resume must return an error.
 
 ## Intentional pi adaptations
 

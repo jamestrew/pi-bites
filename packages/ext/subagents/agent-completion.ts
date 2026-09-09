@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildEventData } from "./event-data.js";
+import { getAgentStatus } from "./agent-status.js";
 import { buildNotificationDetails, formatTaskNotification } from "./notifications.js";
 import { isMissingFinalResponse, MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
 import type {
@@ -39,21 +40,6 @@ export function buildWaitAgentResult(record: AgentRecord, includeOutput: boolean
       : {}),
     ...(includeOutput && record.abort ? { abort: { ...record.abort } } : {}),
   };
-}
-
-function buildWaitAgentStatus(record: AgentRecord, includeOutput: boolean): WaitAgentStatus {
-  switch (record.status) {
-    case "queued":
-      return "pending_init";
-    case "running":
-      return "running";
-    case "completed":
-      return { completed: includeOutput && record.result?.trim() ? record.result : null };
-    case "error":
-      return { errored: includeOutput ? (record.error ?? "unknown error") : "" };
-    case "stopped":
-      return "shutdown";
-  }
 }
 
 function buildMissingWaitAgentResult(id: string): WaitAgentResult {
@@ -132,7 +118,7 @@ export function createAgentCompletionHandler({
       }
       const terminal = isTerminal(record);
       const includeOutput = terminal && claim(record);
-      if (terminal) status[id] = buildWaitAgentStatus(record, includeOutput);
+      if (terminal) status[id] = getAgentStatus(record, includeOutput);
       return buildWaitAgentResult(record, includeOutput);
     });
     return { outcome: "terminal", timed_out: false, status, agents };
@@ -183,7 +169,8 @@ export function createAgentCompletionHandler({
     };
     const failed = finished.status === "error" || finished.status === "stopped";
     const notifyFinishedUI = () => {
-      if (getRecord(record.id)?.generation !== generation) return;
+      const current = getRecord(record.id);
+      if (current && current.generation !== generation) return;
       try {
         onAgentFinishedUI(record.id);
       } catch {

@@ -84,6 +84,7 @@ describe("background helper tools", () => {
     expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("resume");
     expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("inherit_context");
     expect([...tools.keys()]).toContain("send_input");
+    expect([...tools.keys()]).toContain("close_agent");
     expect([...tools.keys()]).not.toContain("MessageAgent");
     expect([...tools.keys()]).not.toContain("get_subagent_result");
     expect([...tools.keys()]).not.toContain("steer_subagent");

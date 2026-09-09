@@ -389,6 +389,35 @@ describe("spawn-and-wait orchestration", () => {
     harness.shutdown();
   });
 
+  it("closes a running agent without duplicating its final notification", async () => {
+    const session = {
+      clearQueue: vi.fn(),
+      dispose: vi.fn(),
+      extensionRunner: { emit: vi.fn(async () => {}) },
+    } as any;
+    vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, options) => {
+      options.onSessionCreated?.(session);
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+          once: true,
+        });
+      });
+    });
+    const harness = makeHarness();
+    const spawned = await spawn(harness.tools, harness.ctx);
+    const id = agentId(spawned);
+
+    const closed = await harness.tools.get("close_agent").execute("close", { target: id });
+    const repeated = await harness.tools.get("close_agent").execute("close-again", { target: id });
+
+    expect(JSON.parse(closed.content[0].text)).toEqual({ previous_status: "running" });
+    expect(JSON.parse(repeated.content[0].text)).toEqual({ previous_status: "shutdown" });
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
+    expect(session.extensionRunner.emit).toHaveBeenCalledOnce();
+    expect(session.dispose).toHaveBeenCalledOnce();
+    harness.shutdown();
+  });
+
   it("times out without cancelling the agent and releases it for automatic delivery", async () => {
     vi.useFakeTimers();
     const child = deferredRun();

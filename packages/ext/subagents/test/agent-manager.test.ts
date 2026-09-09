@@ -84,101 +84,6 @@ describe("AgentManager — completion callbacks", () => {
   });
 });
 
-describe("AgentManager — cleanup timer", () => {
-  let manager: AgentManager;
-
-  afterEach(() => manager.dispose());
-
-  it("does not keep the process alive on its own", () => {
-    manager = new AgentManager();
-
-    expect((manager as any).cleanupInterval.hasRef()).toBe(false);
-  });
-});
-
-describe("AgentManager — Bug 3 clearCompleted", () => {
-  let manager: AgentManager;
-
-  afterEach(() => manager.dispose());
-
-  it("clearCompleted removes completed records", async () => {
-    manager = new AgentManager();
-    resolvedRun();
-
-    const id = manager.spawn(mockPi, mockCtx, "worker", "test", {
-      description: "test",
-    });
-    await manager.getRecord(id)!.promise;
-
-    expect(manager.listAgents()).toHaveLength(1);
-    manager.clearCompleted();
-    expect(manager.listAgents()).toHaveLength(0);
-  });
-
-  it("clearCompleted does not remove running or queued agents", async () => {
-    // With one concurrency slot, the second agent stays queued behind the first.
-    manager = new AgentManager(undefined, 1);
-
-    // Mock runAgent to never resolve (keeps agent "running")
-    mockPendingRun();
-
-    const id1 = manager.spawn(mockPi, mockCtx, "worker", "test1", {
-      description: "running agent",
-    });
-    // Second agent should be queued (limit=1)
-    const id2 = manager.spawn(mockPi, mockCtx, "worker", "test2", {
-      description: "queued agent",
-    });
-
-    expect(manager.getRecord(id1)!.status).toBe("running");
-    expect(manager.getRecord(id2)!.status).toBe("queued");
-
-    manager.clearCompleted();
-
-    // Both should still be present
-    expect(manager.getRecord(id1)).toBeDefined();
-    expect(manager.getRecord(id2)).toBeDefined();
-
-    // Abort to allow cleanup
-    manager.abort(id1);
-    manager.abort(id2);
-  });
-
-  it("clearCompleted calls dispose on sessions of removed records", async () => {
-    manager = new AgentManager();
-    const disposeSpy = vi.fn();
-    const sess = { dispose: disposeSpy, extensionRunner: { emit: vi.fn(async () => {}) } };
-    vi.mocked(runAgent).mockResolvedValue({
-      responseText: "done",
-      session: sess as any,
-    });
-
-    const id = manager.spawn(mockPi, mockCtx, "worker", "test", {
-      description: "test",
-    });
-    await manager.getRecord(id)!.promise;
-
-    manager.clearCompleted();
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(disposeSpy).toHaveBeenCalledOnce();
-  });
-
-  it("clearCompleted removes error and stopped records", async () => {
-    manager = new AgentManager();
-    vi.mocked(runAgent).mockRejectedValue(new Error("boom"));
-
-    const id = manager.spawn(mockPi, mockCtx, "worker", "test", {
-      description: "test",
-    });
-    await manager.getRecord(id)!.promise;
-    expect(manager.getRecord(id)!.status).toBe("error");
-
-    manager.clearCompleted();
-    expect(manager.getRecord(id)).toBeUndefined();
-  });
-});
-
 // Eager init removes the optional/required asymmetry that previously required
 // `??=` defaults at the callback sites and `?? 0` / `?? 1` at the read sites.
 describe("AgentManager — lifetime usage + compaction count are eagerly initialized", () => {
@@ -507,10 +412,8 @@ describe("AgentManager — abort() state machine", () => {
     expect(manager.abort(id)).toBe(true);
     expect(record.status).toBe("stopped");
     expect(onComplete).not.toHaveBeenCalled();
-    expect((manager as any).runningCount).toBe(1);
+    expect((manager as any).runningCount).toBe(0);
     expect(manager.getRecord(queuedId)?.status).toBe("queued");
-
-    manager.clearCompleted();
     expect(manager.getRecord(id)).toBe(record);
 
     // The agent loop ends and the promise settles "normally".
@@ -523,11 +426,12 @@ describe("AgentManager — abort() state machine", () => {
     expect(record.status).toBe("stopped"); // not overwritten to "completed"
     expect(record.result).toBe("partial output"); // partial result still captured
     expect(onComplete.mock.calls.filter(([completed]) => completed === record)).toHaveLength(1);
-    expect(manager.getRecord(queuedId)?.status).not.toBe("queued");
+    expect(manager.getRecord(queuedId)?.status).toBe("queued");
     expect((manager as any).runningCount).toBe(0);
 
-    manager.clearCompleted();
+    await manager.close(id);
     expect(manager.getRecord(id)).toBeUndefined();
+    expect(manager.getRecord(queuedId)?.status).not.toBe("queued");
   });
 });
 

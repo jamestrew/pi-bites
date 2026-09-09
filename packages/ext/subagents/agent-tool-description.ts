@@ -44,3 +44,12 @@ export function getWaitAgentToolParameters() {
     { additionalProperties: false },
   );
 }
+
+/** Build Pi's TypeBox form of the pinned close_agent parameter contract. */
+export function getCloseAgentToolParameters() {
+  const properties = CODEX_V1_CONTRACT.tools.close_agent.parameters.properties;
+  return Type.Object(
+    { target: Type.String({ description: properties.target.description }) },
+    { additionalProperties: false },
+  );
+}

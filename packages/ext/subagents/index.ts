@@ -5,6 +5,7 @@
  *   spawn_agent   — LLM-callable: spawn a sub-agent
  *   wait_agent    — LLM-callable: wait for selected sub-agents
  *   send_input    — LLM-callable: send input to a running sub-agent
+ *   close_agent   — LLM-callable: close a retained sub-agent
  *
  * Commands:
  *   /agents                 — Interactive agent management menu
@@ -26,6 +27,7 @@ import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import { createSubagentMessenger } from "./subagent-messages.js";
 import { registerAgentTool } from "./register-agent-tool.js";
+import { registerCloseAgent } from "./register-close-agent.js";
 import { registerSendInput } from "./register-send-input.js";
 import { registerWaitAgent } from "./register-wait-agent.js";
 import { type AgentActivity } from "./ui/agent-format.js";
@@ -140,7 +142,6 @@ export default function (
       (customType, content, display, details) =>
         sessionManager.appendCustomMessageEntry(customType, content, display, details),
     );
-    manager.clearCompleted();
   });
 
   pi.on("agent_start", () => parentMessenger.agentStarted());
@@ -447,12 +448,13 @@ export default function (
     setFleetViewEnabled,
   });
 
-  // ---- wait_agent and send_input tools ----
+  // ---- Agent lifecycle tools ----
   registerWaitAgent(pi, {
     waitFor: completion.waitFor,
     getRecord: (id) => manager.getRecord(id),
   });
   registerSendInput(pi, manager);
+  registerCloseAgent(pi, manager);
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {

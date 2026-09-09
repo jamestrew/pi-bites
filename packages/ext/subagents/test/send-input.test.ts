@@ -37,7 +37,7 @@ describe("send_input", () => {
   });
 
   it("uses the pinned contract and submits queued and interrupting input", async () => {
-    const session = { id: "retained", steer: vi.fn(async () => {}) };
+    const session = { id: "retained", steer: vi.fn(async (_message: string) => {}) };
     const record = { id: "agent-1", description: "worker", status: "running", session };
     const calls: string[] = [];
     const manager = {
@@ -49,6 +49,10 @@ describe("send_input", () => {
       cancelAndSteer: vi.fn((_id, message) => {
         calls.push("interrupt");
         calls.push(`redirect:${message}`);
+        return true;
+      }),
+      sendInput: vi.fn(async (_id, message) => {
+        await session.steer(message);
         return true;
       }),
     };
@@ -105,9 +109,15 @@ describe("send_input", () => {
     const pending = { id: "pending", description: "starting", status: "running" };
     const manager = {
       getRecord: vi.fn((id) => (id === pending.id ? pending : undefined)),
-      steer: vi.fn(() => true),
-      startTurn: vi.fn(() => true),
+      steer: vi.fn((_id: string, _message: string) => true),
+      startTurn: vi.fn((_id: string, _message: string) => true),
       cancelAndSteer: vi.fn(),
+      sendInput: vi.fn(async (id, message) => {
+        if (pending.status === "completed") return manager.startTurn(id, message);
+        if (pending.status === "running" || pending.status === "queued")
+          return manager.steer(id, message);
+        return false;
+      }),
     };
     const { tool } = register(manager);
     const staleCtx = Object.create(null);
@@ -174,7 +184,7 @@ describe("send_input", () => {
         undefined,
         staleCtx,
       );
-      expect(textOf(terminal)).toContain(`unavailable (status: ${status})`);
+      expect(textOf(terminal)).toContain(`input was not submitted to agent ${pending.id}`);
     }
   });
 
@@ -183,7 +193,9 @@ describe("send_input", () => {
     const record = { id: "agent-1", description: "worker", status: "running", session };
     const manager = {
       getRecord: vi.fn(() => record),
-      steer: vi.fn(() => true),
+      sendInput: vi.fn(async () => {
+        throw new Error("blocked");
+      }),
     };
     const { tool } = register(manager);
 
@@ -197,7 +209,7 @@ describe("send_input", () => {
 
     expect(textOf(rejected)).toContain("input was not submitted to agent agent-1: blocked");
     expect(rejected.details.status).toBe("failed");
-    expect(manager.steer).not.toHaveBeenCalled();
+    expect(manager.sendInput).toHaveBeenCalledOnce();
   });
 
   it("reports interrupt failure without issuing a submission id", async () => {

@@ -113,6 +113,7 @@ describe("Codex V1 subagent contract", () => {
       "spawn_agent",
       "wait_agent",
       "send_input",
+      "close_agent",
       "MessageAgent",
     ]);
     expect(Object.values(SUBAGENT_TOOL_NAMES)).not.toContain("Agent");

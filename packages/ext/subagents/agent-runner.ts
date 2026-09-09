@@ -46,6 +46,7 @@ export const SUBAGENT_TOOL_NAMES = {
   SPAWN_AGENT: "spawn_agent",
   WAIT_AGENT: "wait_agent",
   SEND_INPUT: "send_input",
+  CLOSE_AGENT: "close_agent",
   MESSAGE_AGENT: "MessageAgent",
 } as const;
 

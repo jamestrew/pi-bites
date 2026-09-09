@@ -40,7 +40,12 @@ function makeHarness(
     onAgentFinishedUI,
     scheduleAutomatic,
   });
-  return { completion, pi, onAgentFinishedUI };
+  return {
+    completion,
+    pi,
+    onAgentFinishedUI,
+    removeRecord: (id: string) => byId.delete(id),
+  };
 }
 
 describe("agent completion delivery", () => {
@@ -124,6 +129,26 @@ describe("agent completion delivery", () => {
     deliver();
     deliver();
     expect(pi.sendMessage).not.toHaveBeenCalled();
+    completion.dispose();
+  });
+
+  it("clears pending UI when close removes a record before deferred delivery", () => {
+    const record = makeRecord("a");
+    let deliver!: () => void;
+    const { completion, onAgentFinishedUI, removeRecord } = makeHarness(
+      [record],
+      (_parent, callback) => {
+        deliver = callback;
+        return true;
+      },
+    );
+
+    completion.onAgentComplete(record);
+    removeRecord(record.id);
+    deliver();
+
+    expect(onAgentFinishedUI).toHaveBeenCalledOnce();
+    expect(onAgentFinishedUI).toHaveBeenCalledWith(record.id);
     completion.dispose();
   });
 
