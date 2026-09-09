@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 const registerModules = [
   "./bash-gate/index.js",
   "./rtk.js",
+  "./codegraph.js",
   "./statusline.js",
   "./footer/index.js",
   "./token-count/index.js",
@@ -95,9 +96,9 @@ async function loadExtension(
   };
   if (options.subagent) {
     const { runAsSubagent } = await import("./subagents/subagent-context.js");
-    runAsSubagent(options.subagent, () => registerExtension(pi as never));
+    await runAsSubagent(options.subagent, () => registerExtension(pi as never));
   } else {
-    registerExtension(pi as never);
+    await registerExtension(pi as never);
   }
 
   return {
@@ -134,6 +135,7 @@ describe("extension entrypoint", () => {
     try {
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./codegraph.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledWith(
         loaded.pi,
         expect.any(Object),
@@ -186,8 +188,19 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./bash-gate/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./rtk.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
+      expect(loaded.registerSpies.get("./codegraph.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./auto-compaction.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
+  test("can disable CodeGraph without probing its executable", async () => {
+    const loaded = await loadExtension({ disable: ["codegraph"] });
+    try {
+      expect(loaded.registerSpies.get("./codegraph.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();
     }

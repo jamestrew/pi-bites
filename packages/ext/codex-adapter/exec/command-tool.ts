@@ -42,32 +42,34 @@ export function renderExecScanline(
   return theme.bold(action) + (detail ? theme.fg("toolTitle", detail) : "");
 }
 
-function textContent(result: AgentToolResult<UnifiedExecResult>): string {
+type ExecRenderDetails = Pick<UnifiedExecResult, "output" | "wall_time_seconds" | "session_id">;
+
+function textContent(result: AgentToolResult<ExecRenderDetails>): string {
   return result.content
     .filter((item): item is { type: "text"; text: string } => item.type === "text")
     .map(({ text }) => text)
     .join("\n");
 }
 
-function modelInputTokenCount(result: AgentToolResult<UnifiedExecResult>): number {
+function modelInputTokenCount(result: AgentToolResult<ExecRenderDetails>): number {
   return Math.ceil(textContent(result).length / 4);
 }
 
-function execOutput(result: AgentToolResult<UnifiedExecResult>): string {
-  const details = result.details as UnifiedExecResult | undefined;
+function execOutput(result: AgentToolResult<ExecRenderDetails>): string {
+  const details = result.details as ExecRenderDetails | undefined;
   return sanitizeText(details?.output ?? textContent(result))
     .replace(/^(?:[\t ]*\n)+/, "")
     .replace(/[\t ]*(?:\n[\t ]*)+$/, "");
 }
 
 function execStatus(
-  result: AgentToolResult<UnifiedExecResult>,
+  result: AgentToolResult<ExecRenderDetails>,
   isPartial: boolean,
   isError: boolean,
   startedAt?: number,
   endedAt?: number,
 ): string | undefined {
-  const details = result.details as UnifiedExecResult | undefined;
+  const details = result.details as ExecRenderDetails | undefined;
   if (isPartial) return details ? `Elapsed ${details.wall_time_seconds.toFixed(1)}s` : undefined;
   const inputTokens = modelInputTokenCount(result);
   const tokenSuffix =
@@ -90,7 +92,7 @@ export function throwForExecFailure(result: UnifiedExecResult): void {
 }
 
 export function renderExecResult(
-  result: AgentToolResult<UnifiedExecResult>,
+  result: AgentToolResult<ExecRenderDetails>,
   options: { expanded: boolean; isPartial: boolean },
   theme: RenderTheme,
   context: { isError: boolean; state: { startedAt?: number; endedAt?: number } },

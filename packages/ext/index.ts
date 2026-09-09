@@ -1,4 +1,5 @@
 import registerBashGate from "./bash-gate/index.js";
+import registerCodegraph from "./codegraph.js";
 import registerRtk from "./rtk.js";
 import registerStatusline from "./statusline.js";
 import registerFooter from "./footer/index.js";
@@ -24,7 +25,7 @@ import registerCodexAdapter from "./codex-adapter/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   const configRef: { current: BitesConfig } = { current: {} };
   const isSubagent = getActiveSubagent() != null;
   const isNonInteractive = process.argv.some((arg) => arg === "--print" || arg === "-p");
@@ -52,6 +53,8 @@ export default function (pi: ExtensionAPI) {
   const previewCodexPrompt = disabled.has("codexAdapter")
     ? undefined
     : registerCodexAdapter(pi, configRef);
+
+  if (!disabled.has("codegraph")) await registerCodegraph(pi);
 
   if (isSubagent) return;
 
