@@ -1,0 +1,5 @@
+interface:
+  display_name: "Pi Documentation"
+  short_description: "Read and use Pi's docs and source"
+policy:
+  allow_implicit_invocation: false
