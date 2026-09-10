@@ -106,6 +106,17 @@ Stock `openai-codex` Responses models get `web_run` through the existing Pi logi
 
 Linux x86-64 and arm64 native helpers, including `view_image`, are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
 
+### Code Mode host dependency
+
+Code Mode requires the pinned standalone host from Codex’s GitHub release for
+Linux x64 or arm64. Install it manually using the [download and checksum instructions](packages/ext/codex-adapter/vendor/code-mode/README.md#manual-installation).
+The host lives under `${XDG_DATA_HOME:-$HOME/.local/share}/pi-bites/code-mode/`, outside
+Git. Pi never downloads it automatically. Source, checksums, notices and rebuild
+instructions remain in this repository.
+
+Code Mode activation is still forthcoming; the current structured adapter does
+not require this dependency.
+
 ## CodeGraph exploration
 
 When `codegraph --version` succeeds on `PATH`, pi-bites registers `codegraph_explore({ query, maxFiles? })` as the primary tool for unfamiliar code understanding. Install the standalone CodeGraph CLI separately and run `codegraph init` in your repository; installing after startup requires `/reload`. No SDK, MCP server, instruction-file edits, or watcher is used.
