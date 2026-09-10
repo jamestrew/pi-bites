@@ -1,0 +1,5 @@
+# Authorize nested commands individually
+
+Apply the existing bash-gate policy to each actual nested command, with independent authorization records, rather than approving an entire JavaScript cell or batch. Serialize human permission dialogs while allowing independent reviews and authorized commands to proceed; recheck session allowances before displaying queued requests. Cell cancellation invalidates pending approvals so late approval cannot start a process.
+
+Preserve the existing policy scope of authorizing command launches; `write_stdin` polling and interactive input remain outside command classification. A denial rejects that nested call without directly revoking unrelated authorizations or cancelling sibling calls. Preserve Codex's native rejection and cleanup contract: if an unhandled rejection ends the cell, unfinished sibling delegates can be cancelled by runtime cleanup. Do not change denials into successful structured values or add bespoke batching instructions to promise stronger isolation than Codex provides.
