@@ -47,6 +47,8 @@ The standalone host protocol has no description-export operation. Do not ask it 
 
 The web description's decision boundary, citation instructions, special cases, and word limits are tool text and remain intact. Remove unsupported operation examples and replace the mixed finance batching example with the same example minus its finance property. Remove screenshot-only references where they advertise screenshot capability. Do not import complete model prompts, conversion's abbreviated help, adaptive wait advice, or bespoke `Promise.allSettled` guidance.
 
+The internal host bridge implemented by #297 is described in [Runtime integration](runtime.md), including its generation-qualified cell IDs, lifecycle hooks, ownership and resource bounds. It remains inaccessible to models pending cutover.
+
 ## Outer tool contract
 
 ### `exec`

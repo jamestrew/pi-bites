@@ -9,11 +9,33 @@ The Codex adapter's `apply_patch`, `exec_command`, `write_stdin`, `view_image`, 
 
 ## Code Mode contract and host
 
-Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the future Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. The standalone host is now a manually installed dependency from the pinned Codex GitHub release, with matched source under `vendor/code-mode`; see its [packaging record](vendor/code-mode/README.md) for artifact hashes, V8/native notices, build commands and validation limits. The host remains internal and disconnected from activation until #297–#302. The eight existing helper artifacts retain their older provenance below.
+Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the future Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. The standalone host is now a manually installed dependency from the pinned Codex GitHub release, with matched source under `vendor/code-mode`; see its [packaging record](vendor/code-mode/README.md) for artifact hashes, V8/native notices, build commands and validation limits. The host runtime remains internal and disconnected from activation until #300–#302. The eight existing helper artifacts retain their older provenance below.
+
+## Session-owned Code Mode bridge (#297)
+
+The internal TypeScript connection, framed process IO, protocol parsing and
+session/delegate flow are adapted from conversion 3.0.31 at
+`94eb6c0745e2f516bf19603f912f7b6478b43355`, specifically
+`src/tools/code-mode/{host-process,host-connection,host-session,host-client,host-protocol,host-operation,host-cell-operations,host-delegation,delegate-runtime}.ts`.
+The conversion package's MIT license is retained in `LICENSE`; native protocol
+and source semantics remain at the Codex pin above.
+
+The reduction retains only explicitly supplied callable tools, the dedicated
+host connection, execute/wait/terminate/shutdown, notifications, cancellation,
+and shell ownership. It omits Notebook/shared runtime registries, custom tool
+commands, providers, traces/renderers, preflight blockers, source rewriting and
+adaptive/direct-tool waits. Local changes include native pragma defaults/ranges,
+generation-qualified cell IDs, stable lifecycle snapshots, bounded state,
+fail-closed startup and crash behavior, and a Linux RSS watchdog for native
+output/store retention. No host source or artifact changes are made.
+
+See [the runtime integration contract](../../../docs/code-mode-contract/runtime.md)
+for API, shell ownership, lifecycle hooks, bounds and validation. No Code Mode
+tool is registered by this change; current structured activation is untouched.
 
 ## Retained surface
 
-The TypeScript parser, path rules, result types, native runner/error handling, executor, and tool behavior came from `packages/pi-codex-conversion/src/{patch,tools/apply-patch,tools/exec,tools/native,tools/view-image,tools/web-run}`. They were reduced to the direct `apply_patch`, structured `exec_command`, `write_stdin`, local-only `view_image`, and standalone `web_run` surfaces and adapted to Pi-bites paths and APIs. The local adapter uses Pi's existing provider, model catalogue, authentication, configured shell, and core tools; it does not retain upstream provider registration, prompt conversion, Code Mode `exec`/`wait`, compaction, voice, image generation/editing, model-generated image descriptions, or settings features.
+The TypeScript parser, path rules, result types, native runner/error handling, executor, and tool behavior came from `packages/pi-codex-conversion/src/{patch,tools/apply-patch,tools/exec,tools/native,tools/view-image,tools/web-run}`. They were reduced to the direct `apply_patch`, structured `exec_command`, `write_stdin`, local-only `view_image`, and standalone `web_run` surfaces and adapted to Pi-bites paths and APIs. The local adapter uses Pi's existing provider, model catalogue, authentication, configured shell, and core tools; it does not retain upstream provider registration, prompt conversion, compaction, voice, image generation/editing, model-generated image descriptions, or settings features.
 
 Local integration changes include configuration-based provider matching, ownership-aware active-tool reconciliation, Linux x86-64/arm64 binary locators, direct binary-path injection for failure tests, and nested use of the host's single-file mutation queue. The upstream collapsed/expanded patch diff and failure rendering is retained, with local sequencing for repeated targets and result-detail snapshots for restored rows. Patch parsing and execution remain delegated to the retained upstream parser and native implementation.
 
