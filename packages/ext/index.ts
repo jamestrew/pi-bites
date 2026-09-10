@@ -1,6 +1,5 @@
 import registerBashGate from "./bash-gate/index.js";
 import registerCodegraph from "./codegraph.js";
-import registerRtk from "./rtk.js";
 import registerStatusline from "./statusline.js";
 import registerFooter from "./footer/index.js";
 import registerTokenCount from "./token-count/index.js";
@@ -45,7 +44,6 @@ export default async function (pi: ExtensionAPI) {
   const autoMode =
     isSubagent || disabled.has("autoMode") ? undefined : registerAutoMode(pi, configRef);
   const bashGate = disabled.has("bashGate") ? undefined : registerBashGate(pi, configRef, autoMode);
-  if (!disabled.has("rtk")) registerRtk(pi);
   if (!disabled.has("tools")) registerCustomTools(pi);
   // Subagent sessions install the same policy directly at Pi's safe
   // prepare-next-turn seam; ctx.compact() would abort their owning invocation.

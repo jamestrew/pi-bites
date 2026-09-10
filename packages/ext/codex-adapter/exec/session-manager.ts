@@ -29,7 +29,6 @@ import {
   makeSnapshotSince,
   snapshotSession,
 } from "./results.ts";
-import { createRtkNoHookWarningDataFilter, type RtkNoHookWarningDataFilter } from "../../rtk.ts";
 
 export interface UnifiedExecResult {
   chunk_id: string;
@@ -55,7 +54,6 @@ export type ExecSessionChangeReason = "start" | "output" | "exit" | "terminate";
 
 export interface ExecCommandInput {
   cmd: string;
-  displayCommand?: string | undefined;
   workdir?: string | undefined;
   shell?: string | undefined;
   defaultShell?: string | undefined;
@@ -65,7 +63,6 @@ export interface ExecCommandInput {
   max_yield_time_ms?: number | undefined;
   max_output_tokens?: number | undefined;
   login?: boolean | undefined;
-  filterRtkOutput?: boolean | undefined;
 }
 
 export interface WriteStdinInput {
@@ -126,7 +123,6 @@ export function createExecSessionManager(
   const commandHistory = new Map<number, string>();
   const completedExitCodes = new Map<number, number>();
   const pipeNormalizers = new WeakMap<ExecSession, PipeOutputNormalizer>();
-  const rtkOutputFilters = new WeakMap<ExecSession, RtkNoHookWarningDataFilter>();
   const changeListeners = new Set<(reason: ExecSessionChangeReason) => void>();
   const exitListeners = new Set<(sessionId: number, command: string) => void>();
   const bridgeSessions = createBridgeSessionRuntime(options.bridgeBinaryPath);
@@ -198,8 +194,6 @@ export function createExecSessionManager(
 
   function finalizeSession(session: ExecSession, reason: ExecSessionChangeReason = "exit"): void {
     if (session.finalized) return;
-    rtkOutputFilters.get(session)?.end();
-    rtkOutputFilters.delete(session);
     const normalizer = pipeNormalizers.get(session);
     if (normalizer) {
       pipeNormalizers.delete(session);
@@ -242,24 +236,13 @@ export function createExecSessionManager(
     );
   }
 
-  function appendOutput(
-    session: ExecSession,
-    text: string,
-    stream: "stdout" | "stderr" | "pty",
-  ): void {
-    if (text.length === 0) return;
-    const filter = rtkOutputFilters.get(session);
-    if (filter) filter(Buffer.from(text), stream);
-    else appendNormalizedOutput(session, text);
-  }
-
   function setBaseEnv(env: NodeJS.ProcessEnv): void {
     baseEnv = { ...env };
   }
 
   const bridgeHooks: BridgeSessionHooks = {
     isOwned: (session) => !shuttingDown && sessions.get(session.id) === session,
-    onOutput: (session, text, stream) => appendOutput(session, text, stream),
+    onOutput: appendNormalizedOutput,
     onOutputDropped: (session, bytes) => {
       session.bufferStartOffset += bytes;
       session.outputVersion += 1;
@@ -278,7 +261,7 @@ export function createExecSessionManager(
       const session = bridgeSessions.create({
         id: nextSessionId++,
         input: {
-          command: input.displayCommand ?? input.cmd,
+          command: input.cmd,
           executionCommand: execution.command,
           executionEnv: execution.env,
           ...(input.tty === undefined ? {} : { tty: input.tty }),
@@ -289,14 +272,6 @@ export function createExecSessionManager(
         ...(signal ? { signal } : {}),
         hooks: bridgeHooks,
       });
-      if (input.filterRtkOutput) {
-        rtkOutputFilters.set(
-          session,
-          createRtkNoHookWarningDataFilter((data) =>
-            appendNormalizedOutput(session, data.toString()),
-          ),
-        );
-      }
       if (!session.tty) pipeNormalizers.set(session, createPipeOutputNormalizer());
       sessions.set(session.id, session);
       rememberCommand(session.id, session.command);
