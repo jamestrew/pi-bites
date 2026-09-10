@@ -9,8 +9,8 @@ const root = resolve(import.meta.dirname);
 const retainedGroups = [
   /^(?:activation|apply-patch|exec-command|prompt-guidance|vendor-boundary|view-image)\.test\.ts$/,
   /^web-run\.test\.ts$/,
-  /^code-mode\.test\.ts$/,
-  /^code-mode\/(?:binary\.ts|vendor-inventory\.json)$/,
+  /^code-mode(?:-(?:runtime|connection))?\.test\.ts$/,
+  /^code-mode\/(?:(?:binary|runtime|lifecycle|delegates|exec-source|types|host-connection|host-process|host-protocol)\.ts|vendor-inventory\.json)$/,
   /^(?:activation|index|native-binary-error|prompt-guidance)\.ts$/,
   /^(?:LICENSE|UPSTREAM\.md)$/,
   /^apply-patch\/(?:binary|executor|rendering|render-state|tool)\.ts$/,
