@@ -7,6 +7,10 @@ The Codex adapter's `apply_patch`, `exec_command`, `write_stdin`, `view_image`, 
 - Commit: `e12067caadc38da4e785d0300202aac233ae3b2f`
 - Package license: MIT, preserved in [`LICENSE`](LICENSE)
 
+## Planned Code Mode contract
+
+Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the future Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. This is a target contract; it does not change the current artifacts or their older provenance below. Native packaging and activation land in #296–#302.
+
 ## Retained surface
 
 The TypeScript parser, path rules, result types, native runner/error handling, executor, and tool behavior came from `packages/pi-codex-conversion/src/{patch,tools/apply-patch,tools/exec,tools/native,tools/view-image,tools/web-run}`. They were reduced to the direct `apply_patch`, structured `exec_command`, `write_stdin`, local-only `view_image`, and standalone `web_run` surfaces and adapted to Pi-bites paths and APIs. The local adapter uses Pi's existing provider, model catalogue, authentication, configured shell, and core tools; it does not retain upstream provider registration, prompt conversion, Code Mode `exec`/`wait`, compaction, voice, image generation/editing, model-generated image descriptions, or settings features.

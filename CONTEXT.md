@@ -51,3 +51,15 @@ _Avoid_: Cell
 **Bash gate**:
 A permission gate that classifies requested shell commands and obtains automated or human approval when required.
 _Avoid_: JavaScript sandbox
+
+**Runtime session**:
+Branch-owned Code Mode state containing cells and serializable stored values; it is cleared on branch/session replacement, reload, shutdown, or leaving supported model scope.
+_Avoid_: Shell session, persistent notebook
+
+**Nested trace**:
+Presentation data for an owned tool invocation rendered inside its enclosing `exec`/`wait` result. It is not an independent model-visible tool message.
+_Avoid_: Injected tool result
+
+**Contract baseline**:
+The selected Codex revision plus explicit Pi capability projections, recorded in [the Code Mode baseline](docs/code-mode-contract/README.md). It specifies the target migration interface, not current adapter activation.
+_Avoid_: Latest upstream, conversion prompt
