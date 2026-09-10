@@ -9,6 +9,8 @@ const root = resolve(import.meta.dirname);
 const retainedGroups = [
   /^(?:activation|apply-patch|exec-command|prompt-guidance|vendor-boundary|view-image)\.test\.ts$/,
   /^web-run\.test\.ts$/,
+  /^code-mode\.test\.ts$/,
+  /^code-mode\/(?:binary\.ts|vendor-inventory\.json)$/,
   /^(?:activation|index|native-binary-error|prompt-guidance)\.ts$/,
   /^(?:LICENSE|UPSTREAM\.md)$/,
   /^apply-patch\/(?:binary|executor|rendering|render-state|tool)\.ts$/,
@@ -27,6 +29,10 @@ const retainedGroups = [
   /^vendor\/view-image\/view-image\/rust\/(?:Cargo\.toml|main\.rs)$/,
   /^vendor\/view-image\/rust\/crates\/codex-utils-image\/[^/]+$/,
 ];
+const codeModeVendor = JSON.parse(
+  readFileSync(resolve(root, "code-mode/vendor-inventory.json"), "utf8"),
+) as Record<string, string>;
+
 const nativeArtifacts = [
   "apply-patch/bin/linux-arm64/apply_patch",
   "apply-patch/bin/linux-x64/apply_patch",
@@ -65,7 +71,12 @@ describe("Codex adapter vendor boundary", () => {
     expect(
       files.filter(
         (path) =>
-          !nativeArtifacts.includes(path) && !retainedGroups.some((group) => group.test(path)),
+          !nativeArtifacts.includes(path) &&
+          !(
+            path.startsWith("vendor/code-mode/") &&
+            Object.hasOwn(codeModeVendor, path.slice("vendor/code-mode/".length))
+          ) &&
+          !retainedGroups.some((group) => group.test(path)),
       ),
     ).toEqual([]);
     expect(
@@ -107,6 +118,24 @@ describe("Codex adapter vendor boundary", () => {
       createHash("sha256")
         .update(readFileSync(resolve(root, path)))
         .digest("hex");
+    expect(sha256("code-mode/vendor-inventory.json")).toBe(
+      "b419691bd70b7dd89d2ec87a14fd7710e5663e06fae0e9d6a7f04418b5119931",
+    );
+    for (const [path, digest] of Object.entries(codeModeVendor)) {
+      expect(sha256(`vendor/code-mode/${path}`), path).toBe(digest);
+    }
+    const codeModeLockfile = readFileSync(resolve(root, "vendor/code-mode/Cargo.lock"), "utf8");
+    for (const dependency of [
+      "codex-core",
+      "codex-otel",
+      "reqwest",
+      "toml",
+      "opentelemetry",
+      "cpal",
+      "zeromq",
+    ]) {
+      expect(codeModeLockfile).not.toContain(`name = "${dependency}"`);
+    }
     expect(sha256("apply-patch/bin/linux-arm64/apply_patch")).toBe(
       "0ce6c0c12fcadaa41143aee1c0de2c8be86cee4b1e7655391815c18f048c9518",
     );

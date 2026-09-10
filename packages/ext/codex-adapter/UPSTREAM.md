@@ -7,9 +7,9 @@ The Codex adapter's `apply_patch`, `exec_command`, `write_stdin`, `view_image`, 
 - Commit: `e12067caadc38da4e785d0300202aac233ae3b2f`
 - Package license: MIT, preserved in [`LICENSE`](LICENSE)
 
-## Planned Code Mode contract
+## Code Mode contract and host
 
-Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the future Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. This is a target contract; it does not change the current artifacts or their older provenance below. Native packaging and activation land in #296–#302.
+Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the future Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. The standalone host is now a manually installed dependency from the pinned Codex GitHub release, with matched source under `vendor/code-mode`; see its [packaging record](vendor/code-mode/README.md) for artifact hashes, V8/native notices, build commands and validation limits. The host remains internal and disconnected from activation until #297–#302. The eight existing helper artifacts retain their older provenance below.
 
 ## Retained surface
 
@@ -25,7 +25,7 @@ The structured shell tools retain the upstream JSON-lines bridge protocol, resum
 
 ## Native artifact
 
-Only these upstream artifacts are retained:
+The eight existing tool artifacts below remain in Git. The two Linux Code Mode hosts are installed separately from the pinned Codex release; their checksums and installation instructions are in [the host packaging record](vendor/code-mode/README.md):
 
 - Path: `apply-patch/bin/linux-x64/apply_patch`
 - Target: Linux x86-64
@@ -135,15 +135,15 @@ Run those commands inside a shell containing both `github:NixOS/nixpkgs/nixos-22
 
 ## Deliberate exclusions
 
-The vendor does not contain Code Mode, Notebook Mode, custom provider or Responses Lite transport code, cached transport/prewarming, native compaction, conversation-history forwarding, voice or dictation, GipPity, image generation/editing, remote image descriptions, usage/settings/changelog UI, or binaries for targets other than Linux x86-64 and arm64. The repository boundary test also rejects their known source-group names, unsupported native artifacts, changed binary digests, and upstream dependencies used only by removed features.
+The vendor now contains only the explicitly inventoried standalone Code Mode host/protocol/runtime in addition to the existing native tools. It does not contain Notebook Mode, custom provider or Responses Lite transport code, cached transport/prewarming, native compaction, conversation-history forwarding, voice or dictation, GipPity, image generation/editing, remote image descriptions, usage/settings/changelog UI, or binaries for targets other than Linux x86-64 and arm64. The repository boundary test also rejects their known source-group names, unsupported native artifacts, changed binary digests, and upstream dependencies used only by removed features.
 
 `tree-sitter-bash` and `web-tree-sitter` remain repository dependencies for Pi-bites' bash-gate parser; they are not retained for the adapter. No runtime dependency on `@howaboua/pi-codex-conversion` or OpenAI's SDK remains.
 
 ## Sync procedure
 
 1. Record the new package version, package repository commit, and every nested OpenAI Codex source revision before copying anything.
-2. Diff only the retained TypeScript groups and the four reduced Rust workspaces above. Port needed changes into the owned Pi-bites implementation; do not copy the upstream package wholesale.
+2. Diff only the retained TypeScript groups and the five reduced Rust workspaces above. Port needed changes into the owned Pi-bites implementation; do not copy the upstream package wholesale.
 3. Reapply the local integration changes documented under **Retained surface**, including provider-neutral activation, tool preservation, bounded output, lifecycle cleanup, and supported Linux architecture lookup.
-4. Regenerate reduced Cargo lockfiles, run all locked Cargo test/build pairs, strip the Linux x86-64 and arm64 executables, replace only the eight documented artifacts, and update their SHA-256 values here and in `vendor-boundary.test.ts`.
+4. Regenerate reduced Cargo lockfiles, run all locked Cargo test/build pairs, strip the Linux x86-64 and arm64 executables, replace only the eight existing tool artifacts; update the separate Code Mode release pin and hashes using its V8/provenance recipe, and update their SHA-256 values here and in `vendor-boundary.test.ts`.
 5. Recheck all nested licenses/notices and update this file for source, dependency, binary, or divergence changes.
 6. Run the focused adapter tests and `bun check`. The boundary test must pass before the sync is accepted.
