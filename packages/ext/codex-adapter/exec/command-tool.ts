@@ -12,7 +12,6 @@ import {
 import { Type, type Static } from "typebox";
 
 import { sanitizeText } from "../../subagents/ui/text-lines.js";
-import { consumeRtkExecInput } from "../../rtk.js";
 import { formatUnifiedExecResult } from "./format.js";
 import type { ExecSessionManager, UnifiedExecResult } from "./session-manager.js";
 
@@ -215,19 +214,12 @@ export function createExecCommandTool(
       const projectTrusted = ctx.isProjectTrusted();
       const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
       const defaultShell = getShellConfig(settings.getShellPath()).shell;
-      const originalCommand = consumeRtkExecInput(params);
-      const displayCommand = originalCommand ?? params.cmd;
-      const input = {
-        ...params,
-        defaultShell,
-        displayCommand,
-        filterRtkOutput: originalCommand !== undefined,
-      };
+      const input = { ...params, defaultShell };
       const result = await sessions.exec(input, cwd, signal, (update) =>
-        onUpdate?.(toolResult(update, displayCommand)),
+        onUpdate?.(toolResult(update, params.cmd)),
       );
       throwForExecFailure(result);
-      return toolResult(result, displayCommand);
+      return toolResult(result, params.cmd);
     },
     renderCall(args, theme, context) {
       if (context.executionStarted) context.state.startedAt ??= Date.now();

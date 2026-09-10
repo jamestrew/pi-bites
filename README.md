@@ -9,7 +9,6 @@ A small collection of personal extensions for the pi coding agent.
 - Tweaked `read` tool description/output to keep file reads less noisy
 - Configurable bash command gate
 - Optional model-reviewed automode for bash-gate approvals
-- RTK command rewriting for assistant `bash` tool calls and user `!` shell commands
 - Better fuzzy finding for `@` file mentions powered by `fff`
 - Script-driven statusline
 - Token-count/status helpers
@@ -130,7 +129,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, autoMode, rtk, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal, codexAdapter, codegraph
+bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal, codexAdapter, codegraph
 ```
 
 You can also edit config directly:

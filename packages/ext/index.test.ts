@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 const registerModules = [
   "./bash-gate/index.js",
-  "./rtk.js",
   "./codegraph.js",
   "./statusline.js",
   "./footer/index.js",
@@ -170,23 +169,10 @@ describe("extension entrypoint", () => {
     }
   });
 
-  test("registers command authorization before command rewriting", async () => {
-    const loaded = await loadExtension();
-    try {
-      const gateOrder =
-        loaded.registerSpies.get("./bash-gate/index.js")?.mock.invocationCallOrder[0];
-      const rtkOrder = loaded.registerSpies.get("./rtk.js")?.mock.invocationCallOrder[0];
-      expect(gateOrder).toBeLessThan(rtkOrder!);
-    } finally {
-      loaded.restoreArgv();
-    }
-  });
-
   test("subagents load shared tools and behavior without recursive features", async () => {
     const loaded = await loadExtension({ subagent: "general" });
     try {
       expect(loaded.registerSpies.get("./bash-gate/index.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./rtk.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./codegraph.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./auto-compaction.js")).not.toHaveBeenCalled();
