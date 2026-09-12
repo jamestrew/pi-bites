@@ -37,7 +37,7 @@ export function renderExecScanline(
 ): string {
   const summary = typeof command === "string" ? sanitizeText(command).trim() : "";
   const detail = `${summary ? ` ${summary}` : ""}${suffix}`;
-  return theme.bold(action) + (detail ? theme.fg("toolTitle", detail) : "");
+  return theme.bold(action) + (detail ? theme.fg("accent", detail) : "");
 }
 
 type ExecRenderDetails = Pick<UnifiedExecResult, "output" | "wall_time_seconds" | "session_id">;

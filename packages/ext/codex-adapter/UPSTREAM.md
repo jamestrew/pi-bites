@@ -196,4 +196,22 @@ projections, tool-selection policy, transport fallback, lifecycle integration an
 verification are documented in [the activation record](../../../docs/code-mode-contract/activation.md).
 Regenerate `code-mode/contract.generated.json` using those commands. Runtime output
 formatting ports the pinned UTF-8 middle-truncation policy; nested traces remain
-separate Pi result details for the next rendering issue.
+separate Pi result details.
+
+## Nested presentation (#301)
+
+`code-mode/rendering.ts` reuses the five owned call/result renderers with isolated
+per-call state. It renders live approval/execution updates and restores bounded
+trace snapshots without runtime access. Each observation saves a display version;
+the newest `wait` owns the cell's nested rows and invalidates earlier owners.
+Standalone explicit output and script errors stay with their emitting observation.
+Raw JavaScript stays hidden even when expanded; expansion shows nested tool details.
+Pi renders explicitly emitted images, while the nested display renders un-emitted
+images and avoids repeating images already emitted in earlier observations.
+
+This is local presentation code, informed by conversion's Code Mode renderer rather
+than copied wholesale: conversion repeats full traces across waits and hides successful
+standalone output by default. Trace updates contain no model-visible content. Saved
+trace data is capped at 128 calls/16 MiB, with per-field text and structural bounds.
+The production cutover remains gated until #302. Rendering, width, restore, and live
+host update coverage lives at the registered `exec`/`wait` and trace snapshot seams.

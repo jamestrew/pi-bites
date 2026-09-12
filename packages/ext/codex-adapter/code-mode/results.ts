@@ -9,6 +9,9 @@ export interface CodeModeDetails {
   state: RuntimeResponse["kind"];
   failed: boolean;
   traces: NestedTrace[];
+  displayVersion?: number;
+  errorText?: string;
+  output?: string;
 }
 
 /** Pi persists error status via tool_result; throwing here would discard accumulated images. */
@@ -17,6 +20,7 @@ export function codeModeResult(
   elapsed: number,
   maxTokens: number,
   traces: NestedTrace[],
+  displayVersion?: number,
 ): AgentToolResult<CodeModeDetails> {
   const failed = response.errorText !== undefined;
   const status =
@@ -34,6 +38,10 @@ export function codeModeResult(
     },
   ];
   const items = [...response.contentItems];
+  const output = truncateCodeModeOutput(response.contentItems, maxTokens)
+    .filter((item) => item.type === "input_text")
+    .map((item) => item.text)
+    .join("\n");
   if (failed) items.push({ type: "input_text", text: `Script error:\n${response.errorText}` });
   for (const item of truncateCodeModeOutput(items, maxTokens)) {
     if (item.type === "input_text") {
@@ -45,6 +53,15 @@ export function codeModeResult(
   }
   return {
     content,
-    details: { codeMode: true, cellId: response.cellId, state: response.kind, failed, traces },
+    details: {
+      codeMode: true,
+      cellId: response.cellId,
+      state: response.kind,
+      failed,
+      traces,
+      displayVersion,
+      errorText: response.errorText?.slice(0, 8192),
+      output: output.length > 65536 ? `${output.slice(0, 65536)}\n[Display truncated]` : output,
+    },
   };
 }

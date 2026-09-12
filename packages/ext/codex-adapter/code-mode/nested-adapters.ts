@@ -31,6 +31,7 @@ interface Invocation {
   context: ToolExecutionContext;
   authorization: CommandAuthorizationSession;
   prepared(params: unknown): void;
+  status(this: void, state: "approval" | "running"): void;
   update(result: AgentToolResult<unknown>): void;
 }
 export interface NestedResult {
@@ -45,7 +46,7 @@ export interface NestedAdapter extends Pick<
 > {
   available(context: ToolExecutionContext): boolean;
   invoke(input: unknown, invocation: Invocation): Promise<NestedResult>;
-  failureDetails?(this: void, callId: string): unknown;
+  renderDetails?(this: void, callId: string): unknown;
   cleanup?(this: void, callId: string): void;
 }
 interface Policy<P extends TObject, D> {
@@ -62,7 +63,7 @@ interface Policy<P extends TObject, D> {
   project(result: AgentToolResult<D>): unknown;
   isError?(result: AgentToolResult<D>): boolean;
   reject?(result: AgentToolResult<D>): boolean;
-  failureDetails?(this: void, callId: string): unknown;
+  renderDetails?(this: void, callId: string): unknown;
   cleanup?(this: void, callId: string): void;
 }
 
@@ -82,7 +83,7 @@ function bind<P extends TObject, D, S>(
     kind: policy.freeform ? "freeform" : "function",
     ...(policy.freeform ? {} : { inputSchema: schema }),
     available: policy.available ?? (() => true),
-    failureDetails: policy.failureDetails,
+    renderDetails: policy.renderDetails,
     cleanup: policy.cleanup,
     async invoke(input, invocation) {
       const raw = policy.input ? policy.input(input) : input;
@@ -94,7 +95,8 @@ function bind<P extends TObject, D, S>(
       const observe = (result: AgentToolResult<D>) => policy.observe?.(result, invocation.call);
       const run = () => {
         invocation.signal.throwIfAborted();
-        return tool.execute(
+        invocation.status("running");
+        const pending = tool.execute(
           invocation.call.callId,
           params,
           invocation.signal,
@@ -104,6 +106,9 @@ function bind<P extends TObject, D, S>(
           },
           invocation.context,
         );
+        const details = policy.renderDetails?.(invocation.call.callId);
+        if (details) invocation.update({ content: [], details });
+        return pending;
       };
       const result = await (policy.execute ? policy.execute(params, invocation, run) : run());
       invocation.signal.throwIfAborted();
@@ -137,11 +142,13 @@ export function createNestedAdapters(
 ): NestedAdapter[] {
   return [
     bind(owned.exec_command, {
-      execute: async (params, { authorization, call, signal }, run) =>
-        await authorization.authorize(
+      execute: async (params, { authorization, call, signal, status }, run) => {
+        status("approval");
+        return await authorization.authorize(
           { toolCallId: call.callId, toolName: "exec_command", command: params.cmd, signal },
           () => shellResult(run),
-        ),
+        );
+      },
       observe: (result, call) => {
         if (result.details.session_id !== undefined) call.ownShell(result.details.session_id);
       },
@@ -163,7 +170,7 @@ export function createNestedAdapters(
       project: () => ({}),
       isError: (result) => isApplyPatchFailure(result.details),
       reject: (result) => isApplyPatchFailure(result.details),
-      failureDetails: (callId) => ({ render: getApplyPatchRenderSnapshot(callId) }),
+      renderDetails: (callId) => ({ render: getApplyPatchRenderSnapshot(callId) }),
       cleanup: deleteApplyPatchRenderState,
     }),
     bind(owned.web_run, {

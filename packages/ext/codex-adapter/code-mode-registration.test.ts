@@ -126,7 +126,11 @@ test.skipIf(!host)(
           return value;
         },
       });
-    const exec = async (code: string) => h.tools.get("exec").execute("outer-exec", { code });
+    const updates: any[] = [];
+    const exec = async (code: string) =>
+      h.tools
+        .get("exec")
+        .execute("outer-exec", { code }, undefined, (update: any) => updates.push(update));
     try {
       await h.emit("session_start", {}, ctx);
       const pending = exec(
@@ -138,6 +142,97 @@ test.skipIf(!host)(
           expect.objectContaining({ type: "text", text: expect.stringContaining("hello") }),
         ]),
       );
+      expect(updates.every((update) => update.content.length === 0)).toBe(true);
+      expect(updates.map((update) => update.details.traces[0]?.state)).toEqual(
+        expect.arrayContaining(["approval", "running", "completed"]),
+      );
+      expect(new Set(updates.map((update) => update.details.displayVersion)).size).toBe(1);
+      const nestedYield = await exec(
+        'await tools.exec_command({cmd:"printf nested",login:false}); await yield_control(); text("resumed");',
+      );
+      const waitUpdates: any[] = [];
+      const nestedWait = await h.tools
+        .get("wait")
+        .execute("nested-wait", { cell_id: nestedYield.details.cellId }, undefined, (update: any) =>
+          waitUpdates.push(update),
+        );
+      expect(waitUpdates[0].details.traces[0].result.details.output).toBe("nested");
+      expect(nestedWait.details.displayVersion).toBeGreaterThan(nestedYield.details.displayVersion);
+      expect(nestedWait.details.traces[0].callId).toBe(nestedYield.details.traces[0].callId);
+      const concurrentCell = await exec(
+        'await yield_control(); await tools.exec_command({cmd:"sleep 0.05",login:false});',
+      );
+      const acceptedWait = h.tools
+        .get("wait")
+        .execute("accepted-wait", { cell_id: concurrentCell.details.cellId });
+      const rejectedUpdates: any[] = [];
+      await expect(
+        h.tools
+          .get("wait")
+          .execute(
+            "duplicate-wait",
+            { cell_id: concurrentCell.details.cellId },
+            undefined,
+            (update: any) => rejectedUpdates.push(update),
+          ),
+      ).rejects.toThrow("Already waiting");
+      await acceptedWait;
+      expect(rejectedUpdates).toEqual([]);
+      const failedYield = await exec(
+        'await tools.exec_command({cmd:"printf retained-before-abort",login:false}); await yield_control(); await tools.exec_command({cmd:"sleep 1",login:false});',
+      );
+      const controller = new AbortController();
+      let abortScheduled = false;
+      const failedWait = await h.tools
+        .get("wait")
+        .execute("aborted-wait", { cell_id: failedYield.details.cellId }, controller.signal, () => {
+          if (!abortScheduled) {
+            abortScheduled = true;
+            queueMicrotask(() => controller.abort());
+          }
+        });
+      expect(failedWait.details.failed).toBe(true);
+      expect(failedWait.details.displayVersion).toBeGreaterThan(failedYield.details.displayVersion);
+      expect(
+        failedWait.details.traces.some(
+          (trace: any) => trace.result?.details?.output === "retained-before-abort",
+        ),
+      ).toBe(true);
+      expect(
+        failedWait.details.traces.every(
+          (trace: any) => trace.state === "completed" || trace.state === "error",
+        ),
+      ).toBe(true);
+      expect(
+        await h.emit("tool_result", { toolName: "wait", details: failedWait.details }, context()),
+      ).toEqual({ isError: true });
+      const renderContext = {
+        state: {},
+        cwd: process.cwd(),
+        toolCallId: "aborted-wait",
+        expanded: false,
+        isPartial: false,
+        isError: true,
+        showImages: false,
+        invalidate() {},
+      };
+      const renderTheme = {
+        bold: (text: string) => text,
+        fg: (_role: string, text: string) => text,
+        bg: (_role: string, text: string) => text,
+      };
+      const renderFailed = () =>
+        h.tools
+          .get("wait")
+          .renderResult(
+            JSON.parse(JSON.stringify(failedWait)),
+            { expanded: false, isPartial: false },
+            renderTheme,
+            { ...renderContext, state: {} },
+          )
+          .render(100)
+          .join("\n");
+      expect(renderFailed()).toContain("retained-before-abort");
       await h.emit("model_select", {}, context("gpt-5.6"));
       expect((await exec('text(load("value"));')).content).toContainEqual({
         type: "text",
@@ -150,6 +245,7 @@ test.skipIf(!host)(
       expect(waited.content).toContainEqual({ type: "text", text: "second" });
       expect(waited.content).not.toContainEqual({ type: "text", text: "first" });
       await h.emit("session_tree", {}, context());
+      expect(renderFailed()).toContain("retained-before-abort");
       expect((await exec('text(load("value"));')).content).toContainEqual({
         type: "text",
         text: "undefined",

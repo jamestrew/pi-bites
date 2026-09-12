@@ -3,9 +3,10 @@ import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 export interface NestedTrace {
   cellId: string;
   callId: string;
+  cwd?: string;
   name: string;
   input: unknown;
-  state: "running" | "completed" | "error";
+  state: "approval" | "running" | "completed" | "error";
   result?: AgentToolResult<unknown>;
 }
 
@@ -16,9 +17,25 @@ export interface NestedTrace {
 export class NestedTraces {
   private entries = new Map<string, { trace: NestedTrace; bytes: number }>();
   private bytes = 0;
+  private version = 0;
+  private listeners = new Set<(cellId: string) => void>();
+  observe(cellId: string, update: () => void): { version: number; dispose(): void } {
+    const version = ++this.version;
+    const listener = (id: string) => {
+      if (id === cellId) update();
+    };
+    this.listeners.add(listener);
+    return {
+      version,
+      dispose: () => {
+        this.listeners.delete(listener);
+      },
+    };
+  }
   clear(): void {
     this.entries.clear();
     this.bytes = 0;
+    this.listeners.clear();
   }
   forCell(cellId: string): NestedTrace[] {
     return [...this.entries.values()]
@@ -27,9 +44,12 @@ export class NestedTraces {
   }
   record(trace: NestedTrace): void {
     let remaining = 64 * 1024;
+    let nodes = 4096;
     const bound = (value: unknown, depth = 0): unknown => {
+      if (--nodes < 0) return undefined;
       if (typeof value === "string") {
-        const text = value.slice(0, Math.max(256, Math.min(8192, remaining)));
+        const limit = Math.max(0, Math.min(8192, remaining));
+        const text = value.length > limit ? `${value.slice(0, limit)}\n[Display truncated]` : value;
         remaining -= text.length;
         return text;
       }
@@ -52,10 +72,12 @@ export class NestedTraces {
     };
     const input = bound(trace.input);
     remaining = 64 * 1024;
+    nodes = 4096;
     const result = trace.result
       ? { content: bound(trace.result.content), details: undefined as unknown }
       : undefined;
     remaining = 64 * 1024;
+    nodes = 4096;
     if (result && trace.result) result.details = bound(trace.result.details);
     const bounded = { ...trace, input, result } as NestedTrace;
     const bytes = Buffer.byteLength(JSON.stringify(bounded));
@@ -68,6 +90,13 @@ export class NestedTraces {
       const [key, entry] = oldest;
       this.bytes -= entry.bytes;
       this.entries.delete(key);
+    }
+    for (const listener of this.listeners) {
+      try {
+        listener(trace.cellId);
+      } catch {
+        /* Presentation must not reject a delegate. */
+      }
     }
   }
 }

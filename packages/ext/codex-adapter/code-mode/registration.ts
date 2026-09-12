@@ -49,7 +49,7 @@ export default function registerCodeMode(
     }),
     (reason) => notify?.(`Code Mode cleared: ${reason}`, "info"),
   );
-  const refresh = registerCodeModeTools(pi, lifecycle, bridge, getTools);
+  const refresh = registerCodeModeTools(pi, lifecycle, bridge, getTools, owned);
   const enabled = (model: ExtensionContext["model"]) =>
     !configRef.current.disable?.includes("codexAdapter") && isAdapterModel(model);
   const reconcile = (ctx: ExtensionContext) => {

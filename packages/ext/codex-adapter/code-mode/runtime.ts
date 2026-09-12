@@ -79,6 +79,7 @@ export class CodeModeRuntime {
     source: string,
     signal?: AbortSignal,
     tools: readonly RuntimeTool[] = this.tools,
+    onStarted?: (cellId: string) => void,
   ): Promise<RuntimeResponse> {
     const enabledTools = tools.map((tool) => ({ ...tool }));
     if (new Set(enabledTools.map((tool) => tool.name)).size !== enabledTools.length)
@@ -130,6 +131,7 @@ export class CodeModeRuntime {
           cellId = executionCellId(value);
           if (!cellId) throw new Error("Invalid Code Mode execution start");
           this.delegates.bind(cellId, enabledTools);
+          onStarted?.(`${this.sessionId}:${cellId}`);
           this.startingExecutions.delete(reservation);
           if (signal?.aborted) abort();
         },
@@ -148,17 +150,22 @@ export class CodeModeRuntime {
     }
   }
 
-  async wait(cellId: string, yieldTimeMs = 10_000, signal?: AbortSignal): Promise<RuntimeResponse> {
+  async wait(
+    cellId: string,
+    yieldTimeMs = 10_000,
+    signal?: AbortSignal,
+    onStarted?: () => void,
+  ): Promise<RuntimeResponse> {
     unsignedInteger(yieldTimeMs, "yield_time_ms");
-    return this.observe(cellId, false, yieldTimeMs, signal);
+    return this.observe(cellId, false, yieldTimeMs, signal, onStarted);
   }
 
-  async terminate(cellId: string): Promise<RuntimeResponse> {
+  async terminate(cellId: string, onStarted?: () => void): Promise<RuntimeResponse> {
     validateCellId(cellId);
     // Synchronous invalidation precedes host IO and any queued approval continuation.
     if (cellId.startsWith(`${this.sessionId}:`))
       this.delegates.cancelCell(cellId.slice(this.sessionId.length + 1), true);
-    return this.observe(cellId, true);
+    return this.observe(cellId, true, 0, undefined, onStarted);
   }
 
   private async observe(
@@ -166,6 +173,7 @@ export class CodeModeRuntime {
     terminate: boolean,
     yieldTimeMs = 10_000,
     signal?: AbortSignal,
+    onStarted?: () => void,
   ): Promise<RuntimeResponse> {
     validateCellId(cellId);
     signal?.throwIfAborted();
@@ -211,6 +219,7 @@ export class CodeModeRuntime {
     try {
       await this.start();
       signal?.throwIfAborted();
+      onStarted?.();
       id = this.connection.nextRequestId();
       const value = await this.connection.requestWithId(id, request);
       const wrapped = runtimeOutcome(value);
