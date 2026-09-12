@@ -119,7 +119,7 @@ describe("Codex adapter vendor boundary", () => {
         .update(readFileSync(resolve(root, path)))
         .digest("hex");
     expect(sha256("code-mode/vendor-inventory.json")).toBe(
-      "0635476c7813ead20a380ac87cc5fbf1b5d7d12fb3ee59fc98761ffdff5b6a2c",
+      "4d6fb5af77c7bf23b4f67ec691aeba7681850801a35c93f60316b03a2b92deab",
     );
     for (const [path, digest] of Object.entries(codeModeVendor)) {
       expect(sha256(`vendor/code-mode/${path}`), path).toBe(digest);

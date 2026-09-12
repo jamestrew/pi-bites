@@ -1,27 +1,31 @@
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { getCodeModeHostPath, verifyCodeModeHost } from "./code-mode/binary.js";
 
 afterEach(() => vi.unstubAllEnvs());
 
-test("finds manually installed hosts in versioned user data directories", () => {
+test("finds executable hosts in PATH order, including symlinks", () => {
   const directory = mkdtempSync(join(tmpdir(), "code-mode-installed-"));
-  vi.stubEnv("XDG_DATA_HOME", directory);
   try {
-    for (const arch of ["x64", "arm64"]) {
-      const binary = join(
-        directory,
-        "pi-bites/code-mode/rust-v0.145.0",
-        `linux-${arch}`,
-        "codex-code-mode-host",
-      );
-      mkdirSync(dirname(binary), { recursive: true });
-      writeFileSync(binary, "installed fixture");
-      expect(getCodeModeHostPath("linux", arch)).toBe(binary);
-    }
+    const entries = ["missing", "nonexecutable", "directory", "first", "second"].map((name) =>
+      join(directory, name),
+    );
+    for (const entry of entries) mkdirSync(entry);
+    const helper = "codex-code-mode-host";
+    writeFileSync(join(entries[1]!, helper), "not executable", { mode: 0o644 });
+    mkdirSync(join(entries[2]!, helper));
+    const binary = join(directory, "host");
+    writeFileSync(binary, "installed fixture", { mode: 0o755 });
+    symlinkSync(binary, join(entries[3]!, helper));
+    writeFileSync(join(entries[4]!, helper), "second fixture", { mode: 0o755 });
+    vi.stubEnv("PATH", entries.join(delimiter));
+    for (const arch of ["x64", "arm64"])
+      expect(getCodeModeHostPath("linux", arch)).toBe(join(entries[3]!, helper));
+    vi.stubEnv("PATH", relative(process.cwd(), entries[4]!));
+    expect(getCodeModeHostPath("linux", "x64")).toBe(join(entries[4]!, helper));
     expect(() => getCodeModeHostPath("darwin", "arm64")).toThrow(/Unsupported.*disable/i);
     expect(() => getCodeModeHostPath("linux", "riscv64")).toThrow(/Unsupported/i);
   } finally {
@@ -29,11 +33,14 @@ test("finds manually installed hosts in versioned user data directories", () => 
   }
 });
 
-test("missing dependency points to manual installation without downloading", () => {
+test("missing or nonexecutable PATH dependency points to manual installation", () => {
   const directory = mkdtempSync(join(tmpdir(), "code-mode-absent-"));
-  vi.stubEnv("XDG_DATA_HOME", directory);
+  vi.stubEnv("PATH", directory);
   try {
-    expect(() => getCodeModeHostPath("linux", "x64")).toThrow(/manual-installation.*disable/);
+    writeFileSync(join(directory, "codex-code-mode-host"), "not executable", { mode: 0o644 });
+    expect(() => getCodeModeHostPath("linux", "x64")).toThrow(/PATH.*manual-installation.*disable/);
+    vi.stubEnv("PATH", undefined);
+    expect(() => getCodeModeHostPath("linux", "x64")).toThrow(/PATH.*manual-installation.*disable/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

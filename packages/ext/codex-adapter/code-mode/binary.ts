@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { accessSync, constants, statSync } from "node:fs";
+import { delimiter, resolve } from "node:path";
 
 const helper = "codex-code-mode-host";
 const recovery =
@@ -16,16 +15,16 @@ export function getCodeModeHostPath(
       `Unsupported Code Mode platform ${platform}-${arch}. Use Linux x64/arm64 or explicitly disable codexAdapter.`,
     );
   }
-  const path = join(
-    process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"),
-    "pi-bites",
-    "code-mode",
-    "rust-v0.145.0",
-    `linux-${arch}`,
-    helper,
-  );
-  if (!existsSync(path)) throw new Error(`${helper} is missing at ${path}. ${recovery}`);
-  return path;
+  for (const directory of process.env.PATH?.split(delimiter) ?? []) {
+    const path = resolve(directory, helper);
+    try {
+      accessSync(path, constants.X_OK);
+      if (statSync(path).isFile()) return path;
+    } catch {
+      // Continue searching past missing or inaccessible PATH entries.
+    }
+  }
+  throw new Error(`${helper} was not found executable on PATH. ${recovery}`);
 }
 
 /** Packaging probe only. The session-owned runtime client is implemented separately. */
