@@ -1,11 +1,6 @@
 # Native contracts and activation (#300)
 
-The internal entry point is `packages/ext/codex-adapter/code-mode/registration.ts`.
-Production still calls the existing structured adapter: `CODE_MODE_READY` is false
-in `codex-adapter/index.ts`. #301 supplies coherent nested rendering and #302 removes
-the gate, the legacy registration in `index.ts`, `legacy-activation.ts`, and its
-legacy guidance/tests. This is a temporary integration boundary, not a public
-experimental flag or a permanent choice of two adapter modes.
+The default `packages/ext/codex-adapter/index.ts` exports the Code Mode registration in `code-mode/registration.ts`. The temporary gate and legacy direct adapter registration/guidance have been removed by #302. Unsupported models use normal Pi core tools.
 
 ## Reproduce the definitions
 
@@ -42,7 +37,7 @@ from `utils/string/src/truncate.rs` and `utils/output-truncation/src/lib.rs` (bo
 are now included in the source evidence manifest). Status and wall time retain the
 native shape. Failed scripts keep accumulated output/images; an exec/wait-specific
 Pi `tool_result` hook sets error status before persistence. Bounded nested traces
-remain in `details` for #301, never appended to the model result.
+remain in `details` for nested rendering, never appended to the model result.
 
 ## Scope and selection
 
@@ -52,9 +47,7 @@ variant segments. One recognized provider prefix may precede the ID:
 `openai/`, `openai-codex/`, `azure/`, `azure-openai/`, `github-copilot/`, `openrouter/`.
 Thus `gpt-6-astra` and `openai/gpt-5.6-pro` match; `gpt-60`, `gpt-6.1`, `gpt-7`,
 `unknown/gpt-6`, and opaque aliases do not. The provider and API names never grant
-model eligibility. The deprecated `codexAdapter.providers` remains accepted only
-for the gated legacy path; Code Mode ignores it. Remove it at #302 rather than
-silently rejecting unrelated valid configuration now.
+model eligibility. The obsolete `codexAdapter.providers` option has been removed. Unknown keys in existing configuration remain ignored, with no provider-wide activation.
 
 Model-visible tools and nested callable tools are separate sets. Initial session
 selection bounds both: explicitly unavailable adapter tools are not recovered
@@ -110,9 +103,7 @@ model/tree events do not terminally shut down the shared shell manager.
 
 Behavioral tests cover scoped IDs, tool selection/restoration, registered lifecycle,
 real-host exec/wait/state/branch cleanup and throwing stale getters, failed output
-with images, and stock provider payloads. Payload captures stop before network
-access; they are not live model-route smoke tests. #302 still owns that exercise
-and the rendering/cutover decision. Host tests run against an explicitly supplied
+with images, and stock provider payloads. Payload tests stop before network access. The [cutover record](cutover.md) separately records live route smoke and its limitations. Host tests run against an explicitly supplied
 `PI_BITES_TEST_CODE_MODE_HOST`, the manual installation, or the retained local build;
 without any host, native integration tests skip. Final repository validation is
 `bun check`, including Node and Bun host/registration checks.

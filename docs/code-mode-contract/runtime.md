@@ -157,8 +157,7 @@ exercise reserved for the integrated cutover.
 ## Owned nested tools (#299)
 
 `NestedToolBridge` in `code-mode/nested-tools.ts` supplies the five owned capabilities to
-`CodeModeRuntime`. It remains internal: model activation/contract generation belongs to #300,
-and rendering these traces belongs to #301. The `register*Tool` helpers now return the exact
+`CodeModeRuntime`. The default registration applies generated contracts and connects the nested renderers. The `register*Tool` helpers now return the exact
 definition registered with Pi; pass those definitions to the bridge with the same shell manager
 used for the runtime's `shells` option. Do not construct replacement tools per cell.
 
@@ -169,7 +168,7 @@ authorization and result conversion to each concrete definition once; shared dis
 cancellation and trace recording. Capture snapshots those dependencies and bash-gate's
 session authorization. `bridge.tools()` supplies current availability; pass it as execute's third
 argument when availability changes without replacing the runtime. Delegates also recheck current
-web/image availability. #300 replaces the internal metadata with the generated native contracts
+web/image availability. Registration replaces the internal metadata with the generated native contracts
 while retaining these invoke functions. No nested alias, sandbox field, web settings, auth, or
 conversation data is accepted. Input must satisfy the strict projected schema before preparation,
 then the prepared input is checked again; numeric arguments must be nonnegative safe integers.

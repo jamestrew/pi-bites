@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "no
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, test as nativeTest } from "vitest";
+import { afterEach, expect, vi, test as nativeTest } from "vitest";
 import { createBashGateHarness } from "../bash-gate/test/harness.js";
 import { createApplyPatchTool } from "./apply-patch/tool.js";
 import { createExecCommandTool } from "./exec/command-tool.js";
@@ -37,9 +37,10 @@ afterEach(async () => {
 function setup(
   web: Partial<CreateWebRunToolOptions> = {},
   gateOptions: Parameters<typeof createBashGateHarness>[4] = {},
+  autoMode?: Parameters<typeof createBashGateHarness>[2],
 ) {
   const cwd = mkdtempSync(join(tmpdir(), "pi-nested-"));
-  const gate = createBashGateHarness([], false, undefined, true, gateOptions);
+  const gate = createBashGateHarness([], false, autoMode, true, gateOptions);
   gate.ui.select.mockResolvedValue("Allow");
   const sessions = createExecSessionManager({ minEmptyWriteYieldTimeMs: 250 });
   const config: CodexAdapterConfig = { webSearchProviders: ["work"] };
@@ -396,4 +397,144 @@ test("web route errors reject without fallback and model capabilities are rechec
   model.input = ["text"];
   expect((await runtime.wait(cell.cellId)).errorText).toContain("unavailable");
   expect(bridge.tools().map((tool) => tool.name)).not.toContain("view_image");
+});
+
+test("unhandled aggregate denial cancels sibling approval before a late allow can launch", async () => {
+  const { runtime, gate, cwd } = setup();
+  const denied = Promise.withResolvers<string>();
+  const sibling = Promise.withResolvers<string>();
+  gate.ui.select
+    .mockImplementationOnce(() => denied.promise)
+    .mockImplementationOnce(() => sibling.promise);
+  const pending = await runtime.execute(
+    '// @exec: {"yield_time_ms":30}\nawait Promise.all([tools.exec_command({cmd:"touch denied",login:false}), tools.exec_command({cmd:"touch sibling",login:false})]);',
+  );
+  await expect.poll(() => gate.ui.select.mock.calls.length).toBe(1);
+  denied.resolve("Deny");
+  expect((await runtime.wait(pending.cellId)).errorText).toContain("denied");
+  sibling.resolve("Allow");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(existsSync(join(cwd, "denied"))).toBe(false);
+  expect(existsSync(join(cwd, "sibling"))).toBe(false);
+});
+
+test("queued real commands recheck a shared session allowance and safe work proceeds", async () => {
+  const { runtime, gate, cwd } = setup(
+    {},
+    { bashGate: { rules: [{ cmd: "touch", reason: "smoke" }] } },
+  );
+  const choice = Promise.withResolvers<string>();
+  gate.ui.select.mockImplementationOnce(() => choice.promise);
+  const pending = await runtime.execute(
+    '// @exec: {"yield_time_ms":30}\ntext(await Promise.allSettled([tools.exec_command({cmd:"touch first",login:false}), tools.exec_command({cmd:"touch second",login:false})]));',
+  );
+  await expect.poll(() => gate.ui.select.mock.calls.length).toBe(1);
+  expect(
+    values(
+      await runtime.execute(
+        'text(await tools.exec_command({cmd:"printf independent",login:false}));',
+      ),
+    ),
+  ).toEqual([expect.objectContaining({ output: "independent" })]);
+  choice.resolve('Allow for session ("touch")');
+  expect(
+    (values(await runtime.wait(pending.cellId))[0] as { status: string }[]).map((r) => r.status),
+  ).toEqual(["fulfilled", "fulfilled"]);
+  expect(gate.ui.select).toHaveBeenCalledOnce();
+  expect(existsSync(join(cwd, "first"))).toBe(true);
+  expect(existsSync(join(cwd, "second"))).toBe(true);
+});
+
+test.each(["allow", "deny", "review-error", "escalation-error", "cancel"] as const)(
+  "real nested Auto Mode %s settles authorization before process creation",
+  async (outcome) => {
+    const pendingReview = Promise.withResolvers<{ outcome: "allow" }>();
+    const review = vi.fn(async () => {
+      if (outcome === "review-error") throw new Error("review unavailable");
+      if (outcome === "cancel") return pendingReview.promise;
+      return { outcome: outcome === "allow" ? ("allow" as const) : ("deny" as const) };
+    });
+    const { runtime, gate, cwd, expire } = setup({}, {}, { isEnabled: () => true, review });
+    gate.ui.select.mockResolvedValue("Deny");
+    if (outcome === "escalation-error")
+      gate.ui.select.mockRejectedValue(new Error("UI unavailable"));
+    const pending = runtime.execute(
+      '// @exec: {"yield_time_ms":30}\nawait tools.exec_command({cmd:"touch reviewed",login:false});',
+    );
+    expire();
+    let result = await pending;
+    if (outcome === "cancel") {
+      await expect.poll(() => review.mock.calls.length).toBe(1);
+      await runtime.terminate(result.cellId);
+      pendingReview.resolve({ outcome: "allow" });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    } else {
+      if (result.kind === "yielded") result = await runtime.wait(result.cellId);
+      if (outcome === "allow") expect(result.errorText).toBeUndefined();
+      else expect(result.errorText).toBeTruthy();
+    }
+    expect(existsSync(join(cwd, "reviewed"))).toBe(outcome === "allow");
+    expect(review).toHaveBeenCalledOnce();
+    expect(gate.pi.appendEntry.mock.calls.map(([, entry]) => entry)).toEqual([
+      expect.objectContaining({ status: outcome === "allow" ? "reviewer-approved" : "blocked" }),
+    ]);
+  },
+);
+
+test("the real host and bundled web client carry navigation and citations only to the selected route", async () => {
+  const { createServer } = await import("node:http");
+  const requests: { id: string; commands: unknown }[] = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      requests.push(JSON.parse(body));
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          output: "native citation citeturn0search0",
+          results: [{ ref_id: "turn0search0", url: "https://example.org/source" }],
+        }),
+      );
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  cleanup.push(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+      server.closeAllConnections();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("missing server address");
+  const { runtime, model, owned, config, expire } = setup();
+  model.baseUrl = `http://127.0.0.1:${address.port}/v1`;
+  expire();
+  const commands = [
+    { search_query: [{ q: "explicit query" }] },
+    { open: [{ ref_id: "turn0search0" }] },
+    { click: [{ ref_id: "turn0search0", id: 1 }] },
+    { find: [{ ref_id: "turn0search0", pattern: "source" }] },
+    { image_query: [{ q: "sample" }] },
+  ];
+  for (const command of commands) {
+    const result = await runtime.execute(`text(await tools.web_run(${JSON.stringify(command)}));`);
+    expect(result.errorText).toBeUndefined();
+    expect(result.contentItems).toEqual([
+      { type: "input_text", text: "native citation citeturn0search0" },
+    ]);
+  }
+  expect(requests.map((request) => request.commands)).toEqual(commands);
+  expect(new Set(requests.map((request) => request.id)).size).toBe(1);
+  expect(owned.web_run.transformCitations("citeturn0search0")).toBe(
+    "[source](<https://example.org/source>)",
+  );
+  config.webSearchProviders = [];
+  expect(
+    (await runtime.execute('await tools.web_run({search_query:[{q:"blocked"}]});')).errorText,
+  ).toContain("unavailable");
+  expect(requests).toHaveLength(5);
 });

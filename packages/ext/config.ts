@@ -73,8 +73,6 @@ export interface AutoModeConfig {
 }
 
 export interface CodexAdapterConfig {
-  /** @deprecated Legacy structured adapter only; ignored by scoped Code Mode. Remove at #302 cutover. */
-  providers?: string[];
   /** Responses provider IDs explicitly trusted to implement Codex `/alpha/search`. */
   webSearchProviders?: string[];
   /** Permit web_run to use stock openai-codex auth when the active provider cannot search. */
@@ -207,7 +205,6 @@ function isCodexAdapterConfig(value: unknown): value is CodexAdapterConfig {
     field.every((provider) => typeof provider === "string" && provider.trim().length > 0);
   return (
     isRecord(value) &&
-    isOptional(value, "providers", isProviderList) &&
     isOptional(value, "webSearchProviders", isProviderList) &&
     isOptional(value, "allowOpenAICodexFallback", (field) => typeof field === "boolean")
   );

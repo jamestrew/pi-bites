@@ -37,7 +37,7 @@ A capability exposed for the model to call directly, outside a Code Mode executi
 _Avoid_: Nested tool
 
 **Structured mode**:
-The existing Codex adapter interface that exposes its capabilities as direct structured tools.
+The retired Codex adapter interface that exposed its capabilities as direct structured tools; no longer an activation option.
 _Avoid_: Code Mode
 
 **Cell**:
@@ -61,5 +61,5 @@ Presentation data for an owned tool invocation rendered inside its enclosing `ex
 _Avoid_: Injected tool result
 
 **Contract baseline**:
-The selected Codex revision plus explicit Pi capability projections, recorded in [the Code Mode baseline](docs/code-mode-contract/README.md). It specifies the target migration interface, not current adapter activation.
+The selected Codex revision plus explicit Pi capability projections, recorded in [the Code Mode baseline](docs/code-mode-contract/README.md). It specifies the active adapter interface and its supported deviations.
 _Avoid_: Latest upstream, conversion prompt

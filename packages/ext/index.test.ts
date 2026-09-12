@@ -36,7 +36,6 @@ async function loadExtension(
     subagent?: string;
     realGoal?: boolean;
     realCodex?: boolean;
-    codexProviders?: string[];
   } = {},
 ) {
   vi.resetModules();
@@ -45,7 +44,7 @@ async function loadExtension(
   const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
   const previewCodexPrompt = vi.fn((prompt: string) => `codex:${prompt}`);
   const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
-  const bashGate = { isYolo: vi.fn(() => false) };
+  const bashGate = { isYolo: vi.fn(() => false), captureSession: vi.fn() };
   if (options.realGoal) vi.doUnmock("./goal/index.js");
   if (options.realCodex) vi.doUnmock("./codex-adapter/index.js");
   for (const modulePath of registerModules) {
@@ -62,10 +61,7 @@ async function loadExtension(
 
   vi.doMock("@earendil-works/pi-coding-agent", () => ({}));
 
-  const loadConfig = vi.fn(() => ({
-    ...(options.disable ? { disable: options.disable } : {}),
-    ...(options.codexProviders ? { codexAdapter: { providers: options.codexProviders } } : {}),
-  }));
+  const loadConfig = vi.fn(() => (options.disable ? { disable: options.disable } : {}));
   const registerBitesCommands = vi.fn();
   vi.doMock("./config.js", () => ({
     loadConfig,
@@ -85,7 +81,9 @@ async function loadExtension(
       handlers.set(name, registered);
     }),
     registerCommand: vi.fn(),
-    registerTool: vi.fn(),
+    registerTool: vi.fn((tool: { name: string }) => {
+      if (!activeTools.includes(tool.name)) activeTools.push(tool.name);
+    }),
     registerMarkdownTransformer: vi.fn(),
     sendMessage: vi.fn(),
     getActiveTools: vi.fn(() => activeTools),
@@ -234,11 +232,21 @@ describe("extension entrypoint", () => {
     }
   });
 
-  test("assembled adapter follows provider changes without clobbering unrelated tools", async () => {
-    const loaded = await loadExtension({
-      realCodex: true,
-      codexProviders: ["work-provider"],
-    });
+  test("assembled adapter follows model scope without clobbering unrelated tools", async () => {
+    const loaded = await loadExtension({ realCodex: true });
+    const ctx = {
+      cwd: process.cwd(),
+      model: {
+        id: "gpt-6",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        input: ["text", "image"],
+      },
+      ui: { notify: vi.fn() },
+      sessionManager: { getSessionId: () => "assembled-session" },
+      modelRegistry: {},
+      isProjectTrusted: () => true,
+    };
     try {
       expect(loaded.pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
         "apply_patch",
@@ -246,42 +254,26 @@ describe("extension entrypoint", () => {
         "write_stdin",
         "view_image",
         "web_run",
+        "exec",
+        "wait",
       ]);
-
-      for (const handler of loaded.handlers.get("session_start") ?? [])
+      for (const handler of loaded.handlers.get("session_start") ?? []) await handler({}, ctx);
+      expect(loaded.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+      for (const handler of loaded.handlers.get("model_select") ?? [])
         await handler(
           {},
-          {
-            cwd: process.cwd(),
-            model: {
-              provider: "openai-codex",
-              api: "openai-codex-responses",
-              input: ["text", "image"],
-            },
-          },
+          { ...ctx, model: { ...ctx.model, id: "gpt-5.6", provider: "work-provider" } },
         );
-      expect(loaded.getActiveTools()).toEqual([
-        "exec_command",
-        "write_stdin",
-        "apply_patch",
-        "view_image",
-        "web_run",
-        "custom",
-      ]);
-
+      expect(loaded.getActiveTools()).toEqual(["exec", "wait", "custom"]);
       for (const handler of loaded.handlers.get("model_select") ?? [])
-        await handler({ model: { provider: "work-provider" } }, {});
-      expect(loaded.getActiveTools()).toEqual([
-        "exec_command",
-        "write_stdin",
-        "apply_patch",
-        "custom",
-      ]);
-
-      for (const handler of loaded.handlers.get("model_select") ?? [])
-        await handler({ model: { provider: "out-of-scope" } }, {});
+        await handler(
+          {},
+          { ...ctx, model: { ...ctx.model, id: "claude", provider: "work-provider" } },
+        );
       expect(loaded.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom"]);
     } finally {
+      for (const handler of loaded.handlers.get("session_shutdown") ?? [])
+        await handler({ reason: "quit" }, ctx);
       loaded.restoreArgv();
     }
   });
@@ -295,6 +287,8 @@ describe("extension entrypoint", () => {
         "write_stdin",
         "view_image",
         "web_run",
+        "exec",
+        "wait",
       ]);
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./footer/index.js")).not.toHaveBeenCalled();
