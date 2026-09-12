@@ -1,0 +1,746 @@
+{
+  "date": "2026-09-12",
+  "sdkVersion": "0.85.0",
+  "routes": [
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "date": "2026-09-12T17:17:13.235Z",
+      "scenario": "coding",
+      "status": "failed",
+      "api": "openai-codex-responses",
+      "requests": 3,
+      "usage": [
+        {
+          "input": 2467,
+          "output": 117,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 31,
+          "totalTokens": 2584,
+          "cost": {
+            "input": 0.012335,
+            "output": 0.00351,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.015845
+          }
+        },
+        {
+          "input": 317,
+          "output": 108,
+          "cacheRead": 2304,
+          "cacheWrite": 0,
+          "reasoning": 52,
+          "totalTokens": 2729,
+          "cost": {
+            "input": 0.001585,
+            "output": 0.0032400000000000003,
+            "cacheRead": 0.001152,
+            "cacheWrite": 0,
+            "total": 0.0059770000000000005
+          }
+        },
+        {
+          "input": 321,
+          "output": 21,
+          "cacheRead": 2432,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 2774,
+          "cost": {
+            "input": 0.001605,
+            "output": 0.00063,
+            "cacheRead": 0.0012159999999999999,
+            "cacheWrite": 0,
+            "total": 0.003451
+          }
+        }
+      ],
+      "contextUsage": {
+        "tokens": 2774,
+        "contextWindow": 272000,
+        "percent": 1.0198529411764705
+      },
+      "checks": {
+        "noWebHelp": true,
+        "noWebCall": true,
+        "computed": true
+      },
+      "failures": [],
+      "timedOut": false,
+      "completeContractObservationIndexes": [],
+      "webObservationIndexes": [],
+      "toolErrors": [
+        [
+          {
+            "type": "text",
+            "text": "Script failed\nWall time 0.1 seconds\nOutput:\n"
+          },
+          {
+            "type": "text",
+            "text": "Script error:\nBash gate: command was denied by the user."
+          }
+        ]
+      ],
+      "payloads": [
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "fd8172db9950b5d5d8b9e677dcc839faf52d4fd0352bcd1a8a54b99857449972",
+          "inputCharacters": 181,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "fd8172db9950b5d5d8b9e677dcc839faf52d4fd0352bcd1a8a54b99857449972",
+          "inputCharacters": 2415,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "fd8172db9950b5d5d8b9e677dcc839faf52d4fd0352bcd1a8a54b99857449972",
+          "inputCharacters": 4704,
+          "toolTypes": ["custom", "function"]
+        }
+      ],
+      "aggregateUsage": {
+        "input": 3105,
+        "cacheRead": 4736,
+        "cacheWrite": 0,
+        "output": 246,
+        "providerInput": 7841
+      }
+    },
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "date": "2026-09-12T17:16:51.002Z",
+      "scenario": "implicit",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "requests": 5,
+      "usage": [
+        {
+          "input": 2459,
+          "output": 47,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 14,
+          "totalTokens": 2506,
+          "cost": {
+            "input": 0.012295,
+            "output": 0.00141,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.013705
+          }
+        },
+        {
+          "input": 4587,
+          "output": 96,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 33,
+          "totalTokens": 4683,
+          "cost": {
+            "input": 0.022935,
+            "output": 0.00288,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.025815
+          }
+        },
+        {
+          "input": 10386,
+          "output": 137,
+          "cacheRead": 2304,
+          "cacheWrite": 0,
+          "reasoning": 96,
+          "totalTokens": 12827,
+          "cost": {
+            "input": 0.051930000000000004,
+            "output": 0.00411,
+            "cacheRead": 0.001152,
+            "cacheWrite": 0,
+            "total": 0.05719200000000001
+          }
+        },
+        {
+          "input": 9728,
+          "output": 96,
+          "cacheRead": 12544,
+          "cacheWrite": 0,
+          "reasoning": 38,
+          "totalTokens": 22368,
+          "cost": {
+            "input": 0.04864,
+            "output": 0.00288,
+            "cacheRead": 0.006272,
+            "cacheWrite": 0,
+            "total": 0.057792
+          }
+        },
+        {
+          "input": 5888,
+          "output": 58,
+          "cacheRead": 22144,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 28090,
+          "cost": {
+            "input": 0.02944,
+            "output": 0.00174,
+            "cacheRead": 0.011072,
+            "cacheWrite": 0,
+            "total": 0.042252
+          }
+        }
+      ],
+      "contextUsage": {
+        "tokens": 28090,
+        "contextWindow": 272000,
+        "percent": 10.327205882352942
+      },
+      "checks": {
+        "discovered": true,
+        "webAfterHelp": true
+      },
+      "failures": [],
+      "timedOut": false,
+      "completeContractObservationIndexes": [0],
+      "webObservationIndexes": [1, 2, 3],
+      "toolErrors": [],
+      "payloads": [
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "2ca3742a01f809e55c02a9e9fb64db5df3a63758a121dc5325b537df329fe340",
+          "inputCharacters": 149,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "2ca3742a01f809e55c02a9e9fb64db5df3a63758a121dc5325b537df329fe340",
+          "inputCharacters": 10909,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "2ca3742a01f809e55c02a9e9fb64db5df3a63758a121dc5325b537df329fe340",
+          "inputCharacters": 40598,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "2ca3742a01f809e55c02a9e9fb64db5df3a63758a121dc5325b537df329fe340",
+          "inputCharacters": 64877,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "2ca3742a01f809e55c02a9e9fb64db5df3a63758a121dc5325b537df329fe340",
+          "inputCharacters": 81671,
+          "toolTypes": ["custom", "function"]
+        }
+      ],
+      "aggregateUsage": {
+        "input": 33048,
+        "cacheRead": 36992,
+        "cacheWrite": 0,
+        "output": 434,
+        "providerInput": 70040
+      }
+    },
+    {
+      "route": "openai-codex/gpt-6-astra",
+      "date": "2026-09-12T17:17:55.552Z",
+      "scenario": "coding",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "requests": 2,
+      "usage": [
+        {
+          "input": 2469,
+          "output": 52,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 2521,
+          "cost": {
+            "input": 0.024690000000000004,
+            "output": 0.0026000000000000003,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.027290000000000005
+          }
+        },
+        {
+          "input": 2545,
+          "output": 21,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 2566,
+          "cost": {
+            "input": 0.02545,
+            "output": 0.0010500000000000002,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0265
+          }
+        }
+      ],
+      "contextUsage": {
+        "tokens": 2566,
+        "contextWindow": 272000,
+        "percent": 0.9433823529411766
+      },
+      "checks": {
+        "noWebHelp": true,
+        "noWebCall": true,
+        "computed": true
+      },
+      "failures": [],
+      "timedOut": false,
+      "completeContractObservationIndexes": [],
+      "webObservationIndexes": [],
+      "toolErrors": [],
+      "payloads": [
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "d3074c6348ffef9b302063a83b5db99b2613fbcaf46901905f36df3161e04be2",
+          "inputCharacters": 181,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "d3074c6348ffef9b302063a83b5db99b2613fbcaf46901905f36df3161e04be2",
+          "inputCharacters": 594,
+          "toolTypes": ["custom", "function"]
+        }
+      ],
+      "aggregateUsage": {
+        "input": 5014,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "output": 73,
+        "providerInput": 5014
+      }
+    },
+    {
+      "route": "openai-codex/gpt-6-astra",
+      "date": "2026-09-12T17:17:22.355Z",
+      "scenario": "explicit",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "requests": 4,
+      "usage": [
+        {
+          "input": 2462,
+          "output": 60,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 2522,
+          "cost": {
+            "input": 0.024620000000000003,
+            "output": 0.003,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.027620000000000002
+          }
+        },
+        {
+          "input": 4357,
+          "output": 48,
+          "cacheRead": 2304,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 6709,
+          "cost": {
+            "input": 0.043570000000000005,
+            "output": 0.0024000000000000002,
+            "cacheRead": 0.002304,
+            "cacheWrite": 0,
+            "total": 0.048274000000000004
+          }
+        },
+        {
+          "input": 4016,
+          "output": 44,
+          "cacheRead": 6528,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 10588,
+          "cost": {
+            "input": 0.04016,
+            "output": 0.0022,
+            "cacheRead": 0.006528,
+            "cacheWrite": 0,
+            "total": 0.048888
+          }
+        },
+        {
+          "input": 6362,
+          "output": 30,
+          "cacheRead": 10368,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 16760,
+          "cost": {
+            "input": 0.06362000000000001,
+            "output": 0.0015,
+            "cacheRead": 0.010367999999999999,
+            "cacheWrite": 0,
+            "total": 0.07548800000000001
+          }
+        }
+      ],
+      "contextUsage": {
+        "tokens": 16760,
+        "contextWindow": 272000,
+        "percent": 6.161764705882352
+      },
+      "checks": {
+        "discovered": true,
+        "webAfterHelp": true
+      },
+      "failures": [],
+      "timedOut": false,
+      "completeContractObservationIndexes": [0, 0],
+      "webObservationIndexes": [1, 2],
+      "toolErrors": [],
+      "payloads": [
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "55c93fdafb3f4fb705c9bc342c0b05c4af2516de505a22c7906bd3860b5ecde6",
+          "inputCharacters": 173,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "55c93fdafb3f4fb705c9bc342c0b05c4af2516de505a22c7906bd3860b5ecde6",
+          "inputCharacters": 18430,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "55c93fdafb3f4fb705c9bc342c0b05c4af2516de505a22c7906bd3860b5ecde6",
+          "inputCharacters": 36527,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "55c93fdafb3f4fb705c9bc342c0b05c4af2516de505a22c7906bd3860b5ecde6",
+          "inputCharacters": 49613,
+          "toolTypes": ["custom", "function"]
+        }
+      ],
+      "aggregateUsage": {
+        "input": 17197,
+        "cacheRead": 19200,
+        "cacheWrite": 0,
+        "output": 182,
+        "providerInput": 36397
+      }
+    },
+    {
+      "route": "openai-codex/gpt-6-astra",
+      "date": "2026-09-12T17:17:38.409Z",
+      "scenario": "implicit",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "requests": 3,
+      "usage": [
+        {
+          "input": 2460,
+          "output": 60,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 2520,
+          "cost": {
+            "input": 0.0246,
+            "output": 0.003,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0276
+          }
+        },
+        {
+          "input": 6659,
+          "output": 51,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 6710,
+          "cost": {
+            "input": 0.06659000000000001,
+            "output": 0.00255,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.06914000000000001
+          }
+        },
+        {
+          "input": 4980,
+          "output": 69,
+          "cacheRead": 6528,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 11577,
+          "cost": {
+            "input": 0.049800000000000004,
+            "output": 0.0034500000000000004,
+            "cacheRead": 0.006528,
+            "cacheWrite": 0,
+            "total": 0.059778000000000005
+          }
+        }
+      ],
+      "contextUsage": {
+        "tokens": 11577,
+        "contextWindow": 272000,
+        "percent": 4.2562500000000005
+      },
+      "checks": {
+        "discovered": true,
+        "webAfterHelp": true
+      },
+      "failures": [],
+      "timedOut": false,
+      "completeContractObservationIndexes": [0, 0],
+      "webObservationIndexes": [1],
+      "toolErrors": [],
+      "payloads": [
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "10ab1641fb912e08ecb2003de10ba5985f18a9f2ccbb6e0b32b195e63a6a3464",
+          "inputCharacters": 149,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "10ab1641fb912e08ecb2003de10ba5985f18a9f2ccbb6e0b32b195e63a6a3464",
+          "inputCharacters": 18406,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "10ab1641fb912e08ecb2003de10ba5985f18a9f2ccbb6e0b32b195e63a6a3464",
+          "inputCharacters": 31666,
+          "toolTypes": ["custom", "function"]
+        }
+      ],
+      "aggregateUsage": {
+        "input": 14099,
+        "cacheRead": 6528,
+        "cacheWrite": 0,
+        "output": 180,
+        "providerInput": 20627
+      }
+    },
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "date": "2026-09-12T17:15:16.312Z",
+      "scenario": "explicit",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "requests": 8,
+      "usage": [
+        {
+          "input": 2463,
+          "output": 47,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 14,
+          "totalTokens": 2510,
+          "cost": {
+            "input": 0.012315000000000001,
+            "output": 0.00141,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.013725000000000001
+          }
+        },
+        {
+          "input": 2287,
+          "output": 102,
+          "cacheRead": 2304,
+          "cacheWrite": 0,
+          "reasoning": 38,
+          "totalTokens": 4693,
+          "cost": {
+            "input": 0.011435,
+            "output": 0.0030600000000000002,
+            "cacheRead": 0.001152,
+            "cacheWrite": 0,
+            "total": 0.015647
+          }
+        },
+        {
+          "input": 4078,
+          "output": 132,
+          "cacheRead": 4480,
+          "cacheWrite": 0,
+          "reasoning": 28,
+          "totalTokens": 8690,
+          "cost": {
+            "input": 0.020390000000000002,
+            "output": 0.00396,
+            "cacheRead": 0.00224,
+            "cacheWrite": 0,
+            "total": 0.026590000000000003
+          }
+        },
+        {
+          "input": 16438,
+          "output": 145,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 27,
+          "totalTokens": 16583,
+          "cost": {
+            "input": 0.08219000000000001,
+            "output": 0.00435,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.08654
+          }
+        },
+        {
+          "input": 8434,
+          "output": 103,
+          "cacheRead": 16256,
+          "cacheWrite": 0,
+          "reasoning": 32,
+          "totalTokens": 24793,
+          "cost": {
+            "input": 0.042170000000000006,
+            "output": 0.00309,
+            "cacheRead": 0.008128,
+            "cacheWrite": 0,
+            "total": 0.053388000000000005
+          }
+        },
+        {
+          "input": 22160,
+          "output": 70,
+          "cacheRead": 8448,
+          "cacheWrite": 0,
+          "reasoning": 19,
+          "totalTokens": 30678,
+          "cost": {
+            "input": 0.11080000000000001,
+            "output": 0.0021,
+            "cacheRead": 0.0042239999999999995,
+            "cacheWrite": 0,
+            "total": 0.11712400000000002
+          }
+        },
+        {
+          "input": 9510,
+          "output": 117,
+          "cacheRead": 30464,
+          "cacheWrite": 0,
+          "reasoning": 34,
+          "totalTokens": 40091,
+          "cost": {
+            "input": 0.04755,
+            "output": 0.00351,
+            "cacheRead": 0.015231999999999999,
+            "cacheWrite": 0,
+            "total": 0.066292
+          }
+        },
+        {
+          "input": 22044,
+          "output": 82,
+          "cacheRead": 24576,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 46702,
+          "cost": {
+            "input": 0.11022000000000001,
+            "output": 0.00246,
+            "cacheRead": 0.012288,
+            "cacheWrite": 0,
+            "total": 0.12496800000000002
+          }
+        }
+      ],
+      "contextUsage": {
+        "tokens": 46702,
+        "contextWindow": 272000,
+        "percent": 17.16985294117647
+      },
+      "checks": {
+        "discovered": true,
+        "webAfterHelp": true
+      },
+      "failures": [],
+      "timedOut": false,
+      "completeContractObservationIndexes": [0],
+      "webObservationIndexes": [1, 2, 3, 4, 5, 6],
+      "toolErrors": [],
+      "payloads": [
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 173,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 11001,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 29682,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 65378,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 101230,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 129514,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 150485,
+          "toolTypes": ["custom", "function"]
+        },
+        {
+          "toolsSha256": "b1beb8a592d33356c4aeaf6698ef5097e33a8d6abfcbad7fc2ae8247e019d344",
+          "instructionsSha256": "77080581d8a8585815553fce7b60ded994f45f0cc2a1f56ec8745f63b144b7ca",
+          "inputCharacters": 174806,
+          "toolTypes": ["custom", "function"]
+        }
+      ],
+      "aggregateUsage": {
+        "input": 87414,
+        "cacheRead": 86528,
+        "cacheWrite": 0,
+        "output": 798,
+        "providerInput": 173942
+      }
+    }
+  ],
+  "unavailableRoutes": [
+    "Work/custom providers: no configuration found or supplied.",
+    "Live structured-fallback route: not configured; all exercised routes advertised grammar. Stock serialized fallback payloads covered by integration checks."
+  ]
+}

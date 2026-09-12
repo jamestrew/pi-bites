@@ -16,6 +16,7 @@ import {
 } from "./web-run/tool.js";
 import { getCodeModeHostPath } from "./code-mode/binary.js";
 import { NestedToolBridge } from "./code-mode/nested-tools.js";
+import { nativeTools, contract } from "./code-mode/contracts.js";
 import { CodeModeRuntime } from "./code-mode/runtime.js";
 import type { RuntimeResponse } from "./code-mode/types.js";
 import type { CodexAdapterConfig } from "../config.js";
@@ -83,7 +84,11 @@ function setup(
     });
   const bridge = new NestedToolBridge(owned, gate.gate, () => config);
   bridge.capture(ctx as never);
-  const runtime = new CodeModeRuntime({ binary, tools: bridge.tools(), shells: sessions });
+  const runtime = new CodeModeRuntime({
+    binary,
+    tools: nativeTools(bridge.tools()),
+    shells: sessions,
+  });
   cleanup.push(async () => {
     await runtime.shutdown();
     bridge.clear();
@@ -510,9 +515,21 @@ test("the real host and bundled web client carry navigation and citations only t
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("missing server address");
-  const { runtime, model, owned, config, expire } = setup();
+  const { runtime, bridge, model, owned, config, expire } = setup();
   model.baseUrl = `http://127.0.0.1:${address.port}/v1`;
   expire();
+  const discovered = values(await runtime.execute("text(ALL_TOOLS);"))[0] as {
+    name: string;
+    description: string;
+  }[];
+  expect(discovered).toHaveLength(5);
+  for (const entry of discovered) {
+    expect(entry.description).toBe(
+      contract.tools.find((tool) => tool.name === entry.name)!.runtime_description,
+    );
+    expect(entry.description.match(/declare const tools:/g)).toHaveLength(1);
+  }
+  expect(requests).toEqual([]);
   const commands = [
     { search_query: [{ q: "explicit query" }] },
     { open: [{ ref_id: "turn0search0" }] },
@@ -537,4 +554,8 @@ test("the real host and bundled web client carry navigation and citations only t
     (await runtime.execute('await tools.web_run({search_query:[{q:"blocked"}]});')).errorText,
   ).toContain("unavailable");
   expect(requests).toHaveLength(5);
+  const unavailable = values(
+    await runtime.execute("text(ALL_TOOLS);", undefined, nativeTools(bridge.tools())),
+  )[0] as { name: string }[];
+  expect(unavailable.map((tool) => tool.name)).not.toContain("web_run");
 });

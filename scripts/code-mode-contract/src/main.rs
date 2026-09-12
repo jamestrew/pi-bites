@@ -1,4 +1,6 @@
-use codex_code_mode_protocol::{ToolDefinition, build_exec_tool_description};
+use codex_code_mode_protocol::{
+    ToolDefinition, augment_tool_definition, build_exec_tool_description,
+};
 use std::{collections::BTreeMap, io};
 
 fn main() {
@@ -20,9 +22,14 @@ fn main() {
             .to_owned()
         })
         .collect();
+    let deferred_base = build_exec_tool_description(&[], &tools, &BTreeMap::new(), 10_000, true);
+    let descriptions: Vec<String> = tools
+        .into_iter()
+        .map(|tool| augment_tool_definition(tool).description)
+        .collect();
     serde_json::to_writer(
         io::stdout(),
-        &serde_json::json!({"base":base, "sections":sections}),
+        &serde_json::json!({"base":base, "sections":sections, "descriptions":descriptions, "deferred_base":deferred_base}),
     )
     .unwrap();
 }

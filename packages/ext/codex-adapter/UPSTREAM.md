@@ -214,3 +214,7 @@ host update coverage lives at the registered `exec`/`wait` and trace snapshot se
 ## Default cutover (#302)
 
 The [cutover validation record](../../../docs/code-mode-contract/cutover.md) maps real-host checks, shared authorization, lifecycle cleanup, native artifact validation, and actual route smoke results. The boundary rejects the removed legacy source groups. Native Rust sources, binaries, contracts and provider transports are unchanged by this cutover; only the host packaging README inventory entry changes to describe the active dependency.
+
+## Nested discovery follow-up (#304)
+
+At the unchanged Code Mode pin, `augment_tool_definition` generates declaration-bearing runtime metadata for all five supported tools. `scripts/code-mode-contract/src/main.rs` invokes this native function and the native builder's deferred-list path; the Python projection retains those outputs in `contract.generated.json`. Runtime metadata uses `runtime_description` and eager sections remain native generated sections. Web's full supported documentation is intentionally deferred locally, unlike native standalone web's eager default. See the [contract policy](../../../docs/code-mode-contract/README.md#nested-discovery-policy-304-2026-09-12) and the already committed [discovery research](../../../docs/code-mode-contract/tool-discovery-research.md) and [token accounting research](../../../docs/code-mode-contract/token-accounting-research.md).

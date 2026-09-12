@@ -15,8 +15,13 @@ import {
 import registerAdapter from "../packages/ext/codex-adapter/index.js";
 import registerGate from "../packages/ext/bash-gate/index.js";
 
-const [route, output] = process.argv.slice(2);
-if (!route?.includes("/") || !output) throw new Error("Usage: PROVIDER/MODEL OUTPUT_DIR");
+const [route, output, scenario] = process.argv.slice(2);
+if (
+  !route?.includes("/") ||
+  !output ||
+  (scenario && !["explicit", "implicit", "coding"].includes(scenario))
+)
+  throw new Error("Usage: PROVIDER/MODEL OUTPUT_DIR [explicit|implicit|coding]");
 const separator = route.indexOf("/");
 const provider = route.slice(0, separator);
 const modelId = route.slice(separator + 1);
@@ -28,6 +33,7 @@ const record: Record<string, unknown> = {
   route,
   date: new Date().toISOString(),
   status: "pending",
+  scenario: scenario ?? "cutover",
 };
 const save = () =>
   writeFileSync(join(directory, "result.json"), JSON.stringify(record, null, 2) + "\n");
@@ -50,6 +56,7 @@ try {
     let approvals = 0;
     let requests = 0;
     const observations: unknown[] = [];
+    const usage: unknown[] = [];
     const failures: string[] = [];
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -70,7 +77,16 @@ try {
             pendingCommand = (event as { command?: string }).command;
           });
           pi.on("before_provider_request", (event) => {
-            const tools = (event.payload as { tools?: unknown[] }).tools;
+            const payload = event.payload as {
+              tools?: unknown[];
+              instructions?: unknown;
+              input?: unknown;
+            };
+            const tools = payload.tools;
+            writeFileSync(
+              join(directory, `payload-${requests + 1}.json`),
+              JSON.stringify(payload, null, 2) + "\n",
+            );
             writeFileSync(
               join(directory, `tools-${++requests}.json`),
               JSON.stringify(tools ?? [], null, 2) + "\n",
@@ -126,6 +142,8 @@ try {
         onError: (error) => failures.push(String(error)),
       });
       session.subscribe((event) => {
+        if (event.type === "message_end" && event.message.role === "assistant")
+          usage.push(event.message.usage);
         if (
           event.type === "message_end" &&
           event.message.role === "assistant" &&
@@ -134,9 +152,20 @@ try {
           failures.push(event.message.errorMessage);
       });
       record.activeTools = session.getActiveToolNames();
+      const discoveryPrompts: Record<string, string> = {
+        explicit:
+          "Search the web for the official OpenAI API tool-search documentation and give a short answer with a source link.",
+        implicit:
+          "What is the latest stable version of Bun today? Give its release date and a source link.",
+        coding:
+          "Use the available tools to compute the sum of the squares of integers 1 through 10 in JavaScript, then state the result.",
+      };
       await session.prompt(
-        `Run this Code Mode smoke exercise using the available exec/wait tools. First execute text(6 * 7). Then execute text("before-yield"); await yield_control(); text("after-yield"); and use wait to consume its result. Next execute text(await tools.exec_command({cmd:${JSON.stringify(command)},login:false})); exactly once; the test UI approves that exact command. Finally execute image(await tools.view_image({path:"image.png"})); to emit the supplied local image. Do not use web or other commands. Finish with one sentence describing any failure.`,
+        discoveryPrompts[scenario ?? ""] ??
+          `Run this Code Mode smoke exercise using the available exec/wait tools. First execute text(6 * 7). Then execute text("before-yield"); await yield_control(); text("after-yield"); and use wait to consume its result. Next execute text(await tools.exec_command({cmd:${JSON.stringify(command)},login:false})); exactly once; the test UI approves that exact command. Finally execute image(await tools.view_image({path:"image.png"})); to emit the supplied local image. Do not use web or other commands. Finish with one sentence describing any failure.`,
       );
+      record.usage = usage;
+      record.contextUsage = session.getContextUsage();
       record.approvals = approvals;
       record.requests = requests;
       record.observations = observations;
@@ -157,6 +186,25 @@ try {
           results.some((r) => r.content.some((c) => c.text?.includes("code-mode-approved"))),
         image: results.some((r) => r.content.some((c) => c.type === "image")),
       };
+      if (scenario) {
+        const serialized = JSON.stringify(observations);
+        const discoveryIndex = results.findIndex((r) =>
+          r.content.some(
+            (c) => c.text?.includes("exec tool declaration:") && c.text.includes("web_run"),
+          ),
+        );
+        const webIndex = (observations as { details?: unknown }[]).findIndex((r) =>
+          JSON.stringify(r.details ?? {}).includes('"name":"web_run"'),
+        );
+        record.checks =
+          scenario === "coding"
+            ? {
+                noWebHelp: discoveryIndex < 0,
+                noWebCall: webIndex < 0,
+                computed: serialized.includes("385"),
+              }
+            : { discovered: discoveryIndex >= 0, webAfterHelp: webIndex > discoveryIndex };
+      }
       record.status =
         !timedOut &&
         failures.length === 0 &&
