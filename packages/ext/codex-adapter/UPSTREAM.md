@@ -182,3 +182,18 @@ integration and cleanup obligations, and the contract baseline for deliberate re
 Shell defaults/ranges, deadline waits, and explicit small output budgets now match the selected
 baseline. Direct tools still reject nonzero exits; the nested bridge resolves their native typed
 result and preserves the failed presentation state.
+
+## Native surface integration (#300)
+
+The internal `code-mode/registration.ts` connects the runtime and owned delegates
+to native-shaped `exec`/`wait`. It remains behind the false `CODE_MODE_READY` gate
+until #301/#302. `legacy-activation.ts` preserves the pre-cutover behavior only;
+Code Mode's `activation.ts` accepts scoped GPT-5.6/GPT-6 IDs and ignores the deprecated
+provider-wide option. No custom provider or complete model prompt is introduced.
+
+The generated contract, pinned Rust description-builder harness, exact capability
+projections, tool-selection policy, transport fallback, lifecycle integration and
+verification are documented in [the activation record](../../../docs/code-mode-contract/activation.md).
+Regenerate `code-mode/contract.generated.json` using those commands. Runtime output
+formatting ports the pinned UTF-8 middle-truncation policy; nested traces remain
+separate Pi result details for the next rendering issue.

@@ -73,7 +73,7 @@ export interface AutoModeConfig {
 }
 
 export interface CodexAdapterConfig {
-  /** Provider IDs whose models should all use Codex-shaped tools. */
+  /** @deprecated Legacy structured adapter only; ignored by scoped Code Mode. Remove at #302 cutover. */
   providers?: string[];
   /** Responses provider IDs explicitly trusted to implement Codex `/alpha/search`. */
   webSearchProviders?: string[];

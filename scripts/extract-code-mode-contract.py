@@ -11,6 +11,8 @@ import subprocess
 REVISION = "25af12f7e61572b0bc18ddb1008be543b91519b0"
 # Full sources preserve computed schemas, descriptions, and decisive runtime paths.
 SOURCES = (
+    "codex-rs/utils/output-truncation/src/lib.rs",
+    "codex-rs/utils/string/src/truncate.rs",
     "LICENSE",
     "NOTICE",
     "codex-rs/code-mode-protocol/src/description.rs",

@@ -78,7 +78,7 @@ GPT models use the adapter automatically regardless of provider, including `gith
 {}
 ```
 
-To adapt every model from another provider, opt in that installation's exact provider ID (the values below are examples, not canonical Copilot or Bedrock IDs):
+The legacy `providers` option is deprecated and will be ignored at the Code Mode cutover. Until then it opts every model from the listed provider into the structured adapter (these are example IDs):
 
 ```json
 {
@@ -114,8 +114,24 @@ The host lives under `${XDG_DATA_HOME:-$HOME/.local/share}/pi-bites/code-mode/`,
 Git. Pi never downloads it automatically. Source, checksums, notices and rebuild
 instructions remain in this repository.
 
-Code Mode activation is still forthcoming; the current structured adapter does
-not require this dependency.
+The Code Mode registration path is implemented but remains internal until #301
+rendering and #302 integration validation are complete. `CODE_MODE_READY` in the
+adapter entry point is false; there is no public experimental setting. The current
+structured adapter does not require this dependency.
+
+At cutover, only GPT-5.6 and GPT-6 base IDs and hyphenated variants activate Code Mode,
+including IDs with recognized `openai/`, `openai-codex/`, `azure/`, `azure-openai/`,
+`github-copilot/`, or `openrouter/` prefixes. Provider-wide activation, generic Codex
+aliases, other GPT families, and standalone outside-scope `web_run` will be removed.
+`providers` will no longer select models; `webSearchProviders`,
+`allowOpenAICodexFallback`, and `disable: ["codexAdapter"]` retain their independent roles.
+
+The new surface exposes `exec` and `wait`, hides the five nested adapter tools,
+and preserves unrelated direct tools. It respects session tool selection and
+restores only displaced core tools on leaving scope. Stock Pi sends raw JavaScript
+through grammar tools where the actual API/model supports them; other routes send
+`{"code":"..."}` through the stock structured fallback. Details and reproducible
+contract generation are in [the integration record](docs/code-mode-contract/activation.md).
 
 ## CodeGraph exploration
 

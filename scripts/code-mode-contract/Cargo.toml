@@ -1,0 +1,11 @@
+[package]
+name = "pi-bites-code-mode-contract"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+codex-code-mode-protocol = { path = "../../packages/ext/codex-adapter/vendor/code-mode/crates/code-mode-protocol" }
+serde_json = "1"
