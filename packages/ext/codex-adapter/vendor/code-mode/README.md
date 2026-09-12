@@ -35,13 +35,13 @@ Do not use the checkout's current HEAD as the source pin.
 The host is installed manually from **unmodified official Codex release assets** at
 `https://github.com/openai/codex/releases/download/rust-v0.145.0/`.
 Executables are not tracked in this repository. Source, checksums, notices and
-build instructions remain here. There is no automatic download, installer command,
-or conversion-package dependency.
+build instructions remain here. Downloads run only through the explicit installer script; there is no automatic
+download or conversion-package dependency.
 
-| Installed path (under the version directory below) | Bytes | SHA-256 |
+| Linux architecture | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `linux-x64/codex-code-mode-host` | 46,139,288 | `60bf16414be5333f09ff082540082304c7352931ef64bdeb170d4c35a82e6ef8` |
-| `linux-arm64/codex-code-mode-host` | 43,502,544 | `de29626fbdd921920bde5a76ec8e61cb837ce25e8d8853aace6001ca452e9c40` |
+| x64 | 46,139,288 | `60bf16414be5333f09ff082540082304c7352931ef64bdeb170d4c35a82e6ef8` |
+| arm64 | 43,502,544 | `de29626fbdd921920bde5a76ec8e61cb837ce25e8d8853aace6001ca452e9c40` |
 
 | Release archive | SHA-256 |
 | --- | --- |
@@ -54,71 +54,52 @@ snapshot at runtime. Linux must permit V8's JIT memory mappings and threads.
 They provide the native evaluator, not a filesystem/network sandbox for delegated
 tools. Other operating systems and architectures fail explicitly.
 
-`code-mode/binary.ts` looks only in the versioned user data directory:
-`$XDG_DATA_HOME/pi-bites/code-mode/rust-v0.145.0/linux-<arch>/codex-code-mode-host`,
-where `XDG_DATA_HOME` defaults to `~/.local/share`. Its bounded, five-second startup probe negotiates protocol
-v1 and waits for a clean process exit after EOF. It rejects missing/unexecutable
-files, malformed/oversized/incompatible handshakes, crashes and hangs with
+`code-mode/binary.ts` resolves the first executable file named
+`codex-code-mode-host` on Pi's `PATH`, including symlinks. Any directory on
+`PATH` is supported; there is no fallback to a fixed installation directory.
+Use the pinned release above; PATH lookup does not verify release identity or
+checksums. Its bounded, five-second packaging probe negotiates protocol
+v1 and waits for a clean process exit after EOF. Lookup rejects a missing executable; the probe rejects malformed/oversized/incompatible handshakes, crashes and hangs with
 manual installation instructions and an explicit disable escape hatch. It never changes tool dialects.
 The session-owned connection negotiates on its own live process;
 this packaging probe is not a cached guarantee that a future process is healthy.
 
 ## Manual installation
 
-Run this Bash block from the pi-bites package/checkout directory. It downloads
-only the current Linux architecture, verifies both the archive and executable
-before installation, and retains the redistribution notices alongside it. It
-requires `curl`, `tar`, `sha256sum`, and `install`. The default adapter requires this dependency for eligible GPT-5.6/GPT-6 models.
+Run the [installer](../../../../../scripts/code-mode-install.sh) from the repository root:
 
 ```bash
-(
-  set -eu
-  case "$(uname -s)-$(uname -m)" in
-    Linux-x86_64)
-      code_mode_arch=x64
-      code_mode_target=x86_64-unknown-linux-musl
-      code_mode_archive_sha=ac23177956c30cc1f9f180c27bd80f5bb5b76780db55fb94dcc22644d490852e
-      code_mode_binary_sha=60bf16414be5333f09ff082540082304c7352931ef64bdeb170d4c35a82e6ef8
-      ;;
-    Linux-aarch64)
-      code_mode_arch=arm64
-      code_mode_target=aarch64-unknown-linux-musl
-      code_mode_archive_sha=22b5862c7206bc944f59402dbab4b4169e381ae8a68f0144a9ba7b61bcf3dd39
-      code_mode_binary_sha=de29626fbdd921920bde5a76ec8e61cb837ce25e8d8853aace6001ca452e9c40
-      ;;
-    *) echo "Code Mode requires Linux x64 or arm64" >&2; exit 1 ;;
-  esac
-  code_mode_download=$(mktemp -d)
-  trap 'rm -rf "$code_mode_download"' EXIT
-  code_mode_asset="codex-code-mode-host-$code_mode_target"
-  curl --fail --location --retry 3 \
-    "https://github.com/openai/codex/releases/download/rust-v0.145.0/$code_mode_asset.tar.gz" \
-    -o "$code_mode_download/host.tar.gz"
-  printf '%s  %s\n' "$code_mode_archive_sha" "$code_mode_download/host.tar.gz" | sha256sum --check -
-  tar -xzf "$code_mode_download/host.tar.gz" -C "$code_mode_download" "$code_mode_asset"
-  printf '%s  %s\n' "$code_mode_binary_sha" "$code_mode_download/$code_mode_asset" | sha256sum --check -
-  code_mode_dir="${XDG_DATA_HOME:-$HOME/.local/share}/pi-bites/code-mode/rust-v0.145.0/linux-$code_mode_arch"
-  mkdir -p "$code_mode_dir"
-  cp packages/ext/codex-adapter/vendor/code-mode/{LICENSE,NOTICE,THIRD_PARTY_LICENSES.html} "$code_mode_dir/"
-  cp -R packages/ext/codex-adapter/vendor/code-mode/licenses "$code_mode_dir/"
-  cp packages/ext/codex-adapter/LICENSE "$code_mode_dir/LICENSE-conversion-MIT"
-  install -m 755 "$code_mode_download/$code_mode_asset" "$code_mode_dir/codex-code-mode-host"
-)
+bash scripts/code-mode-install.sh
+# Or choose the directory for the executable:
+bash scripts/code-mode-install.sh --install-dir "$HOME/bin"
 ```
 
-Run `/reload` after installing. Keep `XDG_DATA_HOME` the same when installing and
-running Pi. Different host pins have separate directories; a new pin requires an
-explicit installation. To remove a pin, delete only its version directory.
+The default destination is `~/.local/bin`. Relative destinations resolve against
+your current working directory; the script itself can be invoked from any directory.
+Use `--help` for usage. The installer downloads only the current Linux architecture,
+verifies both the archive and executable before installation, and installs
+`codex-code-mode-host` directly in the chosen directory. Redistribution notices
+are retained under `<install-dir>/codex-code-mode-host-notices/rust-v0.145.0/`.
+It requires Bash, `curl`, `tar`, `sha256sum`, `realpath`, and standard coreutils.
+
+Ensure the chosen directory is on Pi's `PATH`, then run `/reload`. If you changed
+`PATH` in your shell, restart Pi from that environment. The installer does not
+edit shell configuration. Existing installations in a versioned data directory
+can still be added to `PATH` or linked into a directory already on it.
+
+Rerunning the script replaces the executable in the chosen directory. To uninstall,
+remove that executable and its `codex-code-mode-host-notices` directory.
 For an offline installation, transfer the matching release archive and notices
-from another machine, then perform the same checksum/extraction/install steps.
+from another machine, verify the archive and executable against the checksums
+above, and install the executable in a directory on `PATH`.
 No `postinstall` hook or first-use network request runs in Pi.
 
 The normal `bun check` suite uses temporary executable fixtures and needs neither
 a downloaded host nor external network access for Code Mode; native integration tests skip when no host exists. Tests of the bundled web client use a local HTTP server. To smoke-test a real installed
-host from the repository root (use `linux-arm64` for arm64):
+host from the repository root:
 
 ```bash
-python3 scripts/code-mode-smoke.py "${XDG_DATA_HOME:-$HOME/.local/share}/pi-bites/code-mode/rust-v0.145.0/linux-x64/codex-code-mode-host"
+python3 scripts/code-mode-smoke.py "$(command -v codex-code-mode-host)"
 ```
 
 ## V8 and native notices

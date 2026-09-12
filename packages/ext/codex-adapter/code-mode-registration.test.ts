@@ -110,14 +110,13 @@ const host = hostPath();
 test.skipIf(!host)(
   "exec uses the real host, survives supported switches, and branch navigation clears state with stale contexts",
   async () => {
-    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import("node:fs");
+    const { mkdtempSync, symlinkSync, rmSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");
     const directory = mkdtempSync(join(tmpdir(), "code-mode-registration-"));
-    const installed = join(directory, `pi-bites/code-mode/rust-v0.145.0/linux-${process.arch}`);
-    mkdirSync(installed, { recursive: true });
+    const installed = directory;
     symlinkSync(host!, join(installed, "codex-code-mode-host"));
-    vi.stubEnv("XDG_DATA_HOME", directory);
+    vi.stubEnv("PATH", `${directory}:${process.env.PATH ?? ""}`);
     const gate = createBashGateHarness([], false, undefined, true, {
       bashGate: { rules: [{ cmd: "printf", reason: "integration approval" }] },
     });
@@ -322,14 +321,13 @@ test.each(["exec", "wait"])(
 test.skipIf(!host).each(["replacement", "reload", "shutdown", "unsupported"] as const)(
   "default registration clears running shells and cells on %s with expired contexts",
   async (reason) => {
-    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import("node:fs");
+    const { mkdtempSync, symlinkSync, rmSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");
     const directory = mkdtempSync(join(tmpdir(), "code-mode-lifecycle-"));
-    const installed = join(directory, `pi-bites/code-mode/rust-v0.145.0/linux-${process.arch}`);
-    mkdirSync(installed, { recursive: true });
+    const installed = directory;
     symlinkSync(host!, join(installed, "codex-code-mode-host"));
-    vi.stubEnv("XDG_DATA_HOME", directory);
+    vi.stubEnv("PATH", `${directory}:${process.env.PATH ?? ""}`);
     const h = setup();
     let stale = false;
     const original = context();
@@ -385,7 +383,7 @@ test.skipIf(!host).each(["replacement", "reload", "shutdown", "unsupported"] as 
 test("a missing host fails visibly without changing the default tool interface", async () => {
   const { mkdtempSync, rmSync } = await import("node:fs");
   const directory = mkdtempSync("/tmp/code-mode-missing-");
-  vi.stubEnv("XDG_DATA_HOME", directory);
+  vi.stubEnv("PATH", directory);
   const h = setup();
   const ctx = context();
   try {
