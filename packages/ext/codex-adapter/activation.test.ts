@@ -36,7 +36,7 @@ vi.mock("./view-image/tool.js", () => ({
     pi.registerTool({ name: "view_image" }),
 }));
 
-import { isAdapterModel, reconcileTools, type AdapterToolState } from "./activation.js";
+import { isAdapterModel, reconcileTools, type AdapterToolState } from "./legacy-activation.js";
 import registerCodexAdapter from "./index.js";
 import type { BitesConfig } from "../config.js";
 

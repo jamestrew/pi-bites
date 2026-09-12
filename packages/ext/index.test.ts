@@ -151,6 +151,7 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./codex-adapter/index.js")).toHaveBeenCalledWith(
         loaded.pi,
         expect.any(Object),
+        loaded.bashGate,
       );
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,

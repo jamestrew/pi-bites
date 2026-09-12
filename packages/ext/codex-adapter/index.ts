@@ -1,3 +1,9 @@
+import registerCodeMode from "./code-mode/registration.js";
+import type { BashGateController } from "../bash-gate/index.js";
+
+// #302 removes this temporary gate and the legacy registration after #301 rendering is ready.
+const CODE_MODE_READY = false;
+
 import type { BuildSystemPromptOptions, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import type { BitesConfig } from "../config.js";
@@ -6,7 +12,7 @@ import {
   reconcileTools,
   type AdapterModel,
   type AdapterToolState,
-} from "./activation.js";
+} from "./legacy-activation.js";
 import { registerApplyPatchTool } from "./apply-patch/tool.js";
 import { registerExecCommandTool } from "./exec/command-tool.js";
 import { createExecSessionManager } from "./exec/session-manager.js";
@@ -24,7 +30,10 @@ export type CodexPromptPreview = (
 export default function registerCodexAdapter(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
+  gate?: BashGateController,
 ): CodexPromptPreview {
+  // oxlint-disable-next-line no-unnecessary-condition -- temporary integration gate removed by #302.
+  if (CODE_MODE_READY) return registerCodeMode(pi, configRef, gate);
   const state: AdapterToolState = {};
   const sessions = createExecSessionManager();
 

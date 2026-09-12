@@ -2,6 +2,8 @@
   "repository": "https://github.com/openai/codex",
   "revision": "25af12f7e61572b0bc18ddb1008be543b91519b0",
   "sha256": {
+    "codex-rs/utils/output-truncation/src/lib.rs": "229513d08e5af60c96eba9136815b0ce06fa9b5f67a8daf68f3185ffc9739eeb",
+    "codex-rs/utils/string/src/truncate.rs": "51a22c8252db01b668f312e17c87c43c1abd96fc46ac3cfca0a85d45f6dc4d71",
     "LICENSE": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
     "NOTICE": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
     "codex-rs/code-mode-protocol/src/description.rs": "b23719ac5f14bf3b14e472348a1fc4eee54d7f181befc44394d163885ff8c012",

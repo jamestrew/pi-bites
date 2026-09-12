@@ -23,12 +23,17 @@ interface Snapshot {
 export class NestedToolBridge {
   readonly traces = new NestedTraces();
   private snapshot: Snapshot | undefined;
+  private enabled: ReadonlySet<string> | undefined;
+
+  setEnabled(names: ReadonlySet<string>): void {
+    this.enabled = new Set(names);
+  }
   private owner = new AbortController();
   private readonly adapters: NestedAdapter[];
 
   constructor(
     private readonly owned: OwnedNestedTools,
-    private readonly gate: BashGateController,
+    private readonly gate: BashGateController | undefined,
     getConfig: () => CodexAdapterConfig,
   ) {
     this.adapters = createNestedAdapters(owned, getConfig);
@@ -44,7 +49,12 @@ export class NestedToolBridge {
     };
     this.snapshot = {
       context,
-      authorization: this.gate.captureSession(ctx),
+      authorization: this.gate?.captureSession(ctx) ?? {
+        async authorize(request, launch) {
+          request.signal?.throwIfAborted();
+          return launch();
+        },
+      },
       signal: ctx.signal ?? new AbortController().signal,
     };
   }
@@ -61,7 +71,10 @@ export class NestedToolBridge {
     const snapshot = this.current();
     const owner = this.owner.signal;
     return this.adapters
-      .filter((adapter) => adapter.available(snapshot.context))
+      .filter(
+        (adapter) =>
+          (!this.enabled || this.enabled.has(adapter.name)) && adapter.available(snapshot.context),
+      )
       .map((adapter) => ({
         name: adapter.name,
         description: adapter.description,
@@ -101,7 +114,7 @@ export class NestedToolBridge {
     trace("running");
     try {
       signal.throwIfAborted();
-      if (!adapter.available(snapshot.context))
+      if ((this.enabled && !this.enabled.has(adapter.name)) || !adapter.available(snapshot.context))
         throw new Error(`${adapter.name} is unavailable for the active model`);
       const result = await adapter.invoke(input, {
         call,
