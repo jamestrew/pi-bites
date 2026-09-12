@@ -9,6 +9,8 @@ export type BashGateApprovalResult =
 
 export interface ApprovalRequest {
   requestId: string;
+  toolCallId?: string;
+  signal?: AbortSignal;
   agentId?: string;
   title: string;
   command: string;
@@ -62,7 +64,8 @@ function approvalResult(value: unknown): BashGateApprovalResult | undefined {
 
 export async function requestSubagentApproval(
   pi: ExtensionAPI,
-  request: Omit<ApprovalRequest, "requestId">,
+  request: Omit<ApprovalRequest, "requestId" | "signal">,
+  signal?: AbortSignal,
 ): Promise<BashGateApprovalResult> {
   const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const channel = "subagents:bash_gate:approval";
@@ -78,10 +81,13 @@ export async function requestSubagentApproval(
       if (settled) return;
       settled = true;
       clearTimeout(ackTimer);
+      signal?.removeEventListener("abort", abort);
       unsubAck();
       unsubReply();
       resolve(result);
     };
+
+    const abort = () => settle({ outcome: "failure", message: "approval cancelled" });
 
     unsubAck = pi.events.on(ackChannel, () => {
       acked = true;
@@ -98,7 +104,9 @@ export async function requestSubagentApproval(
       if (!acked) settle({ outcome: "failure", message: "parent approval broker unavailable" });
     }, 250);
 
-    pi.events.emit(channel, { requestId, ...request });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+    else pi.events.emit(channel, { requestId, ...request, ...(signal ? { signal } : {}) });
   });
 }
 

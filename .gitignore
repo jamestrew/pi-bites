@@ -6,3 +6,6 @@ bun.lock
 
 /packages/ext/codex-adapter/vendor/web-run/target/
 /packages/ext/codex-adapter/vendor/view-image/target/
+/packages/ext/codex-adapter/vendor/code-mode/target/
+
+/scripts/code-mode-contract/target/

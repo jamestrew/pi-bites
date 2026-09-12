@@ -1,0 +1,400 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+import { getCodeModeHostPath } from "./code-mode/binary.js";
+import { expect, test, vi } from "vitest";
+import registerCodeMode from "./index.js";
+import { createBashGateHarness } from "../bash-gate/test/harness.js";
+import type { BashGateController } from "../bash-gate/index.js";
+
+type Handler = (event: any, ctx: any) => any;
+function setup(initial = ["read", "bash", "edit", "write", "custom"], gate?: BashGateController) {
+  const handlers = new Map<string, Handler[]>();
+  const tools = new Map<string, any>();
+  let active = [...initial];
+  const config = { current: {} as import("../config.js").BitesConfig };
+  const pi = {
+    registerTool(tool: any) {
+      tools.set(tool.name, tool);
+      if (!active.includes(tool.name)) active.push(tool.name);
+    },
+    registerMarkdownTransformer: vi.fn(),
+    on(name: string, handler: Handler) {
+      handlers.set(name, [...(handlers.get(name) ?? []), handler]);
+    },
+    getActiveTools: () => [...active],
+    setActiveTools: (names: string[]) => {
+      active = [...names];
+    },
+  };
+  const preview = registerCodeMode(pi as never, config, gate);
+  const emit = async (name: string, event: any, ctx: any) => {
+    let result;
+    for (const handler of handlers.get(name) ?? []) result = (await handler(event, ctx)) ?? result;
+    return result;
+  };
+  return { tools, config, pi, preview, emit };
+}
+function context(id = "gpt-6", image = true) {
+  return {
+    cwd: process.cwd(),
+    hasUI: true,
+    model: {
+      id,
+      provider: "openai-codex",
+      api: "openai-codex-responses",
+      input: image ? ["text", "image"] : ["text"],
+    },
+    sessionManager: { getSessionId: () => "test-session", getEntries: () => [] },
+    modelRegistry: {},
+    isProjectTrusted: () => true,
+    signal: new AbortController().signal,
+    ui: { notify: vi.fn() },
+  };
+}
+
+test("registered Code Mode lifecycle preserves custom tools and restores cores on disable", async () => {
+  const h = setup();
+  const ctx = context();
+  await h.emit("session_start", {}, ctx);
+  expect(h.pi.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+  const options = {
+    cwd: process.cwd(),
+    skills: [
+      {
+        name: "review",
+        description: "Review code",
+        filePath: "/tmp/review/SKILL.md",
+        baseDir: "/tmp/review",
+        sourceInfo: {
+          path: "test",
+          source: "test",
+          scope: "temporary" as const,
+          origin: "top-level" as const,
+        },
+        disableModelInvocation: false,
+      },
+    ],
+  };
+  const chained = "project\n<pi-bites>kept</pi-bites>\n<other-extension>kept</other-extension>";
+  const preview = h.preview(chained, ctx.model as never, options);
+  const turn = await h.emit(
+    "before_agent_start",
+    { systemPrompt: chained, systemPromptOptions: options },
+    ctx,
+  );
+  expect(turn.systemPrompt).toBe(preview);
+  expect(preview.startsWith(chained)).toBe(true);
+  expect(preview).toContain("text(result.output)");
+  expect(preview).not.toContain("Use the read tool");
+  h.config.current.disable = ["codexAdapter"];
+  await h.emit("before_agent_start", { systemPrompt: "project", systemPromptOptions: {} }, ctx);
+  expect(h.pi.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom"]);
+  await h.emit("session_shutdown", {}, ctx);
+});
+
+function hostPath() {
+  if (process.env.PI_BITES_TEST_CODE_MODE_HOST) return process.env.PI_BITES_TEST_CODE_MODE_HOST;
+  try {
+    return getCodeModeHostPath();
+  } catch {
+    /* Tests can use the retained local build. */
+  }
+  const built = resolve(
+    import.meta.dirname,
+    "vendor/code-mode/target/release/codex-code-mode-host",
+  );
+  return existsSync(built) ? built : undefined;
+}
+const host = hostPath();
+
+test.skipIf(!host)(
+  "exec uses the real host, survives supported switches, and branch navigation clears state with stale contexts",
+  async () => {
+    const { mkdtempSync, symlinkSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const directory = mkdtempSync(join(tmpdir(), "code-mode-registration-"));
+    const installed = directory;
+    symlinkSync(host!, join(installed, "codex-code-mode-host"));
+    vi.stubEnv("PATH", `${directory}:${process.env.PATH ?? ""}`);
+    const gate = createBashGateHarness([], false, undefined, true, {
+      bashGate: { rules: [{ cmd: "printf", reason: "integration approval" }] },
+    });
+    gate.ui.select.mockResolvedValue("Allow");
+    const h = setup(undefined, gate.gate);
+    const original = { ...context(), ui: gate.ui };
+    let stale = false;
+    const ctx = Object.fromEntries(Object.entries(original).map(([key, value]) => [key, value]));
+    for (const [key, value] of Object.entries(original))
+      Object.defineProperty(ctx, key, {
+        get() {
+          if (stale) throw new Error(`stale ctx ${key}`);
+          return value;
+        },
+      });
+    const updates: any[] = [];
+    const exec = async (code: string) =>
+      h.tools
+        .get("exec")
+        .execute("outer-exec", { code }, undefined, (update: any) => updates.push(update));
+    try {
+      await h.emit("session_start", {}, ctx);
+      const pending = exec(
+        'store("value", 42); text(await tools.exec_command({cmd:"printf hello",login:false}));',
+      );
+      stale = true;
+      expect((await pending).content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "text", text: expect.stringContaining("hello") }),
+        ]),
+      );
+      expect(gate.ui.select).toHaveBeenCalledOnce();
+      expect(updates.every((update) => update.content.length === 0)).toBe(true);
+      expect(updates.map((update) => update.details.traces[0]?.state)).toEqual(
+        expect.arrayContaining(["approval", "running", "completed"]),
+      );
+      expect(new Set(updates.map((update) => update.details.displayVersion)).size).toBe(1);
+      const nestedYield = await exec(
+        'await tools.exec_command({cmd:"printf nested",login:false}); await yield_control(); text("resumed");',
+      );
+      const waitUpdates: any[] = [];
+      const nestedWait = await h.tools
+        .get("wait")
+        .execute("nested-wait", { cell_id: nestedYield.details.cellId }, undefined, (update: any) =>
+          waitUpdates.push(update),
+        );
+      expect(waitUpdates[0].details.traces[0].result.details.output).toBe("nested");
+      expect(nestedWait.details.displayVersion).toBeGreaterThan(nestedYield.details.displayVersion);
+      expect(nestedWait.details.traces[0].callId).toBe(nestedYield.details.traces[0].callId);
+      const concurrentCell = await exec(
+        'await yield_control(); await tools.exec_command({cmd:"sleep 0.05",login:false});',
+      );
+      const acceptedWait = h.tools
+        .get("wait")
+        .execute("accepted-wait", { cell_id: concurrentCell.details.cellId });
+      const rejectedUpdates: any[] = [];
+      await expect(
+        h.tools
+          .get("wait")
+          .execute(
+            "duplicate-wait",
+            { cell_id: concurrentCell.details.cellId },
+            undefined,
+            (update: any) => rejectedUpdates.push(update),
+          ),
+      ).rejects.toThrow("Already waiting");
+      await acceptedWait;
+      expect(rejectedUpdates).toEqual([]);
+      const failedYield = await exec(
+        'await tools.exec_command({cmd:"printf retained-before-abort",login:false}); await yield_control(); await tools.exec_command({cmd:"sleep 1",login:false});',
+      );
+      const controller = new AbortController();
+      let abortScheduled = false;
+      const failedWait = await h.tools
+        .get("wait")
+        .execute("aborted-wait", { cell_id: failedYield.details.cellId }, controller.signal, () => {
+          if (!abortScheduled) {
+            abortScheduled = true;
+            queueMicrotask(() => controller.abort());
+          }
+        });
+      expect(failedWait.details.failed).toBe(true);
+      expect(failedWait.details.displayVersion).toBeGreaterThan(failedYield.details.displayVersion);
+      expect(
+        failedWait.details.traces.some(
+          (trace: any) => trace.result?.details?.output === "retained-before-abort",
+        ),
+      ).toBe(true);
+      expect(
+        failedWait.details.traces.every(
+          (trace: any) => trace.state === "completed" || trace.state === "error",
+        ),
+      ).toBe(true);
+      expect(
+        await h.emit("tool_result", { toolName: "wait", details: failedWait.details }, context()),
+      ).toEqual({ isError: true });
+      const renderContext = {
+        state: {},
+        cwd: process.cwd(),
+        toolCallId: "aborted-wait",
+        expanded: false,
+        isPartial: false,
+        isError: true,
+        showImages: false,
+        invalidate() {},
+      };
+      const renderTheme = {
+        bold: (text: string) => text,
+        fg: (_role: string, text: string) => text,
+        bg: (_role: string, text: string) => text,
+      };
+      const renderFailed = () =>
+        h.tools
+          .get("wait")
+          .renderResult(
+            JSON.parse(JSON.stringify(failedWait)),
+            { expanded: false, isPartial: false },
+            renderTheme,
+            { ...renderContext, state: {} },
+          )
+          .render(100)
+          .join("\n");
+      expect(renderFailed()).toContain("retained-before-abort");
+      await h.emit("model_select", {}, context("gpt-5.6"));
+      expect((await exec('text(load("value"));')).content).toContainEqual({
+        type: "text",
+        text: "42",
+      });
+      const yielded = await exec('text("first"); await yield_control(); text("second");');
+      const waited = await h.tools
+        .get("wait")
+        .execute("outer-wait", { cell_id: yielded.details.cellId });
+      expect(waited.content).toContainEqual({ type: "text", text: "second" });
+      expect(waited.content).not.toContainEqual({ type: "text", text: "first" });
+      await h.emit("session_tree", {}, context());
+      expect(renderFailed()).toContain("retained-before-abort");
+      expect((await exec('text(load("value"));')).content).toContainEqual({
+        type: "text",
+        text: "undefined",
+      });
+      expect(original.ui.notify).toHaveBeenCalledWith(
+        "Code Mode cleared: branch navigation",
+        "info",
+      );
+      const failed = await exec(
+        'text("before error"); image("data:image/png;base64,aGVsbG8="); throw new Error("failure");',
+      );
+      expect(failed.content).toContainEqual({
+        type: "image",
+        mimeType: "image/png",
+        data: "aGVsbG8=",
+      });
+      expect(
+        await h.emit("tool_result", { toolName: "exec", details: failed.details }, context()),
+      ).toEqual({ isError: true });
+      const truncated = await exec(
+        '// @exec: {"max_output_tokens":5}\ntext("0123456789012345678901234567890123456789");',
+      );
+      expect(truncated.content).toContainEqual({
+        type: "text",
+        text: "Warning: truncated output (original token count: 10)\nTotal output lines: 1\n\n0123456789…5 tokens truncated…0123456789",
+      });
+      await h.emit("model_select", {}, context("claude"));
+      expect(h.pi.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom"]);
+      await expect(exec("text(1)")).rejects.toThrow(/outside supported/);
+    } finally {
+      await h.emit("session_shutdown", {}, {});
+      vi.unstubAllEnvs();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("disabling exec restores displaced cores immediately at the registered lifecycle boundary", async () => {
+  const h = setup();
+  const ctx = context();
+  await h.emit("session_start", {}, ctx);
+  h.pi.setActiveTools(["wait", "custom"]);
+  await h.emit("turn_start", {}, ctx);
+  expect(h.pi.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom", "wait"]);
+  await h.emit("model_select", {}, context("gpt-5.6"));
+  expect(h.pi.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom", "wait"]);
+  await h.emit("session_shutdown", {}, ctx);
+});
+
+test.each(["exec", "wait"])(
+  "explicitly re-enabling %s survives registered lifecycle reconciliation",
+  async (name) => {
+    const h = setup();
+    const ctx = context();
+    await h.emit("session_start", {}, ctx);
+    h.pi.setActiveTools(h.pi.getActiveTools().filter((tool) => tool !== name));
+    await h.emit("turn_start", {}, ctx);
+    expect(h.pi.getActiveTools()).not.toContain(name);
+    h.pi.setActiveTools([...h.pi.getActiveTools(), name]);
+    await h.emit("turn_start", {}, ctx);
+    expect(h.pi.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+    await h.emit("session_shutdown", {}, ctx);
+  },
+);
+
+test.skipIf(!host).each(["replacement", "reload", "shutdown", "unsupported"] as const)(
+  "default registration clears running shells and cells on %s with expired contexts",
+  async (reason) => {
+    const { mkdtempSync, symlinkSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const directory = mkdtempSync(join(tmpdir(), "code-mode-lifecycle-"));
+    const installed = directory;
+    symlinkSync(host!, join(installed, "codex-code-mode-host"));
+    vi.stubEnv("PATH", `${directory}:${process.env.PATH ?? ""}`);
+    const h = setup();
+    let stale = false;
+    const original = context();
+    const ctx = new Proxy(original, {
+      get(target, key) {
+        if (stale) throw new Error(`stale ctx ${String(key)}`);
+        return Reflect.get(target, key);
+      },
+    });
+    try {
+      await h.emit("session_start", {}, ctx);
+      const running = await h.tools.get("exec").execute("running", {
+        code: 'store("old",42); text(await tools.exec_command({cmd:"echo $$; sleep 60",login:false,yield_time_ms:250})); await yield_control();',
+      });
+      const shell = JSON.parse(
+        running.content.find((c: any) => c.type === "text" && c.text.startsWith("{")).text,
+      );
+      const pid = Number(shell.output.trim());
+      expect(pid).toBeGreaterThan(1);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      stale = true;
+      if (reason === "replacement") await h.emit("session_start", {}, context());
+      else if (reason === "unsupported") await h.emit("model_select", {}, context("claude"));
+      else
+        await h.emit("session_shutdown", { reason: reason === "reload" ? "reload" : "quit" }, {});
+      await expect
+        .poll(() => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .toBe(false);
+      if (reason === "unsupported") await h.emit("model_select", {}, context());
+      else if (reason === "reload" || reason === "shutdown") return; // Pi constructs a fresh extension instance next.
+      expect(
+        (await h.tools.get("exec").execute("fresh", { code: 'text(load("old"));' })).content,
+      ).toContainEqual({ type: "text", text: "undefined" });
+      const missing = await h.tools
+        .get("wait")
+        .execute("old-wait", { cell_id: running.details.cellId });
+      expect(missing.details.failed).toBe(true);
+    } finally {
+      await h.emit("session_shutdown", { reason: "quit" }, {});
+      vi.unstubAllEnvs();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("a missing host fails visibly without changing the default tool interface", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const directory = mkdtempSync("/tmp/code-mode-missing-");
+  vi.stubEnv("PATH", directory);
+  const h = setup();
+  const ctx = context();
+  try {
+    await h.emit("session_start", {}, ctx);
+    await expect(h.tools.get("exec").execute("missing", { code: "text(42)" })).rejects.toThrow(
+      "Install the Code Mode dependency",
+    );
+    expect(h.pi.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+  } finally {
+    await h.emit("session_shutdown", { reason: "quit" }, {});
+    vi.unstubAllEnvs();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

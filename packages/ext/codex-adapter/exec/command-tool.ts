@@ -6,9 +6,8 @@ import {
   SettingsManager,
   type AgentToolResult,
   type ExtensionAPI,
-  type ExtensionContext,
-  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { OwnedToolDefinition, ToolExecutionContext } from "../tool-execution.js";
 import { Type, type Static } from "typebox";
 
 import { sanitizeText } from "../../subagents/ui/text-lines.js";
@@ -38,7 +37,7 @@ export function renderExecScanline(
 ): string {
   const summary = typeof command === "string" ? sanitizeText(command).trim() : "";
   const detail = `${summary ? ` ${summary}` : ""}${suffix}`;
-  return theme.bold(action) + (detail ? theme.fg("toolTitle", detail) : "");
+  return theme.bold(action) + (detail ? theme.fg("accent", detail) : "");
 }
 
 type ExecRenderDetails = Pick<UnifiedExecResult, "output" | "wall_time_seconds" | "session_id">;
@@ -83,11 +82,17 @@ function execStatus(
     : `Took ${seconds.toFixed(1)}s${tokenSuffix}`;
 }
 
+export class ExecCommandError extends Error {
+  constructor(readonly result: UnifiedExecResult) {
+    super(
+      `${result.output ? `${result.output}\n\n` : ""}Command exited with code ${result.exit_code}`,
+    );
+  }
+}
+
 export function throwForExecFailure(result: UnifiedExecResult): void {
   if (result.exit_code === undefined || result.exit_code === 0) return;
-  throw new Error(
-    `${result.output ? `${result.output}\n\n` : ""}Command exited with code ${result.exit_code}`,
-  );
+  throw new ExecCommandError(result);
 }
 
 export function renderExecResult(
@@ -152,8 +157,7 @@ const parameters = Type.Object({
   tty: Type.Optional(Type.Boolean({ description: "Run in an interactive pseudo-terminal." })),
   yield_time_ms: Type.Optional(
     Type.Number({
-      description:
-        "Wait before yielding output. Defaults to 30000 ms; minimum 5000 ms for non-interactive commands.",
+      description: "Wait before yielding output. Defaults to 10000 ms; clamps to 250–30000 ms.",
     }),
   ),
   max_output_tokens: Type.Optional(
@@ -197,7 +201,11 @@ function toolResult(
 
 export function createExecCommandTool(
   sessions: ExecSessionManager,
-): ToolDefinition<typeof parameters, UnifiedExecResult, { startedAt?: number; endedAt?: number }> {
+): OwnedToolDefinition<
+  typeof parameters,
+  UnifiedExecResult,
+  { startedAt?: number; endedAt?: number }
+> {
   return {
     name: "exec_command",
     label: "exec_command",
@@ -207,7 +215,7 @@ export function createExecCommandTool(
     executionMode: "parallel",
     parameters,
     prepareArguments: canonicalArguments,
-    async execute(_toolCallId, params, signal, onUpdate, ctx: ExtensionContext) {
+    async execute(_toolCallId, params, signal, onUpdate, ctx: ToolExecutionContext) {
       // Pi extension contexts are session-bound. Snapshot everything before the
       // first await so continuations cannot dereference a replaced session.
       const cwd = ctx.cwd;
@@ -235,6 +243,11 @@ export function createExecCommandTool(
   };
 }
 
-export function registerExecCommandTool(pi: ExtensionAPI, sessions: ExecSessionManager): void {
-  pi.registerTool(createExecCommandTool(sessions));
+export function registerExecCommandTool(
+  pi: ExtensionAPI,
+  sessions: ExecSessionManager,
+): ReturnType<typeof createExecCommandTool> {
+  const tool = createExecCommandTool(sessions);
+  pi.registerTool(tool);
+  return tool;
 }

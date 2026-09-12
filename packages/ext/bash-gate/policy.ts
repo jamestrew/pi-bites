@@ -1,0 +1,563 @@
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { extractBashFacts, type BashFacts, type BashSimpleCommand } from "./bash-command-facts.js";
+import type {
+  BashGateConfig,
+  BashGateRedirectRule,
+  BashGateRule,
+  OneOrMany,
+  BitesConfig,
+} from "../config.js";
+import {
+  SUBAGENT_METADATA_ENTRY,
+  parseSubagentMetadata,
+  type SubagentMetadata,
+} from "../subagents/agent-runner.js";
+type BashGatePolicy = "deny" | "prompt";
+export function subagentMetadata(entries: SessionEntry[]): SubagentMetadata | null | undefined {
+  const entry = [...entries]
+    .reverse()
+    .find(
+      (candidate) =>
+        candidate.type === "custom" && candidate.customType === SUBAGENT_METADATA_ENTRY,
+    );
+  if (entry?.type !== "custom") return undefined;
+  return parseSubagentMetadata(entry.data) ?? null;
+}
+
+export function subagentBashGatePolicy(entries: SessionEntry[]): BashGatePolicy | undefined {
+  const metadata = subagentMetadata(entries);
+  if (metadata === undefined) return undefined;
+  if (metadata === null) return "deny";
+  const policy = metadata.bashGatePolicy;
+  return policy === "deny" || policy === "prompt" ? policy : "prompt";
+}
+
+// The allowlist trusts installed programs and project code/configuration. It is not limited to
+// read-only commands: routine local changes are acceptable when they are easy to inspect and
+// revert (for example formatters, compilers, tests, `git add`, and `git commit`). Gate commands
+// whose normal purpose can irreversibly delete data, alter the host toolchain, mutate remote
+// services, install code, or execute an arbitrary caller-supplied command. A compromised binary
+// or malicious project plugin is out of scope; treating those as hostile would gate every useful
+// development tool.
+const DEFAULT_BASH_GATE_ALLOWLIST: BashGateRule[] = [
+  {
+    cmd: [
+      "[",
+      "basename",
+      "cal",
+      "cat",
+      "cksum",
+      "cmp",
+      "comm",
+      "cut",
+      "df",
+      "diff",
+      "dirname",
+      "du",
+      "echo",
+      "ecs",
+      "false",
+      "file",
+      "fold",
+      "free",
+      "golangci-lint",
+      "grep",
+      "head",
+      "id",
+      "jest",
+      "jq",
+      "ls",
+      "md5sum",
+      "mypy",
+      "next",
+      "nl",
+      "od",
+      "paratest",
+      "paste",
+      "pest",
+      "phpstan",
+      "phpunit",
+      "pint",
+      "prettier",
+      "printenv",
+      "printf",
+      "ps",
+      "pwd",
+      "pytest",
+      "readlink",
+      "realpath",
+      "rspec",
+      "rubocop",
+      "ruff",
+      "sha256sum",
+      "sort",
+      "stat",
+      "tail",
+      "test",
+      "tree",
+      "tr",
+      "true",
+      "tsc",
+      "uname",
+      "uniq",
+      "uptime",
+      "vitest",
+      "wc",
+      "whoami",
+      "which",
+    ],
+  },
+  { cmd: ["find", "rg"] },
+  {
+    cmd: "cargo",
+    subcommands: ["bench", "build", "check", "clippy", "doc", "fmt", "metadata", "test", "tree"],
+  },
+  {
+    cmd: "docker",
+    subcommands: [
+      "diff",
+      "history",
+      "images",
+      "info",
+      "inspect",
+      "logs",
+      "port",
+      "ps",
+      "stats",
+      "top",
+      "version",
+    ],
+  },
+  { cmd: "dotnet", subcommands: ["build", "format", "restore", "test"] },
+  { cmd: "go", subcommands: ["build", "doc", "env", "fmt", "list", "test", "version", "vet"] },
+  { cmd: "gradlew", subcommands: ["assemble", "build", "check", "lint", "test"] },
+  { cmd: "gt", subcommands: "log" },
+  {
+    cmd: ["kubectl", "oc"],
+    subcommands: [
+      "api-resources",
+      "api-versions",
+      "describe",
+      "diff",
+      "explain",
+      "get",
+      "logs",
+      "top",
+      "version",
+    ],
+  },
+  { cmd: "mvn", subcommands: ["compile", "package", "test", "verify"] },
+  { cmd: "npm", subcommands: ["explain", "list", "ls", "outdated", "test", "view"] },
+  { cmd: "oc", subcommands: ["status", "whoami"] },
+  { cmd: "php", subcommands: "-l" },
+  { cmd: "pip", subcommands: ["check", "freeze", "list", "show"] },
+  { cmd: "playwright", subcommands: "test" },
+  { cmd: "pnpm", subcommands: ["list", "outdated", "test", "why"] },
+  { cmd: "prisma", subcommands: ["format", "generate", "validate", "version"] },
+  { cmd: "rake", subcommands: ["spec", "test"] },
+  { cmd: "sbt", subcommands: ["compile", "test"] },
+  { cmd: "uv", subcommands: "tree" },
+];
+
+const DEFAULT_BASH_GATE_ALLOW_PREFIXES = [
+  ["aws", "configure", "list"],
+  ["aws", "configure", "list-profiles"],
+  ["aws", "s3", "ls"],
+  ["aws", "sts", "get-caller-identity"],
+  ["docker", "compose", "config"],
+  ["docker", "compose", "images"],
+  ["docker", "compose", "logs"],
+  ["docker", "compose", "ls"],
+  ["docker", "compose", "ps"],
+  ["docker", "compose", "top"],
+  ["docker", "context", "inspect"],
+  ["docker", "context", "ls"],
+  ["docker", "context", "show"],
+  ["docker", "image", "inspect"],
+  ["docker", "image", "ls"],
+  ["docker", "network", "inspect"],
+  ["docker", "network", "ls"],
+  ["docker", "volume", "inspect"],
+  ["docker", "volume", "ls"],
+  ["gh", "auth", "status"],
+  ["gh", "gist", "list"],
+  ["gh", "gist", "view"],
+  ["gh", "issue", "list"],
+  ["gh", "issue", "status"],
+  ["gh", "issue", "view"],
+  ["gh", "pr", "checks"],
+  ["gh", "pr", "diff"],
+  ["gh", "pr", "list"],
+  ["gh", "pr", "status"],
+  ["gh", "pr", "view"],
+  ["gh", "release", "list"],
+  ["gh", "release", "view"],
+  ["gh", "repo", "list"],
+  ["gh", "repo", "view"],
+  ["gh", "run", "list"],
+  ["gh", "run", "view"],
+  ["gh", "workflow", "list"],
+  ["gh", "workflow", "view"],
+  ["glab", "auth", "status"],
+  ["glab", "issue", "list"],
+  ["glab", "issue", "view"],
+  ["glab", "mr", "checks"],
+  ["glab", "mr", "diff"],
+  ["glab", "mr", "list"],
+  ["glab", "mr", "view"],
+  ["glab", "pipeline", "list"],
+  ["glab", "pipeline", "view"],
+  ["glab", "release", "list"],
+  ["glab", "release", "view"],
+  ["glab", "repo", "view"],
+  ["git", "add"],
+  ["git", "blame"],
+  ["git", "commit"],
+  ["git", "diff"],
+  ["git", "log"],
+  ["git", "ls-files"],
+  ["git", "name-rev"],
+  ["git", "pull"],
+  ["git", "rebase"],
+  ["git", "rev-list"],
+  ["git", "rev-parse"],
+  ["git", "shortlog"],
+  ["git", "show"],
+  ["git", "status"],
+  ["jj", "abandon"],
+  ["jj", "b", "list"],
+  ["jj", "bookmark", "list"],
+  ["jj", "config", "get"],
+  ["jj", "config", "list"],
+  ["jj", "config", "path"],
+  ["jj", "commit"],
+  ["jj", "describe"],
+  ["jj", "diff"],
+  ["jj", "edit"],
+  ["jj", "evolog"],
+  ["jj", "evolution-log"],
+  ["jj", "file", "list"],
+  ["jj", "file", "show"],
+  ["jj", "file", "track"],
+  ["jj", "file", "untrack"],
+  ["jj", "git", "fetch"],
+  ["jj", "interdiff"],
+  ["jj", "log"],
+  ["jj", "new"],
+  ["jj", "op", "log"],
+  ["jj", "op", "show"],
+  ["jj", "operation", "log"],
+  ["jj", "operation", "show"],
+  ["jj", "rebase"],
+  ["jj", "restore"],
+  ["jj", "root"],
+  ["jj", "show"],
+  ["jj", "split"],
+  ["jj", "squash"],
+  ["jj", "st"],
+  ["jj", "status"],
+  ["jj", "tag", "list"],
+  ["jj", "version"],
+  ["jj", "workspace", "list"],
+  ["jj", "workspace", "root"],
+  ["kubectl", "auth", "can-i"],
+  ["kubectl", "config", "current-context"],
+  ["kubectl", "config", "get-contexts"],
+  ["kubectl", "config", "view"],
+  ["oc", "auth", "can-i"],
+  ["oc", "config", "current-context"],
+  ["oc", "config", "get-contexts"],
+  ["oc", "config", "view"],
+  ["uv", "pip", "check"],
+  ["uv", "pip", "freeze"],
+  ["uv", "pip", "list"],
+  ["uv", "pip", "show"],
+];
+
+export const DEFAULT_BASH_GATE_RULES: BashGateRule[] = [
+  { cmd: ["rm", "rmdir"] },
+  { cmd: ["chmod", "chown", "chgrp", "ln", "tee", "truncate", "dd", "shred"] },
+  { cmd: ["sudo", "su", "kill", "pkill", "killall", "reboot", "shutdown"] },
+  { cmd: ["ssh", "scp", "sftp"] },
+  {
+    cmd: "find",
+    flagAny: [
+      "-delete",
+      "-exec",
+      "-execdir",
+      "-fls",
+      "-fprint",
+      "-fprint0",
+      "-fprintf",
+      "-ok",
+      "-okdir",
+    ],
+  },
+  { cmd: "file", flagAny: ["-C", "--compile"] },
+  { cmd: "go", subcommands: "env", flagAny: ["-u", "-w"] },
+  { cmd: "mypy", flagAny: "--install-types" },
+  { cmd: "printf", flagAny: "-v" },
+  { cmd: "pytest", flagAny: "--basetemp" },
+  { cmd: "rg", flagAny: ["--hostname-bin", "--pre"] },
+  { cmd: "sort", flagAny: ["-o", "--output", "--compress-program"] },
+  { cmd: "date", flagAny: ["-s", "--set"] },
+  {
+    cmd: "git",
+    flagAny: ["--output", "--ext-diff", "--textconv", "--open-files-in-pager"],
+  },
+  { cmd: "git", subcommands: "grep", flagAny: "-O" },
+  { cmd: "tree", flagAny: "-o" },
+  {
+    cmd: "git",
+    subcommands: [
+      "push",
+      "merge",
+      "reset",
+      "checkout",
+      "stash",
+      "cherry-pick",
+      "revert",
+      "tag",
+      "init",
+      "clone",
+    ],
+  },
+  { cmd: "git", subcommands: "branch", flagAny: ["-d", "-D"] },
+  { cmd: "git", subcommands: "rebase", flagAny: ["-x", "--exec"] },
+  { cmd: "npm", subcommands: ["install", "uninstall", "update", "ci", "link", "publish"] },
+  { cmd: "yarn", subcommands: ["add", "remove", "install", "publish"] },
+  { cmd: "bun", subcommands: ["add", "remove", "install", "publish"] },
+  { cmd: "pnpm", subcommands: ["add", "remove", "install", "publish"] },
+  { cmd: "pip", subcommands: ["install", "uninstall"] },
+  { cmd: ["apt", "apt-get"], subcommands: ["install", "remove", "purge", "update", "upgrade"] },
+  { cmd: "brew", subcommands: ["install", "uninstall", "upgrade"] },
+  { cmd: "systemctl", subcommands: ["start", "stop", "restart", "enable", "disable"] },
+  { cmd: "service", subcommands: ["start", "stop", "restart"] },
+  { cmd: ["vim", "vi", "nano", "emacs", "code", "subl"] },
+  { redirects: "any-write" },
+];
+
+export interface BashGateMatch {
+  label: string;
+  source: "builtin" | "configured";
+  rule: BashGateRule;
+  reason?: string;
+}
+
+interface BashRuleCommandMatch {
+  label: string;
+}
+
+function normalizeToken(value?: string): string | undefined {
+  return value?.toLowerCase();
+}
+
+function asArray<T>(value?: OneOrMany<T>): T[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function resolveConfiguredRules(config: BitesConfig): BashGateRule[] {
+  return config.bashGate?.rules ?? [];
+}
+
+export function resolveEffectiveRules(config: BashGateConfig | BitesConfig = {}): BashGateRule[] {
+  const configuredRules =
+    "rules" in config
+      ? (config.rules ?? [])
+      : "bashGate" in config
+        ? resolveConfiguredRules(config)
+        : [];
+  return [...DEFAULT_BASH_GATE_RULES, ...configuredRules];
+}
+
+function isDangerousRedirect(operator: string, target?: string): boolean {
+  if (!operator.includes(">")) return false;
+  if (operator.includes("<&") || operator.includes(">&")) return false;
+  return target?.trim() !== "/dev/null";
+}
+
+function matchesRedirectRule(facts: BashFacts, redirectRule: BashGateRedirectRule): boolean {
+  return facts.redirects.some((redirect) => {
+    if (!isDangerousRedirect(redirect.operator, redirect.target)) return false;
+    if (redirectRule === "any-write") return true;
+    if (redirectRule === "append") return redirect.operator.includes(">>");
+    return redirect.operator.includes(">") && !redirect.operator.includes(">>");
+  });
+}
+
+function matchCommandRule(
+  command: BashSimpleCommand,
+  rule: BashGateRule,
+): BashRuleCommandMatch | undefined {
+  const name = normalizeToken(command.name);
+  const subcommand = normalizeToken(command.subcommand);
+  const cmdOptions = asArray(rule.cmd).map(normalizeToken).filter(Boolean);
+  const subcommandOptions = asArray(rule.subcommands).map(normalizeToken).filter(Boolean);
+  const flagOptions = asArray(rule.flagAny).flatMap((flag) => {
+    const normalized = normalizeToken(flag);
+    return normalized ? [normalized] : [];
+  });
+  const commandFlags = command.flags.flatMap((flag) => {
+    const normalized = normalizeToken(flag);
+    if (!normalized) return [];
+    const equalsIndex = normalized.indexOf("=");
+    return equalsIndex === -1 ? [normalized] : [normalized, normalized.slice(0, equalsIndex)];
+  });
+
+  if (cmdOptions.length > 0 && (!name || !cmdOptions.includes(name))) return undefined;
+
+  let matchedSubcommand: string | undefined;
+  if (subcommandOptions.length > 0) {
+    if (name === "service") {
+      const serviceAction = normalizeToken(command.argv.at(-1));
+      if (!serviceAction || !subcommandOptions.includes(serviceAction)) return undefined;
+      matchedSubcommand = serviceAction;
+    } else {
+      if (!subcommand || !subcommandOptions.includes(subcommand)) return undefined;
+      matchedSubcommand = subcommand;
+    }
+  }
+
+  const matchedFlag =
+    flagOptions.length > 0
+      ? flagOptions.find((option) =>
+          commandFlags.some(
+            (flag) => flag === option || (option.length === 2 && flag.startsWith(option)),
+          ),
+        )
+      : undefined;
+  if (flagOptions.length > 0 && !matchedFlag) return undefined;
+
+  if (name === "git" && matchedSubcommand === "branch" && matchedFlag) {
+    return { label: `git branch -d` };
+  }
+
+  if (matchedSubcommand) return { label: `${name} ${matchedSubcommand}` };
+  if (matchedFlag && name) return { label: `${name} ${matchedFlag}` };
+  if (name) return { label: name };
+  return undefined;
+}
+
+function matchRuleAgainstFacts(facts: BashFacts, rule: BashGateRule): string[] {
+  if (rule.redirects && !matchesRedirectRule(facts, rule.redirects)) return [];
+
+  const hasCommandConstraint =
+    rule.cmd !== undefined || rule.subcommands !== undefined || rule.flagAny !== undefined;
+  if (!hasCommandConstraint) {
+    if (!rule.redirects) return [];
+    const hasAppend = matchesRedirectRule(facts, "append");
+    if (rule.redirects === "append") return ["redirect:>>"];
+    if (rule.redirects === "truncate") return ["redirect:>"];
+    return [hasAppend ? "redirect:>>" : "redirect:>"];
+  }
+
+  const labels: string[] = [];
+  for (const command of facts.commands) {
+    const matched = matchCommandRule(command, rule);
+    if (matched) labels.push(matched.label);
+  }
+
+  return [...new Set(labels)];
+}
+
+function pushMatches(
+  matches: BashGateMatch[],
+  labels: string[],
+  source: BashGateMatch["source"],
+  rule: BashGateRule,
+): void {
+  for (const label of labels) {
+    if (matches.some((match) => match.label === label && match.source === source)) continue;
+    matches.push({
+      label,
+      source,
+      rule,
+      reason: rule.reason,
+    });
+  }
+}
+
+function isReadOnlySedCommand(command: BashSimpleCommand): boolean {
+  const [quiet, script, ...files] = command.argv.slice(1);
+  return (
+    quiet === "-n" &&
+    /^\d+(?:,\d+)?p$/u.test(script ?? "") &&
+    files.every((file) => file === "-" || !file.startsWith("-"))
+  );
+}
+
+function pushUnlistedCommands(
+  matches: BashGateMatch[],
+  facts: BashFacts,
+  rules: BashGateRule[],
+  rawCommand: string,
+): void {
+  for (const command of facts.commands) {
+    const name = command.name;
+    const invokedAs = command.argv[0];
+    const isAllowlisted =
+      name !== undefined &&
+      name === normalizeToken(name) &&
+      invokedAs === name &&
+      !facts.hasVariableAssignment &&
+      (DEFAULT_BASH_GATE_ALLOWLIST.some((rule) => matchCommandRule(command, rule)) ||
+        (name === "sed" && isReadOnlySedCommand(command)) ||
+        DEFAULT_BASH_GATE_ALLOW_PREFIXES.some((prefix) =>
+          prefix.every((token, index) => normalizeToken(command.argv[index]) === token),
+        ));
+    if (!name || isAllowlisted) continue;
+    const matchedExplicitRule = rules.some(
+      (rule) =>
+        (rule.cmd !== undefined || rule.subcommands !== undefined || rule.flagAny !== undefined) &&
+        (!rule.redirects || matchesRedirectRule(facts, rule.redirects)) &&
+        matchCommandRule(command, rule),
+    );
+    if (matchedExplicitRule) continue;
+
+    const label = `unlisted: ${rawCommand}`;
+    if (matches.some((match) => match.label === label && match.source === "builtin")) continue;
+    matches.push({
+      label,
+      source: "builtin",
+      rule: { cmd: name },
+      reason: `${name} is not on the bash-gate allowlist`,
+    });
+  }
+}
+
+export async function findMatchedPatterns(
+  command: string,
+  rulesOrConfig: BashGateRule[] | BashGateConfig | BitesConfig = {},
+): Promise<BashGateMatch[]> {
+  const facts = await extractBashFacts(command);
+
+  const configuredRules = Array.isArray(rulesOrConfig)
+    ? rulesOrConfig
+    : "rules" in rulesOrConfig
+      ? (rulesOrConfig.rules ?? [])
+      : "bashGate" in rulesOrConfig
+        ? resolveConfiguredRules(rulesOrConfig)
+        : [];
+  const builtinRules = Array.isArray(rulesOrConfig) ? [] : DEFAULT_BASH_GATE_RULES;
+
+  const matches: BashGateMatch[] = [];
+
+  for (const rule of configuredRules) {
+    pushMatches(matches, matchRuleAgainstFacts(facts, rule), "configured", rule);
+  }
+
+  for (const rule of builtinRules) {
+    pushMatches(matches, matchRuleAgainstFacts(facts, rule), "builtin", rule);
+  }
+
+  pushUnlistedCommands(matches, facts, [...configuredRules, ...builtinRules], command);
+  return matches;
+}
+
+export async function findMatchedPattern(
+  command: string,
+  rulesOrConfig: BashGateRule[] | BashGateConfig | BitesConfig = {},
+): Promise<BashGateMatch | undefined> {
+  return (await findMatchedPatterns(command, rulesOrConfig))[0];
+}

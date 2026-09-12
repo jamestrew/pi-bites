@@ -26,7 +26,6 @@ export interface BridgeExecSession {
   exitCode: number | null | undefined;
   listeners: Set<() => void>;
   interactive: boolean;
-  nextEmptyPollYieldMs?: number | undefined;
   lastSeq: number;
   startedAt: number;
   updatedAt: number;

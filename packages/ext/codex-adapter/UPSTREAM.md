@@ -7,15 +7,36 @@ The Codex adapter's `apply_patch`, `exec_command`, `write_stdin`, `view_image`, 
 - Commit: `e12067caadc38da4e785d0300202aac233ae3b2f`
 - Package license: MIT, preserved in [`LICENSE`](LICENSE)
 
-## Planned Code Mode contract
+## Code Mode contract and host
 
-Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the future Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. This is a target contract; it does not change the current artifacts or their older provenance below. Native packaging and activation land in #296–#302.
+Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. The standalone host is now a manually installed dependency from the pinned Codex GitHub release, with matched source under `vendor/code-mode`; see its [packaging record](vendor/code-mode/README.md) for artifact hashes, V8/native notices, build commands and validation limits. The default adapter now activates this runtime for scoped GPT-5.6/GPT-6 models. The eight existing helper artifacts retain their older provenance below.
+
+## Session-owned Code Mode bridge (#297)
+
+The internal TypeScript connection, framed process IO, protocol parsing and
+session/delegate flow are adapted from conversion 3.0.31 at
+`94eb6c0745e2f516bf19603f912f7b6478b43355`, specifically
+`src/tools/code-mode/{host-process,host-connection,host-session,host-client,host-protocol,host-operation,host-cell-operations,host-delegation,delegate-runtime}.ts`.
+The conversion package's MIT license is retained in `LICENSE`; native protocol
+and source semantics remain at the Codex pin above.
+
+The reduction retains only explicitly supplied callable tools, the dedicated
+host connection, execute/wait/terminate/shutdown, notifications, cancellation,
+and shell ownership. It omits Notebook/shared runtime registries, custom tool
+commands, providers, traces/renderers, preflight blockers, source rewriting and
+adaptive/direct-tool waits. Local changes include native pragma defaults/ranges,
+generation-qualified cell IDs, stable lifecycle snapshots, bounded state,
+fail-closed startup and crash behavior, and a Linux RSS watchdog for native
+output/store retention. No host source or artifact changes are made.
+
+See [the runtime integration contract](../../../docs/code-mode-contract/runtime.md)
+for API, shell ownership, lifecycle hooks, bounds and validation.
 
 ## Retained surface
 
-The TypeScript parser, path rules, result types, native runner/error handling, executor, and tool behavior came from `packages/pi-codex-conversion/src/{patch,tools/apply-patch,tools/exec,tools/native,tools/view-image,tools/web-run}`. They were reduced to the direct `apply_patch`, structured `exec_command`, `write_stdin`, local-only `view_image`, and standalone `web_run` surfaces and adapted to Pi-bites paths and APIs. The local adapter uses Pi's existing provider, model catalogue, authentication, configured shell, and core tools; it does not retain upstream provider registration, prompt conversion, Code Mode `exec`/`wait`, compaction, voice, image generation/editing, model-generated image descriptions, or settings features.
+The TypeScript parser, path rules, result types, native runner/error handling, executor, and tool behavior came from `packages/pi-codex-conversion/src/{patch,tools/apply-patch,tools/exec,tools/native,tools/view-image,tools/web-run}`. They were reduced to the direct `apply_patch`, structured `exec_command`, `write_stdin`, local-only `view_image`, and standalone `web_run` surfaces and adapted to Pi-bites paths and APIs. The local adapter uses Pi's existing provider, model catalogue, authentication, configured shell, and core tools; it does not retain upstream provider registration, prompt conversion, compaction, voice, image generation/editing, model-generated image descriptions, or settings features.
 
-Local integration changes include configuration-based provider matching, ownership-aware active-tool reconciliation, Linux x86-64/arm64 binary locators, direct binary-path injection for failure tests, and nested use of the host's single-file mutation queue. The upstream collapsed/expanded patch diff and failure rendering is retained, with local sequencing for repeated targets and result-detail snapshots for restored rows. Patch parsing and execution remain delegated to the retained upstream parser and native implementation.
+Local integration changes include scoped model-family matching, ownership-aware active-tool reconciliation, Linux x86-64/arm64 binary locators, direct binary-path injection for failure tests, and nested use of the host's single-file mutation queue. The upstream collapsed/expanded patch diff and failure rendering is retained, with local sequencing for repeated targets and result-detail snapshots for restored rows. Patch parsing and execution remain delegated to the retained upstream parser and native implementation.
 
 The structured shell tools retain the upstream JSON-lines bridge protocol, resumable session manager, bounded tail output, interruption and process-group cleanup. Their custom command-summary renderer and session tracker were omitted in favor of minimal Pi-native rendering. Pi's configured `shellPath` is snapshotted before asynchronous execution, and live TypeScript output buffers are capped at 1 MiB per process in addition to the native bridge's 8 MiB retained-output cap. The local read response adds `droppedBytes` accounting so output evicted at that native cap is represented in truncation metadata rather than silently lost.
 
@@ -25,7 +46,7 @@ The structured shell tools retain the upstream JSON-lines bridge protocol, resum
 
 ## Native artifact
 
-Only these upstream artifacts are retained:
+The eight existing tool artifacts below remain in Git. The two Linux Code Mode hosts are installed separately from the pinned Codex release; their checksums and installation instructions are in [the host packaging record](vendor/code-mode/README.md):
 
 - Path: `apply-patch/bin/linux-x64/apply_patch`
 - Target: Linux x86-64
@@ -135,15 +156,61 @@ Run those commands inside a shell containing both `github:NixOS/nixpkgs/nixos-22
 
 ## Deliberate exclusions
 
-The vendor does not contain Code Mode, Notebook Mode, custom provider or Responses Lite transport code, cached transport/prewarming, native compaction, conversation-history forwarding, voice or dictation, GipPity, image generation/editing, remote image descriptions, usage/settings/changelog UI, or binaries for targets other than Linux x86-64 and arm64. The repository boundary test also rejects their known source-group names, unsupported native artifacts, changed binary digests, and upstream dependencies used only by removed features.
+The vendor now contains only the explicitly inventoried standalone Code Mode host/protocol/runtime in addition to the existing native tools. It does not contain Notebook Mode, custom provider or Responses Lite transport code, cached transport/prewarming, native compaction, conversation-history forwarding, voice or dictation, GipPity, image generation/editing, remote image descriptions, usage/settings/changelog UI, or binaries for targets other than Linux x86-64 and arm64. The repository boundary test also rejects their known source-group names, unsupported native artifacts, changed binary digests, and upstream dependencies used only by removed features.
 
 `tree-sitter-bash` and `web-tree-sitter` remain repository dependencies for Pi-bites' bash-gate parser; they are not retained for the adapter. No runtime dependency on `@howaboua/pi-codex-conversion` or OpenAI's SDK remains.
 
 ## Sync procedure
 
 1. Record the new package version, package repository commit, and every nested OpenAI Codex source revision before copying anything.
-2. Diff only the retained TypeScript groups and the four reduced Rust workspaces above. Port needed changes into the owned Pi-bites implementation; do not copy the upstream package wholesale.
+2. Diff only the retained TypeScript groups and the five reduced Rust workspaces above. Port needed changes into the owned Pi-bites implementation; do not copy the upstream package wholesale.
 3. Reapply the local integration changes documented under **Retained surface**, including provider-neutral activation, tool preservation, bounded output, lifecycle cleanup, and supported Linux architecture lookup.
-4. Regenerate reduced Cargo lockfiles, run all locked Cargo test/build pairs, strip the Linux x86-64 and arm64 executables, replace only the eight documented artifacts, and update their SHA-256 values here and in `vendor-boundary.test.ts`.
+4. Regenerate reduced Cargo lockfiles, run all locked Cargo test/build pairs, strip the Linux x86-64 and arm64 executables, replace only the eight existing tool artifacts; update the separate Code Mode release pin and hashes using its V8/provenance recipe, and update their SHA-256 values here and in `vendor-boundary.test.ts`.
 5. Recheck all nested licenses/notices and update this file for source, dependency, binary, or divergence changes.
 6. Run the focused adapter tests and `bun check`. The boundary test must pass before the sync is accepted.
+
+### Nested bridge (#299)
+
+The local `code-mode/nested-tools.ts` bridge dispatches only the five owned tools through the
+session-owned host. It does not vendor conversion's direct-execute/preflight broker. It preserves
+Pi-bites authorization, patch mutation queues and partial-failure snapshots, execution-time web
+routing/citation collection, and native image emission. `code-mode/nested-traces.ts` retains bounded
+presentation data separately from returned native values. The default adapter registers native exec/wait.
+See [owned nested tools](../../../docs/code-mode-contract/runtime.md#owned-nested-tools-299) for
+integration and cleanup obligations, and the contract baseline for deliberate result projections.
+Shell defaults/ranges, deadline waits, and explicit small output budgets now match the selected
+baseline. Direct tools still reject nonzero exits; the nested bridge resolves their native typed
+result and preserves the failed presentation state.
+
+## Native surface integration (#300)
+
+`code-mode/registration.ts` connects the runtime and owned delegates to native-shaped `exec`/`wait` through the default adapter entry point. `activation.ts` accepts scoped GPT-5.6/GPT-6 IDs. #302 removed the temporary gate, legacy direct activation/guidance, and provider-wide configuration. No custom provider or complete model prompt is introduced.
+
+The generated contract, pinned Rust description-builder harness, exact capability
+projections, tool-selection policy, transport fallback, lifecycle integration and
+verification are documented in [the activation record](../../../docs/code-mode-contract/activation.md).
+Regenerate `code-mode/contract.generated.json` using those commands. Runtime output
+formatting ports the pinned UTF-8 middle-truncation policy; nested traces remain
+separate Pi result details.
+
+## Nested presentation (#301)
+
+`code-mode/rendering.ts` reuses the five owned call/result renderers with isolated
+per-call state. It renders live approval/execution updates and restores bounded
+trace snapshots without runtime access. Each observation saves a display version;
+the newest `wait` owns the cell's nested rows and invalidates earlier owners.
+Standalone explicit output and script errors stay with their emitting observation.
+Raw JavaScript stays hidden even when expanded; expansion shows nested tool details.
+Pi renders explicitly emitted images, while the nested display renders un-emitted
+images and avoids repeating images already emitted in earlier observations.
+
+This is local presentation code, informed by conversion's Code Mode renderer rather
+than copied wholesale: conversion repeats full traces across waits and hides successful
+standalone output by default. Trace updates contain no model-visible content. Saved
+trace data is capped at 128 calls/16 MiB, with per-field text and structural bounds.
+Rendering, width, restore, and live
+host update coverage lives at the registered `exec`/`wait` and trace snapshot seams.
+
+## Default cutover (#302)
+
+The [cutover validation record](../../../docs/code-mode-contract/cutover.md) maps real-host checks, shared authorization, lifecycle cleanup, native artifact validation, and actual route smoke results. The boundary rejects the removed legacy source groups. Native Rust sources, binaries, contracts and provider transports are unchanged by this cutover; only the host packaging README inventory entry changes to describe the active dependency.

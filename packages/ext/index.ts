@@ -50,7 +50,7 @@ export default async function (pi: ExtensionAPI) {
   if (!isSubagent && !disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
   const previewCodexPrompt = disabled.has("codexAdapter")
     ? undefined
-    : registerCodexAdapter(pi, configRef);
+    : registerCodexAdapter(pi, configRef, bashGate);
 
   if (!disabled.has("codegraph")) await registerCodegraph(pi);
 

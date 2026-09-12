@@ -227,7 +227,7 @@ test("renders the query scanline and exec-style collapsed, expanded, and error o
     context as never,
   );
   expect(callRow.render(200).map((line) => line.trimEnd())).toEqual([
-    "<bold>codegraph_explore</bold><toolTitle> find callers (max 4 files)</toolTitle>",
+    "<bold>codegraph_explore</bold><accent> find callers (max 4 files)</accent>",
   ]);
   const text = Array.from({ length: 10 }, (_, i) => `source ${i + 1}`).join("\n");
   const result = {

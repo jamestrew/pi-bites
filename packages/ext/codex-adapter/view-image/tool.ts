@@ -1,4 +1,5 @@
-import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { OwnedToolDefinition } from "../tool-execution.js";
 import { Type } from "typebox";
 
 import { fitLine, sanitizeSingleLine } from "../../subagents/ui/text-lines.js";
@@ -55,7 +56,7 @@ export function parseViewImageOutput(stdout: string): {
 
 export function createViewImageTool(
   options: CreateViewImageToolOptions = {},
-): ToolDefinition<typeof parameters, ViewImageDetails> {
+): OwnedToolDefinition<typeof parameters, ViewImageDetails> {
   return {
     name: "view_image",
     label: "view_image",
@@ -99,6 +100,8 @@ export function createViewImageTool(
   };
 }
 
-export function registerViewImageTool(pi: ExtensionAPI): void {
-  pi.registerTool(createViewImageTool());
+export function registerViewImageTool(pi: ExtensionAPI): ReturnType<typeof createViewImageTool> {
+  const tool = createViewImageTool();
+  pi.registerTool(tool);
+  return tool;
 }

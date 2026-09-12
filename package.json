@@ -12,7 +12,7 @@
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check .",
     "typecheck": "tsgo --noEmit",
-    "test": "env -u PI_PACKAGE_DIR vitest run packages && env -u PI_PACKAGE_DIR bun --bun vitest run scripts",
+    "test": "env -u PI_PACKAGE_DIR vitest run packages && env -u PI_PACKAGE_DIR bun --bun vitest run scripts packages/ext/codex-adapter/code-mode-runtime.test.ts packages/ext/codex-adapter/code-mode-connection.test.ts packages/ext/codex-adapter/code-mode-nested.test.ts packages/ext/codex-adapter/code-mode-registration.test.ts packages/ext/codex-adapter/code-mode-transport.test.ts",
     "check": "bun run lint && bun run fmt && bun run typecheck && bun run test",
     "loop": "bun scripts/loop.ts",
     "smoke:goal-model": "./scripts/goal-model-smoke.sh",

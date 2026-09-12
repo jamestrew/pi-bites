@@ -1,9 +1,6 @@
 import { Text } from "@earendil-works/pi-tui";
-import type {
-  AgentToolResult,
-  ExtensionAPI,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { OwnedToolDefinition } from "../tool-execution.js";
 import { Type } from "typebox";
 
 import { formatUnifiedExecResult } from "./format.js";
@@ -20,7 +17,7 @@ const parameters = Type.Object({
   yield_time_ms: Type.Optional(
     Type.Number({
       description:
-        "Wait before yielding output. Non-empty writes default to 250 ms; empty polls default to 30000 ms.",
+        "Wait before yielding output. Non-empty writes default to 250 ms; empty polls default to 5000 ms and clamp to 5000–300000 ms.",
     }),
   ),
   max_output_tokens: Type.Optional(
@@ -57,7 +54,11 @@ function toolResult(
 
 export function createWriteStdinTool(
   sessions: ExecSessionManager,
-): ToolDefinition<typeof parameters, UnifiedExecResult, { startedAt?: number; endedAt?: number }> {
+): OwnedToolDefinition<
+  typeof parameters,
+  UnifiedExecResult,
+  { startedAt?: number; endedAt?: number }
+> {
   return {
     name: "write_stdin",
     label: "write_stdin",
@@ -94,6 +95,11 @@ export function createWriteStdinTool(
   };
 }
 
-export function registerWriteStdinTool(pi: ExtensionAPI, sessions: ExecSessionManager): void {
-  pi.registerTool(createWriteStdinTool(sessions));
+export function registerWriteStdinTool(
+  pi: ExtensionAPI,
+  sessions: ExecSessionManager,
+): ReturnType<typeof createWriteStdinTool> {
+  const tool = createWriteStdinTool(sessions);
+  pi.registerTool(tool);
+  return tool;
 }
