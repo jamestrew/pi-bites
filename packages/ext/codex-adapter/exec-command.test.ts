@@ -379,7 +379,7 @@ describe("exec_command and write_stdin", () => {
       description: expect.stringContaining("interpreted by the current shell"),
     });
     expect(exec.parameters.properties.yield_time_ms).toMatchObject({
-      description: expect.stringContaining("Defaults to 30000 ms"),
+      description: expect.stringContaining("Defaults to 10000 ms"),
     });
     expect(exec.parameters.properties.max_output_tokens).toMatchObject({
       description: expect.stringContaining("Defaults to 10000 tokens"),
@@ -407,7 +407,7 @@ describe("exec_command and write_stdin", () => {
       description: expect.stringContaining("pass empty to poll"),
     });
     expect(write.parameters.properties.yield_time_ms).toMatchObject({
-      description: expect.stringContaining("empty polls default to 30000 ms"),
+      description: expect.stringContaining("empty polls default to 5000 ms"),
     });
     expect(write.parameters.properties.max_output_tokens).toMatchObject({
       description: expect.stringContaining("Defaults to 10000 tokens"),
@@ -449,7 +449,7 @@ describe("exec_command and write_stdin", () => {
     ).rejects.toThrow("failed\n\nCommand exited with code 9");
   });
 
-  test("extends foreground and empty-poll waits while output remains active", async () => {
+  test("honors foreground and empty-poll deadlines while output remains active", async () => {
     const sessions = manager();
     const activeCommand = "for value in 1 2 3 4 5 6; do printf $value; sleep .1; done; printf done";
     const foreground = await sessions.exec(
@@ -461,7 +461,10 @@ describe("exec_command and write_stdin", () => {
       },
       tempDir(),
     );
-    expect(foreground).toMatchObject({ exit_code: 0, output: "123456done" });
+    expect(foreground.session_id).toBe(1);
+    const rest = await sessions.write({ session_id: 1, yield_time_ms: 1000 });
+    expect(rest.exit_code).toBe(0);
+    expect(foreground.output + rest.output).toBe("123456done");
 
     const background = await sessions.exec(
       {
@@ -474,7 +477,10 @@ describe("exec_command and write_stdin", () => {
     );
     expect(background.session_id).toBe(2);
     const completed = await sessions.write({ session_id: 2, yield_time_ms: 250 });
-    expect(completed).toMatchObject({ exit_code: 0, output: "12345done" });
+    expect(completed.session_id).toBe(2);
+    const restOfPoll = await sessions.write({ session_id: 2, yield_time_ms: 1000 });
+    expect(restOfPoll.exit_code).toBe(0);
+    expect(background.output + completed.output + restOfPoll.output).toBe("12345done");
   });
 
   test("includes already-unread output in partial poll updates", async () => {

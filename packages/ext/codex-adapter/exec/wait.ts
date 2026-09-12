@@ -18,62 +18,34 @@ export function registerAbortHandler(
   return () => signal.removeEventListener("abort", abortListener);
 }
 
-export function waitForExitOrInactivity(
+export function waitForExitOrDeadline(
   session: WaitableSession,
-  idleTimeMs: number,
-  maxWaitMs = idleTimeMs,
+  waitMs: number,
   signal?: AbortSignal,
   onUpdate?: (elapsedMs: number) => void,
 ): Promise<number> {
   if (session.exitCode !== undefined && session.exitCode !== null) return Promise.resolve(0);
   if (signal?.aborted) return Promise.resolve(0);
-
   const startedAt = Date.now();
-  const hardLimitMs = Math.max(idleTimeMs, maxWaitMs);
-  let updateTimer: ReturnType<typeof setInterval> | undefined;
-  let idleTimer: ReturnType<typeof setTimeout> | undefined;
-  let hardTimer: ReturnType<typeof setTimeout> | undefined;
-  let lastUpdateAt = 0;
-  let outputVersion = session.outputVersion;
-  return new Promise((resolvePromise) => {
-    let abortCleanup: (() => void) | undefined;
+  return new Promise((resolve) => {
     let done = false;
-    const cleanup = () => {
-      if (idleTimer) clearTimeout(idleTimer);
-      if (hardTimer) clearTimeout(hardTimer);
-      if (updateTimer) clearInterval(updateTimer);
-      abortCleanup?.();
-      session.listeners.delete(onWake);
-    };
+    let abortCleanup: (() => void) | undefined;
+    let updateTimer: ReturnType<typeof setInterval> | undefined;
     const finish = () => {
       if (done) return;
       done = true;
-      cleanup();
-      resolvePromise(Date.now() - startedAt);
-    };
-    const emitUpdate = (force = false) => {
-      const now = Date.now();
-      if (!force && now - lastUpdateAt < 250) return;
-      lastUpdateAt = now;
-      onUpdate?.(now - startedAt);
+      clearTimeout(timer);
+      if (updateTimer) clearInterval(updateTimer);
+      abortCleanup?.();
+      session.listeners.delete(onWake);
+      resolve(Date.now() - startedAt);
     };
     const onWake = () => {
-      if (session.exitCode === undefined || session.exitCode === null) {
-        if (session.outputVersion !== outputVersion) {
-          outputVersion = session.outputVersion;
-          if (idleTimer) clearTimeout(idleTimer);
-          idleTimer = setTimeout(finish, idleTimeMs);
-        }
-        emitUpdate();
-        return;
-      }
-      emitUpdate(true);
-      finish();
+      if (session.exitCode !== undefined && session.exitCode !== null) finish();
     };
-    idleTimer = setTimeout(finish, idleTimeMs);
-    hardTimer = setTimeout(finish, hardLimitMs);
-    abortCleanup = registerAbortHandler(signal, finish);
-    if (onUpdate) updateTimer = setInterval(emitUpdate, 250);
+    const timer = setTimeout(finish, waitMs);
     session.listeners.add(onWake);
+    abortCleanup = registerAbortHandler(signal, finish);
+    if (onUpdate) updateTimer = setInterval(() => onUpdate(Date.now() - startedAt), 250);
   });
 }

@@ -10,7 +10,7 @@ export interface ExecOutputSessionState {
 }
 
 function maxCharsForTokens(maxOutputTokens = DEFAULT_MAX_OUTPUT_TOKENS): number {
-  return Math.max(256, maxOutputTokens * 4);
+  return Math.max(0, maxOutputTokens * 4);
 }
 
 function stripTerminalControlSequences(text: string): string {
@@ -173,9 +173,10 @@ export function truncateOutput(
   const originalTokenCount = Math.ceil(Math.max(text.length, originalCharCount) / 4);
   if (text.length <= maxChars && originalCharCount <= maxChars)
     return { output: text, original_token_count: originalTokenCount };
-  const tailChars = Math.max(0, maxChars - TRUNCATION_NOTICE.length);
+  const notice = maxChars >= TRUNCATION_NOTICE.length ? TRUNCATION_NOTICE : "";
+  const tailChars = Math.max(0, maxChars - notice.length);
   return {
-    output: TRUNCATION_NOTICE + truncateToTail(text, tailChars).output,
+    output: notice + (tailChars === 0 ? "" : truncateToTail(text, tailChars).output),
     original_token_count: originalTokenCount,
   };
 }

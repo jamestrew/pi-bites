@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
-import type {
-  AgentToolResult,
-  ExtensionAPI,
-  ExtensionContext,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { OwnedToolDefinition, ToolExecutionContext } from "../tool-execution.js";
 import { Type, type Static } from "typebox";
 
 import type { CodexAdapterConfig } from "../../config.js";
@@ -384,13 +380,15 @@ function renderCitationMarkers(markdown: string, sources: ReadonlyMap<string, st
   });
 }
 
-export function createWebRunTool(options: CreateWebRunToolOptions): ToolDefinition<
+export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDefinition<
   typeof parameters,
   WebRunDetails,
   WebRunRenderState
 > & {
   resetNavigationState(): void;
+  transformCitations(markdown: string): string;
 } {
+  const sources = new Map<string, string>();
   let navigationId = randomUUID();
   let navigationCalls = 0;
   let navigationRoute: string | undefined;
@@ -401,7 +399,9 @@ export function createWebRunTool(options: CreateWebRunToolOptions): ToolDefiniti
     promptSnippet: "Search and navigate the web with explicit arguments",
     executionMode: "parallel",
     parameters,
+    transformCitations: (markdown) => renderCitationMarkers(markdown, sources),
     resetNavigationState() {
+      sources.clear();
       navigationId = randomUUID();
       navigationCalls = 0;
       navigationRoute = undefined;
@@ -412,7 +412,7 @@ export function createWebRunTool(options: CreateWebRunToolOptions): ToolDefiniti
       params,
       signal,
       _onUpdate,
-      ctx: ExtensionContext,
+      ctx: ToolExecutionContext,
     ): Promise<AgentToolResult<WebRunDetails>> {
       // Contexts are session-bound. Snapshot all getters before auth or process awaits.
       const activeModel = ctx.model as AdapterModel | undefined;
@@ -466,6 +466,12 @@ export function createWebRunTool(options: CreateWebRunToolOptions): ToolDefiniti
         }
         const text = outputText(output);
         if (!text) throw new Error("returned no output");
+        rememberCitationSources(output, sources);
+        while (sources.size > 1024) {
+          const oldest = sources.keys().next().value;
+          if (oldest === undefined) break;
+          sources.delete(oldest);
+        }
         return {
           content: [{ type: "text", text }],
           details: { route: route.kind, webRun: output },
@@ -517,20 +523,15 @@ export function createWebRunTool(options: CreateWebRunToolOptions): ToolDefiniti
   };
 }
 
-export function registerWebRunTool(pi: ExtensionAPI, options: CreateWebRunToolOptions): void {
-  const sources = new Map<string, string>();
+export function registerWebRunTool(
+  pi: ExtensionAPI,
+  options: CreateWebRunToolOptions,
+): ReturnType<typeof createWebRunTool> {
   const tool = createWebRunTool(options);
   pi.registerTool(tool);
   pi.registerMarkdownTransformer((markdown, context) =>
-    context.messageType === "assistant" ? renderCitationMarkers(markdown, sources) : markdown,
+    context.messageType === "assistant" ? tool.transformCitations(markdown) : markdown,
   );
-  pi.on("tool_result", (event) => {
-    if (event.toolName !== "web_run") return;
-    const details = event.details as WebRunDetails | undefined;
-    if (details?.webRun) rememberCitationSources(details.webRun, sources);
-  });
-  pi.on("session_start", () => {
-    tool.resetNavigationState();
-    sources.clear();
-  });
+  pi.on("session_start", () => tool.resetNavigationState());
+  return tool;
 }
