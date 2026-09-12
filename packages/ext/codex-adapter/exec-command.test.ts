@@ -67,7 +67,7 @@ describe("exec_command and write_stdin", () => {
     const call = tool.renderCall!({ cmd: "printf one\nprintf two" }, theme as never, {} as never)
       .render(200)
       .map((line) => line.trimEnd());
-    expect(call).toEqual(["<bold>Exec</bold><toolTitle> printf one", "printf two</toolTitle>"]);
+    expect(call).toEqual(["<bold>Exec</bold><accent> printf one", "printf two</accent>"]);
 
     const result = {
       content: [{ type: "text" as const, text: "unused structured output" }],
@@ -127,13 +127,13 @@ describe("exec_command and write_stdin", () => {
         .render(200)
         .map((line) => line.trimEnd());
     const pollScanline = [
-      "<bold>Poll</bold><toolTitle> echo started",
+      "<bold>Poll</bold><accent> echo started",
       "sleep 5",
-      "echo finished</toolTitle>",
+      "echo finished</accent>",
     ];
     expect(renderCall()).toEqual(pollScanline);
     expect(renderCall("")).toEqual(pollScanline);
-    expect(renderCall("\n")[0]).toBe("<bold>Input</bold><toolTitle> echo started");
+    expect(renderCall("\n")[0]).toBe("<bold>Input</bold><accent> echo started");
 
     const rendered = tool.renderResult!(
       {

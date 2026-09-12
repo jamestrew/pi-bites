@@ -3,7 +3,7 @@ import type { BashGateController, CommandAuthorizationSession } from "../../bash
 import type { CodexAdapterConfig } from "../../config.js";
 import type { ToolExecutionContext } from "../tool-execution.js";
 import type { DelegateCall, RuntimeTool } from "./types.js";
-import { NestedTraces } from "./nested-traces.js";
+import { NestedTraces, type NestedTrace } from "./nested-traces.js";
 import {
   createNestedAdapters,
   type NestedAdapter,
@@ -100,11 +100,12 @@ export class NestedToolBridge {
     const snapshot = this.current();
     const signal = AbortSignal.any([owner, snapshot.signal, call.signal]);
     let params = input;
-    const trace = (state: "running" | "completed" | "error", result?: AgentToolResult<unknown>) => {
+    const trace = (state: NestedTrace["state"], result?: AgentToolResult<unknown>) => {
       if (!owner.aborted)
         this.traces.record({
           cellId: call.cellId,
           callId: call.callId,
+          cwd: snapshot.context.cwd,
           name: adapter.name,
           input: params,
           result,
@@ -125,6 +126,7 @@ export class NestedToolBridge {
           params = value;
           trace("running");
         },
+        status: (state) => trace(state),
         update: (value) => trace("running", value),
       });
       signal.throwIfAborted();
@@ -135,7 +137,7 @@ export class NestedToolBridge {
       if (!(error instanceof NestedResultError))
         trace("error", {
           content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-          details: adapter.failureDetails?.(call.callId),
+          details: adapter.renderDetails?.(call.callId),
         });
       throw error;
     } finally {
