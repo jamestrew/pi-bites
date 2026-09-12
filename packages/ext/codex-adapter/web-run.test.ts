@@ -650,33 +650,38 @@ describe("web_run rendering", () => {
 
   test("renders web citation markers as links instead of internal protocol syntax", async () => {
     let transform!: (markdown: string, context: { messageType: string }) => string;
-    let recordResult!: (event: { toolName: string; details: unknown }) => void;
+    let registered!: ReturnType<typeof createWebRunTool>;
     registerWebRunTool(
       {
-        registerTool: vi.fn(),
+        registerTool: (tool: typeof registered) => {
+          registered = tool;
+        },
         registerMarkdownTransformer: (transformer: typeof transform) => {
           transform = transformer;
         },
-        on: (event: string, handler: typeof recordResult) => {
-          if (event === "tool_result") recordResult = handler;
-        },
+        on: vi.fn(),
       } as never,
-      { getConfig: () => ({}) },
-    );
-    recordResult({
-      toolName: "web_run",
-      details: {
-        route: "stock",
-        webRun: {
-          search_results: [
-            {
-              ref_id: "turn0search0",
-              url: "https://www.typescriptlang.org/docs/handbook/intro",
-            },
-          ],
-        },
+      {
+        getConfig: () => ({ webSearchProviders: ["work"] }),
+        runNative: async () =>
+          JSON.stringify({
+            output: "result",
+            search_results: [
+              { ref_id: "turn0search0", url: "https://www.typescriptlang.org/docs/handbook/intro" },
+            ],
+          }),
       },
-    });
+    );
+    await registered.execute(
+      "citation",
+      { search_query: [{ q: "typescript" }] },
+      undefined,
+      undefined,
+      context({
+        active: model("work", "gpt", "openai-responses", "https://work.example"),
+        auth: { ok: true, headers: { Authorization: "Bearer work" } },
+      }) as never,
+    );
 
     expect(transform("Typed JavaScript. citeturn0search0", { messageType: "assistant" })).toBe(
       "Typed JavaScript. [source](<https://www.typescriptlang.org/docs/handbook/intro>)",

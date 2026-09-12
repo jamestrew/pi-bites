@@ -169,3 +169,16 @@ The vendor now contains only the explicitly inventoried standalone Code Mode hos
 4. Regenerate reduced Cargo lockfiles, run all locked Cargo test/build pairs, strip the Linux x86-64 and arm64 executables, replace only the eight existing tool artifacts; update the separate Code Mode release pin and hashes using its V8/provenance recipe, and update their SHA-256 values here and in `vendor-boundary.test.ts`.
 5. Recheck all nested licenses/notices and update this file for source, dependency, binary, or divergence changes.
 6. Run the focused adapter tests and `bun check`. The boundary test must pass before the sync is accepted.
+
+### Nested bridge (#299)
+
+The local `code-mode/nested-tools.ts` bridge dispatches only the five owned tools through the
+session-owned host. It does not vendor conversion's direct-execute/preflight broker. It preserves
+Pi-bites authorization, patch mutation queues and partial-failure snapshots, execution-time web
+routing/citation collection, and native image emission. `code-mode/nested-traces.ts` retains bounded
+presentation data separately from returned native values. Registration remains deferred to #300.
+See [owned nested tools](../../../docs/code-mode-contract/runtime.md#owned-nested-tools-299) for
+integration and cleanup obligations, and the contract baseline for deliberate result projections.
+Shell defaults/ranges, deadline waits, and explicit small output budgets now match the selected
+baseline. Direct tools still reject nonzero exits; the nested bridge resolves their native typed
+result and preserves the failed presentation state.

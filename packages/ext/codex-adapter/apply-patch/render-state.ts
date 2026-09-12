@@ -18,6 +18,10 @@ interface ApplyPatchRenderState extends ApplyPatchRenderSnapshot {
 
 const applyPatchRenderStates = new Map<string, ApplyPatchRenderState>();
 
+export function deleteApplyPatchRenderState(toolCallId: string): void {
+  applyPatchRenderStates.delete(toolCallId);
+}
+
 export function clearApplyPatchRenderState(): void {
   applyPatchRenderStates.clear();
 }

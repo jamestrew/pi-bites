@@ -13,7 +13,6 @@ import {
   DEFAULT_EXEC_YIELD_TIME_MS,
   DEFAULT_MAX_EMPTY_WRITE_YIELD_TIME_MS,
   DEFAULT_WRITE_YIELD_TIME_MS,
-  MAX_EXEC_YIELD_TIME_MS,
   clampExecYieldTime,
   clampWriteYieldTime,
   normalizeMinEmptyWriteYieldTime,
@@ -22,7 +21,7 @@ import {
   resolveShell,
   resolveWorkdir,
 } from "./shell.ts";
-import { registerAbortHandler, waitForExitOrInactivity } from "./wait.ts";
+import { registerAbortHandler, waitForExitOrDeadline } from "./wait.ts";
 import {
   makeExecResult,
   makeSnapshotResult,
@@ -290,14 +289,9 @@ export function createExecSessionManager(
           minNonInteractiveExecYieldTimeMs,
           input.max_yield_time_ms,
         );
-        const maxExecWaitMs = Math.max(
-          execYieldMs,
-          input.max_yield_time_ms ?? MAX_EXEC_YIELD_TIME_MS,
-        );
-        const waitedMs = await waitForExitOrInactivity(
+        const waitedMs = await waitForExitOrDeadline(
           session,
           execYieldMs,
-          maxExecWaitMs,
           signal,
           onUpdate
             ? (elapsedMs) =>
@@ -305,11 +299,6 @@ export function createExecSessionManager(
             : undefined,
         );
         await bridgeSessions.waitForStartup(session, signal);
-        if (session.exitCode === undefined || session.exitCode === null)
-          session.nextEmptyPollYieldMs = growEmptyPollYield(
-            Math.max(execYieldMs, waitedMs),
-            maxEmptyWriteYieldTimeMs,
-          );
         return finishResult(session, waitedMs, input.max_output_tokens);
       } catch (error) {
         if (signal?.aborted) sessions.delete(session.id);
@@ -342,7 +331,6 @@ export function createExecSessionManager(
           );
         }
         await bridgeSessions.write(session, chars);
-        session.nextEmptyPollYieldMs = undefined;
       }
       onUpdate?.(makeSnapshotSince(session, 0, updateBaseline, input.max_output_tokens));
       const requestedYieldMs = clampWriteYieldTime(
@@ -352,15 +340,11 @@ export function createExecSessionManager(
         minEmptyWriteYieldTimeMs,
         maxEmptyWriteYieldTimeMs,
       );
-      const effectiveYieldMs = isEmptyPoll
-        ? Math.max(requestedYieldMs, session.nextEmptyPollYieldMs ?? 0)
-        : requestedYieldMs;
       const waitedMs =
         session.exitCode === undefined
-          ? await waitForExitOrInactivity(
+          ? await waitForExitOrDeadline(
               session,
-              effectiveYieldMs,
-              isEmptyPoll ? maxEmptyWriteYieldTimeMs : effectiveYieldMs,
+              requestedYieldMs,
               signal,
               onUpdate
                 ? (elapsedMs) =>
@@ -376,11 +360,6 @@ export function createExecSessionManager(
             )
           : 0;
       await bridgeSessions.waitForStartup(session, signal);
-      if (isEmptyPoll && (session.exitCode === undefined || session.exitCode === null))
-        session.nextEmptyPollYieldMs = growEmptyPollYield(
-          effectiveYieldMs,
-          maxEmptyWriteYieldTimeMs,
-        );
       return finishResult(session, waitedMs, input.max_output_tokens);
     },
     hasSession: (sessionId) => sessions.has(sessionId),
@@ -428,8 +407,4 @@ export function createExecSessionManager(
         }
       })()),
   };
-}
-
-function growEmptyPollYield(currentMs: number, maximumMs: number): number {
-  return Math.min(maximumMs, currentMs * 2);
 }

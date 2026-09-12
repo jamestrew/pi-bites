@@ -153,3 +153,51 @@ shell ownership, lifecycle resets, stale getters, startup failures, host crash,
 protocol errors and resource overflow. A separate Bun smoke check confirmed that image content survives a script
 error. This change modifies no Rust sources or artifacts. It does not claim arm64 runtime validation or the model-route smoke
 exercise reserved for the integrated cutover.
+
+## Owned nested tools (#299)
+
+`NestedToolBridge` in `code-mode/nested-tools.ts` supplies the five owned capabilities to
+`CodeModeRuntime`. It remains internal: model activation/contract generation belongs to #300,
+and rendering these traces belongs to #301. The `register*Tool` helpers now return the exact
+definition registered with Pi; pass those definitions to the bridge with the same shell manager
+used for the runtime's `shells` option. Do not construct replacement tools per cell.
+
+Call `bridge.capture(ctx)` synchronously from an active lifecycle/turn context, including model
+selection. The shared `ToolExecutionContext` type makes the captured dependencies explicit in
+each owned tool implementation. Typed adapters in `nested-adapters.ts` bind validation,
+authorization and result conversion to each concrete definition once; shared dispatch only owns
+cancellation and trace recording. Capture snapshots those dependencies and bash-gate's
+session authorization. `bridge.tools()` supplies current availability; pass it as execute's third
+argument when availability changes without replacing the runtime. Delegates also recheck current
+web/image availability. #300 replaces the internal metadata with the generated native contracts
+while retaining these invoke functions. No nested alias, sandbox field, web settings, auth, or
+conversation data is accepted. Input must satisfy the strict projected schema before preparation,
+then the prepared input is checked again; numeric arguments must be nonnegative safe integers.
+
+Use `runtime.shutdown()` and `bridge.clear()` on branch/session invalidation. Shutdown owns shell
+cleanup; clear aborts pending bridge work and drops navigation, citations, and trace data. Clearing
+also invalidates already-issued tool tables. Capture fresh context before obtaining a new table.
+Ordinary supported-model changes only refresh the snapshot. Deferred callbacks never read Pi ctx.
+
+Shell launch authorization uses the actual validated command and generation-qualified nested call
+ID. Initial/partial exec updates register ownership before the delegate returns; write_stdin never
+adopts another cell's shell. Native nonzero exit codes resolve with the manager's typed result while
+remaining errors in presentation. Shared shell waits now use deadlines: initial default 10 s,
+250–30,000 ms; nonempty writes 250–30,000 ms; empty polls default/minimum 5 s and maximum 300 s.
+Output retains the existing bounded tail and dropped-output accounting, honoring even zero/small
+explicit budgets. Direct shell calls retain their existing nonzero-exit error behavior.
+
+Freeform patches adapt to `{input}` and keep the existing file mutation queues across all cells.
+The same partial-failure predicate serves the direct result hook and nested rejection; nested
+snapshots survive independently of transient patch render state. Successful JS patch results are
+`{}`. Web citation collection now occurs inside the owned execution path, so direct and nested
+results update the same bounded source map without requiring tool_result events. Web JS results
+are strings. Image JS results are native data URLs with `detail: "original"`; only explicit
+`image()` emits them into runtime content, leaving the existing image block in UI trace data.
+
+`bridge.traces.forCell(cellId)` returns presentation snapshots, never extra model results. The
+store retains at most 128 calls / 16 MiB, bounds text and structural depth, and omits oversized
+trace images instead of corrupting base64. The model-visible native value is independent of those
+limits; native runtime and individual tool limits still apply. Consumers must tolerate evicted
+calls or shortened text. `code-mode-nested.test.ts` exercises the real host, shell/patch/image
+helpers, real bash-gate, and web client execution with a substituted external request boundary.

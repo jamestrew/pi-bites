@@ -3,10 +3,9 @@ import { Container, Text } from "@earendil-works/pi-tui";
 import {
   type AgentToolResult,
   type ExtensionAPI,
-  type ExtensionContext,
-  type ToolDefinition,
   withFileMutationQueue,
 } from "@earendil-works/pi-coding-agent";
+import type { OwnedToolDefinition, ToolExecutionContext } from "../tool-execution.js";
 import { Type } from "typebox";
 
 import { parsePatchActions } from "../patch/parser.js";
@@ -160,7 +159,7 @@ async function withMutationQueues<T>(paths: string[], run: () => Promise<T>): Pr
 
 export function createApplyPatchTool(
   options: CreateApplyPatchToolOptions = {},
-): ToolDefinition<typeof parameters, ApplyPatchDetails, ApplyPatchToolRenderState> {
+): OwnedToolDefinition<typeof parameters, ApplyPatchDetails, ApplyPatchToolRenderState> {
   return {
     name: "apply_patch",
     label: "apply_patch",
@@ -183,7 +182,7 @@ export function createApplyPatchTool(
       params: { input: string },
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
-      ctx: ExtensionContext,
+      ctx: ToolExecutionContext,
     ): Promise<AgentToolResult<ApplyPatchDetails>> {
       const cwd = ctx.cwd;
       const patchText = params.input;
@@ -260,20 +259,25 @@ export function createApplyPatchTool(
   };
 }
 
-export function registerApplyPatchTool(pi: ExtensionAPI): void {
-  pi.registerTool(createApplyPatchTool());
+export function isApplyPatchFailure(details: unknown): boolean {
+  return (
+    !!details &&
+    typeof details === "object" &&
+    "status" in details &&
+    details.status === "partial_failure"
+  );
+}
+
+export function registerApplyPatchTool(pi: ExtensionAPI): ReturnType<typeof createApplyPatchTool> {
+  const tool = createApplyPatchTool();
+  pi.registerTool(tool);
   pi.on("session_start", clearApplyPatchRenderState);
   pi.on("session_shutdown", clearApplyPatchRenderState);
   pi.on("tool_result", (event) => {
-    if (
-      event.toolName === "apply_patch" &&
-      event.details &&
-      typeof event.details === "object" &&
-      "status" in event.details &&
-      event.details.status === "partial_failure"
-    ) {
+    if (event.toolName === "apply_patch" && isApplyPatchFailure(event.details)) {
       return { isError: true };
     }
     return undefined;
   });
+  return tool;
 }
