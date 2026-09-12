@@ -25,7 +25,7 @@ describe("loadConfig", () => {
       JSON.stringify({
         autoCompaction: { thresholdTokens: 150_000 },
         smallModel: { model: "github-copilot/claude-haiku-4.5", thinking: "low" },
-        codexAdapter: { providers: ["github-copilot"] },
+        codexAdapter: { webSearchProviders: ["github-copilot"] },
       }),
     );
     mkdirSync(join(project, ".pi"));
@@ -34,7 +34,7 @@ describe("loadConfig", () => {
       JSON.stringify({
         autoCompaction: { thresholdTokens: 120_000 },
         smallModel: { thinking: "minimal" },
-        codexAdapter: { providers: ["aws-bedrock"] },
+        codexAdapter: { webSearchProviders: ["aws-bedrock"] },
       }),
       { flag: "wx" },
     );
@@ -45,7 +45,6 @@ describe("loadConfig", () => {
         autoMode: { thinking: "low" },
         bashGate: { mode: "auto" },
         codexAdapter: {
-          providers: ["github-copilot", "aws-bedrock"],
           webSearchProviders: ["trusted-responses-proxy"],
           allowOpenAICodexFallback: true,
         },
@@ -55,8 +54,6 @@ describe("loadConfig", () => {
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();
     expect(parseBitesConfig({ autoCompaction: { thresholdTokens: 0 } })).toBeUndefined();
     expect(parseBitesConfig({ bashGate: { mode: "automatic" } })).toBeUndefined();
-    expect(parseBitesConfig({ codexAdapter: { providers: "github-copilot" } })).toBeUndefined();
-    expect(parseBitesConfig({ codexAdapter: { providers: [""] } })).toBeUndefined();
     expect(
       parseBitesConfig({ codexAdapter: { webSearchProviders: ["trusted-responses-proxy"] } }),
     ).toBeDefined();
@@ -69,7 +66,7 @@ describe("loadConfig", () => {
       model: "github-copilot/claude-haiku-4.5",
       thinking: "minimal",
     });
-    expect(config.codexAdapter).toEqual({ providers: ["aws-bedrock"] });
+    expect(config.codexAdapter).toEqual({ webSearchProviders: ["aws-bedrock"] });
 
     rmSync(project, { recursive: true, force: true });
   });

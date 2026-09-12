@@ -7,11 +7,11 @@ import { describe, expect, test } from "vitest";
 
 const root = resolve(import.meta.dirname);
 const retainedGroups = [
-  /^(?:activation|apply-patch|exec-command|prompt-guidance|vendor-boundary|view-image)\.test\.ts$/,
+  /^(?:apply-patch|exec-command|vendor-boundary|view-image)\.test\.ts$/,
   /^web-run\.test\.ts$/,
   /^code-mode(?:-(?:runtime|connection|nested|activation|registration|rendering|transport))?\.test\.ts$/,
   /^code-mode\/(?:(?:contracts|registration|rendering|tools|results|output|binary|runtime|lifecycle|delegates|nested-adapters|nested-tools|nested-traces|exec-source|types|host-connection|host-process|host-protocol)\.ts|(?:vendor-inventory|contract.generated)\.json)$/,
-  /^(?:legacy-activation|activation|index|native-binary-error|prompt-guidance|tool-execution)\.ts$/,
+  /^(?:activation|index|native-binary-error|tool-execution)\.ts$/,
   /^(?:LICENSE|UPSTREAM\.md)$/,
   /^apply-patch\/(?:binary|executor|rendering|render-state|tool)\.ts$/,
   /^exec\/(?:binary|bridge-client|bridge-session|command-tool|format|output|results|session-manager|shell|wait|write-stdin-tool)\.ts$/,
@@ -119,7 +119,7 @@ describe("Codex adapter vendor boundary", () => {
         .update(readFileSync(resolve(root, path)))
         .digest("hex");
     expect(sha256("code-mode/vendor-inventory.json")).toBe(
-      "b419691bd70b7dd89d2ec87a14fd7710e5663e06fae0e9d6a7f04418b5119931",
+      "0635476c7813ead20a380ac87cc5fbf1b5d7d12fb3ee59fc98761ffdff5b6a2c",
     );
     for (const [path, digest] of Object.entries(codeModeVendor)) {
       expect(sha256(`vendor/code-mode/${path}`), path).toBe(digest);

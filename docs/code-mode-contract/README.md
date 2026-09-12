@@ -1,6 +1,6 @@
 # Codex Code Mode contract baseline
 
-Accepted 2026-09-09 for [#295](https://github.com/jamestrew/pi-bites/issues/295), under [epic #294](https://github.com/jamestrew/pi-bites/issues/294). This is the target contract for #296–#302, not a claim that Code Mode is active today. The current structured adapter remains unchanged until the coherent cutover. RTK removal (#292) is already in ancestor commit `6dc4c867`.
+Accepted 2026-09-09 for [#295](https://github.com/jamestrew/pi-bites/issues/295), under [epic #294](https://github.com/jamestrew/pi-bites/issues/294). This is the active contract implemented through #296–#302; see [cutover validation](cutover.md). RTK removal (#292) is already in ancestor commit `6dc4c867`.
 
 ## Source selection and reproduction
 
@@ -47,7 +47,7 @@ The standalone host protocol has no description-export operation. Do not ask it 
 
 The web description's decision boundary, citation instructions, special cases, and word limits are tool text and remain intact. Remove unsupported operation examples and replace the mixed finance batching example with the same example minus its finance property. Remove screenshot-only references where they advertise screenshot capability. Do not import complete model prompts, conversion's abbreviated help, adaptive wait advice, or bespoke `Promise.allSettled` guidance.
 
-The internal host bridge implemented by #297 is described in [Runtime integration](runtime.md), including its generation-qualified cell IDs, lifecycle hooks, ownership and resource bounds. It remains inaccessible to models pending cutover.
+The internal host bridge implemented by #297 is described in [Runtime integration](runtime.md), including its generation-qualified cell IDs, lifecycle hooks, ownership and resource bounds. It is activated through the default scoped adapter.
 
 ## Outer tool contract
 
@@ -229,6 +229,6 @@ Reuse the five existing renderers inside enclosing exec/wait results. Hide JavaS
 
 [ADRs 0001–0004](../adr/0001-codex-code-mode-scope.md) and [CONTEXT.md](../../CONTEXT.md) define the accepted scope. #296 packages the pin and generation seam; #297 owns host IPC, cells, budgets, and cleanup; #298 shares command authorization; #299 implements the five projections and aligns defaults/results; #300 registers projected definitions and narrows activation; #301 presents traces; #302 validates the complete cutover. These issues should not reopen the supported tools, model families, native cleanup contract, or prompt policy.
 
-Keep Code Mode inaccessible until all seams work together. Preserve unrelated direct tools and additive Pi/project/skill/extension prompts. Outside supported GPT-5.6/GPT-6 families (including named variants and recognized provider prefixes), restore normal Pi core tools and remove the current standalone outside-scope web exception at cutover. Do not activate all GPT models, future GPT families, or whole configured providers.
+The default cutover connects all three seams. Preserve unrelated direct tools and additive Pi/project/skill/extension prompts. Outside supported GPT-5.6/GPT-6 families (including named variants and recognized provider prefixes), restore normal Pi core tools and remove the current standalone outside-scope web exception at cutover. Do not activate all GPT models, future GPT families, or whole configured providers.
 
 Validation for this baseline: reproduce both JSON artifacts from the pinned Git objects, review the complete extracted schemas/semantics, and run `bun check`. No tests solely for descriptions/prompts are required. Later runtime checks must cover rejection/sibling cleanup, pending approvals, deadline/default alignment, partial patch failure, typed results, citation updates, image conversion, grammar/fallback wire output, and stale contexts; #302 records actual maintainer-route smoke coverage and unavailable routes.

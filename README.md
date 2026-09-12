@@ -59,9 +59,6 @@ Example:
   "autoMode": {
     "thinking": "low"
   },
-  "codexAdapter": {
-    "providers": ["github-copilot"]
-  },
   "disable": ["tokenCount"]
 }
 ```
@@ -70,32 +67,19 @@ Example:
 
 ### Codex adapter
 
-`codexAdapter` exposes `exec_command`, `write_stdin`, and `apply_patch` in place of the active core file/shell tools. Vision-capable adapter models also get local-only `view_image({ path })`; it accepts PNG, JPEG, WebP, and non-animated GIF input up to 32 MiB and 4096 pixels per dimension, with relative paths resolved from the session working directory. Text-only models never receive the tool, and image viewing makes no hidden provider or description-model request. The adapter also exposes independently policy-gated `web_run` search/navigation. It preserves unrelated tools and uses Pi's stock model registry and authentication.
+`codexAdapter` exposes Code Mode through `exec` and `wait` for GPT-5.6 and GPT-6 base IDs and hyphenated variants. The five owned capabilities—`exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`—are callable inside `exec`, subject to session selection and availability. Unrelated direct tools remain available. Other model families use normal Pi core tools, with no standalone adapter web tool.
 
-GPT models use the adapter automatically regardless of provider, including `github-copilot/gpt-*` and Pi's stock `openai-codex` models:
+Recognized model-ID prefixes are `openai/`, `openai-codex/`, `azure/`, `azure-openai/`, `github-copilot/`, and `openrouter/`. A provider name alone never enables the adapter. The obsolete `codexAdapter.providers` option has been removed; existing unknown configuration keys are ignored, so it no longer selects models.
 
-```json
-{}
-```
+Commands still pass through bash-gate and Auto Mode individually, after argument construction and before launch. Nested activity uses the existing tool renderers; raw JavaScript is hidden, and expansion shows nested details. A cell resumed with `wait` is distinct from a shell session resumed with `tools.write_stdin`. Normal completed cells can leave background shells. Explicit cancellation cleans up that cell's shells; leaving supported scope, tree navigation, replacement, reload and shutdown clear runtime state and owned processes. Saved transcripts restore display only.
 
-The legacy `providers` option is deprecated and will be ignored at the Code Mode cutover. Until then it opts every model from the listed provider into the structured adapter (these are example IDs):
+Vision-capable models can use local-only `view_image({ path })`, accepting PNG, JPEG, WebP and non-animated GIF up to 32 MiB and 4096 pixels per dimension. Text-only models never receive it. Image viewing makes no hidden provider request; emit the returned image explicitly with `image(...)` to send it to the model.
 
-```json
-{
-  "codexAdapter": {
-    "providers": ["your-copilot-provider-id", "your-bedrock-provider-id"]
-  }
-}
-```
-
-Configured provider matching trims and lowercases the complete provider ID. `gpt-*` model IDs and models whose provider, model ID, or API identifies them as Codex are enabled automatically.
-
-Stock `openai-codex` Responses models get `web_run` through the existing Pi login. Other providers are hidden by default even when listed under `providers`. Trust a verified Responses provider's own `/alpha/search` endpoint by exact provider ID, or independently opt in to stock OpenAI Codex fallback:
+Stock `openai-codex` Responses models get nested `web_run` through their existing Pi login. Other providers are hidden by default. Trust a verified Responses provider's own `/alpha/search` endpoint by exact provider ID, or independently opt in to stock OpenAI Codex fallback:
 
 ```json
 {
   "codexAdapter": {
-    "providers": ["your-work-provider"],
     "webSearchProviders": ["your-verified-responses-provider"],
     "allowOpenAICodexFallback": false
   }
@@ -114,24 +98,14 @@ The host lives under `${XDG_DATA_HOME:-$HOME/.local/share}/pi-bites/code-mode/`,
 Git. Pi never downloads it automatically. Source, checksums, notices and rebuild
 instructions remain in this repository.
 
-The Code Mode registration path is implemented but remains internal until #301
-rendering and #302 integration validation are complete. `CODE_MODE_READY` in the
-adapter entry point is false; there is no public experimental setting. The current
-structured adapter does not require this dependency.
+The default adapter requires this host. A missing or crashed host fails visibly and keeps the Code Mode interface; install/repair the host and `/reload`, or explicitly disable `codexAdapter` to use normal Pi tools. There is no second structured adapter mode.
 
-At cutover, only GPT-5.6 and GPT-6 base IDs and hyphenated variants activate Code Mode,
-including IDs with recognized `openai/`, `openai-codex/`, `azure/`, `azure-openai/`,
-`github-copilot/`, or `openrouter/` prefixes. Provider-wide activation, generic Codex
-aliases, other GPT families, and standalone outside-scope `web_run` will be removed.
-`providers` will no longer select models; `webSearchProviders`,
-`allowOpenAICodexFallback`, and `disable: ["codexAdapter"]` retain their independent roles.
-
-The new surface exposes `exec` and `wait`, hides the five nested adapter tools,
+The surface exposes `exec` and `wait`, hides the five nested adapter tools,
 and preserves unrelated direct tools. It respects session tool selection and
 restores only displaced core tools on leaving scope. Stock Pi sends raw JavaScript
 through grammar tools where the actual API/model supports them; other routes send
 `{"code":"..."}` through the stock structured fallback. Details and reproducible
-contract generation are in [the integration record](docs/code-mode-contract/activation.md).
+contract generation are in [the integration record](docs/code-mode-contract/activation.md). See [cutover validation and live smoke instructions](docs/code-mode-contract/cutover.md) for coverage and route availability.
 
 ## CodeGraph exploration
 

@@ -8,7 +8,7 @@ import {
   getGrammarToolInput,
 } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { expect, test, vi } from "vitest";
-import registerCodeMode from "./code-mode/registration.js";
+import registerCodeMode from "./index.js";
 
 function registered() {
   const tools = new Map<string, Tool>();

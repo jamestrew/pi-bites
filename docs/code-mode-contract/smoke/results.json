@@ -1,0 +1,42 @@
+{
+  "sdkVersion": "0.85.0",
+  "toolsSha256": "fec9d67604940661414167178612fd674bc05c812f070bcc11c20c6b1f624817",
+  "routes": [
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "date": "2026-09-12T03:25:34.105Z",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "activeTools": ["exec", "wait"],
+      "approvals": 1,
+      "requests": 6,
+      "failures": [],
+      "timedOut": false,
+      "checks": {
+        "normal": true,
+        "wait": true,
+        "approval": true,
+        "image": true
+      }
+    },
+    {
+      "route": "openai-codex/gpt-6-astra",
+      "date": "2026-09-12T03:34:51.103Z",
+      "status": "passed",
+      "modelSource": "SDK catalog",
+      "api": "openai-codex-responses",
+      "activeTools": ["exec", "wait"],
+      "approvals": 1,
+      "requests": 6,
+      "failures": [],
+      "timedOut": false,
+      "checks": {
+        "normal": true,
+        "wait": true,
+        "approval": true,
+        "image": true
+      }
+    }
+  ],
+  "unavailableRoutes": ["Work/custom providers: no configuration found or supplied."]
+}

@@ -9,7 +9,7 @@ The Codex adapter's `apply_patch`, `exec_command`, `write_stdin`, `view_image`, 
 
 ## Code Mode contract and host
 
-Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the future Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. The standalone host is now a manually installed dependency from the pinned Codex GitHub release, with matched source under `vendor/code-mode`; see its [packaging record](vendor/code-mode/README.md) for artifact hashes, V8/native notices, build commands and validation limits. The host runtime remains internal and disconnected from activation until #300–#302. The eight existing helper artifacts retain their older provenance below.
+Issue #295 selects Codex `rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` with conversion 3.0.31 / `94eb6c0745e2f516bf19603f912f7b6478b43355` as the Code Mode source/bridge pair. The [contract baseline](../../../docs/code-mode-contract/README.md) records exact source extraction, supported definitions, result conversion, and intentional deviations. The standalone host is now a manually installed dependency from the pinned Codex GitHub release, with matched source under `vendor/code-mode`; see its [packaging record](vendor/code-mode/README.md) for artifact hashes, V8/native notices, build commands and validation limits. The default adapter now activates this runtime for scoped GPT-5.6/GPT-6 models. The eight existing helper artifacts retain their older provenance below.
 
 ## Session-owned Code Mode bridge (#297)
 
@@ -30,14 +30,13 @@ fail-closed startup and crash behavior, and a Linux RSS watchdog for native
 output/store retention. No host source or artifact changes are made.
 
 See [the runtime integration contract](../../../docs/code-mode-contract/runtime.md)
-for API, shell ownership, lifecycle hooks, bounds and validation. No Code Mode
-tool is registered by this change; current structured activation is untouched.
+for API, shell ownership, lifecycle hooks, bounds and validation.
 
 ## Retained surface
 
 The TypeScript parser, path rules, result types, native runner/error handling, executor, and tool behavior came from `packages/pi-codex-conversion/src/{patch,tools/apply-patch,tools/exec,tools/native,tools/view-image,tools/web-run}`. They were reduced to the direct `apply_patch`, structured `exec_command`, `write_stdin`, local-only `view_image`, and standalone `web_run` surfaces and adapted to Pi-bites paths and APIs. The local adapter uses Pi's existing provider, model catalogue, authentication, configured shell, and core tools; it does not retain upstream provider registration, prompt conversion, compaction, voice, image generation/editing, model-generated image descriptions, or settings features.
 
-Local integration changes include configuration-based provider matching, ownership-aware active-tool reconciliation, Linux x86-64/arm64 binary locators, direct binary-path injection for failure tests, and nested use of the host's single-file mutation queue. The upstream collapsed/expanded patch diff and failure rendering is retained, with local sequencing for repeated targets and result-detail snapshots for restored rows. Patch parsing and execution remain delegated to the retained upstream parser and native implementation.
+Local integration changes include scoped model-family matching, ownership-aware active-tool reconciliation, Linux x86-64/arm64 binary locators, direct binary-path injection for failure tests, and nested use of the host's single-file mutation queue. The upstream collapsed/expanded patch diff and failure rendering is retained, with local sequencing for repeated targets and result-detail snapshots for restored rows. Patch parsing and execution remain delegated to the retained upstream parser and native implementation.
 
 The structured shell tools retain the upstream JSON-lines bridge protocol, resumable session manager, bounded tail output, interruption and process-group cleanup. Their custom command-summary renderer and session tracker were omitted in favor of minimal Pi-native rendering. Pi's configured `shellPath` is snapshotted before asynchronous execution, and live TypeScript output buffers are capped at 1 MiB per process in addition to the native bridge's 8 MiB retained-output cap. The local read response adds `droppedBytes` accounting so output evicted at that native cap is represented in truncation metadata rather than silently lost.
 
@@ -176,7 +175,7 @@ The local `code-mode/nested-tools.ts` bridge dispatches only the five owned tool
 session-owned host. It does not vendor conversion's direct-execute/preflight broker. It preserves
 Pi-bites authorization, patch mutation queues and partial-failure snapshots, execution-time web
 routing/citation collection, and native image emission. `code-mode/nested-traces.ts` retains bounded
-presentation data separately from returned native values. Registration remains deferred to #300.
+presentation data separately from returned native values. The default adapter registers native exec/wait.
 See [owned nested tools](../../../docs/code-mode-contract/runtime.md#owned-nested-tools-299) for
 integration and cleanup obligations, and the contract baseline for deliberate result projections.
 Shell defaults/ranges, deadline waits, and explicit small output budgets now match the selected
@@ -185,11 +184,7 @@ result and preserves the failed presentation state.
 
 ## Native surface integration (#300)
 
-The internal `code-mode/registration.ts` connects the runtime and owned delegates
-to native-shaped `exec`/`wait`. It remains behind the false `CODE_MODE_READY` gate
-until #301/#302. `legacy-activation.ts` preserves the pre-cutover behavior only;
-Code Mode's `activation.ts` accepts scoped GPT-5.6/GPT-6 IDs and ignores the deprecated
-provider-wide option. No custom provider or complete model prompt is introduced.
+`code-mode/registration.ts` connects the runtime and owned delegates to native-shaped `exec`/`wait` through the default adapter entry point. `activation.ts` accepts scoped GPT-5.6/GPT-6 IDs. #302 removed the temporary gate, legacy direct activation/guidance, and provider-wide configuration. No custom provider or complete model prompt is introduced.
 
 The generated contract, pinned Rust description-builder harness, exact capability
 projections, tool-selection policy, transport fallback, lifecycle integration and
@@ -213,5 +208,9 @@ This is local presentation code, informed by conversion's Code Mode renderer rat
 than copied wholesale: conversion repeats full traces across waits and hides successful
 standalone output by default. Trace updates contain no model-visible content. Saved
 trace data is capped at 128 calls/16 MiB, with per-field text and structural bounds.
-The production cutover remains gated until #302. Rendering, width, restore, and live
+Rendering, width, restore, and live
 host update coverage lives at the registered `exec`/`wait` and trace snapshot seams.
+
+## Default cutover (#302)
+
+The [cutover validation record](../../../docs/code-mode-contract/cutover.md) maps real-host checks, shared authorization, lifecycle cleanup, native artifact validation, and actual route smoke results. The boundary rejects the removed legacy source groups. Native Rust sources, binaries, contracts and provider transports are unchanged by this cutover; only the host packaging README inventory entry changes to describe the active dependency.

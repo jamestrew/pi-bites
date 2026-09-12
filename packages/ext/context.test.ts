@@ -3,7 +3,6 @@ import {
   type BuildSystemPromptOptions,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { buildExecSkillGuidance } from "./codex-adapter/prompt-guidance.js";
 import { availableContextTokens, buildContextBreakdown } from "./context.js";
 
 const sourceInfo = {
@@ -99,7 +98,10 @@ describe("buildContextBreakdown", () => {
     const result = buildContextBreakdown({
       total: 100,
       window: 1_000,
-      systemPrompt: buildExecSkillGuidance(options.skills ?? [], ["exec_command"]) ?? "",
+      systemPrompt: formatSkillsForPrompt(options.skills ?? []).replace(
+        "Use the read tool",
+        "Use exec",
+      ),
       options,
       tools: [],
       activeTools: [],

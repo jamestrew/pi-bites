@@ -2,10 +2,12 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { getCodeModeHostPath } from "./code-mode/binary.js";
 import { expect, test, vi } from "vitest";
-import registerCodeMode from "./code-mode/registration.js";
+import registerCodeMode from "./index.js";
+import { createBashGateHarness } from "../bash-gate/test/harness.js";
+import type { BashGateController } from "../bash-gate/index.js";
 
 type Handler = (event: any, ctx: any) => any;
-function setup(initial = ["read", "bash", "edit", "write", "custom"]) {
+function setup(initial = ["read", "bash", "edit", "write", "custom"], gate?: BashGateController) {
   const handlers = new Map<string, Handler[]>();
   const tools = new Map<string, any>();
   let active = [...initial];
@@ -24,7 +26,7 @@ function setup(initial = ["read", "bash", "edit", "write", "custom"]) {
       active = [...names];
     },
   };
-  const preview = registerCodeMode(pi as never, config);
+  const preview = registerCodeMode(pi as never, config, gate);
   const emit = async (name: string, event: any, ctx: any) => {
     let result;
     for (const handler of handlers.get(name) ?? []) result = (await handler(event, ctx)) ?? result;
@@ -35,13 +37,14 @@ function setup(initial = ["read", "bash", "edit", "write", "custom"]) {
 function context(id = "gpt-6", image = true) {
   return {
     cwd: process.cwd(),
+    hasUI: true,
     model: {
       id,
       provider: "openai-codex",
       api: "openai-codex-responses",
       input: image ? ["text", "image"] : ["text"],
     },
-    sessionManager: { getSessionId: () => "test-session" },
+    sessionManager: { getSessionId: () => "test-session", getEntries: () => [] },
     modelRegistry: {},
     isProjectTrusted: () => true,
     signal: new AbortController().signal,
@@ -115,8 +118,12 @@ test.skipIf(!host)(
     mkdirSync(installed, { recursive: true });
     symlinkSync(host!, join(installed, "codex-code-mode-host"));
     vi.stubEnv("XDG_DATA_HOME", directory);
-    const h = setup();
-    const original = context();
+    const gate = createBashGateHarness([], false, undefined, true, {
+      bashGate: { rules: [{ cmd: "printf", reason: "integration approval" }] },
+    });
+    gate.ui.select.mockResolvedValue("Allow");
+    const h = setup(undefined, gate.gate);
+    const original = { ...context(), ui: gate.ui };
     let stale = false;
     const ctx = Object.fromEntries(Object.entries(original).map(([key, value]) => [key, value]));
     for (const [key, value] of Object.entries(original))
@@ -142,6 +149,7 @@ test.skipIf(!host)(
           expect.objectContaining({ type: "text", text: expect.stringContaining("hello") }),
         ]),
       );
+      expect(gate.ui.select).toHaveBeenCalledOnce();
       expect(updates.every((update) => update.content.length === 0)).toBe(true);
       expect(updates.map((update) => update.details.traces[0]?.state)).toEqual(
         expect.arrayContaining(["approval", "running", "completed"]),
@@ -310,3 +318,85 @@ test.each(["exec", "wait"])(
     await h.emit("session_shutdown", {}, ctx);
   },
 );
+
+test.skipIf(!host).each(["replacement", "reload", "shutdown", "unsupported"] as const)(
+  "default registration clears running shells and cells on %s with expired contexts",
+  async (reason) => {
+    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const directory = mkdtempSync(join(tmpdir(), "code-mode-lifecycle-"));
+    const installed = join(directory, `pi-bites/code-mode/rust-v0.145.0/linux-${process.arch}`);
+    mkdirSync(installed, { recursive: true });
+    symlinkSync(host!, join(installed, "codex-code-mode-host"));
+    vi.stubEnv("XDG_DATA_HOME", directory);
+    const h = setup();
+    let stale = false;
+    const original = context();
+    const ctx = new Proxy(original, {
+      get(target, key) {
+        if (stale) throw new Error(`stale ctx ${String(key)}`);
+        return Reflect.get(target, key);
+      },
+    });
+    try {
+      await h.emit("session_start", {}, ctx);
+      const running = await h.tools.get("exec").execute("running", {
+        code: 'store("old",42); text(await tools.exec_command({cmd:"echo $$; sleep 60",login:false,yield_time_ms:250})); await yield_control();',
+      });
+      const shell = JSON.parse(
+        running.content.find((c: any) => c.type === "text" && c.text.startsWith("{")).text,
+      );
+      const pid = Number(shell.output.trim());
+      expect(pid).toBeGreaterThan(1);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      stale = true;
+      if (reason === "replacement") await h.emit("session_start", {}, context());
+      else if (reason === "unsupported") await h.emit("model_select", {}, context("claude"));
+      else
+        await h.emit("session_shutdown", { reason: reason === "reload" ? "reload" : "quit" }, {});
+      await expect
+        .poll(() => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        })
+        .toBe(false);
+      if (reason === "unsupported") await h.emit("model_select", {}, context());
+      else if (reason === "reload" || reason === "shutdown") return; // Pi constructs a fresh extension instance next.
+      expect(
+        (await h.tools.get("exec").execute("fresh", { code: 'text(load("old"));' })).content,
+      ).toContainEqual({ type: "text", text: "undefined" });
+      const missing = await h.tools
+        .get("wait")
+        .execute("old-wait", { cell_id: running.details.cellId });
+      expect(missing.details.failed).toBe(true);
+    } finally {
+      await h.emit("session_shutdown", { reason: "quit" }, {});
+      vi.unstubAllEnvs();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("a missing host fails visibly without changing the default tool interface", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const directory = mkdtempSync("/tmp/code-mode-missing-");
+  vi.stubEnv("XDG_DATA_HOME", directory);
+  const h = setup();
+  const ctx = context();
+  try {
+    await h.emit("session_start", {}, ctx);
+    await expect(h.tools.get("exec").execute("missing", { code: "text(42)" })).rejects.toThrow(
+      "Install the Code Mode dependency",
+    );
+    expect(h.pi.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+  } finally {
+    await h.emit("session_shutdown", { reason: "quit" }, {});
+    vi.unstubAllEnvs();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

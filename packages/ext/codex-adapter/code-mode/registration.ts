@@ -23,7 +23,7 @@ import { CodeModeLifecycle } from "./lifecycle.js";
 import { NestedToolBridge } from "./nested-tools.js";
 import { registerCodeModeTools } from "./tools.js";
 
-/** Internal cutover entry point. Production remains gated in index.ts until #301/#302. */
+/** Default adapter registration: scoped Code Mode with stock Pi tools outside scope. */
 export default function registerCodeMode(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },

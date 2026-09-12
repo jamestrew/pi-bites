@@ -1,7 +1,6 @@
 # Standalone Code Mode host packaging
 
-This workspace builds the standalone stdio host only. It is not connected to Pi
-sessions or exposed as a tool; runtime integration belongs to #297.
+This workspace builds the standalone stdio host used by the default scoped Code Mode adapter. Pi-side lifecycle, delegation and rendering remain outside the vendored Rust source.
 
 ## Source boundary
 
@@ -61,7 +60,7 @@ where `XDG_DATA_HOME` defaults to `~/.local/share`. Its bounded, five-second sta
 v1 and waits for a clean process exit after EOF. It rejects missing/unexecutable
 files, malformed/oversized/incompatible handshakes, crashes and hangs with
 manual installation instructions and an explicit disable escape hatch. It never changes tool dialects.
-The session-owned connection in #297 must negotiate on its own live process;
+The session-owned connection negotiates on its own live process;
 this packaging probe is not a cached guarantee that a future process is healthy.
 
 ## Manual installation
@@ -69,8 +68,7 @@ this packaging probe is not a cached guarantee that a future process is healthy.
 Run this Bash block from the pi-bites package/checkout directory. It downloads
 only the current Linux architecture, verifies both the archive and executable
 before installation, and retains the redistribution notices alongside it. It
-requires `curl`, `tar`, `sha256sum`, and `install`. The existing structured adapter
-works without this dependency; Code Mode runtime activation is separate work.
+requires `curl`, `tar`, `sha256sum`, and `install`. The default adapter requires this dependency for eligible GPT-5.6/GPT-6 models.
 
 ```bash
 (
@@ -116,7 +114,7 @@ from another machine, then perform the same checksum/extraction/install steps.
 No `postinstall` hook or first-use network request runs in Pi.
 
 The normal `bun check` suite uses temporary executable fixtures and needs neither
-a downloaded host nor network access for Code Mode. To smoke-test a real installed
+a downloaded host nor external network access for Code Mode; native integration tests skip when no host exists. Tests of the bundled web client use a local HTTP server. To smoke-test a real installed
 host from the repository root (use `linux-arm64` for arm64):
 
 ```bash
