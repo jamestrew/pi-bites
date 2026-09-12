@@ -93,9 +93,10 @@ Linux x86-64 and arm64 native helpers, including `view_image`, are bundled. On a
 ### Code Mode host dependency
 
 Code Mode requires the pinned standalone host from Codex’s GitHub release for
-Linux x64 or arm64. Install it manually using the [download and checksum instructions](packages/ext/codex-adapter/vendor/code-mode/README.md#manual-installation).
-The host lives under `${XDG_DATA_HOME:-$HOME/.local/share}/pi-bites/code-mode/`, outside
-Git. Pi never downloads it automatically. Source, checksums, notices and rebuild
+Linux x64 or arm64. Run `bash scripts/code-mode-install.sh` (optionally with
+`--install-dir "$HOME/bin"`); see the [installation and checksum instructions](packages/ext/codex-adapter/vendor/code-mode/README.md#manual-installation).
+Pi finds `codex-code-mode-host` on `PATH`, so it can be supplied by your package
+manager or installed in any directory on Pi’s `PATH`. Pi never downloads it automatically. Source, checksums, notices and rebuild
 instructions remain in this repository.
 
 The default adapter requires this host. A missing or crashed host fails visibly and keeps the Code Mode interface; install/repair the host and `/reload`, or explicitly disable `codexAdapter` to use normal Pi tools. There is no second structured adapter mode.
