@@ -1,6 +1,27 @@
 # Subagents and Code Mode: reassessing #264
 
-Research date: 2026-09-12. Proposal for discussion, not an accepted contract or an implementation. GitHub issues and bookmarks were inspected without modifying them.
+Research date: 2026-09-12. The initial investigation was read-only. The maintainer subsequently authorized rebasing the subagent stack and codifying this approach in GitHub; the planning update below records that work. Tool implementation and generated contracts still change through the listed child issues.
+
+## Planning update: implementation on the Code Mode foundation
+
+[Epic #264](https://github.com/jamestrew/pi-bites/issues/264) now specifies the agreed V1 direct/nested approach. The nine existing subagent commits, including the three descendants after the `subagents-codex` bookmark, were rebased onto Code Mode head `8f3d622f` plus research commit `4fdc9990`. The bookmark retains its original position at the send-input change; later wait/close work remains in the descendant stack. This was a local rebase, without publishing rewritten Git history.
+
+The conflict resolutions preserve the newer Pi goal-navigation handling and the subagent migration's inherited model/reasoning behavior. The rebased stack passes `bun check`: 1,400 package tests (4 skipped) and 89 script/native-runtime checks, plus lint, formatting, and type checking.
+
+The remaining native GitHub dependency chain is:
+
+| Issue                                                    | Deliverable                                                    | Prerequisites                        |
+| -------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------ |
+| [#305](https://github.com/jamestrew/pi-bites/issues/305) | Common pinned V1 direct/nested contract and deviations         | #271, completed                      |
+| [#276](https://github.com/jamestrew/pi-bites/issues/276) | Finish existing close and retained-state boundary              | #275, #305                           |
+| [#277](https://github.com/jamestrew/pi-bites/issues/277) | Recoverable resume and immediate capacity reservation          | #276                                 |
+| [#306](https://github.com/jamestrew/pi-bites/issues/306) | Shared session-owned operations and stable snapshots           | #305, #277                           |
+| [#307](https://github.com/jamestrew/pi-bites/issues/307) | Child collaboration, roles, caller identity, and shared limits | #305, #306                           |
+| [#308](https://github.com/jamestrew/pi-bites/issues/308) | Scoped nested exposure, structured output, and discovery       | #306, #307                           |
+| [#309](https://github.com/jamestrew/pi-bites/issues/309) | Nested presentation and lifecycle/approval integration         | #308                                 |
+| [#278](https://github.com/jamestrew/pi-bites/issues/278) | Combined parity audit, route smoke, and final integration      | Existing lifecycle children and #309 |
+
+#271–#275 remain closed. #276–#278 were revised rather than replaced. #305 selects the existing Code Mode pin as the common contract source, with supported omissions documented. V2 remains out of scope. The detailed findings below retain the original inspected revisions and explain the decisions; the linked issue bodies own the current implementation scopes.
 
 ## Confirmed direction and parity boundary
 
@@ -20,7 +41,7 @@ Parity means observable contracts and orchestration semantics: argument names/de
 
 Implementation details may differ when those semantics survive: Pi session storage, in-process communication, serialization internals, and UI components need not reproduce Codex internals. Preserve Pi's existing authorization and provider boundaries. This scope does not introduce inter-agent encryption, Codex backend infrastructure, or custom providers.
 
-The recommended public contract remains V1, matching the existing migration. Choosing V2 would still require an explicit revision of the operation set and lifecycle plan; the confirmed exposure requirement alone does not select V2.
+The selected public contract remains V1, matching the existing migration. V2 would require a separate revision of the operation set and lifecycle plan.
 
 ## Recommendation
 
