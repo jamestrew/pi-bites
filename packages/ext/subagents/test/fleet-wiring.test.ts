@@ -279,6 +279,37 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     );
   });
 
+  it("serializes parent dialogs and suppresses matching queued child requests after allow-session", async () => {
+    const { pi, lifecycle } = makePi();
+    const ui = uiCtx();
+    const choice = Promise.withResolvers<string>();
+    ui.select.mockImplementationOnce(() => choice.promise);
+    subagentsExtension(pi);
+    await lifecycle.get("session_start")?.({}, ctxWith(ui));
+    const replies = vi.fn();
+    for (const id of ["one", "two"]) {
+      pi.events.on(`subagents:bash_gate:approval:reply:${id}`, replies);
+      pi.events.emit("subagents:bash_gate:approval", {
+        requestId: id,
+        agentId: "child",
+        title: "child",
+        command: `rm ${id}`,
+        labels: ["rm"],
+        reasons: [],
+        sessionAllowKey: "rm",
+      });
+    }
+    await flush();
+    expect(ui.select).toHaveBeenCalledOnce();
+    choice.resolve('Allow for session ("rm")');
+    await flush();
+    expect(ui.select).toHaveBeenCalledOnce();
+    expect(replies).toHaveBeenCalledTimes(2);
+    expect(replies).toHaveBeenNthCalledWith(2, {
+      result: { outcome: "allow-session", authorization: "human-approved" },
+    });
+  });
+
   it("keeps the FleetView row stable while manual subagent approval is pending", async () => {
     mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
@@ -347,7 +378,10 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         reasons: [],
         subagentContext: "<subagent context unavailable>",
       },
-      ctx,
+      expect.objectContaining({
+        sessionManager: ctx.sessionManager,
+        signal: expect.any(AbortSignal),
+      }),
     );
     expect(reply).toHaveBeenCalledWith({
       result: { outcome: "allow", authorization: "reviewer-approved" },
@@ -555,11 +589,11 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
     await flush();
 
-    expect(ui.select).toHaveBeenCalledWith(expect.stringContaining("not authorized"), [
-      "Allow once",
-      "Export command",
-      "Deny",
-    ]);
+    expect(ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("not authorized"),
+      ["Allow once", "Export command", "Deny"],
+      { signal: expect.any(AbortSignal) },
+    );
     expect(pi.events.emit).toHaveBeenCalledWith(
       "bites:bash_gate",
       expect.objectContaining({
@@ -745,12 +779,11 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         .filter((entry) => entry.type === "custom")
         .map((entry) => (entry.data as { status?: string }).status),
     ).toEqual([undefined, "human-approved", "reviewer-approved"]);
-    expect(ui.select).toHaveBeenCalledWith(expect.stringContaining("needs human approval"), [
-      "Allow once",
-      "Export command",
-      "View conversation",
-      "Deny",
-    ]);
+    expect(ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("needs human approval"),
+      ["Allow once", "Export command", "View conversation", "Deny"],
+      { signal: expect.any(AbortSignal) },
+    );
     expect(review).toHaveBeenCalledTimes(2);
     expect(request.subagentContext).not.toContain('user: "The human approved');
     expect(request.subagentContext.length).toBeLessThanOrEqual(40_000);

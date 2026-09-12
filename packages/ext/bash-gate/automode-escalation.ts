@@ -1,3 +1,4 @@
+import { withApprovalDialog } from "./pending.js";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -18,6 +19,8 @@ interface AutoModeEscalationOptions {
   command: string;
   toolName?: "bash" | "exec_command";
   rationale?: string;
+  signal?: AbortSignal;
+  isAllowed?: () => boolean;
   viewConversation?: () => Promise<void>;
 }
 
@@ -29,47 +32,57 @@ export async function promptAutoModeEscalation({
   toolName,
   rationale,
   viewConversation,
+  signal,
+  isAllowed,
 }: AutoModeEscalationOptions): Promise<"allow" | "deny"> {
-  const waitId = randomUUID();
-  pi.events.emit("bites:bash_gate", { cwd, command, toolName, requiresHuman: true, waitId });
-  try {
-    const prompt = `🤖 Automode denied this command${rationale ? `: ${rationale}` : "."}\n${command}`;
+  return withApprovalDialog(pi.events, signal, async () => {
+    if (isAllowed?.()) return "allow";
+    const waitId = randomUUID();
+    pi.events.emit("bites:bash_gate", { cwd, command, toolName, requiresHuman: true, waitId });
+    try {
+      const prompt = `🤖 Automode denied this command${rationale ? `: ${rationale}` : "."}\n${command}`;
 
-    for (;;) {
-      const choice = await ui.select(prompt, [
-        "Allow once",
-        "Export command",
-        ...(viewConversation ? ["View conversation"] : []),
-        "Deny",
-      ]);
+      for (;;) {
+        const choice = await ui.select(
+          prompt,
+          [
+            "Allow once",
+            "Export command",
+            ...(viewConversation ? ["View conversation"] : []),
+            "Deny",
+          ],
+          ...(signal ? [{ signal }] : []),
+        );
+        signal?.throwIfAborted();
 
-      if (choice === "Allow once") return "allow";
-      if (choice === "Export command") {
-        try {
-          ui.notify(await exportBlockedCommand(command), "info");
-        } catch (error) {
-          ui.notify(`Could not export command: ${String(error)}`, "error");
+        if (choice === "Allow once") return "allow";
+        if (choice === "Export command") {
+          try {
+            ui.notify(await exportBlockedCommand(command), "info");
+          } catch (error) {
+            ui.notify(`Could not export command: ${String(error)}`, "error");
+          }
+          return "deny";
+        }
+        if (choice === "View conversation" && viewConversation) {
+          await viewConversation();
+          continue;
         }
         return "deny";
       }
-      if (choice === "View conversation" && viewConversation) {
-        await viewConversation();
-        continue;
-      }
+    } catch (error) {
+      try {
+        ui.notify(`Automode escalation failed closed: ${String(error)}`, "error");
+      } catch {}
       return "deny";
+    } finally {
+      pi.events.emit("bites:bash_gate_resolved", {
+        cwd,
+        command,
+        toolName,
+        requiresHuman: true,
+        waitId,
+      });
     }
-  } catch (error) {
-    try {
-      ui.notify(`Automode escalation failed closed: ${String(error)}`, "error");
-    } catch {}
-    return "deny";
-  } finally {
-    pi.events.emit("bites:bash_gate_resolved", {
-      cwd,
-      command,
-      toolName,
-      requiresHuman: true,
-      waitId,
-    });
-  }
+  });
 }
