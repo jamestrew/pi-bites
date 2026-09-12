@@ -42,6 +42,7 @@ name the specific harmful effect or missing authorization in the rationale.`;
 const MAX_ENTRY_CHARS = 8_000;
 const MAX_TRANSCRIPT_CHARS = 40_000;
 export interface AutoModeReviewRequest {
+  toolCallId?: string;
   command: string;
   toolName?: "bash" | "exec_command";
   labels: string[];
