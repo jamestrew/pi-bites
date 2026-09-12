@@ -18,7 +18,7 @@ wait and image property wording, output schemas, and web operation documentation
 are extracted from those verified Rust sources. Only the selected supported fields
 are projected. The small locked Rust build in `scripts/code-mode-contract` calls
 **the retained upstream `build_exec_tool_description`**, with `code_mode_only=true`
-and no deferred tools, for each supported definition. Runtime composition selects
+for each supported definition, and calls native augmentation for declaration-bearing runtime metadata. The base now uses the native deferred-list path (#304). Runtime composition selects
 those generated sections according to actual nested availability; `ALL_TOOLS` and
 host dispatch receive the same descriptions/schemas. Rust/Cargo caches are needed
 for offline generation; no generator or compiler runs during Pi startup.

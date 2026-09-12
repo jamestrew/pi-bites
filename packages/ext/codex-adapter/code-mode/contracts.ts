@@ -29,7 +29,10 @@ export function execDescription(names: readonly string[], grammar: boolean): str
     base = base.replace(", for example `await tools.exec_command(...)`", "");
   return [
     base,
-    ...generated.tools.filter((tool) => names.includes(tool.name)).map((tool) => tool.section),
+    ...(names.includes("web_run") ? [webDiscoveryGuidance] : []),
+    ...generated.tools
+      .filter((tool) => tool.name !== "web_run" && names.includes(tool.name))
+      .map((tool) => tool.section),
   ].join("\n\n");
 }
 
@@ -39,9 +42,15 @@ export function nativeTools(tools: RuntimeTool[]): RuntimeTool[] {
     if (!definition) throw new Error(`Missing native Code Mode contract: ${tool.name}`);
     return {
       ...tool,
-      description: definition.description,
+      description: definition.runtime_description,
       inputSchema: definition.input_schema ?? undefined,
       outputSchema: definition.output_schema ?? undefined,
     };
   });
 }
+
+// Exposure policy only: the complete retained native contract is returned by ALL_TOOLS.
+const webDiscoveryGuidance = `web_run can search the internet, search images, and open, click, or find text in web pages. Before using it, retrieve and read its complete documentation (including citation and word-limit instructions) in a separate exec call:
+text(ALL_TOOLS.filter((tool) => tool.name === "web_run"));
+Retrieve it again if that documentation is no longer in context. Discovery does not execute a web request or grant permission.
+Browse when explicitly asked to search, browse, verify, or look something up; obey explicit requests not to browse. Also browse for information that could have changed (including news, prices, laws, schedules, product specifications, public figures, software, and recommendations); substantial time or money recommendations; precise quotes, links, or attribution; referenced pages or papers whose contents were not supplied; uncertain, niche, or emerging facts; and high-stakes medical, legal, or financial accuracy. When unsure whether browsing is needed, browse. Check local code first for OpenAI product questions; if browsing is needed, use official OpenAI sources unless requested otherwise. Read the full contract before actual web use.`;

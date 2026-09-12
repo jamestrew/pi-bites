@@ -90,6 +90,51 @@ for (const [api, stream] of [
         expect(format.definition).toContain("PRAGMA_LINE");
       }
       expect(payload.tools[1].type).toBe("function");
+      const initial = payload;
+      const discovery = {
+        role: "toolResult",
+        toolCallId: "lookup",
+        toolName: "exec",
+        content: [{ type: "text", text: "discovered documentation" }],
+        isError: false,
+        timestamp: 0,
+      };
+      await (stream as StreamFunction<any>)(
+        model,
+        {
+          systemPrompt: "stable project instructions",
+          messages: [discovery as never],
+          tools,
+        },
+        {
+          apiKey: jwt,
+          transport: "sse",
+          onPayload(value) {
+            payload = value;
+            throw new Error("captured before network");
+          },
+        },
+      ).result();
+      expect(payload.tools).toEqual(initial.tools);
+      const subsequent = payload;
+      await (stream as StreamFunction<any>)(
+        model,
+        {
+          systemPrompt: "stable project instructions",
+          messages: [],
+          tools,
+        },
+        {
+          apiKey: jwt,
+          transport: "sse",
+          onPayload(value) {
+            payload = value;
+            throw new Error("captured before network");
+          },
+        },
+      ).result();
+      expect(subsequent.instructions).toEqual(payload.instructions);
+      if (api === "openai-completions") expect(subsequent.messages[0]).toEqual(payload.messages[0]);
     },
   );
 }

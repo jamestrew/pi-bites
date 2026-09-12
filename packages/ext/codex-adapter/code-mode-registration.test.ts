@@ -139,6 +139,14 @@ test.skipIf(!host)(
         .execute("outer-exec", { code }, undefined, (update: any) => updates.push(update));
     try {
       await h.emit("session_start", {}, ctx);
+      const lookup = async () =>
+        (await exec('text(ALL_TOOLS.filter(t => t.name === "web_run"));')).content.filter(
+          (item: any) => item.type === "text" && item.text.startsWith("["),
+        );
+      const initialDefinitions = JSON.stringify([...h.tools.values()]);
+      const discovered = await lookup();
+      expect(discovered[0].text).toContain("exec tool declaration:");
+      expect(JSON.stringify([...h.tools.values()])).toBe(initialDefinitions);
       const pending = exec(
         'store("value", 42); text(await tools.exec_command({cmd:"printf hello",login:false}));',
       );
@@ -245,6 +253,7 @@ test.skipIf(!host)(
         type: "text",
         text: "42",
       });
+      expect(await lookup()).toEqual(discovered);
       const yielded = await exec('text("first"); await yield_control(); text("second");');
       const waited = await h.tools
         .get("wait")
@@ -253,6 +262,8 @@ test.skipIf(!host)(
       expect(waited.content).not.toContainEqual({ type: "text", text: "first" });
       await h.emit("session_tree", {}, context());
       expect(renderFailed()).toContain("retained-before-abort");
+      // Saved output is inert; a fresh host can rediscover help without restoring store/cells.
+      expect(await lookup()).toEqual(discovered);
       expect((await exec('text(load("value"));')).content).toContainEqual({
         type: "text",
         text: "undefined",

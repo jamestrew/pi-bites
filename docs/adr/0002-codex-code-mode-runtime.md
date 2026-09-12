@@ -17,3 +17,5 @@ Runtime state belongs to the current conversation branch. Leaving the supported 
 Cancelling an individual cell terminates shell sessions created by that cell while leaving other cells' sessions alone. Normal cell completion may leave a resumable shell session running.
 
 Keep runtime execution, Pi-side validated/authorized dispatch, and presentation separate. Preserve the pinned host source unchanged, with packaging and Pi adaptations outside it. The host protocol does not export descriptions; the pinned library builder supplies the generation seam. Bound output and retained trace/state data, and preserve existing native/shell limits. Pi extension contexts are ephemeral: snapshot stable dependencies before asynchronous work and test stale getters that throw.
+
+Nested discovery (#304) uses the existing pinned host metadata global. Discovery has no lifecycle state and requires no host upgrade; see the [exposure policy](../code-mode-contract/README.md#nested-discovery-policy-304-2026-09-12).

@@ -92,10 +92,10 @@ def main():
     tools.append(definition("view_image", re.search(r'description: "([^"]+)"', view)[1], object_schema({"path": primitive_fields(view)["path"]}, ["path"]), image_output))
     generated = subprocess.run(["cargo", "run", "--quiet", "--locked", "--offline", "--manifest-path", str(ROOT / "scripts/code-mode-contract/Cargo.toml")], input=json.dumps(tools), stdout=subprocess.PIPE, text=True, check=True)
     rendered = json.loads(generated.stdout)
-    base = "\n".join(line for line in rendered["base"].split("\n") if not line.startswith(("- `audio(", "- `generatedImage(")))
+    base = "\n".join(line for line in rendered["deferred_base"].split("\n") if not line.startswith(("- `audio(", "- `generatedImage(")))
     base = base.replace(' Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.', '')
     base = base.replace('immediately injects an extra `custom_tool_call_output` for the current `exec` call.', 'queues output for the next `exec`/`wait` observation; Pi UI updates are not immediate model messages.')
-    result = dict(revision=manifest["revision"], exec_base=base, exec_grammar=native["exec_grammar"], wait_description=native["wait_description"], wait_schema=object_schema(primitive_fields(wait), ["cell_id"]), tools=[dict(**tool, section=section) for tool, section in zip(tools, rendered["sections"], strict=True)])
+    result = dict(revision=manifest["revision"], exec_base=base, exec_grammar=native["exec_grammar"], wait_description=native["wait_description"], wait_schema=object_schema(primitive_fields(wait), ["cell_id"]), tools=[dict(**tool, section=section, runtime_description=description) for tool, section, description in zip(tools, rendered["sections"], rendered["descriptions"], strict=True)])
     args.output.write_text(json.dumps(result, indent=2) + "\n")
 
 
