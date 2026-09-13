@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   estimateTokens,
   formatSkillsForPrompt,
@@ -71,11 +74,49 @@ function estimateProviderToolTokens(tool: ToolInfo): number {
   );
 }
 
-function toolDetails(tools: ToolInfo[], activeNames: string[]) {
+function selectActiveTools(tools: ToolInfo[], activeNames: string[]): ToolInfo[] {
   const active = new Set(activeNames);
-  return tools
-    .filter((tool) => active.has(tool.name))
-    .map((tool) => ({ label: tool.name, tokens: estimateProviderToolTokens(tool) }));
+  return tools.filter((tool) => active.has(tool.name));
+}
+
+function toolDetails(tools: ToolInfo[], activeNames: string[]) {
+  return selectActiveTools(tools, activeNames).map((tool) => ({
+    label: tool.name,
+    tokens: estimateProviderToolTokens(tool),
+  }));
+}
+
+export function renderContextMarkdown(input: {
+  timestamp: string;
+  model: string;
+  systemPrompt: string;
+  tools: ToolInfo[];
+  activeTools: string[];
+}): string {
+  const tools = selectActiveTools(input.tools, input.activeTools).map((tool) => {
+    const lines = [`### ${tool.name}`, ""];
+    if (tool.description) lines.push(tool.description, "");
+    lines.push("```json", JSON.stringify(tool.parameters, null, 2), "```");
+    return lines.join("\n");
+  });
+  const toolSection = tools.length
+    ? ["<tools>", "", tools.join("\n\n"), "", "</tools>"].join("\n")
+    : ["<tools>", "", "</tools>"].join("\n");
+
+  return (
+    [
+      [
+        "<meta>",
+        "",
+        `- **timestamp**: ${input.timestamp}`,
+        `- **model**: ${input.model}`,
+        "",
+        "</meta>",
+      ].join("\n"),
+      ["<system-prompt>", "", input.systemPrompt, "", "</system-prompt>"].join("\n"),
+      toolSection,
+    ].join("\n\n") + "\n"
+  );
 }
 
 export function buildContextBreakdown(input: {
@@ -203,23 +244,52 @@ export default function registerContext(
   previewPrompt?: ContextPromptPreview,
 ): void {
   pi.registerCommand("context", {
-    description: "Show estimated context window usage",
-    getArgumentCompletions: (prefix) =>
-      "all".startsWith(prefix.trim())
-        ? [{ value: "all", label: "all", description: "Show item details" }]
-        : null,
+    description: "Show usage or export static context",
+    getArgumentCompletions: (prefix) => {
+      const argument = prefix.trim();
+      const completions = [
+        { value: "all", label: "all", description: "Show item details" },
+        { value: "log", label: "log", description: "Export static context as Markdown" },
+      ].filter((completion) => completion.value.startsWith(argument));
+      return completions.length > 0 ? completions : null;
+    },
     handler: async (args, ctx) => {
       const argument = args.trim();
-      if (argument && argument !== "all") {
-        ctx.ui.notify("Usage: /context [all]", "warning");
+      if (argument && argument !== "all" && argument !== "log") {
+        ctx.ui.notify("Usage: /context [all|log]", "warning");
         return;
       }
       if (ctx.mode !== "tui" || !ctx.model) return;
-      const usage = ctx.getContextUsage();
       const currentSystemPrompt = ctx.getSystemPrompt();
       const systemPrompt = previewPrompt?.(currentSystemPrompt, ctx) ?? currentSystemPrompt;
       const tools = pi.getAllTools();
       const activeTools = pi.getActiveTools();
+      if (argument === "log") {
+        try {
+          const directory = mkdtempSync(join(tmpdir(), "pi-context-"));
+          const path = join(directory, "context.md");
+          const model = ctx.model.name
+            ? `${ctx.model.name} (${ctx.model.provider}/${ctx.model.id})`
+            : `${ctx.model.provider}/${ctx.model.id}`;
+          writeFileSync(
+            path,
+            renderContextMarkdown({
+              timestamp: new Date().toISOString(),
+              model,
+              systemPrompt,
+              tools,
+              activeTools,
+            }),
+            { encoding: "utf8", mode: 0o600, flag: "wx" },
+          );
+          ctx.ui.notify(path, "info");
+        } catch (error) {
+          ctx.ui.notify(`Could not export context: ${String(error)}`, "error");
+        }
+        return;
+      }
+
+      const usage = ctx.getContextUsage();
       const data = buildContextBreakdown({
         total: usage?.tokens ?? null,
         window: usage?.contextWindow ?? ctx.model.contextWindow,

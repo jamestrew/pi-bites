@@ -1,9 +1,10 @@
 import {
   formatSkillsForPrompt,
   type BuildSystemPromptOptions,
+  type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { availableContextTokens, buildContextBreakdown } from "./context.js";
+import { availableContextTokens, buildContextBreakdown, renderContextMarkdown } from "./context.js";
 
 const sourceInfo = {
   path: "<builtin:read>",
@@ -11,6 +12,62 @@ const sourceInfo = {
   scope: "temporary" as const,
   origin: "top-level" as const,
 };
+
+describe("renderContextMarkdown", () => {
+  it("renders the projected prompt and active tool definitions in registry order", () => {
+    const tools = [
+      {
+        name: "read",
+        description: "Read a file.",
+        parameters: { type: "object", properties: { path: { type: "string" } } },
+        sourceInfo,
+      },
+      {
+        name: "write",
+        description: "Write a file.",
+        parameters: { type: "object", properties: {} },
+        sourceInfo,
+      },
+    ] as ToolInfo[];
+
+    expect(
+      renderContextMarkdown({
+        timestamp: "2026-03-18T12:00:00.000Z",
+        model: "provider/model-id",
+        systemPrompt: "Projected system prompt.",
+        tools,
+        activeTools: ["write"],
+      }),
+    ).toBe(`<meta>
+
+- **timestamp**: 2026-03-18T12:00:00.000Z
+- **model**: provider/model-id
+
+</meta>
+
+<system-prompt>
+
+Projected system prompt.
+
+</system-prompt>
+
+<tools>
+
+### write
+
+Write a file.
+
+\`\`\`json
+{
+  "type": "object",
+  "properties": {}
+}
+\`\`\`
+
+</tools>
+`);
+  });
+});
 
 describe("buildContextBreakdown", () => {
   it("separates context files and skills from a matching Pi system prompt", () => {
