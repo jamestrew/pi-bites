@@ -80,16 +80,6 @@ export function createAgentCompletionHandler({
   onAgentResultPendingUI,
   scheduleAutomatic,
 }: AgentCompletionDeps) {
-  const claimedGenerations = new WeakMap<AgentRecord, Set<number>>();
-  function claim(record: AgentRecord, generation = record.generation): boolean {
-    const canonical = getRecord(record.id) ?? record;
-    let claimed = claimedGenerations.get(canonical);
-    if (!claimed) claimedGenerations.set(canonical, (claimed = new Set()));
-    if (claimed.has(generation)) return false;
-    claimed.add(generation);
-    return true;
-  }
-
   const completedGeneration = new WeakMap<AgentRecord, number>();
   const waiters = new Map<number, Waiter>();
   let nextWaiterId = 1;
@@ -117,9 +107,8 @@ export function createAgentCompletionHandler({
         return buildMissingWaitAgentResult(id);
       }
       const terminal = isTerminal(record);
-      const includeOutput = terminal && claim(record);
-      if (terminal) status[id] = getAgentStatus(record, includeOutput);
-      return buildWaitAgentResult(record, includeOutput);
+      if (terminal) status[id] = getAgentStatus(record);
+      return buildWaitAgentResult(record, terminal);
     });
     return { outcome: "terminal", timed_out: false, status, agents };
   }
@@ -187,29 +176,23 @@ export function createAgentCompletionHandler({
       finishedUI = true;
       notifyFinishedUI();
     };
-    if (claimedGenerations.get(record)?.has(generation)) {
-      finishUI();
-      return;
-    }
     try {
       if (getRecord(record.id)?.generation === generation) onAgentResultPendingUI?.(record.id);
     } catch {
       /* UI state must not block completion delivery */
     }
+    const deliver = () => {
+      if (finishedUI || disposed) return;
+      try {
+        emitAutomatic(finished);
+      } finally {
+        finishUI();
+      }
+    };
     try {
       const accepted = scheduleAutomatic
-        ? scheduleAutomatic(
-            record.parentSessionId,
-            () => {
-              try {
-                if (claim(record, generation)) emitAutomatic(finished);
-              } finally {
-                finishUI();
-              }
-            },
-            finishUI,
-          )
-        : (claim(record, generation) && emitAutomatic(finished), finishUI(), true);
+        ? scheduleAutomatic(record.parentSessionId, deliver, finishUI)
+        : (deliver(), true);
       if (!accepted) finishUI();
     } catch {
       finishUI();

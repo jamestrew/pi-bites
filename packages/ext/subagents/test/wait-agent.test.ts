@@ -74,7 +74,7 @@ describe("wait_agent", () => {
     completion.dispose();
   });
 
-  it("lets concurrent and repeated waits observe final status with only one content owner", async () => {
+  it("lets concurrent and repeated waits observe full status independently of notifications", async () => {
     const running = record("worker", "running");
     const { completion, pi } = harness([running]);
     const first = completion.waitFor([running.id], 30_000);
@@ -89,13 +89,13 @@ describe("wait_agent", () => {
       status: { worker: { completed: "finished" } },
     });
     await expect(second).resolves.toMatchObject({
-      status: { worker: { completed: null } },
-      agents: [expect.not.objectContaining({ result: expect.any(String) })],
+      status: { worker: { completed: "finished" } },
+      agents: [expect.objectContaining({ result: "finished" })],
     });
     await expect(completion.waitFor([running.id], 30_000)).resolves.toMatchObject({
-      status: { worker: { completed: null } },
+      status: { worker: { completed: "finished" } },
     });
-    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
     completion.dispose();
   });
 

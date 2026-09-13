@@ -77,14 +77,14 @@ describe("agent completion delivery", () => {
     completion.dispose();
   });
 
-  it("keeps error status observable without repeating claimed failure content", async () => {
+  it("keeps full error status observable after automatic notification", async () => {
     const record = makeRecord("a", { status: "error", result: undefined, error: "failure detail" });
     const { completion, pi } = makeHarness([record]);
     completion.onAgentComplete(record);
 
     const outcome = await completion.waitFor([record.id], 10_000);
-    expect(outcome.status).toEqual({ a: { errored: "" } });
-    expect(outcome.agents[0]).not.toHaveProperty("error");
+    expect(outcome.status).toEqual({ a: { errored: "failure detail" } });
+    expect(outcome.agents[0]).toHaveProperty("error", "failure detail");
     expect(pi.sendMessage).toHaveBeenCalledOnce();
     completion.dispose();
   });
@@ -107,7 +107,7 @@ describe("agent completion delivery", () => {
     completion.dispose();
   });
 
-  it("lets an explicit wait claim content before a queued automatic notification", async () => {
+  it("keeps an explicit wait independent of a queued automatic notification", async () => {
     const record = makeRecord("a", { status: "running", result: undefined });
     let deliver!: () => void;
     const scheduleAutomatic = vi.fn((_parent: string, callback: () => void) => {
@@ -128,7 +128,7 @@ describe("agent completion delivery", () => {
     expect(pi.sendMessage).not.toHaveBeenCalled();
     deliver();
     deliver();
-    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.sendMessage).toHaveBeenCalledOnce();
     completion.dispose();
   });
 
