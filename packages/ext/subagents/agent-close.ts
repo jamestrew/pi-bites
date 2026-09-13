@@ -135,11 +135,29 @@ export class AgentCloser {
     if (manager && header) {
       // Retain the active conversation, not extension state/approvals. Reparent
       // around omitted custom entries so Pi can reconstruct the branch intact.
+      const branch = manager.getBranch();
+      const skippedBoundaries = new Map<string, string>();
+      let nextId: string | undefined;
+      for (const entry of [...branch].reverse()) {
+        if (entry.type !== "custom") nextId = entry.id;
+        else if (nextId) skippedBoundaries.set(entry.id, nextId);
+      }
       const entries: FileEntry[] = [header];
       let parentId: string | null = null;
-      for (const entry of manager.getBranch()) {
+      for (const entry of branch) {
         if (entry.type === "custom") continue;
-        entries.push({ ...entry, parentId });
+        // Compaction boundaries may name removed state entries. Advance to the
+        // next retained entry so reopening does not silently drop the kept tail.
+        entries.push({
+          ...entry,
+          parentId,
+          ...(entry.type === "compaction"
+            ? {
+                firstKeptEntryId:
+                  skippedBoundaries.get(entry.firstKeptEntryId) ?? entry.firstKeptEntryId,
+              }
+            : {}),
+        });
         parentId = entry.id;
       }
       return {
