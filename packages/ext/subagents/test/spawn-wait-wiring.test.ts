@@ -193,7 +193,7 @@ describe("spawn-and-wait orchestration", () => {
     });
     expect(result.content[0].text).not.toContain("src/index.ts");
     expect(result.content[0].text).not.toContain("openai/gpt-5");
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
@@ -218,7 +218,7 @@ describe("spawn-and-wait orchestration", () => {
       },
       timed_out: false,
     });
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
@@ -297,7 +297,7 @@ describe("spawn-and-wait orchestration", () => {
         status: { [agentId(selected)]: { completed: "eventual final" } },
       },
     });
-    expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2);
+    expect(harness.pi.sendMessage).toHaveBeenCalledTimes(3);
     harness.shutdown();
   });
 
@@ -325,7 +325,7 @@ describe("spawn-and-wait orchestration", () => {
     harness.shutdown();
   });
 
-  it("returns final status without content after its automatic notification was delivered", async () => {
+  it("returns full final status after its independent automatic notification was delivered", async () => {
     const child = deferredRun();
     const harness = makeHarness();
     const spawned = await spawn(harness.tools, harness.ctx);
@@ -338,12 +338,12 @@ describe("spawn-and-wait orchestration", () => {
 
     expect(result.details).toMatchObject({
       outcome: "terminal",
-      status: { [id]: { completed: null } },
+      status: { [id]: { completed: "automatic result" } },
       agents: [expect.objectContaining({ id, status: "completed" })],
     });
-    expect(result.details.agents[0]).not.toHaveProperty("result");
+    expect(result.details.agents[0]).toHaveProperty("result", "automatic result");
     expect(JSON.parse(result.content[0].text)).toEqual({
-      status: { [id]: { completed: null } },
+      status: { [id]: { completed: "automatic result" } },
       timed_out: false,
     });
     expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
@@ -362,7 +362,7 @@ describe("spawn-and-wait orchestration", () => {
     expect(result.details.agents).toEqual([
       expect.objectContaining({ status: "error", error: "child exploded" }),
     ]);
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
@@ -385,7 +385,7 @@ describe("spawn-and-wait orchestration", () => {
     expect(result.details.agents).toEqual([
       expect.objectContaining({ id, status: "stopped", error: "aborted" }),
     ]);
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
@@ -501,10 +501,10 @@ describe("spawn-and-wait orchestration", () => {
     expect(result.details.status).toEqual({
       [agentId(secondSpawn)]: { completed: "second done" },
     });
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
 
     first.resolve({ responseText: "first done", session: { dispose: vi.fn() } });
-    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2));
     harness.shutdown();
   });
 
