@@ -133,6 +133,35 @@ describe("AgentManager.close", () => {
     expect(manager.getClosedRecord(id)).not.toEqual(retained);
   });
 
+  it("preserves compacted context when its retained boundary is extension state", async () => {
+    manager = new AgentManager();
+    const sessionManager = SessionManager.inMemory("/tmp");
+    sessionManager.appendMessage({ role: "user", content: "old history", timestamp: 1 });
+    sessionManager.appendCustomEntry("bash-gate-allowance", { allow: "all" });
+    const boundary = sessionManager.getLeafId()!;
+    sessionManager.appendCustomEntry("another-extension", { secret: "discard" });
+    sessionManager.appendMessage({ role: "user", content: "retained tail", timestamp: 2 });
+    sessionManager.appendCompaction("Summary of old history", boundary, 1000);
+    sessionManager.appendMessage({ role: "user", content: "after compaction", timestamp: 3 });
+    const expected = sessionManager.buildSessionContext().messages;
+    expect(expected).toContainEqual({ role: "user", content: "retained tail", timestamp: 2 });
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      responseText: "done",
+      session: { ...mockSession(), sessionManager },
+    });
+    const id = manager.spawn(mockPi, mockCtx, "worker", "compact", { description: "compact" });
+    await manager.getRecord(id)!.promise;
+    await manager.close(id);
+
+    const retained = manager.getClosedRecord(id)!;
+    if (!retained.recoverable || !("conversation" in retained))
+      throw new Error("missing conversation");
+    const { conversation } = retained;
+    const restored = SessionManager.inMemory(conversation.cwd, {}, conversation.entries);
+    expect(restored.getEntries().some((entry) => entry.type === "custom")).toBe(false);
+    expect(restored.buildSessionContext().messages).toEqual(expected);
+  });
+
   it("reports snapshot failure but still disposes the child and releases capacity", async () => {
     manager = new AgentManager(undefined, 1);
     const session = {
