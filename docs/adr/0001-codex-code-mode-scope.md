@@ -4,7 +4,7 @@ Status: Accepted (2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites
 
 Source definitions and supported deviations: [Code Mode contract baseline](../code-mode-contract/README.md).
 
-For the GPT-5.6 and GPT-6 model families, including their named variants, replace the structured adapter interface with Codex-compatible Code Mode, initially nesting only `exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`, subject to their availability policies. Preserve unrelated direct tools, including the three subagent tools; adapting and potentially nesting those tools belongs to separate work. Models outside this scope use Pi's regular core tools rather than retaining a second structured Codex mode; remove the existing exception that exposes standalone `web_run` outside adapter scope.
+For the GPT-5.6 and GPT-6 model families, including their named variants, replace the structured adapter interface with Codex-compatible Code Mode, initially nesting only `exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`, subject to their availability policies. Preserve unrelated direct tools, including the independently usable subagent tools; their V1 nesting follows in #264, not the initial #294 cutover. Models outside this scope use Pi's regular core tools rather than retaining a second structured Codex mode; remove the existing exception that exposes standalone `web_run` outside adapter scope.
 
 GPT-5.6 and GPT-6 are the primary usage target. Keep unsupported-model handling to a simple fallback, and do not automatically activate future GPT families or all models belonging to a configured provider.
 
@@ -25,3 +25,22 @@ The four core nested contracts remain eager, subject to availability. Detailed `
 The pinned generator calls `augment_tool_definition` once per supported definition to supply full argument/return declarations in runtime metadata. Native deferred guidance is generated with a deferred list. The runtime still exposes enabled functions on `tools`; discovery returns ordinary text and does not invoke the dispatcher, authorize commands, contact a web route, or enable credentials. Availability and route validation remain execution-time checks. No tool re-registration, active-tool additions, or system-prompt mutation occurs on lookup.
 
 This is an intentional local exposure policy: standalone native Codex web is eager at both inspected revisions. It is separate from top-level BM25 tool search and Pi additive dynamic loading. Discovery output preserves the preceding prompt prefix but does not guarantee cache hits, and consumes context once retrieved. Compaction may remove help; the model must rediscover it before subsequent web use. Restored help is documentation only: cells, processes, stores, and authorization are never restored from it. The host pin, stock transports/authentication, gate, cancellation, and rendering remain unchanged.
+
+## V1 subagent amendment (#305)
+
+The [V1 contract](../../packages/ext/subagents/CODEX_V1.md) now shares the selected
+`25af12f7e61572b0bc18ddb1008be543b91519b0` baseline. One session-owned subagent engine
+serves flat standalone Pi tools outside eligible Code Mode and native
+`tools.multi_agent_v1__<name>` functions inside it; never expose both paths together.
+Subagents remain independently disableable and usable without the adapter. V2 is not
+a prerequisite: replacing its operation/task hierarchy would discard the existing V1
+migration rather than finish it. Keep the host pinned.
+
+Complete V1 help is declaration-bearing `ALL_TOOLS` metadata; retain eager delegation
+capability and policy cues. Unconditional local deferral differs from upstream eager
+V1 exposure without search, but must not depend on Responses search or abbreviate
+pinned declarations. Measure initial help, discoverable declarations, discovery
+history, and provider payload separately. Omit unsupported `items` and `service_tier`
+explicitly. Roles inherit actual parent capabilities; explorer is not an additional
+read-only boundary. #305 records the target; #306–#309 activate it after usable
+close/resume (#276–#277), with combined validation in #278.
