@@ -231,6 +231,7 @@ export class FleetList {
       .filter(
         (a) =>
           this.pendingResults.has(a.id) ||
+          a.status === "idle" ||
           a.status === "running" ||
           a.status === "queued" ||
           a.id === this.viewingAgentId ||

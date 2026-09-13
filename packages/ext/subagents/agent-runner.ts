@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
+  type FileEntry,
   type AgentSession,
   type AgentSessionEvent,
   createAgentSession,
@@ -47,6 +48,7 @@ export const SUBAGENT_TOOL_NAMES = {
   WAIT_AGENT: "wait_agent",
   SEND_INPUT: "send_input",
   CLOSE_AGENT: "close_agent",
+  RESUME_AGENT: "resume_agent",
   MESSAGE_AGENT: "MessageAgent",
 } as const;
 
@@ -128,6 +130,9 @@ export interface RunOptions {
   signal?: AbortSignal;
   isolated?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** Sanitized manager-owned conversation, never extension state. */
+  conversation?: { sessionId: string; cwd: string; entries: FileEntry[] };
+  allowedTools?: string[];
   /** Active parent conversation entries copied when spawn_agent requests a full-history fork. */
   parentEntries?: ReturnType<ExtensionContext["sessionManager"]["buildContextEntries"]>;
   /** Pi-bites threshold policy captured by the owning parent extension. */
@@ -352,12 +357,11 @@ function instrumentProviderDiagnostics(
   };
 }
 
-export async function runAgent(
+export async function openAgentSession(
   parentSource: ParentSnapshot | ExtensionContext,
   type: SubagentType,
-  prompt: string,
   options: RunOptions,
-): Promise<RunResult> {
+): Promise<AgentSession> {
   agentSession.assertAgentNotCancelled(options.signal);
   const parent = "systemPrompt" in parentSource ? parentSource : snapshotParent(parentSource);
   const agentConfig = resolveAgent(type).config;
@@ -427,13 +431,19 @@ export async function runAgent(
   ];
 
   const settingsManager = SettingsManager.create(configCwd, agentDir);
-  const sessionManager = options.parentEntries
+  const sessionManager = options.conversation
     ? SessionManager.inMemory(
         effectiveCwd,
-        { parentSession: parent.sessionId },
-        options.parentEntries,
+        { id: options.conversation.sessionId },
+        options.conversation.entries,
       )
-    : SessionManager.inMemory(effectiveCwd);
+    : options.parentEntries
+      ? SessionManager.inMemory(
+          effectiveCwd,
+          { parentSession: parent.sessionId },
+          options.parentEntries,
+        )
+      : SessionManager.inMemory(effectiveCwd);
 
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
@@ -452,7 +462,12 @@ export async function runAgent(
     settingsManager,
     modelRuntime,
     model,
-    tools: allowedTools,
+    tools: options.allowedTools
+      ? allowedTools.filter(
+          (name) =>
+            options.allowedTools?.includes(name) || name === SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
+        )
+      : allowedTools,
     customTools: [createMessageAgent(SUBAGENT_TOOL_NAMES.MESSAGE_AGENT, options.messageParent)],
     resourceLoader: loader,
   };
@@ -461,38 +476,64 @@ export async function runAgent(
   }
 
   const { session } = await createAgentSession(sessionOpts);
-  if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
+  try {
+    if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
 
-  if (options.autoCompactionThreshold !== undefined)
-    installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
+    if (options.autoCompactionThreshold !== undefined)
+      installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
 
-  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
+    sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
+      agentId: options.agentId,
+      type,
+      title: agentConfig.displayName ?? agentConfig.name,
+      bashGatePolicy: agentConfig.bashGatePolicy,
+    } satisfies SubagentMetadata);
 
-  sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
-    agentId: options.agentId,
-    type,
-    title: agentConfig.displayName ?? agentConfig.name,
-    bashGatePolicy: agentConfig.bashGatePolicy,
-  } satisfies SubagentMetadata);
+    const baseSessionName = agentConfig.name;
+    session.setSessionName(
+      options.agentId ? `${baseSessionName}#${options.agentId.slice(0, 8)}` : baseSessionName,
+    );
 
-  const baseSessionName = agentConfig.name;
-  session.setSessionName(
-    options.agentId ? `${baseSessionName}#${options.agentId.slice(0, 8)}` : baseSessionName,
-  );
-
-  await agentSession.bindAgentSessionExtensions(
-    session,
-    {
-      onError: (err) => {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `extension-error:${err.extensionPath}`,
-        });
+    await agentSession.bindAgentSessionExtensions(
+      session,
+      {
+        onError: (err) => {
+          options.onToolActivity?.({
+            type: "end",
+            toolName: `extension-error:${err.extensionPath}`,
+          });
+        },
       },
-    },
-    options.signal,
-  );
-  if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
+      options.signal,
+    );
+    if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
+    options.onSessionCreated?.(session);
+    if (options.allowedTools) {
+      session.setActiveToolsByName(
+        session
+          .getActiveToolNames()
+          .filter(
+            (name) =>
+              options.allowedTools?.includes(name) || name === SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
+          ),
+      );
+    }
+
+    return session;
+  } catch (error) {
+    await agentSession.shutdownAgentSession(session);
+    throw error;
+  }
+}
+
+export async function runAgent(
+  parentSource: ParentSnapshot | ExtensionContext,
+  type: SubagentType,
+  prompt: string,
+  options: RunOptions,
+): Promise<RunResult> {
+  const session = await openAgentSession(parentSource, type, options);
+  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
   emitDiagnostic(options.onDiagnostic, "session_created", {
     session_id: session.sessionManager.getSessionId(),
     provider: session.model?.provider,
@@ -507,8 +548,6 @@ export async function runAgent(
     websocket_connect_timeout_ms: session.settingsManager.getWebSocketConnectTimeoutMs(),
     compaction: session.settingsManager.getCompactionSettings(),
   });
-
-  options.onSessionCreated?.(session);
 
   let turnCount = 0;
 
