@@ -9,6 +9,8 @@ import {
 } from "@earendil-works/pi-ai";
 import { createEventBus, ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
+import { AgentManager } from "../agent-manager.js";
+import { createAgentCompletionHandler } from "../agent-completion.js";
 import { runAgent } from "../agent-runner.js";
 
 function response(
@@ -235,3 +237,106 @@ it("real child session preserves an empty terminal provider error", async () => 
     rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+it("ordinary spawn-close-resume-send-wait preserves conversation with fresh permissions", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "subagent-reopen-"));
+  const runtime = await ModelRuntime.create({
+    allowModelNetwork: false,
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+  });
+  const provider = {
+    api: "openai-completions" as const,
+    apiKey: "test",
+    baseUrl: "http://localhost",
+    models: [
+      {
+        id: "model",
+        name: "Recovery Test",
+        reasoning: false,
+        input: ["text" as const],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 10_000,
+        maxTokens: 100,
+      },
+    ],
+  };
+  runtime.registerProvider("recovery-test", provider);
+  const model = runtime.getModel("recovery-test", "model")!;
+  const pi = {
+    exec: async () => ({ code: 1, stdout: "", stderr: "" }),
+    events: createEventBus(),
+    getActiveTools: () => ["read"],
+    getThinkingLevel: () => "off",
+  } as any;
+  const ctx = {
+    cwd,
+    model,
+    scopedModels: [],
+    getSystemPrompt: () => "CURRENT PARENT",
+    sessionManager: { getSessionId: () => "parent" },
+    modelRegistry: {
+      getAvailable: () => [model],
+      getRegisteredProviderIds: () => ["recovery-test"],
+      getRegisteredProviderConfig: () => provider,
+    },
+  } as any;
+  const completion = createAgentCompletionHandler({
+    pi,
+    getRecord: (id) => manager.getRecord(id),
+    onAgentFinishedUI: () => {},
+  });
+  const manager = new AgentManager(completion.onAgentComplete, 1);
+  try {
+    const id = manager.spawn(pi, ctx, "worker", "Remember the blue door", {
+      description: "memory",
+      model,
+      onSessionCreated(session) {
+        session.agent.streamFunction = (m) => response(m, [{ type: "text", text: "Remembered" }]);
+      },
+    });
+    await manager.getRecord(id)!.promise;
+    const original = manager.getRecord(id)!.session!;
+    const sessionId = original.sessionManager.getSessionId();
+    original.sessionManager.appendCustomEntry("bash-gate-allowance", { allow: "all" });
+    const old = original.sessionManager.getLeafId()!;
+    original.sessionManager.appendMessage({
+      role: "user",
+      content: "Keep the brass key",
+      timestamp: 1,
+    });
+    original.sessionManager.appendCompaction("A blue door was remembered", old, 500);
+    const expected = original.sessionManager.buildSessionContext().messages;
+    await manager.close(id);
+    expect(await manager.reopen(pi, ctx, id)).toBe("pending_init");
+    const restored = manager.getRecord(id)!.session!;
+    expect(restored).not.toBe(original);
+    expect(restored.sessionManager.getSessionId()).toBe(sessionId);
+    expect(restored.messages).toEqual(expected);
+    expect(
+      restored.sessionManager
+        .getEntries()
+        .some((entry) => entry.type === "custom" && entry.customType === "bash-gate-allowance"),
+    ).toBe(false);
+    expect(restored.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "MessageAgent"]));
+    expect(restored.getActiveToolNames()).not.toContain("bash");
+    expect(restored.getActiveToolNames()).not.toContain("write");
+    let requests = 0;
+    restored.agent.streamFunction = (m, context) => {
+      requests++;
+      expect(JSON.stringify(context.messages)).toContain("blue door");
+      expect(JSON.stringify(context.messages)).toContain("brass key");
+      return response(m, [{ type: "text", text: "The blue door and brass key" }]);
+    };
+    expect(await manager.sendInput(id, "What do you remember?")).toBe(true);
+    const waited = await completion.waitFor([id], 10_000);
+    expect(waited).toMatchObject({
+      status: { [id]: { completed: "The blue door and brass key" } },
+    });
+    expect(requests).toBe(1);
+  } finally {
+    completion.dispose();
+    await manager.dispose();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}, 30_000);

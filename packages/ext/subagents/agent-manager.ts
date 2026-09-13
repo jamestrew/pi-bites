@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { AgentCloser, type ClosedAgentRecord } from "./agent-close.js";
+import { AgentReopener, type ReopenOptions } from "./agent-reopen.js";
 import { AgentInterrupter } from "./agent-interruption.js";
 import { resumeAgent, runAgent, steerAgent, type ToolActivity } from "./agent-runner.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";
@@ -114,6 +115,7 @@ export class AgentManager {
   private turnCounts = new WeakMap<AgentRecord, number>();
   private pendingAgents = new Set<Promise<string>>();
   private teardowns = new Set<Promise<void>>();
+  private reopener: AgentReopener;
   private closing = false;
   private disposed = false;
   private shutdownPromise?: Promise<void>;
@@ -153,6 +155,19 @@ export class AgentManager {
         if (record.session) await this.teardownSession(record.session);
       },
       releaseReservation: (record) => this.releaseReservation(record),
+    });
+    this.reopener = new AgentReopener(this.agents, this.closer, {
+      reserve: (record) => this.reserve(record),
+      release: (record) => this.releaseReservation(record),
+      commit: (record) => {
+        this.options.set(record, {
+          description: record.description,
+          model: record.session?.model,
+          thinkingLevel: record.invocation?.thinking,
+        });
+      },
+      messageParent,
+      autoCompactionThreshold: getAutoCompactionThreshold,
     });
   }
 
@@ -691,9 +706,10 @@ export class AgentManager {
     if (
       !record ||
       this.closer.isClosing(id) ||
-      (record.status !== "running" && record.status !== "queued")
+      (record.status !== "running" && record.status !== "queued" && record.status !== "idle")
     )
       return false;
+    if (record.status === "idle") return this.startTurn(id, message);
     if (record.session && record.status === "running") {
       record.session.steer(message).catch(() => {});
     } else {
@@ -713,7 +729,8 @@ export class AgentManager {
   async sendInput(id: string, message: string): Promise<boolean> {
     const record = this.agents.get(id);
     if (!record || this.closer.isClosing(id)) return false;
-    if (record.status === "completed") return this.startTurn(id, message);
+    if (record.status === "completed" || record.status === "idle")
+      return this.startTurn(id, message);
     if (record.session && record.status === "running") {
       await steerAgent(record.session, message);
       return true;
@@ -730,7 +747,7 @@ export class AgentManager {
       this.closer.isClosing(id) ||
       record.status === "running" ||
       record.status === "queued" ||
-      (this.settledGeneration.get(record) ?? 0) < record.generation
+      (record.status !== "idle" && (this.settledGeneration.get(record) ?? 0) < record.generation)
     ) {
       return false;
     }
@@ -739,7 +756,7 @@ export class AgentManager {
     if (!options) return false;
     const session = record.session;
 
-    record.generation++;
+    if (record.status !== "idle") record.generation++;
     const generation = record.generation;
     record.prompt = prompt;
     record.status = "queued";
@@ -832,8 +849,14 @@ export class AgentManager {
     return this.closer.get(id);
   }
 
+  reopen(pi: ExtensionAPI, ctx: ExtensionContext, id: string, options?: ReopenOptions) {
+    return this.reopener.open(pi, ctx, id, options);
+  }
+
   /** Close a retained agent and every descendant represented by this manager. */
   close(id: string) {
+    const pending = this.reopener.pending(id);
+    if (pending) return pending.catch(() => undefined).then(() => this.closer.close(id));
     return this.closer.close(id);
   }
 
@@ -842,7 +865,7 @@ export class AgentManager {
     if (!record) return false;
 
     // Remove from queue if queued
-    if (record.status === "queued") {
+    if (record.status === "queued" || record.status === "idle") {
       this.queue = this.queue.filter((q) => q.id !== id);
       record.pendingSteers = undefined;
       record.status = "stopped";
@@ -932,12 +955,14 @@ export class AgentManager {
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.closing = true;
+    void this.reopener.shutdown();
     this.shutdownPromise = Promise.resolve().then(() => this.finishShutdown());
     return this.shutdownPromise;
   }
 
   private async finishShutdown(): Promise<void> {
     this.abortAll();
+    await this.reopener.shutdown();
     await this.waitForAll();
     for (const record of this.agents.values()) {
       if (record.session) void this.teardownSession(record.session);

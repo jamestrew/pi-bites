@@ -3,6 +3,7 @@ import type { AgentRecord, WaitAgentStatus } from "./types.js";
 /** Convert manager state to the pinned Codex V1 status vocabulary. */
 export function getAgentStatus(record: AgentRecord, includeOutput = true): WaitAgentStatus {
   switch (record.status) {
+    case "idle":
     case "queued":
       return "pending_init";
     case "running":

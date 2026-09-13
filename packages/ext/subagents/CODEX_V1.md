@@ -112,9 +112,38 @@ complete Codex system prompt or adding local batching advice.
 - Persisted-session integrations without an available conversation snapshot retain their manager-owned
   path as before. Queued children that never create a session remain explicitly unrecoverable. Snapshot
   failure is an explicit close error, but teardown and capacity release still run exactly once.
-- #277 consumes only this manager-owned lookup to reopen conversations; it must reconstruct extensions
-  and revalidate current parent permissions, role/model/tool scope, and command authorization, not
-  restore historical capabilities. Close does not implement resume or Code Mode dispatch.
+- `resume_agent` consumes only this manager-owned conversation lookup. Path-only legacy records,
+  missing snapshots, and corrupt snapshots fail explicitly; no filesystem session search or arbitrary
+  path reopening occurs. Recovery is manager-lifetime memory, not cross-process persistence.
+
+## Recoverable resume (#277)
+
+- `AgentManager.reopen` preserves agent/session identity, parent, role, description, active history and
+  compaction. It builds a fresh child using the current parent's model, reasoning, provider registry,
+  project configuration and system prompt. It checks current model availability and enabled model
+  scope, intersects the role's tools with current parent active tools, and reconstructs the command
+  authorization gate. Historical model/tool settings, extension state, approvals, cells and processes
+  do not become live capabilities. Parent messaging remains bound to the original parent identity.
+- A reopened child has `pending_init` status until input starts a turn, matching the pin's new thread
+  status. Internally an explicit idle state reserves generation one for the first input; it is not queued
+  for capacity. Waiters registered while idle follow that first turn, or observe shutdown if it closes. `send_input`, Fleet steering and selected-target waits use the same retained-turn
+  paths as spawned agents. Resume alone never sends a synthetic user message or completion.
+- Reserve before loading and retain the slot while the reopened child is open. Concurrent resumes
+  join one reopen; an already-open request returns current status without another slot. Unknown,
+  foreign-owned, closing and unrecoverable targets fail deterministically. A close during reopening
+  waits for that claim before closing the resulting session.
+- Cancellation before entry does nothing. Cancellation during initialization prevents publication,
+  tears down any acquired session and releases the reservation once initialization settles; callers
+  joining another reopen can cancel their own wait without cancelling its owner. Failure retains the
+  owned snapshot for retry. Manager shutdown cancels and awaits reopen claims. Direct calls also carry
+  the current lifecycle owner's signal, so session replacement cannot publish late reopened agents.
+  Publication into the manager is the commit point: cancellation or a lost result afterward leaves
+  the agent discoverable and controllable, still holding its slot.
+- Shared Code Mode dispatch and broader child role/permission parity remain #306–#309 work. The
+  standalone success payload is the pinned `{ status }` object serialized as text; failures throw
+  model-facing errors and update the same bounded call renderer. Focused manager tests cover claims,
+  rollback, owned lookup and stale contexts; a real Pi-session check exercises conversation/compaction,
+  fresh tools and the complete spawn-close-resume-send-wait workflow with a controlled provider.
 
 ### Close baseline verification (#276)
 

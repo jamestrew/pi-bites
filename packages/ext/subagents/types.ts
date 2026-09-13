@@ -51,14 +51,14 @@ export interface AgentConfig {
 
 export interface AgentRecord {
   id: string;
-  /** Monotonic retained-session turn generation. The initial prompt is generation 1. */
+  /** Turn generation within this live session. An idle reopen reserves generation 1 for its first input. */
   generation: number;
   type: SubagentType;
   parentSessionId: string;
   /** Raw task supplied by the caller, without inherited parent context. */
   prompt: string;
   description: string;
-  status: "queued" | "running" | "completed" | "stopped" | "error";
+  status: "idle" | "queued" | "running" | "completed" | "stopped" | "error";
   result?: string;
   error?: string;
   toolUses: number;

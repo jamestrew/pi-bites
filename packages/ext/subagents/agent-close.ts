@@ -41,6 +41,10 @@ export class AgentCloser {
     return structuredClone(this.closed.get(id));
   }
 
+  forget(id: string): void {
+    this.closed.delete(id);
+  }
+
   isClosing(id: string): boolean {
     return this.closing.has(id);
   }
@@ -98,7 +102,8 @@ export class AgentCloser {
     // Defer stops until every record is claimed. Each stop runs before awaiting
     // runners, so a stalled or failing parent cannot leave descendants running.
     const stop = Promise.resolve().then(() => {
-      if (record.status === "running" || record.status === "queued") this.hooks.abort(record.id);
+      if (record.status === "running" || record.status === "queued" || record.status === "idle")
+        this.hooks.abort(record.id);
     });
     const results = await Promise.allSettled([stop, record.promise]);
     let tombstone: ClosedAgentRecord = { id: record.id, recoverable: false };

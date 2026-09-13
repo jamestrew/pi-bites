@@ -229,12 +229,22 @@ export class ConversationViewer implements Component {
 
   /** Stoppable only when a stop handler exists and the agent is still active. */
   private isStoppable(): boolean {
-    return !!this.onStop && (this.record.status === "running" || this.record.status === "queued");
+    return (
+      !!this.onStop &&
+      (this.record.status === "running" ||
+        this.record.status === "queued" ||
+        this.record.status === "idle")
+    );
   }
 
   /** Messageable only while the agent is still active. */
   private canSteer(): boolean {
-    return !!this.onSteer && (this.record.status === "running" || this.record.status === "queued");
+    return (
+      !!this.onSteer &&
+      (this.record.status === "running" ||
+        this.record.status === "queued" ||
+        this.record.status === "idle")
+    );
   }
 
   /** Cancelable only while a live session is active. */

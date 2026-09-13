@@ -27,6 +27,7 @@ import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import { createSubagentMessenger } from "./subagent-messages.js";
 import { registerAgentTool } from "./register-agent-tool.js";
+import { registerResumeAgent } from "./register-resume-agent.js";
 import { registerCloseAgent } from "./register-close-agent.js";
 import { registerSendInput } from "./register-send-input.js";
 import { registerWaitAgent } from "./register-wait-agent.js";
@@ -458,6 +459,7 @@ export default function (
   });
   registerSendInput(pi, manager);
   registerCloseAgent(pi, manager);
+  registerResumeAgent(pi, manager, isScopeModelsEnabled, () => approvalOwner.signal);
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {

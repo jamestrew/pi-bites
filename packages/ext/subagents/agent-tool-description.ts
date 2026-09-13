@@ -53,3 +53,12 @@ export function getCloseAgentToolParameters() {
     { additionalProperties: false },
   );
 }
+
+/** Build Pi's TypeBox form of the pinned resume_agent parameter contract. */
+export function getResumeAgentToolParameters() {
+  const properties = CODEX_V1_CONTRACT.tools.resume_agent.parameters.properties;
+  return Type.Object(
+    { id: Type.String({ description: properties.id.description }) },
+    { additionalProperties: false },
+  );
+}
