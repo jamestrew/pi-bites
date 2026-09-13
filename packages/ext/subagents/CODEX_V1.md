@@ -1,83 +1,221 @@
 # Codex V1 subagent contract
 
-`codex-v1-contract.ts` pins the model-facing target for the subagent migration to Codex revision
-`ddf8a67ab09cd76b8adc0969f11ee1271179aba7`.
+## Baseline and delivery boundary
 
-## Authoritative sources
+The common model-facing baseline is Codex **rust-v0.145.0** /
+`25af12f7e61572b0bc18ddb1008be543b91519b0`, also the existing Code Mode contract
+and host pin. #305 amends #271; it does not upgrade the host or activate nested
+subagents. [Revision evidence](../../../docs/code-mode-contract/subagents-revisions.md)
+compares the old subagent pin and inspected checkout. The earlier
+[research](../../../docs/code-mode-contract/subagents-research.md) remains historical evidence.
 
-- `codex-rs/core/src/tools/handlers/multi_agents_spec.rs` — names, descriptions, parameters, and output schemas
-- `codex-rs/core/src/tools/handlers/multi_agents.rs` — shared tool dispatch
-- `codex-rs/core/src/tools/handlers/multi_agents_common.rs` — shared limits and helpers
-- `codex-rs/core/src/tools/handlers/multi_agents/{spawn,send_input,wait,close_agent,resume_agent}.rs`
-  — per-tool dispatch and result behavior
-- `codex-rs/core/src/session/multi_agents.rs` — lifecycle and role-instruction behavior
-- `codex-rs/core/src/agent/role.rs` — built-in role names and descriptions
-- `codex-rs/core/templates/collab/experimental_prompt.md` — V1 orchestration guidance
+This is the target for #264, not certification of the unfinished integration.
+Existing close work stays in place. #276 finishes retained-state ownership;
+#277 supplies usable resume and reservation; #306 supplies shared operations and
+cancellation; #307 aligns child collaboration and roles; #308 exposes nested
+operations; #309 integrates presentation; #278 runs the combined parity audit.
+Current read-only explorer configuration, child collaboration exclusions, and
+unrecoverable ordinary in-memory closes are **implementation gaps**, not accepted
+platform adaptations. Keep partial nested integration inaccessible until coherent.
 
-The checkout in `~/projects/codex` is a reference only. Pi-bites does not import it or
-`packages/ext/codex-adapter/` at runtime.
+## One engine, two entry points
 
-## Target surface
+| Session configuration                      | Model-facing surface                               |
+| ------------------------------------------ | -------------------------------------------------- |
+| GPT-5.6/GPT-6 family with Code Mode active | Five `tools.multi_agent_v1__<name>` functions only |
+| Other model or adapter disabled            | Same five operations as flat standalone Pi tools   |
+| Subagents disabled                         | Neither surface                                    |
 
-| Tool           | Required input      | Output                                  |
-| -------------- | ------------------- | --------------------------------------- |
-| `spawn_agent`  | `message`           | `agent_id`, nullable `nickname`         |
-| `send_input`   | `target`, `message` | `submission_id`                         |
-| `wait_agent`   | `targets`           | statuses keyed by agent id, `timed_out` |
-| `close_agent`  | `target`            | `previous_status`                       |
-| `resume_agent` | `id`                | `status`                                |
+The operations are `spawn_agent`, `send_input`, `wait_agent`, `close_agent`, and
+`resume_agent`. Do not expose aliases or both paths together. Preserve unrelated
+direct tools, explicit tool selections, and agent identities across exposure
+switches. Children select exposure from their own model and actual permitted
+capabilities, not the parent's adapter state.
 
-An agent status is one of `pending_init`, `running`, `interrupted`, `shutdown`, or `not_found`, or
-an object containing nullable `completed` output or an `errored` message. The exact schemas and
-descriptions live in `codex-v1-contract.ts`; its serialized SHA-256 fixture makes drift explicit.
+`subagents/` owns sessions, validation, role/model resolution, concurrency, message
+delivery, approvals, Fleet, and recoverable conversation data. The composition root
+`packages/ext/index.ts` supplies a session-owned capability/controller to the adapter.
+Direct and nested entry points call the same operations; the adapter must not infer
+executors from `getAllTools()` metadata or duplicate manager/authorization policy.
+There is no runtime dependency from subagents to the adapter.
 
-Tool and role prose starts from the pinned Codex wording rather than a Pi rewrite. The only wording
-change is where omitting Responses-only `items` makes Codex's “use either message or items” parameter
-text inaccurate. The `spawn_agent` description uses Codex's default no-custom-usage-hint rendering,
-with the deterministic “no picker-visible model overrides” variant; a live model catalog is dynamic.
+## Supported declarations and results
 
-The built-in roles are `default`, `worker`, and `explorer`. They inherit the parent's tools, model,
-and reasoning effort unless the caller explicitly overrides supported settings.
+`codex-v1-contract.ts` supplies the supported direct contract. Reproducible generation
+and its provenance are recorded in the revision evidence. Preserve exact supported
+factory prose, including role guidance and argument/output documentation; never
+abbreviate it for a token target. The deterministic factory configuration uses no
+custom usage hint and no picker-visible model overrides. Runtime model catalogs
+remain dynamic; a future catalog-aware factory must preserve upstream formatting.
 
-## Lifecycle and role semantics
+| Operation      | Required input      | Optional input                                            | Successful result                            |
+| -------------- | ------------------- | --------------------------------------------------------- | -------------------------------------------- |
+| `spawn_agent`  | `message`           | `agent_type`, `fork_context`, `model`, `reasoning_effort` | `{ agent_id, nickname }` (nickname nullable) |
+| `send_input`   | `target`, `message` | `interrupt`                                               | `{ submission_id }`                          |
+| `wait_agent`   | `targets`           | `timeout_ms`                                              | `{ status, timed_out }`                      |
+| `close_agent`  | `target`            | —                                                         | `{ previous_status }`                        |
+| `resume_agent` | `id`                | —                                                         | `{ status }`                                 |
 
-- `fork_context: true` forks the parent's full thread history. A full-history fork inherits the
-  parent role and rejects an `agent_type` override.
-- Without a full-history fork, omitting `agent_type` selects `default` and the child starts with only
-  its initial prompt.
-- Pi keeps `explorer` read-only through its existing tool allowlist.
-- A spawned agent reserves concurrency until `close_agent`, including after completion. A spawn that
-  cannot reserve a slot fails instead of entering an invisible queue.
-  Direct manager callers may explicitly opt into queued work with `queueIfBusy: true`.
-  The global `Symbol.for("pi-subagents:manager")` registry exposes `close(id)` to release slots.
-  RPC protocol version 6 adds `subagents:rpc:close` with `{ requestId, agentId }`, returning
-  `{ previous_status }` in the success envelope. `subagents:rpc:stop` still only interrupts work;
-  it does not release the reservation.
-- `wait_agent` and the asynchronous completion notification are independent delivery channels. A
-  waiter may therefore observe the same completed status that is also sent in a notification.
-- `close_agent` snapshots the target status, stops its manager-known open subtree, tears down each
-  session once, and leaves a small closed-agent tombstone. Repeated close calls return `shutdown`;
-  unknown ids return an error.
-- Closing a persisted session retains its manager-owned session path and identity metadata for
-  `resume_agent`. Current child sessions use `SessionManager.inMemory`, so closing them is explicit
-  disposal: their tombstone is marked unrecoverable and a later resume must return an error.
+Status is `pending_init`, `running`, `interrupted`, `shutdown`, `not_found`,
+`{ completed: string | null }`, or `{ errored: string }`. Wait's `status` maps selected
+agent IDs to final statuses. Direct Pi results serialize these objects as JSON text;
+nested success resolves to the object, not a Pi content envelope or JSON string.
+Nested validation/execution failures reject. Renderer details are not model payloads.
 
-## Intentional pi adaptations
+Tool definitions and broader orchestration/model templates are separate. Preserve
+additive Pi-bites, project, skill, and extension prompts rather than importing the
+complete Codex system prompt or adding local batching advice.
 
-- Pi uses ordinary top-level tools rather than the Codex Responses `multi_agent_v1` namespace.
-- Pi keeps `explorer` read-only rather than treating the role as guidance only.
-- `items` is omitted from `spawn_agent` and `send_input`. Pi has no need for the Responses-specific
-  structured text/image/audio/skill/mention union, so plain-text `message` is required.
-- Pi tool definitions cannot send output schemas to the model. The pinned output schemas therefore
-  specify and test the JSON returned by implementations and remain part of the budget measurement.
+## Roles, messaging, waits, and capacity
 
-## Token budget
+- Built-in roles are `default`, `worker`, and `explorer`. Explorer is role guidance,
+  **not a read-only permission boundary**. Inherit actual parent tools, permissions,
+  model, and reasoning unless a supported, authorized override applies. A role must
+  neither grant missing capabilities nor manufacture an extra restriction.
+- `fork_context: true` copies full parent history, inherits the parent role, and
+  rejects explicit `agent_type`. False/omitted starts from the initial prompt and
+  defaults to `default`. Preserve parent/child addressing, depth and capacity limits,
+  target permissions, and descendant ownership. Replace the obsolete injected
+  `MessageAgent` helper and unconditional collaboration exclusions in #307.
+- Validate inputs and supported overrides before launching, reserving, or submitting.
+  Reject empty messages and invalid targets. Reject incompatible fork/role selection.
+  Native errors/defaults and revision-specific behavior are in the revision evidence;
+  unsupported fields must not be silently accepted as working controls.
+- `send_input` queues by default; `interrupt: true` interrupts current work before
+  submitting input. Reuse an open completed agent for another turn. Preserve retained
+  conversation and submission identity. Delivery occurs at Pi's next model boundary,
+  not by injecting into an already ongoing inference.
+- `wait_agent` observes only explicit selected targets and returns when any selected
+  target has final status. Default timeout is 30,000 ms; positive values clamp to
+  10,000–3,600,000 ms. A valid missing target reports `not_found`. Timeout returns `{ status: {}, timed_out: true }` without
+  cancelling work. Final-status notification and selected wait are independent:
+  both may contain the same completion. UI progress is neither delivery channel.
+- Spawn fails immediately when capacity cannot be reserved; no invisible model-facing
+  queue. Completed open agents retain slots until closed. Internal manager callers'
+  explicit `queueIfBusy` is not a tool-level queue contract.
+- Close returns the target's previous status and closes its open descendant subtree.
+  Repeated close returns `shutdown`; unknown targets fail. Interruption alone does not
+  release capacity. Preserve usable conversation and identity for explicit resume.
+- Resume reserves capacity **during reopening, before new work**, commits the
+  reservation after successful reopening, and releases it on failed reopening.
+  Ordinary `spawn → close → resume → send → wait` must work. Reopening uses manager-owned
+  recoverable data and current permissions, not a display tombstone treated as a live
+  session. Storage/serialization mechanisms need not duplicate Codex internals.
 
-The pre-migration baseline is approximately **1,605 tokens**: `Agent` 1,200, `WaitAgent` 169, and
-`MessageAgent` 236. The soft final budget for all five tools is **2,000 tokens**.
+## Cancellation and navigation ownership
 
-The contract test serializes every tool name, description, parameter schema, output schema, and the
-role guidance embedded in `spawn_agent`, then applies Pi's conservative `ceil(characters / 4)`
-estimate. The wording-parity contract currently measures **2,902 tokens**, which is **902 tokens over**
-the soft final budget. Later optimization should begin from this baseline, record each deliberate
-deviation, and update the fixture rather than shortening the initial contract silently.
+An agent is conversation/session-owned, not cell-owned. Outer `wait` resumes a cell;
+`wait_agent` observes agents; `write_stdin` resumes a shell session. Normal cell
+completion, `exit()`, or cell cancellation must not close committed children. Native
+cell finalization still cancels unfinished delegates; it is not an atomic rollback
+transaction for already committed agent effects.
+
+The shared controller must implement these observable commit boundaries (#306):
+
+| Operation        | Before commit                                                                                       | Commit / cancellation after commit                                                                                                                                                                            |
+| ---------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Spawn            | Check signal, owner generation, arguments and capacity; roll back failed uncommitted initialization | Publish child identity and reservation in the session-owned manager. A lost call result must leave the child discoverable/manageable through Fleet and owner controls; do not silently close it with the cell |
+| Send / interrupt | Check current owner, target and signal before each irreversible effect                              | Interruption and accepted input are separate effects; do not claim an interrupted turn is restored if submission fails. Accepted input remains accepted if the result is lost                                 |
+| Wait             | Validate selected targets and register a cancellable waiter                                         | Cancellation removes only this waiter; never close children or consume the independent notification                                                                                                           |
+| Close            | Validate owner and target before shutdown                                                           | Once shutdown is requested, finish subtree teardown and retain recoverable state even if the caller disappears                                                                                                |
+| Resume           | Validate owner, target and current permissions; reserve while reopening, release failed reservation | Publish reopened session before returning. Lost output must not hide the reopened identity or release a committed slot                                                                                        |
+
+Use lifecycle generations and stable snapshots captured while Pi `ctx` is active.
+Deferred callbacks, continuations, and timers must not dereference captured `ctx`.
+Regression checks use throwing getters **and** owner invalidation so stale snapshots
+cannot launch late-approved work.
+
+An exposure/model switch restores direct/nested controls and preserves agents in the
+same conversation. Session replacement, branch navigation, reload, and shutdown
+invalidate the old owner's operations, waiters, approvals, and delivery destinations;
+stop its live work and retain only explicitly recoverable conversation data. Do not
+send old notifications into the new conversation. Saved transcripts restore display,
+not cells, shells, approvals, or live agents. Explicit reopening revalidates ownership
+and permissions. This navigation policy is a Pi adaptation, not a claim of native
+atomic rollback. Keep agent cleanup separate from cell-owned shell cleanup.
+
+## Supported platform adaptations
+
+- Flat standalone Pi names replace the Responses namespace only on direct transport;
+  nested names follow native namespace conversion, `multi_agent_v1__<name>`.
+- Require plain-text `message` and omit Responses-only `items` from spawn/send. Replace
+  only the corresponding either-message-or-items wording, recording the projection.
+- Omit the selected pin's `service_tier` override: Pi cannot honor it. Do not accept an
+  inert field or imply stock provider service-tier controls are a per-agent override.
+- Direct Pi transport may omit output schemas on the wire. Preserve them as execution
+  contracts and nested return declarations.
+- Use stock providers/authentication and existing grammar capability detection with
+  structured exec fallback. Bash-gate authorizes actual child commands; it does not
+  implement Codex filesystem/network sandbox enforcement. Keep Auto Mode, per-command
+  audit identity, queued human prompts, allowance rechecks, cancellation, and child-to-parent
+  escalation. Discovery and outer JavaScript never authorize commands.
+- Pi storage, internal communication, encryption, and UI need not replicate Codex.
+  UI partial updates and next-model-boundary delivery do not promise immediate native
+  Responses injection. Reuse subagent renderers within exec/wait traces and preserve
+  Fleet/navigation; never manufacture duplicate model-visible tool messages.
+
+## Discovery and measurement
+
+Eligible sessions eagerly receive the existence of all five operations, their native
+names, the discovery instruction, and policy needed **before** deciding to delegate:
+spawn authorization/role guidance boundaries, disjoint ownership/no duplicate work,
+capacity retention until close, independent selected wait/notification delivery,
+agent-versus-cell lifetime, and actual inherited permissions. Complete declarations,
+including every argument description/default and return type, are available through:
+
+```js
+text(ALL_TOOLS.filter((tool) => tool.name.startsWith("multi_agent_v1__")));
+```
+
+Read the returned help before use and rediscover after compaction removes it.
+Discovery neither executes a tool nor changes availability or authorization. It must
+work without Responses tool search. Deferring detailed V1 declarations on **every**
+eligible Pi route is intentional local policy: upstream V1 is eager on routes without
+search. Direct tools retain complete definitions. Eager cues are not shortened
+substitutes for discoverable tool definitions.
+
+Report distinct measurements, not a single budget:
+
+1. Standalone five-tool serialized declarations (including output contracts for
+   comparison), plus separately identified additive prompts.
+2. Initial eager Code Mode instructions/capability/policy cues, before discovery.
+3. Full discoverable metadata with declaration-bearing descriptions and return types.
+4. Actual discovery output retained in conversation history, including transport
+   wrapping; account again after rediscovery rather than claiming free deferral.
+5. Actual provider request payloads on each available route: active tool schemas,
+   system/developer prompts, history, and provider-reported input/cache usage where
+   available. Record model/provider/transport and unavailable routes; character
+   estimates are not exact tokenizer counts or guarantees of cache hits.
+
+Historical evidence from #271: old three-tool estimate **1,605**; V1 serialized
+`ceil(characters / 4)` estimate **2,902**, compared with a former soft target **2,000**.
+These are comparison points, not an exact token count or a hard ceiling. No prose
+shortening is authorized by the target. Nested eager/history/provider measurements
+remain pending #308/#278 until the surface actually runs.
+
+## Scenario-based parity checks
+
+Run each scenario through (A) registered direct Pi tool execution and (B) native
+`exec` using the matching `tools.multi_agent_v1__<name>`. Compare parsed direct JSON
+to nested objects and semantic errors; exclude renderer-only metadata. Use controlled
+child turns and clocks/signals, not arbitrary sleeps. These are acceptance scenarios
+for the named follow-ups, not new prompt-only tests or claims that B is active today.
+
+| Scenario                       | Observable check                                                                                                                                                                                                                                          | Delivery  |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| Definitions and bad input      | All five names; omitted defaults; unknown fields, empty message/targets, malformed/unauthorized ID, invalid timeout, unknown role/model/effort, fork plus explicit role reject without side effects; missing target fails except wait returns `not_found` | #306–#308 |
+| History and capabilities       | No-fork defaults to default; full-history fork sees prior turns and inherits role; children inherit actual tools/model/reasoning; explorer can use a permitted write tool and cannot gain a forbidden tool                                                | #307      |
+| Concurrent spawn               | Race two spawns for one slot; only one commits; completed open child still blocks spawn; failed initialization releases reservation                                                                                                                       | #306      |
+| Input and addressing           | Send during initialization/running/completion, child-to-parent and permitted descendant addressing, forbidden target, interrupt then reuse; preserve turns and submission IDs                                                                             | #307      |
+| Selected wait and notification | Unselected completion does not release wait; selected completion does; timeout is empty; multiple selected finals preserved; notification still arrives independently                                                                                     | #306–#307 |
+| Close/resume                   | Close running/completed subtree once; repeat close; unknown ID error; reopen ordinary child with same identity and prior conversation; resume at capacity fails; simultaneous resume reserves before work; failed reopen rolls back                       | #276–#277 |
+| Cancellation races             | Abort before initialization/approval/submission commits prevents late work; abort after commit keeps identity manageable; interrupted-but-unsubmitted send does not claim rollback; cancelled wait leaves child alive                                     | #306      |
+| Three lifetimes                | Spawn then normal cell end, exit, cancellation, and unhandled sibling rejection; committed child survives; shell cancellation remains cell-scoped; outer wait never acts as agent wait                                                                    | #308      |
+| Exposure and navigation        | Supported-model switch and direct/nested fallback preserve IDs and controls, no duplicates, explicit selections survive; disabled subagents expose neither; child model selects independently                                                             | #308      |
+| Owner invalidation             | Throwing stale ctx, branch/session/reload/shutdown during initialization or queued approval: no late launch, old-owner notification, inaccessible work, or restored authorization                                                                         | #306/#309 |
+| Presentation and routes        | Structured nested errors, progress, Fleet/navigation, images, restored and expanded traces; no raw JS by default or duplicate model output; actual grammar and structured-fallback routes                                                                 | #309/#278 |
+| Discovery/accounting           | Complete ALL_TOOLS declarations without search, rediscovery after compaction, separate eager/discoverable/history/provider measurements                                                                                                                   | #308/#278 |
+
+Existing focused behavioral checks cover direct spawn, send, wait, and close. Run
+those and final `bun check` for this rebaseline; #278 records actual live-route coverage
+and any unavailable routes after the remaining implementation lands.
