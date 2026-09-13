@@ -1,3 +1,4 @@
+import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { getAgentStatus } from "./agent-status.js";
 import type { AgentRecord, SubagentType, WaitAgentStatus } from "./types.js";
 
@@ -7,6 +8,14 @@ export type ClosedAgentRecord =
       id: string;
       recoverable: true;
       sessionFile: string;
+      type: SubagentType;
+      parentSessionId: string;
+      description: string;
+    }
+  | {
+      id: string;
+      recoverable: true;
+      conversation: { sessionId: string; cwd: string; entries: FileEntry[] };
       type: SubagentType;
       parentSessionId: string;
       description: string;
@@ -29,7 +38,7 @@ export class AgentCloser {
   ) {}
 
   get(id: string): ClosedAgentRecord | undefined {
-    return this.closed.get(id);
+    return structuredClone(this.closed.get(id));
   }
 
   isClosing(id: string): boolean {
@@ -92,9 +101,13 @@ export class AgentCloser {
       if (record.status === "running" || record.status === "queued") this.hooks.abort(record.id);
     });
     const results = await Promise.allSettled([stop, record.promise]);
-    const tombstone = this.buildClosedRecord(record);
+    let tombstone: ClosedAgentRecord = { id: record.id, recoverable: false };
     try {
-      if (record.session) await this.hooks.teardown(record);
+      try {
+        tombstone = this.buildClosedRecord(record);
+      } finally {
+        if (record.session) await this.hooks.teardown(record);
+      }
       const failure = results.find((result) => result.status === "rejected");
       if (failure) throw failure.reason;
     } finally {
@@ -110,14 +123,34 @@ export class AgentCloser {
     try {
       sessionFile = record.session?.sessionFile;
     } catch {}
+    const metadata = {
+      id: record.id,
+      recoverable: true as const,
+      type: record.type,
+      parentSessionId: record.parentSessionId,
+      description: record.description,
+    };
+    const manager = record.session?.sessionManager;
+    const header = manager && "getHeader" in manager ? manager.getHeader() : undefined;
+    if (manager && header) {
+      // Retain the active conversation, not extension state/approvals. Reparent
+      // around omitted custom entries so Pi can reconstruct the branch intact.
+      const entries: FileEntry[] = [header];
+      let parentId: string | null = null;
+      for (const entry of manager.getBranch()) {
+        if (entry.type === "custom") continue;
+        entries.push({ ...entry, parentId });
+        parentId = entry.id;
+      }
+      return {
+        ...metadata,
+        conversation: structuredClone({ sessionId: header.id, cwd: header.cwd, entries }),
+      };
+    }
     return sessionFile
       ? {
-          id: record.id,
-          recoverable: true,
+          ...metadata,
           sessionFile,
-          type: record.type,
-          parentSessionId: record.parentSessionId,
-          description: record.description,
         }
       : { id: record.id, recoverable: false };
   }
