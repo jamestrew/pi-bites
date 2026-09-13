@@ -10,13 +10,12 @@ compares the old subagent pin and inspected checkout. The earlier
 [research](../../../docs/code-mode-contract/subagents-research.md) remains historical evidence.
 
 This is the target for #264, not certification of the unfinished integration.
-Existing close work stays in place. #276 finishes retained-state ownership;
+Existing close work stays in place. #276 supplies retained-state ownership;
 #277 supplies usable resume and reservation; #306 supplies shared operations and
 cancellation; #307 aligns child collaboration and roles; #308 exposes nested
 operations; #309 integrates presentation; #278 runs the combined parity audit.
-Current read-only explorer configuration, child collaboration exclusions, and
-unrecoverable ordinary in-memory closes are **implementation gaps**, not accepted
-platform adaptations. Keep partial nested integration inaccessible until coherent.
+Current read-only explorer configuration and child collaboration exclusions are
+**implementation gaps**, not accepted platform adaptations. Keep partial nested integration inaccessible until coherent.
 
 ## One engine, two entry points
 
@@ -101,6 +100,31 @@ complete Codex system prompt or adding local batching advice.
   Ordinary `spawn → close → resume → send → wait` must work. Reopening uses manager-owned
   recoverable data and current permissions, not a display tombstone treated as a live
   session. Storage/serialization mechanisms need not duplicate Codex internals.
+
+## Retained close conversations (#276)
+
+- Closing an ordinary in-memory child retains a detached active-branch conversation, child session
+  id/cwd, agent id, role, parent identity, and description in `AgentManager.getClosedRecord(id)`.
+  Closing disposes live resources, not conversation history. The snapshot includes the session header
+  and active branch (including compaction history), with plain custom extension-state entries removed
+  and remaining parent links and compaction boundaries repaired. It never retains the live session, callbacks, or approvals.
+  Returned records are defensive copies; manager disposal clears all retained conversations.
+- Persisted-session integrations without an available conversation snapshot retain their manager-owned
+  path as before. Queued children that never create a session remain explicitly unrecoverable. Snapshot
+  failure is an explicit close error, but teardown and capacity release still run exactly once.
+- #277 consumes only this manager-owned lookup to reopen conversations; it must reconstruct extensions
+  and revalidate current parent permissions, role/model/tool scope, and command authorization, not
+  restore historical capabilities. Close does not implement resume or Code Mode dispatch.
+
+### Close baseline verification (#276)
+
+The `close_agent` target/previous-status schemas and description are unchanged at the shared Code Mode
+pin `25af12f7e61572b0bc18ddb1008be543b91519b0` (`rust-v0.145.0`), verified against
+`codex-rs/core/src/tools/handlers/multi_agents_spec.rs` and
+`codex-rs/core/src/tools/handlers/multi_agents/close_agent.rs`. Flat direct-tool naming is the Pi
+transport adaptation. The broader contract rebaseline belongs to #305; no close declaration rewrite
+is needed. Pi serializes concurrent close requests per agent and returns `shutdown` to subsequent
+callers; upstream does not guarantee concurrent status sampling order.
 
 ## Cancellation and navigation ownership
 

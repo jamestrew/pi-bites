@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AgentManager } from "../agent-manager.js";
 
 vi.mock("../agent-runner.js", () => ({
@@ -54,6 +55,104 @@ describe("AgentManager.close", () => {
     expect(manager.getClosedRecord(completed)).toEqual({ id: completed, recoverable: false });
     expect(completedSession.extensionRunner.emit).toHaveBeenCalledOnce();
     expect(completedSession.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("retains an owned conversation without live resources after closing an in-memory child", async () => {
+    manager = new AgentManager(undefined, 1);
+    const sessionManager = SessionManager.inMemory("/tmp", { id: "child-session" });
+    sessionManager.appendMessage({ role: "user", content: "remember the blue door", timestamp: 1 });
+    const session = { ...mockSession(), sessionManager };
+    vi.mocked(runAgent).mockResolvedValueOnce({ responseText: "remembered", session });
+    const id = manager.spawn(mockPi, mockCtx, "worker", "remember", { description: "memory" });
+    await manager.getRecord(id)!.promise;
+
+    await manager.close(id);
+
+    const retained = manager.getClosedRecord(id)!;
+    expect(retained).toMatchObject({
+      id,
+      recoverable: true,
+      type: "worker",
+      parentSessionId: "parent-session",
+      description: "memory",
+      conversation: { sessionId: "child-session", cwd: "/tmp" },
+    });
+    if (!retained.recoverable || !("conversation" in retained))
+      throw new Error("missing conversation");
+    const { conversation } = retained;
+    const restored = SessionManager.inMemory(
+      conversation.cwd,
+      { id: conversation.sessionId },
+      conversation.entries,
+    );
+    expect(restored.getSessionId()).toBe("child-session");
+    expect(restored.buildSessionContext().messages).toEqual([
+      { role: "user", content: "remember the blue door", timestamp: 1 },
+    ]);
+    expect(session.dispose).toHaveBeenCalledOnce();
+    sessionManager.appendMessage({ role: "user", content: "late mutation", timestamp: 2 });
+    expect(manager.getClosedRecord(id)).toEqual(retained);
+    await manager.dispose();
+    expect(manager.getClosedRecord(id)).toBeUndefined();
+  });
+
+  it("retains the active branch without restoring extension approvals or exposing mutable owned data", async () => {
+    manager = new AgentManager();
+    const sessionManager = SessionManager.inMemory("/tmp");
+    sessionManager.appendMessage({ role: "user", content: "root", timestamp: 1 });
+    const root = sessionManager.getLeafId()!;
+    sessionManager.appendCustomEntry("bash-gate-allowance", { allow: "all" });
+    sessionManager.appendMessage({ role: "user", content: "active", timestamp: 2 });
+    const active = sessionManager.getLeafId()!;
+    sessionManager.branch(root);
+    sessionManager.appendMessage({ role: "user", content: "other branch", timestamp: 3 });
+    sessionManager.branch(active);
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      responseText: "done",
+      session: { ...mockSession(), sessionManager },
+    });
+    const id = manager.spawn(mockPi, mockCtx, "worker", "branch", { description: "branch" });
+    await manager.getRecord(id)!.promise;
+    await manager.close(id);
+
+    const retained = manager.getClosedRecord(id)!;
+    if (!retained.recoverable || !("conversation" in retained))
+      throw new Error("missing conversation");
+    const { conversation } = retained;
+    const restored = SessionManager.inMemory(
+      conversation.cwd,
+      { id: conversation.sessionId },
+      conversation.entries,
+    );
+    expect(restored.buildSessionContext().messages).toEqual([
+      { role: "user", content: "root", timestamp: 1 },
+      { role: "user", content: "active", timestamp: 2 },
+    ]);
+    expect(restored.getEntries().some((entry) => entry.type === "custom")).toBe(false);
+    conversation.entries.length = 0;
+    expect(manager.getClosedRecord(id)).not.toEqual(retained);
+  });
+
+  it("reports snapshot failure but still disposes the child and releases capacity", async () => {
+    manager = new AgentManager(undefined, 1);
+    const session = {
+      ...mockSession(),
+      sessionManager: {
+        getHeader: () => {
+          throw new Error("conversation unavailable");
+        },
+      },
+    };
+    vi.mocked(runAgent).mockResolvedValueOnce({ responseText: "done", session });
+    const id = manager.spawn(mockPi, mockCtx, "worker", "first", { description: "first" });
+    await manager.getRecord(id)!.promise;
+    await expect(manager.close(id)).rejects.toThrow("conversation unavailable");
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(manager.getClosedRecord(id)).toEqual({ id, recoverable: false });
+    vi.mocked(runAgent).mockResolvedValueOnce({ responseText: "next", session: mockSession() });
+    const next = manager.spawn(mockPi, mockCtx, "worker", "next", { description: "next" });
+    await manager.getRecord(next)!.promise;
+    expect(manager.getRecord(next)?.result).toBe("next");
   });
 
   it("retains only manager-owned reopen metadata for a persisted session", async () => {
