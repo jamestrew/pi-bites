@@ -33,6 +33,7 @@ Options:
   --limit N                    Maximum issues to process (default: 3)
   --jobs N                     Issues to run in parallel (default: 1)
   --issues N,N,...             Process explicit issue numbers
+  --work-base-ref REV          Revision to use as the issue workspace base (default: <default-branch>@origin)
   --extension-runtime PATH     Stable extension snapshot directory
   --extension-ref REV          jj revision to snapshot (default: master@origin)
   --no-extension-snapshot      Use pi's normal extension loading`;
@@ -46,6 +47,7 @@ const positiveInteger = (option: string, raw: string): number => {
 };
 
 type RunOptions = {
+  readonly workBaseRef: string | undefined;
   readonly extensionRef: string;
   readonly extensionRuntime: string;
   readonly extensionSnapshot: boolean;
@@ -56,6 +58,7 @@ type RunOptions = {
 
 export function parseRunOptions(argv: ReadonlyArray<string>): RunOptions {
   let issueLimit: number | undefined;
+  let workBaseRef: string | undefined;
   let jobs = 1;
   let issues: ReadonlyArray<number> = [];
   let extensionRuntime = DEFAULT_EXTENSION_RUNTIME;
@@ -75,6 +78,8 @@ export function parseRunOptions(argv: ReadonlyArray<string>): RunOptions {
       issueLimit = positiveInteger(option, raw);
     } else if (option === "--jobs") {
       jobs = positiveInteger(option, raw);
+    } else if (option === "--work-base-ref") {
+      workBaseRef = raw;
     } else if (option === "--extension-runtime") {
       extensionRuntime = raw;
     } else if (option === "--extension-ref") {
@@ -84,6 +89,7 @@ export function parseRunOptions(argv: ReadonlyArray<string>): RunOptions {
     }
   }
   return {
+    workBaseRef,
     extensionRef,
     extensionRuntime,
     extensionSnapshot,
@@ -210,10 +216,10 @@ async function listIssues(
   );
 }
 
-const implementPrompt = (repo: string, base: string, issueNumber: number): string =>
+const implementPrompt = (repo: string, reviewBase: string, issueNumber: number): string =>
   `/skill:implement Implement ${issueNumber} in ${repo}.
 
-Use ${base}@origin as the review base. This is a jj-backed repository, so prefer jj for version-control operations.
+Use ${reviewBase} as the review base. This is a jj-backed repository, so prefer jj for version-control operations.
 
 After the skill's implementation and review cycle, push the change and open a pull request.
 
@@ -343,6 +349,7 @@ async function main() {
   ) as { nameWithOwner: string; defaultBranchRef: { name: string } };
   const repo = repository.nameWithOwner;
   const base = repository.defaultBranchRef.name;
+  const workBaseRef = options.workBaseRef ?? `${base}@origin`;
   await $`jj git fetch --remote origin`.quiet();
   const piArgs = await prepareExtensionRuntime(options);
   const repoRoot = (await $`jj workspace root`.text()).trim();
@@ -387,7 +394,7 @@ async function main() {
     if (candidates.length === 0) break;
 
     const parent = (
-      await $`jj log -r ${`${base}@origin`} --no-graph -T ${'commit_id.short(12) ++ " " ++ description.first_line()'}`.text()
+      await $`jj log -r ${workBaseRef} --no-graph -T ${'commit_id.short(12) ++ " " ++ description.first_line()'}`.text()
     ).trim();
     for (const issue of candidates) attempted.add(issue.number);
     const results = await Promise.allSettled(
@@ -399,7 +406,7 @@ async function main() {
         const workspaceName = `${issue.number}-${process.pid}`;
         const workspacePath = join(workspaceParent, workspaceName);
         await mkdir(workspaceParent, { recursive: true });
-        await $`jj workspace add --name ${workspaceName} -r ${`${base}@origin`} ${workspacePath}`.quiet();
+        await $`jj workspace add --name ${workspaceName} -r ${workBaseRef} ${workspacePath}`.quiet();
 
         let finished = false;
         try {
@@ -414,7 +421,7 @@ async function main() {
             workspacePath,
             piArgs,
             `issue #${issue.number}`,
-            implementPrompt(repo, base, issue.number),
+            implementPrompt(repo, workBaseRef, issue.number),
           );
 
           const linkedPullRequests = JSON.parse(

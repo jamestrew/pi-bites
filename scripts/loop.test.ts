@@ -60,6 +60,13 @@ describe("run options", () => {
       extensionSnapshot: false,
     });
   });
+
+  it("keeps the issue workspace base independent from the extension revision", () => {
+    expect(parseRunOptions(["--work-base-ref", "subagents-codex@origin"])).toMatchObject({
+      workBaseRef: "subagents-codex@origin",
+      extensionRef: "master@origin",
+    });
+  });
 });
 
 describe("ready-for-agent selection", () => {
