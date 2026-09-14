@@ -33,8 +33,7 @@ Options:
   --limit N                    Maximum issues to process (default: 3)
   --jobs N                     Issues to run in parallel (default: 1)
   --issues N,N,...             Process explicit issue numbers
-  --work-base-ref REV          Revision to use as the issue workspace base (default: <pr-base>@origin)
-  --pr-base BRANCH             Intended PR target (required with --work-base-ref)
+  --work-base-ref REV          Revision to use as the issue workspace base (default: <default-branch>@origin)
   --extension-runtime PATH     Stable extension snapshot directory
   --extension-ref REV          jj revision to snapshot (default: master@origin)
   --no-extension-snapshot      Use pi's normal extension loading`;
@@ -49,7 +48,6 @@ const positiveInteger = (option: string, raw: string): number => {
 
 type RunOptions = {
   readonly workBaseRef: string | undefined;
-  readonly prBase: string | undefined;
   readonly extensionRef: string;
   readonly extensionRuntime: string;
   readonly extensionSnapshot: boolean;
@@ -61,7 +59,6 @@ type RunOptions = {
 export function parseRunOptions(argv: ReadonlyArray<string>): RunOptions {
   let issueLimit: number | undefined;
   let workBaseRef: string | undefined;
-  let prBase: string | undefined;
   let jobs = 1;
   let issues: ReadonlyArray<number> = [];
   let extensionRuntime = DEFAULT_EXTENSION_RUNTIME;
@@ -83,8 +80,6 @@ export function parseRunOptions(argv: ReadonlyArray<string>): RunOptions {
       jobs = positiveInteger(option, raw);
     } else if (option === "--work-base-ref") {
       workBaseRef = raw;
-    } else if (option === "--pr-base") {
-      prBase = raw;
     } else if (option === "--extension-runtime") {
       extensionRuntime = raw;
     } else if (option === "--extension-ref") {
@@ -95,7 +90,6 @@ export function parseRunOptions(argv: ReadonlyArray<string>): RunOptions {
   }
   return {
     workBaseRef,
-    prBase,
     extensionRef,
     extensionRuntime,
     extensionSnapshot,
@@ -105,128 +99,34 @@ export function parseRunOptions(argv: ReadonlyArray<string>): RunOptions {
   };
 }
 
-const referencesIssue = (pr: Pick<PullRequest, "body">, issueNumber: number): boolean =>
-  pr.body.split("\n").some((line) => line.trim() === `Closes #${issueNumber}`);
-
 export const selectCandidates = (
   issues: ReadonlyArray<Issue>,
   attempted: ReadonlySet<number>,
-  openPullRequests: ReadonlyArray<Pick<PullRequest, "body">> = [],
 ): Array<Issue> =>
   issues.filter(
     (issue) =>
       !attempted.has(issue.number) &&
       issue.state === "OPEN" &&
-      !openPullRequests.some((pr) => referencesIssue(pr, issue.number)) &&
       nodes(issue.blockedBy).every((blocker) => blocker.state === "CLOSED") &&
       nodes(issue.closedByPullRequestsReferences).every((pr) => pr.state !== "OPEN"),
   );
 
-type PullRequest = {
-  readonly number: number;
-  readonly state: string;
-  readonly baseRefName: string;
-  readonly headRefName: string;
-  readonly headRefOid: string;
-  readonly isCrossRepository: boolean;
-  readonly body: string;
-  readonly url: string;
-};
-
-export function targetBranch(
-  options: Pick<RunOptions, "workBaseRef" | "prBase">,
-  defaultBranch: string,
-): string {
-  if (options.workBaseRef && !options.prBase) {
-    throw new Error(
-      "--work-base-ref requires --pr-base: revisions do not identify a PR target branch",
-    );
-  }
-  return options.prBase ?? defaultBranch;
-}
-
-export function reviewVerdict(output: string) {
-  // Only one terminal verdict is accepted; quoted approvals and earlier review rounds are not authority.
-  const lines = output.trimEnd().split("\n");
-  const verdicts = lines.filter((line) => line.startsWith("RALPH_REVIEW:"));
-  if (verdicts.length !== 1) return undefined;
-  const match =
-    /^RALPH_REVIEW: (APPROVED|CHANGES REQUESTED) PR #([1-9][0-9]*) HEAD ([a-f0-9]{40})$/.exec(
-      lines.at(-1) ?? "",
-    );
-  return match
-    ? { approved: match[1] === "APPROVED", number: Number(match[2]), headRefOid: match[3] }
-    : undefined;
-}
-
-export async function workspaceChangeIds(
-  workspacePath: string,
-  startingBase: string,
-  preexisting: ReadonlySet<string>,
-): Promise<ReadonlySet<string>> {
-  const commitIds =
-    await $`jj -R ${workspacePath} log -r ${`${startingBase}::@ ~ ${startingBase}`} --no-graph -T ${'commit_id ++ "\\n"'}`.text();
-  return new Set(
-    commitIds
-      .trim()
-      .split("\n")
-      .filter((id) => id && !preexisting.has(id)),
-  );
-}
-
 export function pullRequestReference(
-  pullRequests: ReadonlyArray<PullRequest>,
-  issueNumber: number,
-  base: string,
-  newWorkspaceCommitIds: ReadonlySet<string>,
-  piOutput: string,
-  protectedBranches: ReadonlySet<string> = new Set(),
-): PullRequest {
-  const matches = pullRequests.filter(
-    (pr) =>
-      pr.state === "OPEN" &&
-      pr.baseRefName === base &&
-      pr.isCrossRepository === false &&
-      pr.headRefName !== base &&
-      !protectedBranches.has(pr.headRefName) &&
-      newWorkspaceCommitIds.has(pr.headRefOid) &&
-      referencesIssue(pr, issueNumber),
-  );
-  if (matches.length !== 1)
-    throw new Error(
-      `Issue #${issueNumber}: expected exactly one new OPEN PR targeting ${base}, found ${matches.length}`,
-    );
-  const pr = matches[0]!;
-  const verdict = reviewVerdict(piOutput);
-  if (!verdict || verdict.number !== pr.number || verdict.headRefOid !== pr.headRefOid) {
-    throw new Error(`Review does not identify PR #${pr.number} at its current head`);
-  }
-  return pr;
+  linked: ReadonlyArray<{ readonly number: number }>,
+  repositoryPullRequests: ReadonlyArray<{ readonly number: number; readonly headRefOid: string }>,
+  workspaceCommitIds: ReadonlySet<string>,
+): { readonly number: number } | undefined {
+  const reference =
+    linked.at(-1) ??
+    repositoryPullRequests.find((pullRequest) => workspaceCommitIds.has(pullRequest.headRefOid));
+  return reference && { number: reference.number };
 }
 
 const reviewApproved = (state: string, piOutput: string): boolean =>
-  state === "MERGED" || reviewVerdict(piOutput)?.approved === true;
+  state === "MERGED" || piOutput.includes("RALPH_REVIEW: APPROVED");
 
 export const shouldMergePullRequest = (state: string, piOutput: string): boolean =>
   state === "OPEN" && reviewApproved(state, piOutput);
-
-export function verifyMergedPullRequest(expected: PullRequest, actual: PullRequest): void {
-  if (
-    actual.state !== "MERGED" ||
-    actual.number !== expected.number ||
-    actual.baseRefName !== expected.baseRefName ||
-    actual.headRefOid !== expected.headRefOid ||
-    actual.headRefName !== expected.headRefName ||
-    actual.isCrossRepository !== false
-  ) {
-    throw new Error(
-      `PR #${expected.number}: merge identity or target changed; refusing cleanup and issue closure`,
-    );
-  }
-}
-
-export const canDeleteBranch = (pr: PullRequest, protectedBranches: ReadonlySet<string>): boolean =>
-  pr.state === "MERGED" && pr.isCrossRepository === false && !protectedBranches.has(pr.headRefName);
 
 const FINDINGS_HEADING = "## Outstanding review findings";
 const FINDINGS_MARKER = "RALPH_FINDINGS";
@@ -268,34 +168,26 @@ export function pullRequestBodyAfterReview(
 async function deleteMergedBranch(
   workspacePath: string,
   repo: string,
-  pullRequest: PullRequest,
-  protectedBranches: ReadonlySet<string>,
+  pullRequestNumber: number,
 ): Promise<void> {
-  if (!canDeleteBranch(pullRequest, protectedBranches)) return;
-  const branch = pullRequest.headRefName;
-  // A lease prevents deleting a branch advanced since the reviewed head was merged.
-  const gitDirectory = (await $`jj -R ${workspacePath} git root`.text()).trim();
-  const remote = (await $`git --git-dir ${gitDirectory} remote get-url origin`.text()).trim();
-  const remoteRepo = (
-    await $`gh repo view ${remote} --json nameWithOwner --jq .nameWithOwner`.text()
-  ).trim();
-  if (remoteRepo.toLowerCase() !== repo.toLowerCase()) {
-    throw new Error("Origin does not identify the merged PR repository; refusing branch deletion");
+  const head = JSON.parse(
+    await $`gh pr view ${pullRequestNumber} -R ${repo} --json headRefName,headRepository`.text(),
+  ) as { headRefName: string; headRepository: { nameWithOwner: string } };
+  const endpoint = `repos/${head.headRepository.nameWithOwner}/git/refs/heads/${head.headRefName}`;
+  const remoteBranch = await $`gh api ${endpoint}`.quiet().nothrow();
+  if (remoteBranch.exitCode === 0) {
+    await $`gh api --method DELETE ${endpoint}`.quiet();
+  } else if (!remoteBranch.stderr.toString().includes("HTTP 404")) {
+    throw new Error(remoteBranch.stderr.toString().trim());
   }
-  const remoteRef = `refs/heads/${branch}`;
-  const exists = (
-    await $`git --git-dir ${gitDirectory} ls-remote --refs ${remote} ${remoteRef}`.text()
+
+  const localBookmark = (
+    await $`jj -R ${workspacePath} bookmark list ${`exact:${head.headRefName}`} -T name`.text()
   ).trim();
-  if (exists) {
-    await $`git --git-dir ${gitDirectory} push ${remote} ${`--force-with-lease=${remoteRef}:${pullRequest.headRefOid}`} ${`:${remoteRef}`}`.quiet();
+  if (localBookmark === head.headRefName) {
+    await $`jj -R ${workspacePath} bookmark delete ${`exact:${head.headRefName}`}`.quiet();
   }
-  const local = (
-    await $`jj -R ${workspacePath} bookmark list ${`exact:${branch}`} -T ${"if(!remote, normal_target.commit_id())"}`.text()
-  ).trim();
-  if (local === pullRequest.headRefOid) {
-    await $`jj -R ${workspacePath} bookmark delete ${`exact:${branch}`}`.quiet();
-  }
-  console.log(`Deleted branch: ${branch}`);
+  console.log(`Deleted branch: ${head.headRefName}`);
 }
 
 const ISSUE_FIELDS = "number,title,url,state,blockedBy,closedByPullRequestsReferences";
@@ -324,33 +216,12 @@ async function listIssues(
   );
 }
 
-const PR_FIELDS = "number,state,url,body,headRefOid,headRefName,baseRefName,isCrossRepository";
-
-async function readPullRequest(repo: string, number: number): Promise<PullRequest> {
-  return JSON.parse(await $`gh pr view ${number} -R ${repo} --json ${PR_FIELDS}`.text());
-}
-
-async function listOpenPullRequests(repo: string, base: string): Promise<PullRequest[]> {
-  // Closing links are absent on non-default bases; inspect all open PRs on the intended base.
-  const pages = JSON.parse(
-    await $`gh api --paginate ${`repos/${repo}/pulls?state=open&base=${encodeURIComponent(base)}&per_page=100`} --slurp`.text(),
-  ) as Array<Array<{ number: number }>>;
-  return Promise.all(pages.flat().map(({ number }) => readPullRequest(repo, number)));
-}
-
-const implementPrompt = (
-  repo: string,
-  reviewBase: string,
-  prBase: string,
-  issueNumber: number,
-): string =>
+const implementPrompt = (repo: string, reviewBase: string, issueNumber: number): string =>
   `/skill:implement Implement ${issueNumber} in ${repo}.
-
-This is an unattended, non-interactive run: no user is available to answer questions. Proceed with reasonable assumptions grounded in the issue and repository, and record consequential assumptions in your final response before the findings block. For this run, choose appropriate existing test seams without user confirmation; this overrides skills' requirements to ask for seam approval. Do not stop to request clarification or approval. If a genuine blocker prevents safe completion, report the blocker and what is needed to proceed instead of asking a question; do not fabricate a PR or review verdict.
 
 Use ${reviewBase} as the review base. This is a jj-backed repository, so prefer jj for version-control operations.
 
-After the skill's implementation and review cycle, push the change and open a pull request targeting exactly ${prBase} (gh pr create --base ${prBase}). Do not merge, close issues, or delete branches yourself. Review the final pushed head, and report that exact PR number and full 40-character head commit ID below.
+After the skill's implementation and review cycle, push the change and open a pull request.
 
 # Pull request body
 
@@ -393,9 +264,9 @@ End with the findings block, then the verdict, and nothing after it:
 
 RALPH_FINDINGS
 <the findings, or nothing when the review approved>
-RALPH_REVIEW: APPROVED PR #<number> HEAD <full commit ID>
+RALPH_REVIEW: APPROVED
 
-The last line uses APPROVED or CHANGES REQUESTED, followed by the exact PR number and reviewed HEAD as shown. Emit only one RALPH_REVIEW line.`;
+The last line reads exactly \`RALPH_REVIEW: APPROVED\` or exactly \`RALPH_REVIEW: CHANGES REQUESTED\`.`;
 
 async function prepareExtensionRuntime(options: RunOptions): Promise<ReadonlyArray<string>> {
   if (!options.extensionSnapshot) return ["--approve", "--yolo"];
@@ -467,7 +338,7 @@ async function runPi(
 async function main() {
   const options = parseRunOptions(process.argv.slice(2));
   const { issueLimit, issues: requestedIssues, jobs } = options;
-  for (const command of ["bun", "gh", "git", "jj", "pi"]) {
+  for (const command of ["bun", "gh", "jj", "pi"]) {
     if (!Bun.which(command)) throw new Error(`Missing required command: ${command}`);
   }
   if (!(await Bun.file(IMPLEMENT_SKILL).exists())) {
@@ -477,22 +348,9 @@ async function main() {
     await $`gh repo view --json nameWithOwner,defaultBranchRef`.text(),
   ) as { nameWithOwner: string; defaultBranchRef: { name: string } };
   const repo = repository.nameWithOwner;
-  const base = targetBranch(options, repository.defaultBranchRef.name);
+  const base = repository.defaultBranchRef.name;
   const workBaseRef = options.workBaseRef ?? `${base}@origin`;
-  const protectedBranches = new Set([
-    base,
-    repository.defaultBranchRef.name,
-    workBaseRef.replace(/@origin$/, ""),
-    options.extensionRef.replace(/@origin$/, ""),
-  ]);
-  // Validate the branch independently of the arbitrary jj workspace revision.
-  await $`gh api ${`repos/${repo}/branches/${encodeURIComponent(base)}`}`.quiet();
   await $`jj git fetch --remote origin`.quiet();
-  for (const name of (await $`jj bookmark list --all-remotes -T ${'name ++ "\\n"'}`.text())
-    .trim()
-    .split("\n")) {
-    protectedBranches.add(name);
-  }
   const piArgs = await prepareExtensionRuntime(options);
   const repoRoot = (await $`jj workspace root`.text()).trim();
   const workspaceParent = join(dirname(repoRoot), `.${basename(repoRoot)}-workspaces`);
@@ -517,8 +375,7 @@ async function main() {
         }),
       ),
     );
-    const openPullRequests = await listOpenPullRequests(repo, base);
-    const eligible = selectCandidates(issues, attempted, openPullRequests).sort(
+    const eligible = selectCandidates(issues, attempted).sort(
       (left, right) => left.number - right.number,
     );
     const skipped = requestedIssues.filter(
@@ -549,17 +406,7 @@ async function main() {
         const workspaceName = `${issue.number}-${process.pid}`;
         const workspacePath = join(workspaceParent, workspaceName);
         await mkdir(workspaceParent, { recursive: true });
-        const startingBase = (
-          await $`jj log -r ${workBaseRef} --no-graph -T commit_id`.text()
-        ).trim();
-        if (!/^[a-f0-9]{40}$/.test(startingBase))
-          throw new Error("Workspace base must resolve to one commit");
-        const preexisting = new Set(
-          (await $`jj log -r ${"all()"} --no-graph -T ${'commit_id ++ "\\n"'}`.text())
-            .trim()
-            .split("\n"),
-        );
-        await $`jj workspace add --name ${workspaceName} -r ${startingBase} ${workspacePath}`.quiet();
+        await $`jj workspace add --name ${workspaceName} -r ${workBaseRef} ${workspacePath}`.quiet();
 
         let finished = false;
         try {
@@ -574,31 +421,41 @@ async function main() {
             workspacePath,
             piArgs,
             `issue #${issue.number}`,
-            implementPrompt(repo, startingBase, base, issue.number),
+            implementPrompt(repo, workBaseRef, issue.number),
           );
 
-          const newWorkspaceCommitIds = await workspaceChangeIds(
-            workspacePath,
-            startingBase,
-            preexisting,
+          const linkedPullRequests = JSON.parse(
+            await $`gh issue view ${issue.number} -R ${repo} --json closedByPullRequestsReferences --jq .closedByPullRequestsReferences`.text(),
+          ) as ReadonlyArray<{ number: number }>;
+          let repositoryPullRequests: ReadonlyArray<{ number: number; headRefOid: string }> = [];
+          let workspaceCommitIds = new Set<string>();
+          if (linkedPullRequests.length === 0) {
+            const commitIds =
+              await $`jj -R ${workspacePath} log -r ${`${base}@origin..@`} --no-graph -T ${'commit_id ++ "\\n"'}`.text();
+            workspaceCommitIds = new Set(commitIds.trim().split("\n").filter(Boolean));
+            repositoryPullRequests = JSON.parse(
+              await $`gh pr list -R ${repo} --base ${base} --state all --limit 1000 --json number,headRefOid`.text(),
+            ) as ReadonlyArray<{ number: number; headRefOid: string }>;
+          }
+          const reference = pullRequestReference(
+            linkedPullRequests,
+            repositoryPullRequests,
+            workspaceCommitIds,
           );
-          const identified = pullRequestReference(
-            await listOpenPullRequests(repo, base),
-            issue.number,
-            base,
-            newWorkspaceCommitIds,
-            piOutput,
-            protectedBranches,
-          );
-          // Revalidate fresh metadata before the first mutation. The merge also has a head lease.
-          const pullRequest = pullRequestReference(
-            [await readPullRequest(repo, identified.number)],
-            issue.number,
-            base,
-            newWorkspaceCommitIds,
-            piOutput,
-            protectedBranches,
-          );
+          if (!reference) {
+            throw new Error(
+              `Issue #${issue.number} has no pull request after Pi finished\n\nPi output:\n${piOutput.trim() || "(none)"}`,
+            );
+          }
+          const pullRequest = JSON.parse(
+            await $`gh pr view ${reference.number} -R ${repo} --json number,state,url,body,headRefOid`.text(),
+          ) as {
+            body: string;
+            headRefOid: string;
+            number: number;
+            state: string;
+            url: string;
+          };
           const updatedBody = pullRequestBodyAfterReview(
             issue.number,
             pullRequest.state,
@@ -612,22 +469,19 @@ async function main() {
           console.log(`Pull request #${pullRequest.number}: ${pullRequest.url}`);
           console.log(reviewReport(pullRequest.state, piOutput));
           if (shouldMergePullRequest(pullRequest.state, piOutput)) {
-            pullRequestReference(
-              [await readPullRequest(repo, pullRequest.number)],
-              issue.number,
-              base,
-              newWorkspaceCommitIds,
-              piOutput,
-              protectedBranches,
-            );
             await $`gh pr merge ${pullRequest.number} -R ${repo} --rebase --match-head-commit ${pullRequest.headRefOid}`.quiet();
-            const merged = await readPullRequest(repo, pullRequest.number);
-            verifyMergedPullRequest(pullRequest, merged);
-            console.log(`Merged pull request #${pullRequest.number}.`);
-            if (base !== repository.defaultBranchRef.name) {
-              await $`gh issue close ${issue.number} -R ${repo}`.quiet();
+            const mergedState = (
+              await $`gh pr view ${pullRequest.number} -R ${repo} --json state --jq .state`.text()
+            ).trim();
+            if (mergedState !== "MERGED") {
+              throw new Error(
+                `Pull request #${pullRequest.number} is ${mergedState.toLowerCase()} after the merge command`,
+              );
             }
-            await deleteMergedBranch(workspacePath, repo, merged, protectedBranches);
+            console.log(`Merged pull request #${pullRequest.number}.`);
+            await deleteMergedBranch(workspacePath, repo, pullRequest.number);
+          } else if (pullRequest.state === "MERGED") {
+            await deleteMergedBranch(workspacePath, repo, pullRequest.number);
           }
           finished = true;
         } finally {

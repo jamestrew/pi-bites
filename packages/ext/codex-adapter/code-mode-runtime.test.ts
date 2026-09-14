@@ -113,6 +113,41 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
+test("native namespaces retain normalized JavaScript names alongside ordinary tools", async () => {
+  const host = runtime({
+    tools: [
+      {
+        ...tool("multi_agent_v1__spawn_agent", async (input) => ({ agent: input })),
+        toolName: { namespace: "multi_agent_v1", name: "spawn_agent" },
+      },
+      {
+        ...tool("other__spawn_agent", async () => "other namespace"),
+        toolName: { namespace: "other", name: "spawn_agent" },
+      },
+      tool("spawn_agent", async () => "ordinary tool"),
+    ],
+  });
+  expect(
+    await host.execute(`
+text(ALL_TOOLS.map(t => t.name));
+text(await tools.multi_agent_v1__spawn_agent({task:"test"}));
+text(await tools.other__spawn_agent({}));
+text(await tools.spawn_agent({}));
+`),
+  ).toMatchObject({
+    kind: "result",
+    contentItems: [
+      {
+        type: "input_text",
+        text: '["multi_agent_v1__spawn_agent","other__spawn_agent","spawn_agent"]',
+      },
+      { type: "input_text", text: '{"agent":{"task":"test"}}' },
+      { type: "input_text", text: "other namespace" },
+      { type: "input_text", text: "ordinary tool" },
+    ],
+  });
+});
+
 test("caught individual rejection and allSettled allow siblings; unhandled aggregate finalization cancels them", async () => {
   const aborted: AbortSignal[] = [];
   const host = runtime({

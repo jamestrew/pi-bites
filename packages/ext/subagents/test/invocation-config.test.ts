@@ -4,7 +4,7 @@ import type { AgentConfig } from "../types.js";
 
 function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
-    name: "explore",
+    name: "explorer",
     description: "Explore",
     builtinToolNames: ["read"],
     extensions: [],
@@ -23,7 +23,7 @@ describe("resolveAgentInvocationConfig", () => {
       }),
       {
         model: "provider/param-model",
-        thinking: "minimal",
+        reasoning_effort: "minimal",
       },
     );
 

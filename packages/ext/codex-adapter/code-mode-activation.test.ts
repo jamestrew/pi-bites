@@ -4,6 +4,7 @@ import {
   reconcileTools,
   createAdapterToolState,
   getNestedTools,
+  getDelegationTools,
 } from "./activation.js";
 
 test("only GPT-5.6/GPT-6 families and recognized prefixes enter Code Mode", () => {
@@ -159,4 +160,64 @@ test("re-enabling exec honors core capabilities removed while it was disabled", 
   );
   expect(reconcileTools([...readonly, "exec"], true, state)).toEqual(["read", "exec", "wait"]);
   expect([...getNestedTools(state)]).toEqual([]);
+});
+
+test("delegation snapshots recover permitted capabilities without changing parent exposure", () => {
+  const state = createAdapterToolState();
+  const selected = [
+    "read",
+    "bash",
+    "custom",
+    "exec",
+    "wait",
+    "exec_command",
+    "write_stdin",
+    "apply_patch",
+  ];
+  const active = reconcileTools(selected, true, state);
+  expect(active).toEqual(["exec", "wait", "custom"]);
+  const before = structuredClone(state);
+  const allowed = getDelegationTools(active, state);
+  expect(allowed).toEqual(
+    expect.arrayContaining([
+      "read",
+      "bash",
+      "custom",
+      "exec",
+      "wait",
+      "exec_command",
+      "write_stdin",
+    ]),
+  );
+  expect(allowed).not.toContain("edit");
+  expect(allowed).not.toContain("write");
+  expect(allowed).not.toContain("apply_patch");
+  expect(state).toEqual(before);
+  const outside = reconcileTools(active, false, state);
+  expect(getDelegationTools(outside, state)).toEqual(expect.arrayContaining(allowed));
+});
+
+test("selected collaboration has one surface and restores direct controls when either outer control disappears", () => {
+  const state = createAdapterToolState(["spawn_agent", "wait_agent", "send_input"]);
+  const selected = ["custom", "spawn_agent", "wait_agent", "exec", "wait"];
+  const nested = reconcileTools(selected, true, state);
+  expect(nested).toEqual(["custom", "exec", "wait"]);
+  expect([...getNestedTools(state)]).toEqual([
+    "multi_agent_v1__spawn_agent",
+    "multi_agent_v1__wait_agent",
+  ]);
+  expect(getDelegationTools(nested, state)).toContain("spawn_agent");
+  expect(getDelegationTools(nested, state)).not.toContain("send_input");
+  expect(reconcileTools(nested, false, state)).toEqual(["custom", "spawn_agent", "wait_agent"]);
+  const again = reconcileTools(["custom", "spawn_agent", "wait_agent"], true, state);
+  const fallback = reconcileTools(
+    again.filter((name) => name !== "wait"),
+    true,
+    state,
+  );
+  expect(fallback).toEqual(["custom", "spawn_agent", "wait_agent", "exec"]);
+  expect([...getNestedTools(state)]).toEqual([]);
+  const disabled = fallback.filter((name) => name !== "spawn_agent");
+  reconcileTools([...disabled, "wait"], true, state);
+  expect([...getNestedTools(state)]).toEqual(["multi_agent_v1__wait_agent"]);
 });

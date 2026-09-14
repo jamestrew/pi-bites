@@ -6,7 +6,9 @@ import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { onSubagentApprovalRequest } from "../../bash-gate/events.js";
-import { runAgent } from "../agent-runner.js";
+import { createSubagentEventBus } from "../subagent-event-bus.js";
+import { openAgentSession } from "../agent-runner.js";
+import { shutdownAgentSession } from "../agent-session-shutdown.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -20,6 +22,7 @@ function makePi() {
 describe("embedded agent runner (real pi session)", () => {
   let cwd: string;
   let faux: ReturnType<typeof registerFauxProvider>;
+  const sessions: Awaited<ReturnType<typeof openAgentSession>>[] = [];
 
   beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), "subagents-e2e-"));
@@ -29,13 +32,18 @@ describe("embedded agent runner (real pi session)", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const session of sessions.splice(0)) await shutdownAgentSession(session);
     faux.unregister();
     rmSync(cwd, { recursive: true, force: true });
   });
 
   async function runGeneral(
-    options: { pi?: ReturnType<typeof makePi>; capture?: (session: any) => void } = {},
+    options: {
+      pi?: ReturnType<typeof makePi>;
+      capture?: (session: any) => void;
+      isolated?: boolean;
+    } = {},
   ): Promise<string[]> {
     const model = faux.getModel();
     const ctx: any = {
@@ -58,62 +66,64 @@ describe("embedded agent runner (real pi session)", () => {
     };
 
     let active: string[] = [];
-    try {
-      await runAgent(ctx, "general", "go", {
-        pi: options.pi ?? makePi(),
-        messageParent: () => false,
-        agentId: "e2e-agent",
-        model,
-        onSessionCreated: (session) => {
-          active = session.getActiveToolNames();
-          options.capture?.(session);
-        },
-      });
-    } catch {
-      // The active tool set is fixed before the intentionally unconfigured prompt turn.
-    }
+    const session = await openAgentSession(ctx, "worker", {
+      pi: options.pi ?? makePi(),
+      isolated: options.isolated,
+      agentId: "e2e-agent",
+      model,
+      onSessionCreated: (session) => {
+        active = session.getActiveToolNames();
+        options.capture?.(session);
+      },
+    });
+    sessions.push(session);
     return active;
   }
 
-  it("constructs the real child with the embedded general tools and only MessageAgent", async () => {
-    let session: any;
-    const active = await runGeneral({ capture: (created) => (session = created) });
+  it.each([false, true])(
+    "constructs a raw child (isolated=%s) without collaboration tools",
+    async (isolated) => {
+      let session: any;
+      const active = await runGeneral({ isolated, capture: (created) => (session = created) });
 
-    expect(active).toEqual(
-      expect.arrayContaining(["read", "bash", "edit", "write", "MessageAgent"]),
-    );
-    expect(active).not.toContain("Agent");
-    expect(active).not.toContain("WaitAgent");
-    const definition = session.getToolDefinition("MessageAgent");
-    expect(definition.parameters.required).toEqual(["message"]);
-    expect(Object.keys(definition.parameters.properties)).toEqual(["message"]);
-    expect(definition.parameters.additionalProperties).toBe(false);
-  });
+      expect(active).toEqual(expect.arrayContaining(["read", "bash", "edit", "write"]));
+      expect(active).not.toContain("spawn_agent");
+      expect(active).not.toContain("wait_agent");
+      for (const name of ["send_input", "close_agent", "resume_agent", "MessageAgent"]) {
+        expect(active).not.toContain(name);
+        expect(session.getToolDefinition(name)).toBeUndefined();
+      }
+    },
+  );
 
-  it("routes a real child bash gate to the parent approval broker", async () => {
-    const pi = makePi();
-    const approve = vi.fn(async () => ({
-      outcome: "allow" as const,
-      authorization: "human-approved" as const,
-    }));
-    const unsubscribe = onSubagentApprovalRequest(pi, approve);
-    let session: any;
+  it.each([false, true])(
+    "routes a real child bash gate through the root broker (grandchild=%s)",
+    async (grandchild) => {
+      const pi = makePi();
+      const approve = vi.fn(async () => ({
+        outcome: "allow" as const,
+        authorization: "human-approved" as const,
+      }));
+      const unsubscribe = onSubagentApprovalRequest(pi, approve);
+      let session: any;
 
-    try {
-      await runGeneral({ pi, capture: (created) => (session = created) });
-      const result = await session._extensionRunner.emitToolCall({
-        type: "tool_call",
-        toolName: "bash",
-        toolCallId: "gate-e2e",
-        input: { command: "rm -rf tmp" },
-      });
+      try {
+        const parentPi = grandchild ? { ...pi, events: createSubagentEventBus(pi.events) } : pi;
+        await runGeneral({ pi: parentPi, capture: (created) => (session = created) });
+        const result = await session._extensionRunner.emitToolCall({
+          type: "tool_call",
+          toolName: "bash",
+          toolCallId: "gate-e2e",
+          input: { command: "rm -rf tmp" },
+        });
 
-      expect(result).toBeUndefined();
-      expect(approve).toHaveBeenCalledWith(
-        expect.objectContaining({ agentId: "e2e-agent", command: "rm -rf tmp" }),
-      );
-    } finally {
-      unsubscribe();
-    }
-  });
+        expect(result).toBeUndefined();
+        expect(approve).toHaveBeenCalledWith(
+          expect.objectContaining({ agentId: "e2e-agent", command: "rm -rf tmp" }),
+        );
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
 });

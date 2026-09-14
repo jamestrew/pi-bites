@@ -1,3 +1,4 @@
+import { registerChildSendInput } from "./helpers/child-send-input.js";
 /**
  * fleet-wiring.test.ts — end-to-end wiring of the FleetView through the REAL
  * extension (src/index.ts), not the FleetList class in isolation.
@@ -51,6 +52,13 @@ function makePi() {
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getThinkingLevel: vi.fn(() => "off"),
+    getActiveTools: vi.fn(() => [
+      "spawn_agent",
+      "send_input",
+      "wait_agent",
+      "close_agent",
+      "resume_agent",
+    ]),
   } as any;
   return { pi, tools, lifecycle };
 }
@@ -102,6 +110,7 @@ function ctxWith(ui: ReturnType<typeof uiCtx>) {
     ui,
     cwd: process.cwd(),
     model: undefined,
+    scopedModels: [],
     modelRegistry: {
       find: vi.fn(),
       getAvailable: vi.fn(() => []),
@@ -193,7 +202,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r-yolo", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-yolo",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -225,7 +234,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r-switch", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-switch",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -249,7 +258,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r-manual", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-manual",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -321,21 +330,21 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
     const spawn = await tools
-      .get("Agent")
+      .get("spawn_agent")
       .execute(
         "tc",
-        { prompt: "go", description: "stable manual row", subagent_type: "general" },
+        { message: "stable manual row", agent_type: "worker" },
         undefined,
         undefined,
         ctx,
       );
-    const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
+    const agentId = JSON.parse(textOf(spawn)).agent_id;
 
     pi.events.emit("bites:bash_gate", { requiresHuman: false });
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-manual-pending",
       agentId,
-      title: "general",
+      title: "worker",
       command: "git push origin main",
       labels: ["git push"],
       reasons: [],
@@ -363,7 +372,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r1", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r1",
-      title: "general",
+      title: "worker",
       command: "git commit -m test",
       labels: ["git commit"],
       reasons: [],
@@ -402,7 +411,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-session-change",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -431,21 +440,21 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
     const spawn = await tools
-      .get("Agent")
+      .get("spawn_agent")
       .execute(
         "tc",
-        { prompt: "go", description: "stable Automode row", subagent_type: "general" },
+        { message: "stable Automode row", agent_type: "worker" },
         undefined,
         undefined,
         ctx,
       );
-    const agentId = textOf(spawn).match(/Agent ID: ([\w-]+)/)?.[1];
+    const agentId = JSON.parse(textOf(spawn)).agent_id;
 
     pi.events.emit("bites:bash_gate", { requiresHuman: false });
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-automode-pending",
       agentId,
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -471,14 +480,8 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ctx = ctxWith(ui);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
     await tools
-      .get("Agent")
-      .execute(
-        "tc",
-        { prompt: "go", description: "viewed agent", subagent_type: "general-purpose" },
-        undefined,
-        undefined,
-        ctx,
-      );
+      .get("spawn_agent")
+      .execute("tc", { message: "viewed agent", agent_type: "worker" }, undefined, undefined, ctx);
 
     expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
     expect(ui.press("\r")).toEqual({ consume: true });
@@ -512,7 +515,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r-deny", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-deny",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -539,7 +542,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r-failure", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-failure",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -581,7 +584,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r-override", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-override",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -631,7 +634,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     pi.events.on("subagents:bash_gate:approval:reply:r-ui-failure", reply);
     pi.events.emit("subagents:bash_gate:approval", {
       requestId: "r-ui-failure",
-      title: "general",
+      title: "worker",
       command: "rm build.txt",
       labels: ["rm"],
       reasons: [],
@@ -653,7 +656,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
       childManager.appendCustomEntry("pi-bites:subagent", {
         agentId: options.agentId,
-        type: "general",
+        type: "worker",
         title: "review context",
         bashGatePolicy: "prompt",
       });
@@ -713,12 +716,11 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ui = uiCtx();
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
-    await tools.get("Agent").execute(
+    await tools.get("spawn_agent").execute(
       "tc",
       {
-        prompt: "go",
-        description: "review context",
-        subagent_type: "general",
+        message: "review context",
+        agent_type: "worker",
       },
       undefined,
       undefined,
@@ -796,12 +798,11 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ui = uiCtx();
     const ctx = ctxWith(ui);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
-    await tools.get("Agent").execute(
+    await tools.get("spawn_agent").execute(
       "tc",
       {
-        prompt: "go",
-        description: "live one",
-        subagent_type: "general",
+        message: "live one",
+        agent_type: "worker",
       },
       undefined,
       undefined,
@@ -833,14 +834,8 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ctx = ctxWith(ui);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
     await tools
-      .get("Agent")
-      .execute(
-        "tc",
-        { prompt: "go", description: "live one", subagent_type: "general-purpose" },
-        undefined,
-        undefined,
-        ctx,
-      );
+      .get("spawn_agent")
+      .execute("tc", { message: "live one", agent_type: "worker" }, undefined, undefined, ctx);
     const humanGate = (waitId: string) => ({
       cwd: process.cwd(),
       command: "rm build.txt",
@@ -877,18 +872,17 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ui = uiCtx();
     await lifecycle.get("tool_execution_start")?.({}, ctxWith(ui)); // fleet captures THIS ui
 
-    const spawn = await tools.get("Agent").execute(
+    const spawn = await tools.get("spawn_agent").execute(
       "tc",
       {
-        prompt: "go",
-        description: "live one",
-        subagent_type: "general",
+        message: "live one",
+        agent_type: "worker",
       },
       undefined,
       undefined,
       ctxWith(uiCtx()),
     );
-    expect(textOf(spawn)).toMatch(/Agent ID:/);
+    expect(JSON.parse(textOf(spawn)).agent_id).toBeTruthy();
     await flush(); // completion → fleet.onAgentFinished → update → widget registers
 
     const fleetRegs = ui.setWidget.mock.calls.filter(
@@ -905,7 +899,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("keeps a finished agent visible until its deferred final is delivered", async () => {
     vi.useFakeTimers();
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     let finish!: (value: any) => void;
     const { pi, tools, lifecycle } = makePi();
     const ui = uiCtx();
@@ -913,7 +907,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     try {
       vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-        messageParent = options.messageParent;
+        sendInput = registerChildSendInput(options, ctx);
         return new Promise((resolve) => {
           finish = resolve;
         });
@@ -923,18 +917,17 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       await lifecycle.get("tool_execution_start")?.({}, ctx);
       lifecycle.get("agent_start")?.({}, ctx);
 
-      await tools.get("Agent").execute(
+      await tools.get("spawn_agent").execute(
         "tc",
         {
-          prompt: "go",
-          description: "still delivering",
-          subagent_type: "general",
+          message: "still delivering",
+          agent_type: "worker",
         },
         undefined,
         undefined,
         ctx,
       );
-      expect(messageParent?.("progress")).toBe(true);
+      await expect(sendInput("progress")).resolves.toMatchObject({ details: { status: "queued" } });
       finish({ responseText: "done", session: { dispose: vi.fn() } as any });
       await vi.advanceTimersByTimeAsync(1_000);
 

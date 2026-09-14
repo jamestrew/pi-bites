@@ -1,11 +1,33 @@
 import { buildDoneStats } from "./ui/tool-call-format.js";
 import { type AgentDetails, formatTokens } from "./ui/agent-format.js";
 import { getLifetimeTotal, type LifetimeUsage } from "./usage.js";
-import type { AgentRecord } from "./types.ts";
+import type { AgentRecord, WaitAgentStatus } from "./types.ts";
 
 /** Tool execute return value for a text response. */
 export function textResult<const TDetails = AgentDetails>(msg: string, details?: TDetails) {
   return { content: [{ type: "text" as const, text: msg }], details };
+}
+
+/** Model payload and display details travel separately across direct/nested transports. */
+export type SubagentPayload =
+  | { agent_id: string; nickname: string | null }
+  | { submission_id: string }
+  | { status: Record<string, WaitAgentStatus>; timed_out: boolean }
+  | { previous_status: WaitAgentStatus }
+  | { status: WaitAgentStatus };
+
+export function v1Result<D>(value: SubagentPayload, details: D) {
+  return { ...textResult(JSON.stringify(value), details), value };
+}
+
+export class SubagentOperationError extends Error {
+  constructor(
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "SubagentOperationError";
+  }
 }
 
 /** Format an agent's lifetime token total, or "" when zero. */

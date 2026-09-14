@@ -32,7 +32,11 @@ describe("cross-extension RPC", () => {
 
   beforeEach(() => {
     events = createEventBus();
-    manager = { spawn: vi.fn().mockReturnValue("agent-42"), abort: vi.fn().mockReturnValue(true) };
+    manager = {
+      spawn: vi.fn().mockReturnValue("agent-42"),
+      abort: vi.fn().mockReturnValue(true),
+      close: vi.fn().mockResolvedValue({ completed: "done" }),
+    };
     ctx = { session: true };
     deps = { events, pi: { events }, getCtx: () => ctx, manager };
   });
@@ -82,13 +86,13 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-s1", reply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-s1",
-        type: "general-purpose",
+        type: "worker",
         prompt: "do stuff",
       });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(reply).toHaveBeenCalledWith({ success: true, data: { id: "agent-42" } });
-      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "general-purpose", "do stuff", {
+      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "worker", "do stuff", {
         description: "",
       });
     });
@@ -144,7 +148,7 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-s3", reply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-s3",
-        type: "general-purpose",
+        type: "worker",
         prompt: "x",
       });
 
@@ -178,7 +182,7 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-s5", rightReply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-s5",
-        type: "general-purpose",
+        type: "worker",
         prompt: "x",
       });
 
@@ -194,7 +198,7 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-s6", reply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-s6",
-        type: "general-purpose",
+        type: "worker",
         prompt: "x",
       });
 
@@ -254,6 +258,66 @@ describe("cross-extension RPC", () => {
     });
   });
 
+  describe("close RPC", () => {
+    it("returns the previous status without invoking stop or requiring a session", async () => {
+      ctx = undefined;
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:close:reply:close-1", reply);
+      events.emit("subagents:rpc:close", { requestId: "close-1", agentId: "agent-42" });
+
+      await vi.waitFor(() =>
+        expect(reply).toHaveBeenCalledWith({
+          success: true,
+          data: { previous_status: { completed: "done" } },
+        }),
+      );
+      expect(manager.close).toHaveBeenCalledWith("agent-42");
+      expect(manager.abort).not.toHaveBeenCalled();
+    });
+
+    it.each([undefined, 42])("rejects invalid agentId %s", async (agentId) => {
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:close:reply:invalid", reply);
+      events.emit("subagents:rpc:close", { requestId: "invalid", agentId });
+      await vi.waitFor(() =>
+        expect(reply).toHaveBeenCalledWith({
+          success: false,
+          error: "Close RPC requires string agentId",
+        }),
+      );
+      expect(manager.close).not.toHaveBeenCalled();
+    });
+
+    it("returns asynchronous manager errors on the scoped reply channel", async () => {
+      vi.mocked(manager.close).mockRejectedValue(new Error("agent with id missing not found"));
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      const other = vi.fn();
+      events.on("subagents:rpc:close:reply:missing", reply);
+      events.on("subagents:rpc:close:reply:other", other);
+      events.emit("subagents:rpc:close", { requestId: "missing", agentId: "missing" });
+      await vi.waitFor(() =>
+        expect(reply).toHaveBeenCalledWith({
+          success: false,
+          error: "agent with id missing not found",
+        }),
+      );
+      expect(other).not.toHaveBeenCalled();
+    });
+
+    it("unsubscribes close requests", async () => {
+      registerRpcHandlers(deps).unsubClose();
+      const reply = vi.fn();
+      events.on("subagents:rpc:close:reply:closed", reply);
+      events.emit("subagents:rpc:close", { requestId: "closed", agentId: "agent-42" });
+      await Promise.resolve();
+      expect(manager.close).not.toHaveBeenCalled();
+      expect(reply).not.toHaveBeenCalled();
+    });
+  });
+
   // --- concurrent requests ---
 
   describe("concurrent requests", () => {
@@ -303,14 +367,14 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-m1", reply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-m1",
-        type: "general-purpose",
+        type: "worker",
         prompt: "x",
         options: { model: "openai-codex/gpt-5.5" },
       });
 
       await vi.waitFor(() => expect(reply).toHaveBeenCalled());
       expect(reply).toHaveBeenCalledWith({ success: true, data: { id: "agent-42" } });
-      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "general-purpose", "x", {
+      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "worker", "x", {
         description: "",
         model: fakeModel,
       });
@@ -322,7 +386,7 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-m2", reply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-m2",
-        type: "general-purpose",
+        type: "worker",
         prompt: "x",
         options: { model: fakeModel },
       });
@@ -341,7 +405,7 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-m3", reply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-m3",
-        type: "general-purpose",
+        type: "worker",
         prompt: "x",
         options: { model: "nope/does-not-exist" },
       });
@@ -360,7 +424,7 @@ describe("cross-extension RPC", () => {
       events.on("subagents:rpc:spawn:reply:req-m4", reply);
       events.emit("subagents:rpc:spawn", {
         requestId: "req-m4",
-        type: "general-purpose",
+        type: "worker",
         prompt: "x",
         options: { model: "openai-codex/gpt-5.5" },
       });

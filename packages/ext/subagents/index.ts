@@ -1,10 +1,14 @@
+import { applyAndEmitLoaded } from "./settings.js";
+import type { AgentRecord } from "./types.js";
+import { SubagentController } from "./operations.js";
 /**
  * pi-agents — A pi extension providing Claude Code-style autonomous sub-agents.
  *
  * Tools:
- *   Agent         — LLM-callable: spawn a sub-agent
- *   WaitAgent     — LLM-callable: wait for selected sub-agents
- *   MessageAgent  — LLM-callable: send a message to a running agent
+ *   spawn_agent   — LLM-callable: spawn a sub-agent
+ *   wait_agent    — LLM-callable: wait for selected sub-agents
+ *   send_input    — LLM-callable: send input to a running sub-agent
+ *   close_agent   — LLM-callable: close a retained sub-agent
  *
  * Commands:
  *   /agents                 — Interactive agent management menu
@@ -12,11 +16,7 @@
 
 import { withApprovalDialog, waitForAuthorization } from "../bash-gate/pending.js";
 import { randomUUID } from "node:crypto";
-import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  type SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
@@ -24,11 +24,12 @@ import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
-import { createSubagentMessenger } from "./subagent-messages.js";
-import { registerAgentTool } from "./register-agent-tool.js";
-import { registerMessageAgent } from "./register-message-agent.js";
-import { registerWaitAgent } from "./register-wait-agent.js";
-import { type ToolDescriptionMode } from "./settings.js";
+import { createSubagentMessenger, bindSubagentMessenger } from "./subagent-messages.js";
+import { createAgentTool } from "./register-agent-tool.js";
+import { createResumeAgent } from "./register-resume-agent.js";
+import { createCloseAgent } from "./register-close-agent.js";
+import { createSendInput } from "./register-send-input.js";
+import { createWaitAgent } from "./register-wait-agent.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
@@ -47,33 +48,50 @@ import {
 
 // ---- Shared helpers ----
 
-export default function (
+export function createSubagents(
   pi: ExtensionAPI,
   autoMode?: Pick<AutoModeController, "isEnabled" | "review">,
   bashGate?: Pick<BashGateController, "isYolo">,
   getAutoCompactionThreshold?: () => number | undefined,
+  getAllowedTools: () => string[] = () => pi.getActiveTools(),
 ) {
   // ---- Register custom notification renderers ----
   registerNotificationRenderer(pi);
   registerSubagentMessageRenderer(pi);
   const parentMessenger = createSubagentMessenger(pi);
+  const deliveries = new Map<
+    string,
+    { pi: ExtensionAPI; messenger: ReturnType<typeof createSubagentMessenger> }
+  >();
+  const childControllers = new Map<string, SubagentController>();
+  const startParentMessenger = bindSubagentMessenger(pi, parentMessenger, (id) => {
+    deliveries.clear();
+    deliveries.set(id, { pi, messenger: parentMessenger });
+  });
 
   // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
+  // Session approvals are scoped to a live child conversation, never its retained id.
+  const parentAllowances = new Map<string, { incarnation?: string; keys: Set<string> }>();
 
   let manager: AgentManager;
   let fleet: FleetList;
+  let operations: SubagentController;
+  let currentSessionToken: object | undefined;
+  const retiredConversations = new WeakSet<AgentRecord>();
   const completion = createAgentCompletionHandler({
     pi,
     getRecord: (id) => manager.getRecord(id),
     onAgentFinishedUI: (id) => {
-      parentAllowances.delete(id);
       agentActivity.delete(id);
       fleet.onAgentFinished(id);
     },
     onAgentResultPendingUI: (id) => fleet.onAgentResultPending(id),
+    shouldNotify: (record) => !retiredConversations.has(record),
+    deliveryPi: (id) => deliveries.get(id)?.pi,
     scheduleAutomatic: (parentSessionId, deliver, cancel) =>
-      parentMessenger.scheduleFinal(parentSessionId, deliver, cancel),
+      deliveries.get(parentSessionId)?.messenger.scheduleFinal(parentSessionId, deliver, cancel) ??
+      false,
   });
 
   manager = new AgentManager(
@@ -83,6 +101,7 @@ export default function (
       // Emit started event when agent transitions to running (including from queue)
       pi.events.emit("subagents:started", {
         id: record.id,
+        generation: record.generation,
         type: record.type,
         description: record.description,
       });
@@ -98,10 +117,61 @@ export default function (
         compactionCount: record.compactionCount,
       });
     },
-    (parentSessionId, sender, message) =>
-      completion.onAgentMessage(sender, message) ||
-      parentMessenger.send(parentSessionId, sender, message),
+    (parentSessionId, sender, message) => {
+      const record = manager.getRecord(sender.id);
+      return (
+        !!record &&
+        !retiredConversations.has(record) &&
+        (deliveries.get(parentSessionId)?.messenger.send(parentSessionId, sender, message) ?? false)
+      );
+    },
     getAutoCompactionThreshold,
+    (record) => {
+      completion.onAgentStatusChanged(record);
+      parentAllowances.delete(record.id);
+      childControllers.get(record.id)?.invalidate();
+    },
+    (record) =>
+      (childPi, getChildTools = () => childPi.getActiveTools()) => {
+        const child = operations.forChild(childPi, record, getChildTools);
+        childControllers.set(record.id, child);
+        const messenger = createSubagentMessenger(childPi);
+        let sessionId: string | undefined;
+        const start = bindSubagentMessenger(childPi, messenger, (id) => {
+          sessionId = id;
+          deliveries.set(id, { pi: childPi, messenger });
+        });
+        childPi.on("session_start", (_event, ctx) => start(ctx));
+        const retireDescendants = async () => {
+          if (!sessionId) return;
+          const descendants = manager
+            .listAgents()
+            .filter(
+              (candidate) =>
+                candidate.id !== record.id &&
+                manager.tree.containsSession(record.id, candidate.parentSessionId),
+            );
+          for (const descendant of descendants) retiredConversations.add(descendant);
+          await Promise.allSettled(descendants.map((descendant) => manager.close(descendant.id)));
+        };
+        childPi.on("session_shutdown", async () => {
+          child.invalidate();
+          messenger.flushForShutdown();
+          messenger.dispose();
+          if (sessionId && deliveries.get(sessionId)?.messenger === messenger)
+            deliveries.delete(sessionId);
+          if (childControllers.get(record.id) === child) childControllers.delete(record.id);
+          await retireDescendants();
+        });
+        childPi.on("session_before_switch", () => child.invalidate());
+        childPi.on("session_tree", async (_event, ctx) => {
+          child.invalidate();
+          messenger.dispose();
+          start(ctx);
+          await retireDescendants();
+        });
+        return child;
+      },
   );
 
   // Expose manager via Symbol.for() global registry for cross-package access.
@@ -118,49 +188,36 @@ export default function (
       options: Parameters<AgentManager["spawn"]>[4],
     ) => manager.spawn(piRef, ctx, type, prompt, options),
     getRecord: (id: string) => manager.getRecord(id),
+    close: (id: string) => manager.close(id),
   });
 
   // --- Cross-extension RPC via pi.events ---
-  const parentAllowances = new Map<string, Set<string>>();
   let approvalOwner = new AbortController();
   let currentCtx: ExtensionContext | undefined;
-  let currentSessionToken: object | undefined;
 
   // Capture ctx from session_start for the RPC spawn handler.
   pi.on("session_start", async (_event, ctx) => {
+    operations.invalidate();
     approvalOwner.abort();
     approvalOwner = new AbortController();
     parentAllowances.clear();
     currentCtx = ctx;
     currentSessionToken = {};
-    // The runtime supplies the concrete manager, but ExtensionContext exposes only its read facade.
-    // Snapshot this documented append operation now so shutdown never touches a stale ctx.
-    const sessionManager = ctx.sessionManager as typeof ctx.sessionManager &
-      Pick<SessionManager, "appendCustomMessageEntry">;
-    parentMessenger.sessionStarted(
-      sessionManager.getSessionId(),
-      (customType, content, display, details) =>
-        sessionManager.appendCustomMessageEntry(customType, content, display, details),
+    applyAndEmitLoaded(
+      {
+        setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
+        setMaxDepth: (n) => manager.tree.setMaxDepth(n),
+        setScopeModels: setScopeModelsEnabled,
+        setFleetView: setFleetViewEnabled,
+      },
+      (event, payload) => pi.events.emit(event, payload),
+      ctx.cwd,
     );
-    manager.clearCompleted();
-  });
-
-  pi.on("agent_start", () => parentMessenger.agentStarted());
-  pi.on("turn_start", () => parentMessenger.turnStarted());
-  pi.on("message_end", (event) => {
-    if (event.message.role === "assistant") {
-      parentMessenger.assistantMessageEnded(
-        !event.message.content.some((part) => part.type === "toolCall"),
-        event.message.stopReason === "aborted",
-      );
-    }
-  });
-  pi.on("turn_end", () => parentMessenger.turnEnded());
-  pi.on("agent_settled", (_event, ctx) => {
-    if (ctx.isIdle()) parentMessenger.agentSettled();
+    startParentMessenger(ctx);
   });
 
   pi.on("session_before_switch", () => {
+    operations.invalidate();
     approvalOwner.abort();
     parentAllowances.clear();
     currentCtx = undefined;
@@ -177,14 +234,27 @@ export default function (
       approvalOwner.signal,
       ...[ctx.signal, request.signal].filter((value): value is AbortSignal => value !== undefined),
     ]);
-    const isAllowed = () =>
-      !!request.agentId &&
-      parentAllowances.get(request.agentId)?.has(request.sessionAllowKey) === true;
+    const hasLiveIncarnation = () =>
+      !request.agentId ||
+      !request.agentSessionId ||
+      manager.getRecord(request.agentId)?.incarnation === request.agentSessionId;
+    const isAllowed = () => {
+      if (!request.agentId || !hasLiveIncarnation()) return false;
+      const allowance = parentAllowances.get(request.agentId);
+      return (
+        allowance?.incarnation === request.agentSessionId &&
+        allowance?.keys.has(request.sessionAllowKey) === true
+      );
+    };
     const rememberAllowance = () => {
-      if (!request.agentId) return;
-      const keys = parentAllowances.get(request.agentId) ?? new Set<string>();
+      if (!request.agentId || !hasLiveIncarnation()) return;
+      const allowance = parentAllowances.get(request.agentId);
+      const keys =
+        allowance?.incarnation === request.agentSessionId && allowance
+          ? allowance.keys
+          : new Set<string>();
       keys.add(request.sessionAllowKey);
-      parentAllowances.set(request.agentId, keys);
+      parentAllowances.set(request.agentId, { incarnation: request.agentSessionId, keys });
     };
     const sessionChanged = (): BashGateApprovalResult | undefined =>
       !signal.aborted && ownerSessionToken && ownerSessionToken === currentSessionToken
@@ -371,6 +441,7 @@ export default function (
     unsubPing: unsubPingRpc,
     unsubSpawn: unsubSpawnRpc,
     unsubStop: unsubStopRpc,
+    unsubClose: unsubCloseRpc,
   } = registerRpcHandlers({
     events: pi.events,
     pi,
@@ -398,12 +469,14 @@ export default function (
 
   // Persist queued parent deliveries before aborting children and tearing down.
   pi.on("session_shutdown", async () => {
+    operations.invalidate();
     approvalOwner.abort();
     parentAllowances.clear();
     currentCtx = undefined;
     currentSessionToken = undefined;
     unsubSpawnRpc();
     unsubStopRpc();
+    unsubCloseRpc();
     unsubPingRpc();
     unsubBashGateApproval();
     unsubBashGateStarted();
@@ -434,41 +507,52 @@ export default function (
     scopeModelsEnabled = enabled;
   }
 
-  // ---- Agent tool description mode ----
-  // "full" (default) keeps the rich Claude Code-style description; "compact"
-  // swaps in a ~75% smaller one for small/local models (#91). Read once at
-  // tool registration — flipping it applies on the next pi session.
-  let toolDescriptionMode: ToolDescriptionMode = "full";
-  function getToolDescriptionMode(): ToolDescriptionMode {
-    return toolDescriptionMode;
-  }
-  function setToolDescriptionMode(mode: ToolDescriptionMode): void {
-    toolDescriptionMode = mode;
-  }
-
   // Grab UI context from first tool execution.
   pi.on("tool_execution_start", async (_event, ctx) => {
     fleet.setUICtx(ctx.ui);
   });
 
-  // ---- Agent tool ----
-  registerAgentTool(pi, {
+  // ---- spawn_agent tool ----
+  const spawn_agent = createAgentTool(pi, {
     manager,
     agentActivity,
     fleet,
     isScopeModelsEnabled,
-    getToolDescriptionMode,
-    setScopeModelsEnabled,
-    setToolDescriptionMode,
-    setFleetViewEnabled,
   });
 
-  // ---- WaitAgent and MessageAgent tools ----
-  registerWaitAgent(pi, {
+  // ---- Agent lifecycle tools ----
+  const wait_agent = createWaitAgent({
     waitFor: completion.waitFor,
     getRecord: (id) => manager.getRecord(id),
   });
-  registerMessageAgent(pi, manager);
+  const send_input = createSendInput(pi, manager);
+  const close_agent = createCloseAgent(manager);
+  const resume_agent = createResumeAgent(
+    pi,
+    manager,
+    isScopeModelsEnabled,
+    () => approvalOwner.signal,
+  );
+  operations = new SubagentController(
+    pi,
+    { spawn_agent, send_input, wait_agent, close_agent, resume_agent },
+    manager,
+    isScopeModelsEnabled,
+    getAllowedTools,
+  );
+  pi.on("session_tree", async (_event, ctx) => {
+    operations.invalidate();
+    approvalOwner.abort();
+    approvalOwner = new AbortController();
+    parentAllowances.clear();
+    currentCtx = ctx;
+    currentSessionToken = {};
+    parentMessenger.dispose();
+    startParentMessenger(ctx);
+    for (const record of manager.listAgents()) retiredConversations.add(record);
+    // Navigation retires live conversations; explicit resume can recover their owned history.
+    await Promise.allSettled(manager.listAgents().map((record) => manager.close(record.id)));
+  });
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {
@@ -477,9 +561,14 @@ export default function (
     getModelLabelFromConfig,
     isScopeModelsEnabled,
     setScopeModelsEnabled,
-    getToolDescriptionMode,
-    setToolDescriptionMode,
     isFleetViewEnabled,
     setFleetViewEnabled,
   });
+  return operations;
+}
+
+export default function registerSubagents(...args: Parameters<typeof createSubagents>) {
+  const controller = createSubagents(...args);
+  controller.registerTools();
+  return controller;
 }

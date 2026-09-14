@@ -1,0 +1,28 @@
+{
+  "repository": "https://github.com/openai/codex",
+  "revision": "25af12f7e61572b0bc18ddb1008be543b91519b0",
+  "tag": "rust-v0.145.0",
+  "sha256": {
+    "codex-rs/core/src/tools/handlers/multi_agents_spec.rs": "e698adc9665fcc73af8a69be901c825308e2b4a3f23a692579a147cb03fffc99",
+    "codex-rs/core/src/tools/handlers/multi_agents.rs": "1f1e4e6d4d075d3387e1b63237730c7e48326ced095fef30a548482ecebb3b04",
+    "codex-rs/core/src/tools/handlers/multi_agents_common.rs": "d9bd47186b25719cbd0666c10a52f372855c506d64d6b6eff9ca2d23f09a34e8",
+    "codex-rs/core/src/tools/handlers/multi_agents/spawn.rs": "0b559e6c89cd4c00c043df94e33337cbd17ae4ba4edfda747a7fbd85c59f3bce",
+    "codex-rs/core/src/tools/handlers/multi_agents/send_input.rs": "b25edeefb8984da3762fcc184be3604d3e7c57bd133785fb52151fc38731adaf",
+    "codex-rs/core/src/tools/handlers/multi_agents/wait.rs": "b933b6b4e7ca84650171dd75d0e9a89d76302b1234cf46c4e41f35fae3979af7",
+    "codex-rs/core/src/tools/handlers/multi_agents/close_agent.rs": "e571a0491adeb26536756152655ae3539d5bcb1e1a847703523ba67a9b74f99e",
+    "codex-rs/core/src/tools/handlers/multi_agents/resume_agent.rs": "d72352c5021116e05a4e1981c6b18da64ec20e398bee7e071874ed2e1f671920",
+    "codex-rs/core/src/session/multi_agents.rs": "a5106a3cf6c6e03000f76fab9e267e9c50b1aaeac08c06b676e73fbe991a4a93",
+    "codex-rs/core/src/agent/role.rs": "b3a3e368aebb7fed05f0c714d4fb4ad4fcbf0f6bd315bcbcf16e58f562ee4ee9",
+    "codex-rs/core/src/agent/builtins/explorer.toml": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "codex-rs/core/src/config/mod.rs": "decf07dfaece3b51b0de530825f47c110e9c5b61ddd1f55352f1b42a1f471015",
+    "codex-rs/core/src/config/agent_roles.rs": "e9746b4e9fbbccbcbd998537b89c3d15634fa6b013b8790450138238a1631772",
+    "codex-rs/core/src/agent/control/spawn.rs": "6dc88447a38e2340615bfa9d80f03bac685c35308447a1626bda91e2d29f93e8",
+    "codex-rs/core/src/tools/spec_plan.rs": "90fe742264c636bfe0d3ddca3035c866b8cbcee0e0947d59c7017167b2eb580a",
+    "codex-rs/core/src/tools/parallel.rs": "fc71a35e5056c51380c81679367eea21b9df75d86d8189922ae35a05f9b9a806",
+    "codex-rs/core/templates/collab/experimental_prompt.md": "6704ebc4ca8914c2ed0ff65706c1f8dd4f681a9ccec4ae7f9008a5f8e1d78cef",
+    "codex-rs/tools/src/code_mode.rs": "6bd472df7d546065bbd1bcfe413dac451c3ba89d2279ebc204ebfa3e20695525",
+    "codex-rs/code-mode-protocol/src/description.rs": "b23719ac5f14bf3b14e472348a1fc4eee54d7f181befc44394d163885ff8c012",
+    "LICENSE": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+    "NOTICE": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+  }
+}

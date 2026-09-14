@@ -1,3 +1,7 @@
+import type { CompactionInfo } from "./agent-manager.js";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ToolActivity } from "./agent-runner.js";
+import type { AssistantUsage } from "./usage.js";
 /**
  * types.ts — Type definitions for the subagent system.
  */
@@ -23,7 +27,7 @@ export function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === "string" && THINKING_LEVELS.has(value);
 }
 
-export const SUBAGENT_TYPES = ["general", "explore"] as const;
+export const SUBAGENT_TYPES = ["default", "worker", "explorer"] as const;
 export type SubagentType = (typeof SUBAGENT_TYPES)[number];
 
 export const MISSING_FINAL_RESPONSE_ERROR = "Agent completed without a final response.";
@@ -51,12 +55,18 @@ export interface AgentConfig {
 
 export interface AgentRecord {
   id: string;
+  /** Random token for this live session; a reopened conversation gets a new one. */
+  incarnation?: string;
+  /** Turn generation within this live session. An idle reopen reserves generation 1 for its first input. */
+  generation: number;
   type: SubagentType;
   parentSessionId: string;
+  /** Root conversation trust boundary shared by every descendant. */
+  rootSessionId?: string;
   /** Raw task supplied by the caller, without inherited parent context. */
   prompt: string;
   description: string;
-  status: "queued" | "running" | "completed" | "stopped" | "error";
+  status: "idle" | "queued" | "running" | "completed" | "stopped" | "error";
   result?: string;
   error?: string;
   toolUses: number;
@@ -70,9 +80,13 @@ export interface AgentRecord {
   promise?: Promise<string>;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: string[];
-  /** Message to resume with after cancelling the current operation. */
-  pendingCancelSteer?: string;
-  /** The tool_use_id from the original Agent tool call. */
+  /** Messages to resume with after cancelling the current operation. */
+  pendingCancelSteers?: Array<{
+    message: string;
+    accepted?: boolean;
+    settled: Promise<void>;
+  }>;
+  /** The tool_use_id from the original spawn_agent tool call. */
   toolCallId?: string;
   /**
    * Lifetime usage breakdown, accumulated via `message_end` events. Survives
@@ -106,7 +120,7 @@ export interface AgentFailure {
 
 export interface AgentAbort {
   timestamp: number;
-  source: "stop" | "cancel_and_steer" | "shutdown";
+  source: "stop" | "interrupt" | "cancel_and_steer" | "shutdown";
   reason?: string;
 }
 
@@ -121,7 +135,7 @@ export interface WaitAgentResult {
   id: string;
   type: string;
   description: string;
-  status: AgentRecord["status"];
+  status: AgentRecord["status"] | "not_found";
   result?: string;
   error?: string;
   tool_uses: number;
@@ -148,33 +162,38 @@ export interface WaitAgentSender {
   thinking?: ThinkingLevel;
 }
 
+export type WaitAgentStatus =
+  | "pending_init"
+  | "running"
+  | "interrupted"
+  | "shutdown"
+  | "not_found"
+  | { completed: string | null }
+  | { errored: string };
+
 export type WaitAgentOutcome =
   | {
-      outcome: "message";
+      outcome: "terminal";
       timed_out: false;
-      sender: WaitAgentSender;
-      message: string;
+      status: Record<string, WaitAgentStatus>;
       agents: WaitAgentResult[];
     }
   | {
-      outcome: "terminal" | "cancelled";
+      outcome: "cancelled";
       timed_out: false;
+      status: Record<string, never>;
       agents: WaitAgentResult[];
     }
   | {
       outcome: "timeout";
       timed_out: true;
-      agents: WaitAgentResult[];
-    }
-  | {
-      /** Another delivery path already owns the result; this wait must not duplicate it. */
-      outcome: "delivery_claimed";
-      timed_out: false;
+      status: Record<string, never>;
       agents: WaitAgentResult[];
     }
   | {
       outcome: "error";
       timed_out: false;
+      status: Record<string, never>;
       message: string;
       agents: WaitAgentResult[];
     };
@@ -210,4 +229,37 @@ export interface EnvInfo {
   isGitRepo: boolean;
   branch: string;
   platform: string;
+}
+
+export interface SpawnOptions {
+  description: string;
+  allowedTools?: string[];
+  /** Explicitly wait for another agent to close when capacity is exhausted. */
+  queueIfBusy?: boolean;
+  model?: Model<Api>;
+  isolated?: boolean;
+  thinkingLevel?: ThinkingLevel;
+  /** Copy the active parent conversation into the child session. */
+  forkContext?: boolean;
+  /**
+   * Working directory for the agent (absolute path). Default: parent session
+   * cwd. The agent's tools operate here, but .pi config (extensions, skills,
+   * settings) still loads from the parent session's project — the
+   * target directory's `.pi` extensions never execute.
+   */
+  cwd?: string;
+  /** Resolved invocation snapshot captured for UI display. */
+  invocation?: AgentInvocation;
+  /** Called on tool start/end with activity info (for streaming progress to UI). */
+  onToolActivity?: (activity: ToolActivity) => void;
+  /** Called on streaming text deltas from the assistant response. */
+  onTextDelta?: (delta: string, fullText: string) => void;
+  /** Called when the agent session is created (for accessing session stats). */
+  onSessionCreated?: (session: AgentSession) => void;
+  /** Called at the end of each agentic turn with the cumulative count. */
+  onTurnEnd?: (turnCount: number) => void;
+  /** Called once per assistant message_end with that message's usage delta. */
+  onAssistantUsage?: (usage: AssistantUsage) => void;
+  /** Called when the session successfully compacts. */
+  onCompaction?: (info: CompactionInfo) => void;
 }

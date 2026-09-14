@@ -35,6 +35,13 @@ function makePi() {
       },
       appendEntry: vi.fn(),
       getThinkingLevel: vi.fn(() => "off"),
+      getActiveTools: vi.fn(() => [
+        "spawn_agent",
+        "send_input",
+        "wait_agent",
+        "close_agent",
+        "resume_agent",
+      ]),
       sendMessage: vi.fn(() => {
         throw new Error("stale extension context");
       }),
@@ -50,9 +57,11 @@ function makeHeadlessCtx() {
     ui: {
       setStatus: vi.fn(),
       setWidget: vi.fn(),
+      notify: vi.fn(),
     },
     cwd: "/tmp",
     model: undefined,
+    scopedModels: [],
     modelRegistry: {
       find: vi.fn(),
       getAvailable: vi.fn(() => []),
@@ -83,13 +92,12 @@ describe("print mode completion notifications", () => {
     subagentsExtension(pi);
     handlers.get("session_start")?.({}, makeHeadlessCtx());
 
-    const agentTool = tools.get("Agent");
+    const agentTool = tools.get("spawn_agent");
     await agentTool.execute(
       "tool-call-1",
       {
-        prompt: "reply done",
-        description: "tiny child",
-        subagent_type: "general-purpose",
+        message: "tiny child",
+        agent_type: "worker",
       },
       undefined,
       undefined,

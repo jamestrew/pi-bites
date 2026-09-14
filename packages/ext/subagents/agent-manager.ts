@@ -1,27 +1,25 @@
-/**
- * agent-manager.ts — Tracks concurrent agents, queued execution, and resume support.
- *
- * Agents are subject to a configurable concurrency limit (default: 4).
- * Excess agents are queued and auto-started as running agents complete.
- */
-
+import { AgentTree, getAgentSessionId } from "./agent-tree.js";
+import type { RegisterCollaboration } from "./subagent-context.js";
+import type { SubagentContext } from "./operation-context.js";
 import { randomUUID } from "node:crypto";
-import { statSync } from "node:fs";
-import { isAbsolute } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { resumeAgent, runAgent, type ToolActivity } from "./agent-runner.js";
+import { AgentCloser, type ClosedAgentRecord } from "./agent-close.js";
+import { AgentReopener, type ReopenOptions } from "./agent-reopen.js";
+import { AgentInterrupter } from "./agent-interruption.js";
+import { resumeAgent, runAgent, steerAgent, type ToolActivity } from "./agent-runner.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";
 import { resolveAgent } from "./agent-types.js";
 import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
+import { assertValidSpawnCwd } from "./spawn-cwd.js";
 import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
-import type { AgentInvocation, AgentRecord, SubagentType, ThinkingLevel } from "./types.js";
+import type { AgentRecord, SubagentType, SpawnOptions } from "./types.js";
 import { addUsage, appendSubagentUsageRecord, type AssistantUsage } from "./usage.js";
 
-export type OnAgentComplete = (record: AgentRecord) => void;
+export type OnAgentComplete = (record: AgentRecord, generation: number) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
 export type MessageParent = (
@@ -32,88 +30,60 @@ export type MessageParent = (
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 /** Default max concurrent agents. */
-const DEFAULT_MAX_CONCURRENT = 4;
+const DEFAULT_MAX_CONCURRENT = 6;
 export const MAX_RETAINED_TOOL_CALLS = 200;
-
-/**
- * Validate a caller-supplied SpawnOptions.cwd. `undefined`/`null` mean "unset"
- * (parent cwd). Anything else must be an absolute path to an existing
- * directory — curated errors instead of TypeErrors from path/fs internals
- * (RPC callers send arbitrary JSON: null, numbers, file paths).
- */
-function assertValidSpawnCwd(cwd: unknown): asserts cwd is string | undefined | null {
-  if (cwd == null) return;
-  if (typeof cwd !== "string") {
-    throw new Error(`SpawnOptions.cwd must be an absolute path`);
-  }
-  if (!isAbsolute(cwd)) {
-    throw new Error(`SpawnOptions.cwd must be an absolute path: "${cwd}"`);
-  }
-  let isDirectory = false;
-  try {
-    isDirectory = statSync(cwd).isDirectory();
-  } catch {
-    throw new Error(`SpawnOptions.cwd does not exist: "${cwd}"`);
-  }
-  if (!isDirectory) {
-    throw new Error(`SpawnOptions.cwd is not a directory: "${cwd}"`);
-  }
-}
 
 interface SpawnArgs {
   pi: ExtensionAPI;
   parent: ParentSnapshot;
+  parentEntries?: ReturnType<ExtensionContext["sessionManager"]["buildContextEntries"]>;
   type: SubagentType;
   prompt: string;
   options: SpawnOptions;
 }
 
-export interface SpawnOptions {
-  description: string;
-  model?: Model<Api>;
-  isolated?: boolean;
-  thinkingLevel?: ThinkingLevel;
-  /**
-   * Working directory for the agent (absolute path). Default: parent session
-   * cwd. The agent's tools operate here, but .pi config (extensions, skills,
-   * settings) still loads from the parent session's project — the
-   * target directory's `.pi` extensions never execute.
-   */
-  cwd?: string;
-  /** Resolved invocation snapshot captured for UI display. */
-  invocation?: AgentInvocation;
-  /** Called on tool start/end with activity info (for streaming progress to UI). */
-  onToolActivity?: (activity: ToolActivity) => void;
-  /** Called on streaming text deltas from the assistant response. */
-  onTextDelta?: (delta: string, fullText: string) => void;
-  /** Called when the agent session is created (for accessing session stats). */
-  onSessionCreated?: (session: AgentSession) => void;
-  /** Called at the end of each agentic turn with the cumulative count. */
-  onTurnEnd?: (turnCount: number) => void;
-  /** Called once per assistant message_end with that message's usage delta. */
-  onAssistantUsage?: (usage: AssistantUsage) => void;
-  /** Called when the session successfully compacts. */
-  onCompaction?: (info: CompactionInfo) => void;
+interface QueuedTurn {
+  id: string;
+  generation: number;
+  start: () => void;
 }
+
+interface TurnHooks {
+  onToolActivity: (activity: ToolActivity) => void;
+  onTurnEnd: (turnCount: number) => void;
+  onTextDelta: (delta: string, fullText: string) => void;
+  onAssistantUsage: (usage: AssistantUsage) => void;
+  onCompaction: (info: CompactionInfo) => void;
+  onDiagnostic: (event: string, details?: Record<string, unknown>) => void;
+  onAssistantFailure: (failure: AgentRecord["failureHistory"][number]) => void;
+}
+
+export type { SpawnOptions } from "./types.js";
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
-  private cleanupInterval: ReturnType<typeof setInterval>;
+  readonly tree = new AgentTree(this.agents, (id) => this.isClosing(id));
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
+  private onAgentInvalidated?: (record: AgentRecord) => void;
   private messageParent?: MessageParent;
   private getAutoCompactionThreshold?: () => number | undefined;
   private maxConcurrent: number;
   /** Queue of agents waiting to start. */
-  private queue: { id: string; args: SpawnArgs }[] = [];
-  /** Number of currently running agents. */
-  private runningCount = 0;
-  private completed = new WeakSet<AgentRecord>();
-  private releasedSlots = new WeakSet<AgentRecord>();
-  private settled = new WeakSet<AgentRecord>();
+  private queue: QueuedTurn[] = [];
+  /** Number of open agents holding a concurrency slot, including completed agents. */
+  private reservedCount = 0;
+  private reservations = new WeakSet<AgentRecord>();
+  private closer: AgentCloser;
+  private completedGeneration = new WeakMap<AgentRecord, number>();
+  private settledGeneration = new WeakMap<AgentRecord, number>();
+  private interruptions: AgentInterrupter;
+  private options = new WeakMap<AgentRecord, SpawnOptions>();
+  private turnCounts = new WeakMap<AgentRecord, number>();
   private pendingAgents = new Set<Promise<string>>();
   private teardowns = new Set<Promise<void>>();
+  private reopener: AgentReopener;
   private closing = false;
   private disposed = false;
   private shutdownPromise?: Promise<void>;
@@ -125,32 +95,102 @@ export class AgentManager {
     onCompact?: OnAgentCompact,
     messageParent?: MessageParent,
     getAutoCompactionThreshold?: () => number | undefined,
+    onAgentInvalidated?: (record: AgentRecord) => void,
+    private registerCollaboration?: (record: AgentRecord) => RegisterCollaboration,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.onCompact = onCompact;
     this.messageParent = messageParent;
     this.getAutoCompactionThreshold = getAutoCompactionThreshold;
+    this.onAgentInvalidated = onAgentInvalidated;
     this.maxConcurrent = maxConcurrent;
-    // Cleanup completed agents after 10 minutes (but keep sessions for resume)
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
-    this.cleanupInterval.unref();
+    this.interruptions = new AgentInterrupter({
+      isSettled: (record, generation) => (this.settledGeneration.get(record) ?? 0) >= generation,
+      onRequest: (record, source, generation) =>
+        this.recordDiagnostic(record, "abort_requested", { source, generation }),
+      onFailure: (record, error) => {
+        this.recordFailure(record, {
+          timestamp: Date.now(),
+          phase: "manager",
+          message: error instanceof Error ? error.message : String(error),
+          ...(error instanceof Error ? { name: error.name } : {}),
+          error_details: serializeDiagnosticError(error),
+          manager_signal_aborted: record.abortController?.signal.aborted ?? false,
+        });
+      },
+    });
+    this.closer = new AgentCloser(this.agents, {
+      invalidate: (record) => {
+        this.onAgentInvalidated?.(record);
+        void this.reopener.cancelChildren(getAgentSessionId(record));
+      },
+      abort: (id) => void this.abort(id),
+      teardown: async (record) => {
+        await this.reopener.cancelChildren(getAgentSessionId(record));
+        if (record.session) await this.teardownSession(record.session);
+      },
+      releaseReservation: (record) => this.releaseReservation(record),
+    });
+    this.reopener = new AgentReopener(this.agents, this.closer, {
+      assertOwnerAvailable: (parentId, rootId) => this.tree.assertOwnerAvailable(parentId, rootId),
+      reserve: (record) => this.reserve(record),
+      release: (record) => this.releaseReservation(record),
+      commit: (record) => {
+        this.onAgentInvalidated?.(record);
+        this.options.set(record, {
+          description: record.description,
+          model: record.session?.model,
+          thinkingLevel: record.invocation?.thinking,
+        });
+      },
+      registerCollaboration,
+      autoCompactionThreshold: getAutoCompactionThreshold,
+    });
   }
 
-  private notifyComplete(record: AgentRecord): void {
-    if (this.completed.has(record)) return;
-    this.completed.add(record);
+  /** Derived diagnostic count; reservations are the only concurrency accounting. */
+  private get runningCount(): number {
+    let count = 0;
+    for (const record of this.agents.values()) {
+      if (record.status === "running") count++;
+    }
+    return count;
+  }
+
+  private notifyComplete(record: AgentRecord, generation = record.generation): void {
+    if ((this.completedGeneration.get(record) ?? 0) >= generation) return;
+    this.completedGeneration.set(record, generation);
     try {
-      this.onComplete?.(record);
+      this.onComplete?.(record, generation);
     } catch {
       /* completion side effects must not change agent state */
     }
   }
 
-  private releaseSlot(record: AgentRecord): void {
-    if (this.releasedSlots.has(record)) return;
-    this.releasedSlots.add(record);
-    this.runningCount--;
+  private notifyStart(record: AgentRecord): void {
+    try {
+      this.onStart?.(record);
+    } catch {
+      /* UI start side effects must not change turn accounting */
+    }
+  }
+
+  private clearSessionQueue(session?: AgentSession): void {
+    (session as Partial<AgentSession> | undefined)?.clearQueue?.();
+  }
+
+  private reserve(record: AgentRecord): boolean {
+    if (this.reservations.has(record)) return true;
+    if (this.reservedCount >= this.maxConcurrent) return false;
+    this.reservations.add(record);
+    this.reservedCount++;
+    return true;
+  }
+
+  private releaseReservation(record: AgentRecord): void {
+    if (!this.reservations.delete(record)) return;
+    this.reservedCount--;
     this.drainQueue();
   }
 
@@ -221,7 +261,7 @@ export class AgentManager {
           }
         : {}),
       ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
-      ...(details ? { details } : {}),
+      details: { generation: record.generation, ...details },
     }).catch(() => undefined);
   }
 
@@ -243,29 +283,42 @@ export class AgentManager {
 
   /**
    * Spawn an agent and return its ID immediately.
-   * If the concurrency limit is reached, the agent is queued.
+   * Rejects at capacity unless the caller explicitly opts into queuing.
    */
   spawn(
     pi: ExtensionAPI,
-    ctx: ExtensionContext,
+    ctx: SubagentContext,
     requestedType: string,
     prompt: string,
     options: SpawnOptions,
   ): string {
     if (this.closing) throw new Error("AgentManager is shutting down.");
-    const { type } = resolveAgent(requestedType);
+    this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
+    const resolved = resolveAgent(requestedType);
+    if (!requestedType.trim() || !resolved.matched)
+      throw new Error(`Unknown agent type '${requestedType}'.`);
+    const { type } = resolved;
     // Validate before the queue branch — a queued spawn should fail at the
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.
     assertValidSpawnCwd(options.cwd);
+    if (!options.queueIfBusy && this.reservedCount >= this.maxConcurrent) {
+      throw new Error("No concurrency slot is available. Close an agent before spawning another.");
+    }
 
     const id = randomUUID().slice(0, 17);
     const parent = snapshotParent(ctx);
+    const parentEntries = options.forkContext
+      ? structuredClone(ctx.sessionManager.buildContextEntries())
+      : undefined;
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
+      incarnation: randomUUID(),
+      generation: 1,
       type,
       parentSessionId: parent.sessionId,
+      rootSessionId: this.tree.rootSessionId(parent.sessionId),
       prompt,
       description: options.description,
       status: "queued",
@@ -280,22 +333,25 @@ export class AgentManager {
       failureHistory: [],
     };
     this.agents.set(id, record);
+    this.options.set(record, options);
+    this.turnCounts.set(record, 0);
     this.recordDiagnostic(record, "created", {
       manager_running_count: this.runningCount,
       manager_queue_length: this.queue.length,
       manager_max_concurrent: this.maxConcurrent,
     });
 
-    const args: SpawnArgs = { pi, parent, type, prompt, options };
+    const args: SpawnArgs = { pi, parent, parentEntries, type, prompt, options };
 
-    if (this.runningCount >= this.maxConcurrent) {
-      // Queue it — will be started when a running agent completes
-      this.queue.push({ id, args });
+    const start = () => this.startAgent(id, record, args);
+    if (this.reservedCount >= this.maxConcurrent) {
+      // Queue it — will be started when a retained agent releases its slot.
+      this.queue.push({ id, generation: record.generation, start });
     } else {
       // startAgent can throw — clean up the record so callers don't see an
       // orphan in `listAgents()`.
       try {
-        this.startAgent(id, record, args);
+        start();
       } catch (err) {
         this.recordFailure(record, {
           timestamp: Date.now(),
@@ -308,6 +364,7 @@ export class AgentManager {
         this.recordDiagnostic(record, "start_rejected", {
           error: serializeDiagnosticError(err),
         });
+        this.releaseReservation(record);
         this.agents.delete(id);
         throw err;
       }
@@ -315,29 +372,208 @@ export class AgentManager {
 
     pi.events.emit("subagents:created", {
       id,
+      generation: record.generation,
       type,
       description: record.description,
     });
     return id;
   }
 
+  private createTurnHooks(
+    record: AgentRecord,
+    options: SpawnOptions,
+    generation: number,
+    turnCountMode: "absolute" | "increment",
+  ): TurnHooks {
+    const current = () => record.generation === generation;
+    return {
+      onToolActivity: (activity) => {
+        if (!current()) return;
+        if (activity.type === "end") record.toolUses++;
+        if (activity.type === "call") {
+          if (record.toolCalls.length >= MAX_RETAINED_TOOL_CALLS) {
+            record.toolCalls.shift();
+            record.omittedToolCalls++;
+          }
+          record.toolCalls.push(
+            summarizeToolArg(formatToolCall(activity.toolName, activity.arguments ?? {})),
+          );
+        }
+        options.onToolActivity?.(activity);
+      },
+      onTurnEnd: (reportedCount) => {
+        if (!current()) return;
+        const turnCount =
+          turnCountMode === "absolute" ? reportedCount : (this.turnCounts.get(record) ?? 0) + 1;
+        this.turnCounts.set(record, turnCount);
+        options.onTurnEnd?.(turnCount);
+      },
+      onTextDelta: (delta, fullText) => {
+        if (current()) options.onTextDelta?.(delta, fullText);
+      },
+      onAssistantUsage: (usage) => {
+        if (current())
+          this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
+      },
+      onCompaction: (info) => {
+        if (!current()) return;
+        record.compactionCount++;
+        this.onCompact?.(record, info);
+        options.onCompaction?.(info);
+      },
+      onDiagnostic: (event, details) => {
+        if (current()) this.recordDiagnostic(record, event, details);
+      },
+      onAssistantFailure: (failure) => {
+        if (current()) this.recordFailure(record, failure);
+      },
+    };
+  }
+
+  private async applyPendingRedirects(
+    record: AgentRecord,
+    generation: number,
+    session: AgentSession,
+    abortController: AbortController,
+    hooks: TurnHooks,
+    responseText: string,
+  ): Promise<string> {
+    while (
+      record.generation === generation &&
+      record.pendingCancelSteers?.length &&
+      record.status !== "stopped"
+    ) {
+      const redirect = record.pendingCancelSteers.shift();
+      if (!record.pendingCancelSteers.length) record.pendingCancelSteers = undefined;
+      if (!redirect) continue;
+      await redirect.settled;
+      if (!redirect.accepted) continue;
+      if (record.generation !== generation || record.status !== "running") break;
+      record.status = "running";
+      responseText = await resumeAgent(session, redirect.message, {
+        signal: abortController.signal,
+        ...hooks,
+      });
+    }
+    return responseText;
+  }
+
+  private finishGeneration(
+    record: AgentRecord,
+    generation: number,
+    responseText: string,
+    session: AgentSession,
+  ): void {
+    if (record.status !== "stopped") {
+      if (responseText.trim()) {
+        record.status = "completed";
+        record.result = responseText;
+      } else {
+        record.status = "error";
+        record.error = MISSING_FINAL_RESPONSE_ERROR;
+        record.result = undefined;
+      }
+    } else if (responseText.trim()) {
+      record.result = responseText;
+    }
+    record.session = session;
+    record.completedAt ??= Date.now();
+    this.settleGeneration(record, generation);
+  }
+
+  private failGeneration(
+    record: AgentRecord,
+    generation: number,
+    abortController: AbortController,
+    error: unknown,
+  ): void {
+    const message = error instanceof Error ? error.message : String(error);
+    if (record.status !== "stopped") {
+      record.status = "error";
+      record.error = message;
+    } else if (record.abort?.source !== "interrupt") {
+      record.error = message;
+    }
+    this.recordFailure(record, {
+      timestamp: Date.now(),
+      phase: "manager",
+      message,
+      ...(error instanceof Error ? { name: error.name } : {}),
+      error_details: serializeDiagnosticError(error),
+      manager_signal_aborted: abortController.signal.aborted,
+    });
+    record.completedAt ??= Date.now();
+    this.settleGeneration(record, generation);
+  }
+
+  private settleGeneration(record: AgentRecord, generation: number): void {
+    this.settledGeneration.set(record, generation);
+    this.recordDiagnostic(record, "completed", {
+      status: record.status,
+      error: record.error,
+      duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
+      tool_uses: record.toolUses,
+      lifetime_usage: { ...record.lifetimeUsage },
+      compaction_count: record.compactionCount,
+      failure_count: record.failureHistory.length,
+      abort: record.abort,
+    });
+    this.notifyComplete(record, generation);
+  }
+
+  private manageGeneration(
+    record: AgentRecord,
+    generation: number,
+    abortController: AbortController,
+    started: Promise<{ responseText: string; session: AgentSession }>,
+    resumeHooks: TurnHooks,
+  ): void {
+    const promise = started
+      .then(async ({ responseText, session }) => {
+        if (record.generation !== generation) return responseText;
+        responseText = await this.applyPendingRedirects(
+          record,
+          generation,
+          session,
+          abortController,
+          resumeHooks,
+          responseText,
+        );
+        if (record.generation === generation)
+          this.finishGeneration(record, generation, responseText, session);
+        return responseText;
+      })
+      .catch((error) => {
+        if (record.generation === generation)
+          this.failGeneration(record, generation, abortController, error);
+        return "";
+      });
+
+    record.promise = promise;
+    this.pendingAgents.add(promise);
+    void promise.then(
+      () => this.pendingAgents.delete(promise),
+      () => this.pendingAgents.delete(promise),
+    );
+  }
+
   /** Actually start an agent (called immediately or from queue drain). */
   private startAgent(
     id: string,
     record: AgentRecord,
-    { pi, parent, type, prompt, options }: SpawnArgs,
+    { pi, parent, parentEntries, type, prompt, options }: SpawnArgs,
   ) {
+    const generation = record.generation;
     // Re-validate a caller-supplied cwd: queued spawns can start minutes after
     // spawn()'s check, and the directory may be gone by then (TOCTOU). Same
     // curated errors; drainQueue parks a throw on the record as an error.
     assertValidSpawnCwd(options.cwd);
     const customCwd = options.cwd ?? undefined; // null (RPC "unset") → undefined
 
+    if (!this.reserve(record)) throw new Error("No concurrency slot is available.");
     record.status = "running";
     const queuedAt = record.startedAt;
     record.startedAt = Date.now();
-    this.runningCount++;
-    this.onStart?.(record);
     this.recordDiagnostic(record, "started", {
       cwd: customCwd ?? parent.cwd,
       isolated: options.isolated === true,
@@ -349,55 +585,23 @@ export class AgentManager {
 
     const abortController = record.abortController;
     if (!abortController) throw new Error(`Agent ${id} has no abort controller`);
-    const onToolActivity = (activity: ToolActivity) => {
-      if (activity.type === "end") record.toolUses++;
-      if (activity.type === "call") {
-        if (record.toolCalls.length >= MAX_RETAINED_TOOL_CALLS) {
-          record.toolCalls.shift();
-          record.omittedToolCalls++;
-        }
-        record.toolCalls.push(
-          summarizeToolArg(formatToolCall(activity.toolName, activity.arguments ?? {})),
-        );
-      }
-      options.onToolActivity?.(activity);
-    };
-
-    const promise = runAgent(parent, type, prompt, {
+    const initialHooks = this.createTurnHooks(record, options, generation, "absolute");
+    const resumeHooks = this.createTurnHooks(record, options, generation, "increment");
+    const started = runAgent(parent, type, prompt, {
       pi,
+      registerCollaboration: this.registerCollaboration?.(record),
       agentId: id,
+      agentSessionId: record.incarnation,
       model: options.model,
       isolated: options.isolated,
       thinkingLevel: options.thinkingLevel,
+      parentEntries,
+      allowedTools: options.allowedTools,
       autoCompactionThreshold: this.getAutoCompactionThreshold?.(),
       cwd: customCwd,
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,
-      messageParent: (message) =>
-        this.messageParent?.(
-          parent.sessionId,
-          {
-            id,
-            type,
-            title: options.description,
-            ...(options.invocation?.modelName ? { model_name: options.invocation.modelName } : {}),
-            ...(options.invocation?.thinking ? { thinking: options.invocation.thinking } : {}),
-          },
-          message,
-        ) ?? false,
-      onToolActivity,
-      onTurnEnd: options.onTurnEnd,
-      onTextDelta: options.onTextDelta,
-      onAssistantUsage: (usage) => {
-        this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
-      },
-      onDiagnostic: (event, details) => this.recordDiagnostic(record, event, details),
-      onAssistantFailure: (failure) => this.recordFailure(record, failure),
-      onCompaction: (info) => {
-        record.compactionCount++;
-        this.onCompact?.(record, info);
-        options.onCompaction?.(info);
-      },
+      ...initialHooks,
       onSessionCreated: (session) => {
         record.session = session;
         if (abortController.signal.aborted) {
@@ -413,112 +617,34 @@ export class AgentManager {
         }
         options.onSessionCreated?.(session);
       },
-    })
-      .then(async ({ responseText, session }) => {
-        if (record.pendingCancelSteer && record.status !== "stopped") {
-          const message = record.pendingCancelSteer;
-          record.pendingCancelSteer = undefined;
-          record.status = "running";
-          responseText = await resumeAgent(session, message, {
-            onToolActivity,
-            onAssistantUsage: (usage) => {
-              this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
-            },
-            onCompaction: (info) => {
-              record.compactionCount++;
-              this.onCompact?.(record, info);
-              options.onCompaction?.(info);
-            },
-            onDiagnostic: (event, details) => this.recordDiagnostic(record, event, details),
-            onAssistantFailure: (failure) => this.recordFailure(record, failure),
-          });
-        }
-
-        // Don't overwrite status if externally stopped via abort().
-        if (record.status !== "stopped") {
-          if (responseText.trim()) {
-            record.status = "completed";
-            record.result = responseText;
-          } else {
-            record.status = "error";
-            record.error = MISSING_FINAL_RESPONSE_ERROR;
-            record.result = undefined;
-          }
-        } else if (responseText.trim()) {
-          record.result = responseText;
-        }
-        record.session = session;
-        record.completedAt ??= Date.now();
-
-        this.settled.add(record);
-        this.recordDiagnostic(record, "completed", {
-          status: record.status,
-          duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
-          tool_uses: record.toolUses,
-          lifetime_usage: record.lifetimeUsage,
-          compaction_count: record.compactionCount,
-          failure_count: record.failureHistory.length,
-          abort: record.abort,
-        });
-        this.releaseSlot(record);
-        this.notifyComplete(record);
-        return responseText;
-      })
-      .catch((err) => {
-        // Don't overwrite status if externally stopped via abort()
-        if (record.status !== "stopped") {
-          record.status = "error";
-        }
-        record.error = err instanceof Error ? err.message : String(err);
-        this.recordFailure(record, {
-          timestamp: Date.now(),
-          phase: "manager",
-          message: record.error,
-          ...(err instanceof Error ? { name: err.name } : {}),
-          error_details: serializeDiagnosticError(err),
-          manager_signal_aborted: abortController.signal.aborted,
-        });
-        record.completedAt ??= Date.now();
-
-        this.settled.add(record);
-        this.recordDiagnostic(record, "completed", {
-          status: record.status,
-          error: record.error,
-          duration_ms: record.completedAt - record.startedAt,
-          tool_uses: record.toolUses,
-          lifetime_usage: record.lifetimeUsage,
-          compaction_count: record.compactionCount,
-          failure_count: record.failureHistory.length,
-          abort: record.abort,
-        });
-        this.releaseSlot(record);
-        this.notifyComplete(record);
-        return "";
-      });
-
-    record.promise = promise;
-    this.pendingAgents.add(promise);
-    void promise.then(
-      () => this.pendingAgents.delete(promise),
-      () => this.pendingAgents.delete(promise),
-    );
+    });
+    this.manageGeneration(record, generation, abortController, started, resumeHooks);
+    this.notifyStart(record);
   }
 
   /** Start queued agents up to the concurrency limit. */
   private drainQueue() {
-    while (this.queue.length > 0 && this.runningCount < this.maxConcurrent) {
+    if (this.closing) return;
+    while (this.queue.length > 0 && this.reservedCount < this.maxConcurrent) {
       const next = this.queue.shift();
       if (!next) break;
       const record = this.agents.get(next.id);
-      if (!record || record.status !== "queued") continue;
+      if (
+        !record ||
+        this.closer.isClosing(next.id) ||
+        record.status !== "queued" ||
+        record.generation !== next.generation
+      )
+        continue;
       try {
-        this.startAgent(next.id, record, next.args);
+        next.start();
       } catch (err) {
         // Surface late failures on the record so the user/agent can see them
         // via /agents, then keep draining.
         record.status = "error";
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt = Date.now();
+        this.settledGeneration.set(record, record.generation);
         this.recordFailure(record, {
           timestamp: Date.now(),
           phase: "manager",
@@ -534,12 +660,13 @@ export class AgentManager {
           failure_count: record.failureHistory.length,
         });
         this.notifyComplete(record);
+        this.releaseReservation(record);
       }
     }
   }
 
   /**
-   * Send a message to an agent from the UI (mirrors the MessageAgent tool).
+   * Queue input for an agent at its next safe message boundary.
    * A live session queues it for the boundary after the current assistant
    * response's tool-call batch, where it appears as a user message. If the
    * session isn't ready yet, the message is queued on `pendingSteers` and
@@ -548,8 +675,14 @@ export class AgentManager {
    */
   steer(id: string, message: string): boolean {
     const record = this.agents.get(id);
-    if (!record || (record.status !== "running" && record.status !== "queued")) return false;
-    if (record.session) {
+    if (
+      !record ||
+      this.closer.isClosing(id) ||
+      (record.status !== "running" && record.status !== "queued" && record.status !== "idle")
+    )
+      return false;
+    if (record.status === "idle") return this.startTurn(id, message);
+    if (record.session && record.status === "running") {
       record.session.steer(message).catch(() => {});
     } else {
       if (!record.pendingSteers) record.pendingSteers = [];
@@ -558,18 +691,145 @@ export class AgentManager {
     return true;
   }
 
-  cancelAndSteer(id: string, message: string): boolean {
+  async cancelAndSteer(id: string, message: string, signal?: AbortSignal): Promise<boolean> {
     const record = this.agents.get(id);
-    if (!record?.session || record.status !== "running") return false;
-    record.pendingCancelSteer = message;
-    record.abort = {
-      timestamp: Date.now(),
-      source: "cancel_and_steer",
-      reason: "cancel_and_steer",
-    };
-    this.recordDiagnostic(record, "abort_requested", { source: "cancel_and_steer" });
-    record.session.abort().catch(() => {});
+    if (!record?.session || this.closer.isClosing(id) || record.status !== "running") return false;
+    const source = "cancel_and_steer";
+    return this.interruptions.interrupt(record, record.session, source, message, signal);
+  }
+
+  /** Submit ordinary input through the manager's close-aware lifecycle gate. */
+  async sendInput(id: string, message: string, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    const record = this.agents.get(id);
+    if (!record || this.closer.isClosing(id)) return false;
+    // A settled open conversation can accept another turn after success, error, or interruption.
+    if (record.status !== "running" && record.status !== "queued")
+      return this.startTurn(id, message);
+    if (record.session && record.status === "running") {
+      await steerAgent(record.session, message);
+      return true;
+    }
+    return this.steer(id, message);
+  }
+
+  /** Start another turn on a retained, settled session. */
+  startTurn(id: string, prompt: string): boolean {
+    if (this.closing) return false;
+    const record = this.agents.get(id);
+    if (
+      !record?.session ||
+      this.closer.isClosing(id) ||
+      record.status === "running" ||
+      record.status === "queued" ||
+      (record.status !== "idle" && (this.settledGeneration.get(record) ?? 0) < record.generation)
+    ) {
+      return false;
+    }
+
+    const options = this.options.get(record);
+    if (!options) return false;
+    const session = record.session;
+
+    if (record.status !== "idle") record.generation++;
+    const generation = record.generation;
+    record.prompt = prompt;
+    record.status = "queued";
+    record.result = undefined;
+    record.error = undefined;
+    record.abort = undefined;
+    record.pendingCancelSteers = undefined;
+    record.pendingSteers = undefined;
+    record.completedAt = undefined;
+    record.startedAt = Date.now();
+    const abortController = new AbortController();
+    record.abortController = abortController;
+    const start = () =>
+      this.startRetainedTurn(record, session, prompt, options, abortController, generation);
+    if (!this.reservations.has(record) && this.reservedCount >= this.maxConcurrent) {
+      this.queue.push({ id, generation, start });
+    } else {
+      start();
+    }
     return true;
+  }
+
+  private startRetainedTurn(
+    record: AgentRecord,
+    session: AgentSession,
+    prompt: string,
+    options: SpawnOptions,
+    abortController: AbortController,
+    generation: number,
+  ): void {
+    if (record.generation !== generation || record.status !== "queued") return;
+    if (!this.reserve(record)) return;
+    record.status = "running";
+    const queuedAt = record.startedAt;
+    record.startedAt = Date.now();
+    try {
+      this.recordDiagnostic(record, "started", {
+        resumed: true,
+        generation,
+        queue_duration_ms: record.startedAt - queuedAt,
+        manager_running_count: this.runningCount,
+        manager_queue_length: this.queue.length,
+        manager_max_concurrent: this.maxConcurrent,
+      });
+      const hooks = this.createTurnHooks(record, options, generation, "increment");
+      this.clearSessionQueue(session);
+      if (record.pendingSteers?.length) {
+        for (const message of record.pendingSteers) session.steer(message).catch(() => {});
+        record.pendingSteers = undefined;
+      }
+      const started = resumeAgent(session, prompt, {
+        signal: abortController.signal,
+        ...hooks,
+      }).then((responseText) => ({ responseText, session }));
+      this.manageGeneration(record, generation, abortController, started, hooks);
+      this.notifyStart(record);
+    } catch (error) {
+      this.failGeneration(record, generation, abortController, error);
+    }
+  }
+
+  /** Abort the active turn after session creation without disposing the retained session. */
+  async interruptTurn(id: string): Promise<boolean> {
+    const record = this.agents.get(id);
+    if (
+      !record?.session ||
+      this.closer.isClosing(id) ||
+      record.status !== "running" ||
+      !record.promise
+    )
+      return false;
+
+    const session = record.session;
+    const promise = record.promise;
+    const interrupted = await this.interruptions.interrupt(record, session, "interrupt");
+    if (!interrupted) return false;
+    await promise;
+    return true;
+  }
+
+  sendParent(record: AgentRecord, message: string): boolean {
+    return (
+      this.messageParent?.(
+        record.parentSessionId,
+        {
+          id: record.id,
+          type: record.type,
+          title: record.description,
+          ...(record.invocation?.modelName ? { model_name: record.invocation.modelName } : {}),
+          ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
+        },
+        message,
+      ) ?? false
+    );
+  }
+
+  isClosing(id: string): boolean {
+    return this.closer.isClosing(id) || this.closing;
   }
 
   getRecord(id: string): AgentRecord | undefined {
@@ -580,15 +840,36 @@ export class AgentManager {
     return [...this.agents.values()].sort((a, b) => b.startedAt - a.startedAt);
   }
 
+  getClosedRecord(id: string): ClosedAgentRecord | undefined {
+    return this.closer.get(id);
+  }
+
+  reopen(pi: ExtensionAPI, ctx: SubagentContext, id: string, options?: ReopenOptions) {
+    this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
+    return this.reopener.open(pi, ctx, id, {
+      ...options,
+      rootSessionId: this.tree.rootSessionId(ctx.sessionManager.getSessionId()),
+    });
+  }
+
+  /** Close a retained agent and every descendant represented by this manager. */
+  close(id: string) {
+    const pending = this.reopener.pending(id);
+    if (pending) return pending.catch(() => undefined).then(() => this.closer.close(id));
+    return this.closer.close(id);
+  }
+
   abort(id: string): boolean {
     const record = this.agents.get(id);
     if (!record) return false;
 
     // Remove from queue if queued
-    if (record.status === "queued") {
+    if (record.status === "queued" || record.status === "idle") {
       this.queue = this.queue.filter((q) => q.id !== id);
+      record.pendingSteers = undefined;
       record.status = "stopped";
       record.completedAt = Date.now();
+      this.settledGeneration.set(record, record.generation);
       record.abort = { timestamp: Date.now(), source: "stop", reason: "stop" };
       this.recordDiagnostic(record, "abort_requested", { source: "stop", queued: true });
       this.recordDiagnostic(record, "completed", {
@@ -601,44 +882,18 @@ export class AgentManager {
     }
 
     if (record.status !== "running") return false;
+    record.pendingCancelSteers = undefined;
     record.status = "stopped";
     record.error = "aborted";
     record.completedAt = Date.now();
     record.abort = { timestamp: Date.now(), source: "stop", reason: "stop" };
-    this.recordDiagnostic(record, "abort_requested", { source: "stop" });
-    record.abortController?.abort(record.abort.reason);
-    this.releaseSlot(record);
-    this.notifyComplete(record);
+    try {
+      this.recordDiagnostic(record, "abort_requested", { source: "stop" });
+      this.clearSessionQueue(record.session);
+    } finally {
+      record.abortController?.abort(record.abort.reason);
+    }
     return true;
-  }
-
-  private canRemove(record: AgentRecord): boolean {
-    return !record.promise || this.settled.has(record);
-  }
-
-  /** Dispose a record's session and remove it from the map. */
-  private removeRecord(id: string, record: AgentRecord): void {
-    if (record.session) void this.teardownSession(record.session);
-    record.session = undefined;
-    this.agents.delete(id);
-  }
-
-  private cleanup() {
-    const cutoff = Date.now() - 10 * 60_000;
-    for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued") continue;
-      if ((record.completedAt ?? 0) >= cutoff || !this.canRemove(record)) continue;
-      this.removeRecord(id, record);
-    }
-  }
-
-  /** Remove terminal records whose child promises have settled. */
-  clearCompleted(): void {
-    for (const [id, record] of this.agents) {
-      if (record.status === "running" || record.status === "queued" || !this.canRemove(record))
-        continue;
-      this.removeRecord(id, record);
-    }
   }
 
   /** Whether any agents are still running or queued. */
@@ -653,8 +908,11 @@ export class AgentManager {
     for (const queued of this.queue) {
       const record = this.agents.get(queued.id);
       if (record) {
+        record.pendingSteers = undefined;
+        record.pendingCancelSteers = undefined;
         record.status = "stopped";
         record.completedAt = Date.now();
+        this.settledGeneration.set(record, record.generation);
         record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
         this.recordDiagnostic(record, "abort_requested", { source: "shutdown", queued: true });
         this.recordDiagnostic(record, "completed", {
@@ -669,8 +927,11 @@ export class AgentManager {
     // Abort running agents
     for (const record of this.agents.values()) {
       if (record.status === "running") {
+        record.pendingSteers = undefined;
+        record.pendingCancelSteers = undefined;
         record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
         this.recordDiagnostic(record, "abort_requested", { source: "shutdown" });
+        this.clearSessionQueue(record.session);
         record.abortController?.abort(record.abort.reason);
         record.status = "stopped";
         record.completedAt = Date.now();
@@ -682,8 +943,7 @@ export class AgentManager {
 
   /** Wait for every started agent to settle, including agents cancelled during shutdown. */
   async waitForAll(): Promise<void> {
-    // Loop because drainQueue respects the concurrency limit — as running
-    // agents finish they start queued ones, which need awaiting too.
+    // Loop because an available slot can start queued work that also needs awaiting.
     for (;;) {
       this.drainQueue();
       if (this.pendingAgents.size === 0) break;
@@ -694,15 +954,18 @@ export class AgentManager {
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.closing = true;
+    void this.reopener.shutdown();
     this.shutdownPromise = Promise.resolve().then(() => this.finishShutdown());
     return this.shutdownPromise;
   }
 
   private async finishShutdown(): Promise<void> {
     this.abortAll();
+    await this.reopener.shutdown();
     await this.waitForAll();
     for (const record of this.agents.values()) {
       if (record.session) void this.teardownSession(record.session);
+      this.releaseReservation(record);
     }
     await this.waitForTeardowns();
     this.finalizeDispose();
@@ -717,11 +980,12 @@ export class AgentManager {
     if (this.disposed) return;
     this.closing = true;
     this.disposed = true;
-    clearInterval(this.cleanupInterval);
     this.abortAll();
     for (const record of this.agents.values()) {
       if (record.session) void this.teardownSession(record.session);
+      this.releaseReservation(record);
     }
     this.agents.clear();
+    this.closer.clear();
   }
 }

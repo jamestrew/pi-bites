@@ -19,3 +19,23 @@ Cancelling an individual cell terminates shell sessions created by that cell whi
 Keep runtime execution, Pi-side validated/authorized dispatch, and presentation separate. Preserve the pinned host source unchanged, with packaging and Pi adaptations outside it. The host protocol does not export descriptions; the pinned library builder supplies the generation seam. Bound output and retained trace/state data, and preserve existing native/shell limits. Pi extension contexts are ephemeral: snapshot stable dependencies before asynchronous work and test stale getters that throw.
 
 Nested discovery (#304) uses the existing pinned host metadata global. Discovery has no lifecycle state and requires no host upgrade; see the [exposure policy](../code-mode-contract/README.md#nested-discovery-policy-304-2026-09-12).
+
+## Agent ownership amendment (#305)
+
+The cell/shell cleanup policy above does not make subagents cell-owned. A committed
+agent outlives normal cell completion and cancellation; cancelling `wait_agent`
+removes its waiter, not its children. Exposure switches preserve session-owned agent
+identities and restore controls through the other entry point. The subagent controller
+owns generations, capacity, recoverable conversations, approvals, and delivery;
+branch/session replacement, reload, and shutdown invalidate old-owner operations and
+stop live work without delivering into another conversation. Explicit reopen uses
+manager-owned recoverable data and current permissions. See the
+[V1 commit boundaries](../../packages/ext/subagents/CODEX_V1.md#cancellation-and-navigation-ownership):
+accepted input, interruption, shutdown, and published children cannot be promised
+atomic rollback when a cell loses its result. Resume reserves capacity while reopening
+and rolls back failed reopening, rather than waiting for the next turn to reserve.
+
+The #278 parity audit confirms that interruption is not a final V1 wait status.
+Selected waits continue across an interrupted turn and release on a later final
+status or explicit close. Settled open conversations accept subsequent input with
+or without `interrupt: true`; neither completion nor interruption releases capacity.

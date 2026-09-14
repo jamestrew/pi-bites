@@ -1,3 +1,4 @@
+import { registerChildSendInput } from "./helpers/child-send-input.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agent-runner.js", async () => {
@@ -8,7 +9,6 @@ vi.mock("../agent-runner.js", async () => {
 import { MAX_RETAINED_TOOL_CALLS } from "../agent-manager.js";
 import { runAgent } from "../agent-runner.js";
 import subagentsExtension from "../index.js";
-import { WAIT_AGENT_TIMEOUT_GUIDANCE } from "../register-wait-agent.js";
 
 function makeHarness() {
   const tools = new Map<string, any>();
@@ -43,7 +43,14 @@ function makeHarness() {
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getThinkingLevel: vi.fn(() => "off"),
-    getActiveTools: vi.fn(() => ["Agent", "WaitAgent", "MessageAgent", "read"]),
+    getActiveTools: vi.fn(() => [
+      "spawn_agent",
+      "wait_agent",
+      "send_input",
+      "resume_agent",
+      "close_agent",
+      "read",
+    ]),
     setActiveTools: vi.fn(),
   } as any;
   const ctx = {
@@ -99,10 +106,10 @@ function deferredRun() {
 
 async function spawn(tools: Map<string, any>, ctx: any, description = "test agent") {
   return tools
-    .get("Agent")
+    .get("spawn_agent")
     .execute(
       "agent-call",
-      { subagent_type: "general", description, prompt: "do the work" },
+      { agent_type: "worker", message: description },
       undefined,
       undefined,
       ctx,
@@ -119,41 +126,39 @@ const waitFor = (
   signal?: AbortSignal,
 ) =>
   tools
-    .get("WaitAgent")
-    .execute("wait-call", { agent_ids: ids, timeout_ms: timeoutMs }, signal, undefined, ctx);
+    .get("wait_agent")
+    .execute("wait-call", { targets: ids, timeout_ms: timeoutMs }, signal, undefined, ctx);
 
 describe("spawn-and-wait orchestration", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => vi.useRealTimers());
 
-  it("registers WaitAgent and returns a stable Agent identity without waiting", async () => {
+  it("registers wait_agent and returns a stable agent identity without waiting", async () => {
     deferredRun();
     const harness = makeHarness();
 
-    expect([...harness.tools.keys()]).toEqual(expect.arrayContaining(["Agent", "WaitAgent"]));
-    expect(harness.tools.get("Agent").parameters.properties).not.toHaveProperty(
+    expect([...harness.tools.keys()]).toEqual(
+      expect.arrayContaining(["spawn_agent", "wait_agent"]),
+    );
+    expect(harness.tools.get("spawn_agent").parameters.properties).not.toHaveProperty(
       "run_in_background",
     );
-    expect(harness.tools.get("WaitAgent").parameters.properties.timeout_ms).toMatchObject({
-      minimum: 10_000,
-      maximum: 240_000,
-    });
-    const waitGuidelines = harness.tools.get("WaitAgent").promptGuidelines.join("\n");
-    expect(waitGuidelines).toContain(WAIT_AGENT_TIMEOUT_GUIDANCE);
-    expect(waitGuidelines).not.toContain("progress checkpoint");
-    expect(waitGuidelines).not.toContain("wrap up");
+    expect(harness.tools.get("wait_agent").parameters.properties.timeout_ms.description).toContain(
+      "max 3600000",
+    );
 
     const result = await spawn(harness.tools, harness.ctx);
 
     expect(agentId(result)).toMatch(/\S+/);
     expect(result.details.status).toBe("running");
-    expect(result.content[0].text).toContain(`Agent ID: ${agentId(result)}`);
-    expect(result.content[0].text).toContain("Do not duplicate its assigned work");
-    expect(result.content[0].text).toContain("decision-relevant status—not deadline pressure");
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      agent_id: agentId(result),
+      nickname: "test agent",
+    });
     harness.shutdown();
   });
 
-  it("returns a completed agent's full terminal result and consumes automatic delivery", async () => {
+  it("returns a completed agent's V1 status without duplicating its notification", async () => {
     const child = deferredRun();
     const harness = makeHarness();
     harness.ctx.model = { provider: "openai", id: "gpt-5", reasoning: true };
@@ -190,14 +195,17 @@ describe("spawn-and-wait orchestration", () => {
     });
     expect(result.details.agents[0].tool_calls[1]).toMatch(/^Write\(/);
     expect(result.details.agents[0].tool_calls[1].length).toBeLessThan(140);
-    expect(result.content[0].text).toContain("complete result");
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      status: { [agentId(spawned)]: { completed: "complete result" } },
+      timed_out: false,
+    });
     expect(result.content[0].text).not.toContain("src/index.ts");
     expect(result.content[0].text).not.toContain("openai/gpt-5");
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
-  it("returns a missing final response as a WaitAgent terminal error", async () => {
+  it("returns a missing final response as a wait_agent terminal error", async () => {
     const child = deferredRun();
     const harness = makeHarness();
     const spawned = await spawn(harness.tools, harness.ctx);
@@ -212,9 +220,13 @@ describe("spawn-and-wait orchestration", () => {
         error: "Agent completed without a final response.",
       }),
     ]);
-    expect(result.content[0].text).toContain("Agent completed without a final response.");
-    expect(result.content[0].text).not.toContain('"status": "completed"');
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      status: {
+        [agentId(spawned)]: { errored: "Agent completed without a final response." },
+      },
+      timed_out: false,
+    });
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
@@ -223,8 +235,10 @@ describe("spawn-and-wait orchestration", () => {
     const harness = makeHarness();
     await spawn(harness.tools, harness.ctx, "tool-only child");
 
-    const messageParent = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
-    expect(messageParent?.("actual finding")).toBe(true);
+    const sendInput = registerChildSendInput(vi.mocked(runAgent).mock.calls[0]![3], harness.ctx);
+    await expect(sendInput("actual finding")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     child.resolve({ responseText: "", session: { dispose: vi.fn() } });
 
     await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2));
@@ -250,8 +264,8 @@ describe("spawn-and-wait orchestration", () => {
     harness.shutdown();
   });
 
-  it("does not wake a wait when an unselected child messages", async () => {
-    deferredRun();
+  it("does not wake a wait for ordinary selected or unselected child messages", async () => {
+    const selectedChild = deferredRun();
     const harness = makeHarness();
     const selected = await spawn(harness.tools, harness.ctx, "selected");
     deferredRun();
@@ -260,8 +274,13 @@ describe("spawn-and-wait orchestration", () => {
     let waitSettled = false;
     void waiting.then(() => (waitSettled = true));
 
-    const unselectedMessage = vi.mocked(runAgent).mock.calls[1]?.[3].messageParent;
-    expect(unselectedMessage?.("ordinary delivery")).toBe(true);
+    const unselectedMessage = registerChildSendInput(
+      vi.mocked(runAgent).mock.calls[1]![3],
+      harness.ctx,
+    );
+    await expect(unselectedMessage("ordinary delivery")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     await Promise.resolve();
 
     expect(waitSettled).toBe(false);
@@ -273,62 +292,32 @@ describe("spawn-and-wait orchestration", () => {
       { triggerTurn: false },
     );
 
-    const selectedMessage = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
-    expect(selectedMessage?.("wake now")).toBe(true);
-    await expect(waiting).resolves.toMatchObject({
-      details: { outcome: "message", message: "wake now" },
+    const selectedMessage = registerChildSendInput(
+      vi.mocked(runAgent).mock.calls[0]![3],
+      harness.ctx,
+    );
+    await expect(selectedMessage("ordinary selected delivery")).resolves.toMatchObject({
+      details: { status: "queued" },
     });
-    harness.shutdown();
-  });
-
-  it("wakes on a selected child message without duplicating it, then delivers the final", async () => {
-    const child = deferredRun();
-    const harness = makeHarness();
-    harness.ctx.model = { provider: "openai", id: "gpt-5", reasoning: true };
-    const spawned = await spawn(harness.tools, harness.ctx, "trace auth flow");
-    const id = agentId(spawned);
-    const waiting = waitFor(harness.tools, harness.ctx, [id]);
-
-    const messageParent = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
-    expect(messageParent?.("exact\nmessage")).toBe(true);
-    const result = await waiting;
-
-    expect(result.details).toMatchObject({
-      outcome: "message",
-      timed_out: false,
-      sender: {
-        id,
-        type: "general",
-        title: "trace auth flow",
-        model_name: "openai/gpt-5",
-        thinking: "off",
-      },
-      message: "exact\nmessage",
-      agents: [expect.objectContaining({ id, status: "running" })],
-    });
-    expect(JSON.parse(result.content[0].text)).toMatchObject({
-      sender: { id, type: "general", title: "trace auth flow" },
-      message: "exact\nmessage",
-    });
-    expect(result.content[0].text).not.toContain("model_name");
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
-
-    expect(messageParent?.("later message")).toBe(true);
-    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(waitSettled).toBe(false);
+    expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2);
     expect(harness.pi.sendMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({
         customType: "subagent-message",
-        details: expect.objectContaining({ message: "later message" }),
+        details: expect.objectContaining({ message: "ordinary selected delivery" }),
       }),
       { triggerTurn: false },
     );
 
-    child.resolve({ responseText: "eventual final", session: { dispose: vi.fn() } });
-    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2));
-    expect(harness.pi.sendMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ content: expect.stringContaining("eventual final") }),
-      { deliverAs: "steer", triggerTurn: true },
-    );
+    selectedChild.resolve({ responseText: "eventual final", session: { dispose: vi.fn() } });
+    await expect(waiting).resolves.toMatchObject({
+      details: {
+        outcome: "terminal",
+        status: { [agentId(selected)]: { completed: "eventual final" } },
+      },
+    });
+    expect(harness.pi.sendMessage).toHaveBeenCalledTimes(3);
     harness.shutdown();
   });
 
@@ -356,7 +345,7 @@ describe("spawn-and-wait orchestration", () => {
     harness.shutdown();
   });
 
-  it("reports an automatically claimed result without returning or reinjecting it", async () => {
+  it("returns full final status after its independent automatic notification was delivered", async () => {
     const child = deferredRun();
     const harness = makeHarness();
     const spawned = await spawn(harness.tools, harness.ctx);
@@ -368,10 +357,15 @@ describe("spawn-and-wait orchestration", () => {
     const result = await waitFor(harness.tools, harness.ctx, [id]);
 
     expect(result.details).toMatchObject({
-      outcome: "delivery_claimed",
+      outcome: "terminal",
+      status: { [id]: { completed: "automatic result" } },
       agents: [expect.objectContaining({ id, status: "completed" })],
     });
-    expect(result.content[0].text).not.toContain("automatic result");
+    expect(result.details.agents[0]).toHaveProperty("result", "automatic result");
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      status: { [id]: { completed: "automatic result" } },
+      timed_out: false,
+    });
     expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
@@ -388,7 +382,7 @@ describe("spawn-and-wait orchestration", () => {
     expect(result.details.agents).toEqual([
       expect.objectContaining({ status: "error", error: "child exploded" }),
     ]);
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
@@ -411,7 +405,40 @@ describe("spawn-and-wait orchestration", () => {
     expect(result.details.agents).toEqual([
       expect.objectContaining({ id, status: "stopped", error: "aborted" }),
     ]);
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
+    harness.shutdown();
+  });
+
+  it("closes a running agent without duplicating its final notification", async () => {
+    const session = {
+      clearQueue: vi.fn(),
+      dispose: vi.fn(),
+      extensionRunner: { emit: vi.fn(async () => {}) },
+    } as any;
+    vi.mocked(runAgent).mockImplementation((_ctx, _type, _prompt, options) => {
+      options.onSessionCreated?.(session);
+      return new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+          once: true,
+        });
+      });
+    });
+    const harness = makeHarness();
+    const spawned = await spawn(harness.tools, harness.ctx);
+    const id = agentId(spawned);
+
+    const closed = await harness.tools
+      .get("close_agent")
+      .execute("close", { target: id }, undefined, undefined, harness.ctx);
+    const repeated = await harness.tools
+      .get("close_agent")
+      .execute("close-again", { target: id }, undefined, undefined, harness.ctx);
+
+    expect(JSON.parse(closed.content[0].text)).toEqual({ previous_status: "running" });
+    expect(JSON.parse(repeated.content[0].text)).toEqual({ previous_status: "shutdown" });
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
+    expect(session.extensionRunner.emit).toHaveBeenCalledOnce();
+    expect(session.dispose).toHaveBeenCalledOnce();
     harness.shutdown();
   });
 
@@ -429,8 +456,10 @@ describe("spawn-and-wait orchestration", () => {
     expect(timedOut.details).toMatchObject({
       outcome: "timeout",
       timed_out: true,
+      status: {},
       agents: [expect.objectContaining({ id, status: "running" })],
     });
+    expect(JSON.parse(timedOut.content[0].text)).toEqual({ status: {}, timed_out: true });
     expect(harness.pi.sendMessage).not.toHaveBeenCalled();
 
     child.resolve({ responseText: "late result", session: { dispose: vi.fn() } });
@@ -456,10 +485,12 @@ describe("spawn-and-wait orchestration", () => {
     );
 
     controller.abort();
-    const cancelled = await waiting;
-    expect(cancelled.details).toMatchObject({
-      outcome: "cancelled",
-      agents: [expect.objectContaining({ status: "running" })],
+    await expect(waiting).rejects.toMatchObject({
+      name: "SubagentOperationError",
+      details: {
+        outcome: "cancelled",
+        agents: [expect.objectContaining({ status: "running" })],
+      },
     });
 
     child.resolve({ responseText: "late result", session: { dispose: vi.fn() } });
@@ -493,10 +524,13 @@ describe("spawn-and-wait orchestration", () => {
         result: "second done",
       }),
     ]);
-    expect(harness.pi.sendMessage).not.toHaveBeenCalled();
+    expect(result.details.status).toEqual({
+      [agentId(secondSpawn)]: { completed: "second done" },
+    });
+    expect(harness.pi.sendMessage).toHaveBeenCalledOnce();
 
     first.resolve({ responseText: "first done", session: { dispose: vi.fn() } });
-    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2));
     harness.shutdown();
   });
 

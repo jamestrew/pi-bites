@@ -7,7 +7,7 @@ describe("buildAgentPrompt", () => {
     "tells %s-mode agents that they share the parent filesystem",
     (promptMode) => {
       const config: AgentConfig = {
-        name: "general",
+        name: "worker",
         description: "test",
         builtinToolNames: [],
         extensions: [],
@@ -23,6 +23,8 @@ describe("buildAgentPrompt", () => {
       );
 
       expect(prompt).toContain("Filesystem: shared with the parent session and other agents");
+      expect(prompt).toContain("Do the task.");
+      if (promptMode === "append") expect(prompt.startsWith("Parent prompt.\n\n")).toBe(true);
     },
   );
 });

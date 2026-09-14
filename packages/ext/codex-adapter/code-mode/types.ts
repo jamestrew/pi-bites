@@ -26,7 +26,9 @@ export interface DelegateCall {
 }
 
 export interface RuntimeTool {
+  /** JavaScript-facing name, distinct from the optional native identity. */
   name: string;
+  toolName?: { name: string; namespace?: string };
   description: string;
   kind: "function" | "freeform";
   inputSchema?: unknown;

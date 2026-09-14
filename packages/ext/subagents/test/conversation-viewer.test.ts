@@ -46,7 +46,7 @@ function mockSession(messages: any[] = []) {
 function mockRecord(overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "test-1",
-    type: "general",
+    type: "worker",
     prompt: "Investigate the failure.",
     description: "test agent",
     status: "running",
@@ -280,7 +280,7 @@ describe("ConversationViewer", () => {
         mockTui(30, 100),
         mockSession(),
         mockRecord({
-          type: "general",
+          type: "worker",
           invocation: { modelName: "github-copilot/gpt-5.4", thinking: "off" },
         }),
         undefined,

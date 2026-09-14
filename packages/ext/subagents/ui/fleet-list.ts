@@ -231,6 +231,7 @@ export class FleetList {
       .filter(
         (a) =>
           this.pendingResults.has(a.id) ||
+          a.status === "idle" ||
           a.status === "running" ||
           a.status === "queued" ||
           a.id === this.viewingAgentId ||
@@ -351,8 +352,10 @@ export class FleetList {
           keybindings,
           (message: string) => this.manager.steer(record.id, message),
           (message: string) => {
-            if (this.manager.cancelAndSteer(record.id, message))
-              this.ui?.notify(`Canceled current operation for "${record.description}".`, "info");
+            void this.manager.cancelAndSteer(record.id, message).then((interrupted) => {
+              if (interrupted)
+                this.ui?.notify(`Canceled current operation for "${record.description}".`, "info");
+            });
           },
         );
       }, CONVERSATION_OVERLAY_OPTIONS)

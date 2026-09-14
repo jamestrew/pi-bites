@@ -1,3 +1,4 @@
+import { CODEX_V1_TOOL_NAMES } from "../../subagents/codex-v1-contract.js";
 import type { TSchema } from "typebox";
 import { createHash } from "node:crypto";
 import {
@@ -50,7 +51,15 @@ const imageKey = (item: { data: string; mimeType: string }) =>
 export function createCodeModeRendering(owned: OwnedNestedTools) {
   // The dispatcher validates concrete inputs; persisted display snapshots deliberately erase
   // each tool's parameter/result types. Keep that erasure at this presentation boundary.
-  const renderers = owned as unknown as Record<string, Renderer>;
+  const subagents = owned.subagents;
+  const renderers = {
+    ...owned,
+    ...Object.fromEntries(
+      subagents
+        ? CODEX_V1_TOOL_NAMES.map((name) => [`multi_agent_v1__${name}`, subagents.renderers(name)])
+        : [],
+    ),
+  } as unknown as Record<string, Renderer>;
   const owners = new Map<
     string,
     { version: number; owner: WeakRef<Owner>; emitted: Set<string> }
