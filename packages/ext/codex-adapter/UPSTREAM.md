@@ -218,3 +218,12 @@ The [cutover validation record](../../../docs/code-mode-contract/cutover.md) map
 ## Nested discovery follow-up (#304)
 
 At the unchanged Code Mode pin, `augment_tool_definition` generates declaration-bearing runtime metadata for all five supported tools. `scripts/code-mode-contract/src/main.rs` invokes this native function and the native builder's deferred-list path; the Python projection retains those outputs in `contract.generated.json`. Runtime metadata uses `runtime_description` and eager sections remain native generated sections. Web's full supported documentation is intentionally deferred locally, unlike native standalone web's eager default. See the [contract policy](../../../docs/code-mode-contract/README.md#nested-discovery-policy-304-2026-09-12) and the already committed [discovery research](../../../docs/code-mode-contract/tool-discovery-research.md) and [token accounting research](../../../docs/code-mode-contract/token-accounting-research.md).
+
+## Shared V1 collaboration (#308)
+
+The composition root now supplies the subagent controller to scoped Code Mode. V1
+contracts share the same Codex pin; native namespace identity passes through the
+existing host protocol without a host/source upgrade. Complete declarations use
+`ALL_TOOLS`; standalone tools remain available outside Code Mode. See the
+[exposure validation](../../../docs/code-mode-contract/subagents-exposure.md) for
+shared execution, selection fallback, ownership, and validation boundaries.

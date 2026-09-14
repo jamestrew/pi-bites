@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { CodeModeRuntime } from "./code-mode/runtime.js";
+import type { RuntimeTool } from "./code-mode/types.js";
 
 const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -84,6 +85,52 @@ send({type:"operation/response", id:open.id, result:{status:"ok", value:{type:"s
 const execute = receive();
 send({type:"operation/response", id:execute.id, result:{status:"ok", value:{type:"execution/started",cellId:"1"}}});
 `;
+
+test.each([
+  [{ namespace: "multi_agent_v1", name: "spawn_agent" }, true],
+  [{ namespace: "other", name: "spawn_agent" }, false],
+  [{ namespace: "multi_agent", name: "v1__spawn_agent" }, false],
+  [{ name: "multi_agent_v1__spawn_agent" }, false],
+  [{ name: "spawn_agent" }, false],
+] as const)("authorizes exact native tool identity %j", async (toolName, allowed) => {
+  const host = fixture(`${readySession}
+send({type:"delegate/request", id:42, sessionId:open.request.sessionId,
+  request:{type:"tool/invoke",invocation:{cell_id:"1",runtime_tool_call_id:"call",
+    tool_kind:"function",tool_name:${JSON.stringify(toolName)},input:{task:"test"}}}});
+const reply = receive();
+send({type:"execute/initialResponse",id:execute.id,result:{status:"ok",value:{Result:{
+  cell_id:"1",error_text:null,content_items:[{type:"input_text",text:JSON.stringify({
+    metadata:execute.request.request.enabled_tools[0],reply:reply.result
+  })}]
+}}}});
+setInterval(() => {}, 1000);
+`);
+  let calls = 0;
+  const tool: RuntimeTool = {
+    name: "multi_agent_v1__spawn_agent",
+    toolName: { namespace: "multi_agent_v1", name: "spawn_agent" },
+    description: "Spawn an agent",
+    kind: "function",
+    invoke: async (input) => {
+      calls++;
+      return input;
+    },
+  };
+  const response = await host.execute("text(1)", undefined, [tool]);
+  const item = response.contentItems[0];
+  expect(item?.type).toBe("input_text");
+  const result = JSON.parse(item?.type === "input_text" ? item.text : "{}");
+  expect(result.metadata).toMatchObject({
+    name: "multi_agent_v1__spawn_agent",
+    tool_name: { namespace: "multi_agent_v1", name: "spawn_agent" },
+  });
+  expect(result.reply).toEqual(
+    allowed
+      ? { status: "ok", value: { type: "tool/result", result: { task: "test" } } }
+      : { status: "error", message: expect.stringContaining("Unknown Code Mode tool") },
+  );
+  expect(calls).toBe(allowed ? 1 : 0);
+});
 
 test.each([
   ['{Result:{cell_id:"1",content_items:[],error_text:123}}', /invalid error text/],

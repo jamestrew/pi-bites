@@ -281,3 +281,7 @@ capacity reservation during reopening, cancellation/commit races, and scenario-b
 checks for both entry points are specified in the V1 contract, with remaining work
 assigned to #276–#278 and #306–#309. Existing shell/cell cleanup must not be reused as
 implicit child-agent shutdown.
+
+The #308 [exposure validation](subagents-exposure.md) records the activated shared V1
+entry points, native namespace dispatch, discovery, fallback, and remaining live-route
+validation limits.

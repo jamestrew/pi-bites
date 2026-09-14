@@ -17,6 +17,13 @@ import { expect, it } from "vitest";
 import { AgentManager } from "../agent-manager.js";
 import { runAgent } from "../agent-runner.js";
 import registerSubagents from "../index.js";
+import { getCodeModeHostPath } from "../../codex-adapter/code-mode/binary.js";
+let host: string | undefined;
+try {
+  host = getCodeModeHostPath();
+} catch {
+  /* Required only for the Code Mode child. */
+}
 
 const COLLABORATION = ["spawn_agent", "send_input", "wait_agent", "close_agent", "resume_agent"];
 
@@ -111,102 +118,115 @@ function response(
   return stream;
 }
 
-it.each(["model", "gpt-6"])(
-  "real %s child sends parent mail without reusing preamble as its terminal response",
-  async (modelId) => {
-    const cwd = mkdtempSync(join(tmpdir(), "subagent-empty-terminal-"));
-    const runtime = await ModelRuntime.create({
-      allowModelNetwork: false,
-      credentials: new InMemoryCredentialStore(),
-      modelsPath: null,
-    });
-    runtime.registerProvider("terminal-test", {
-      api: "openai-completions",
-      apiKey: "test",
-      baseUrl: "http://localhost",
-      models: [
-        {
-          id: modelId,
-          name: "Terminal Test",
-          reasoning: false,
-          input: ["text"],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 10_000,
-          maxTokens: 100,
-        },
-      ],
-    });
-    const model = runtime.getModel("terminal-test", modelId);
-    if (!model) throw new Error("test model missing");
+for (const modelId of ["model", "gpt-6"])
+  it.skipIf(modelId === "gpt-6" && !host)(
+    `real ${modelId} child sends parent mail without reusing preamble as its terminal response`,
+    async () => {
+      const cwd = mkdtempSync(join(tmpdir(), "subagent-empty-terminal-"));
+      const runtime = await ModelRuntime.create({
+        allowModelNetwork: false,
+        credentials: new InMemoryCredentialStore(),
+        modelsPath: null,
+      });
+      runtime.registerProvider("terminal-test", {
+        api: "openai-completions",
+        apiKey: "test",
+        baseUrl: "http://localhost",
+        models: [
+          {
+            id: modelId,
+            name: "Terminal Test",
+            reasoning: false,
+            input: ["text"],
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            contextWindow: 10_000,
+            maxTokens: 100,
+          },
+        ],
+      });
+      const model = runtime.getModel("terminal-test", modelId);
+      if (!model) throw new Error("test model missing");
 
-    const root = await rootController(
-      cwd,
-      model,
-      runtime.getRegisteredProviderConfig("terminal-test"),
-    );
-    const parentId = root.ctx.sessionManager.getSessionId();
-    let request = 0;
-    try {
-      await root.emit("agent_start");
-      await root.emit("message_end", {
-        message: {
-          role: "assistant",
-          content: [{ type: "text", text: "parent terminal" }],
-          stopReason: "stop",
-        },
-      });
-      const id = root.manager.spawn(root.pi, root.ctx, "worker", "go", {
-        description: "terminal worker",
+      const root = await rootController(
+        cwd,
         model,
-        allowedTools: ["read", ...COLLABORATION, "exec", "wait"],
-        onSessionCreated(session) {
-          expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(COLLABORATION));
-          expect(session.model?.id).toBe(modelId);
-          for (const forbidden of ["bash", "write", "edit", "exec_command", "apply_patch"])
-            expect(session.getActiveToolNames()).not.toContain(forbidden);
-          if (modelId === "gpt-6") expect(session.getActiveToolNames()).toContain("exec");
-          else expect(session.getActiveToolNames()).not.toContain("exec");
-          expect(session.getToolDefinition("MessageAgent")).toBeUndefined();
-          session.agent.streamFunction = (streamModel) => {
-            request++;
-            return request === 1
-              ? response(
-                  streamModel,
-                  [
-                    { type: "text", text: "Earlier preamble" },
-                    {
-                      type: "toolCall",
-                      id: "message-parent",
-                      name: "send_input",
-                      arguments: { target: parentId, message: "actual finding" },
-                    },
-                  ],
-                  "toolUse",
-                )
-              : response(streamModel, []);
-          };
-        },
-      });
-      await root.manager.getRecord(id)!.promise;
-      const record = root.manager.getRecord(id)!;
-      expect(record.status).toBe("error");
-      expect(record.error).toBe("Agent completed without a final response.");
-      expect(record.result).toBeUndefined();
-      expect(root.messages).toEqual([]);
-      await root.emit("turn_end");
-      expect(root.messages).toEqual([]);
-      await root.emit("agent_settled");
-      expect(root.messages.filter((m) => m.customType === "subagent-message")).toMatchObject([
-        { details: { message: "actual finding", sender: { id } } },
-      ]);
-      const result = record.session!.messages.find((m) => m.role === "toolResult");
-      expect(result).toMatchObject({ toolName: "send_input", isError: false });
-    } finally {
-      await root.emit("session_shutdown");
-      rmSync(cwd, { recursive: true, force: true });
-    }
-  },
-);
+        runtime.getRegisteredProviderConfig("terminal-test"),
+      );
+      const parentId = root.ctx.sessionManager.getSessionId();
+      let request = 0;
+      try {
+        await root.emit("agent_start");
+        await root.emit("message_end", {
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "parent terminal" }],
+            stopReason: "stop",
+          },
+        });
+        const id = root.manager.spawn(root.pi, root.ctx, "worker", "go", {
+          description: "terminal worker",
+          model,
+          allowedTools: ["read", ...COLLABORATION, "exec", "wait"],
+          onSessionCreated(session) {
+            if (modelId === "gpt-6") {
+              for (const name of COLLABORATION)
+                expect(session.getActiveToolNames()).not.toContain(name);
+            } else
+              expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(COLLABORATION));
+            expect(session.model?.id).toBe(modelId);
+            for (const forbidden of ["bash", "write", "edit", "exec_command", "apply_patch"])
+              expect(session.getActiveToolNames()).not.toContain(forbidden);
+            if (modelId === "gpt-6") expect(session.getActiveToolNames()).toContain("exec");
+            else expect(session.getActiveToolNames()).not.toContain("exec");
+            expect(session.getToolDefinition("MessageAgent")).toBeUndefined();
+            session.agent.streamFunction = (streamModel) => {
+              request++;
+              return request === 1
+                ? response(
+                    streamModel,
+                    [
+                      { type: "text", text: "Earlier preamble" },
+                      {
+                        type: "toolCall",
+                        id: "message-parent",
+                        name: modelId === "gpt-6" ? "exec" : "send_input",
+                        arguments:
+                          modelId === "gpt-6"
+                            ? {
+                                code: `text(await tools.multi_agent_v1__send_input({target:${JSON.stringify(parentId)},message:"actual finding"}))`,
+                              }
+                            : { target: parentId, message: "actual finding" },
+                      },
+                    ],
+                    "toolUse",
+                  )
+                : response(streamModel, []);
+            };
+          },
+        });
+        await root.manager.getRecord(id)!.promise;
+        const record = root.manager.getRecord(id)!;
+        expect(record.status).toBe("error");
+        expect(record.error).toBe("Agent completed without a final response.");
+        expect(record.result).toBeUndefined();
+        expect(root.messages).toEqual([]);
+        await root.emit("turn_end");
+        expect(root.messages).toEqual([]);
+        await root.emit("agent_settled");
+        expect(root.messages.filter((m) => m.customType === "subagent-message")).toMatchObject([
+          { details: { message: "actual finding", sender: { id } } },
+        ]);
+        const result = record.session!.messages.find((m) => m.role === "toolResult");
+        expect(result).toMatchObject({
+          toolName: modelId === "gpt-6" ? "exec" : "send_input",
+          isError: false,
+        });
+      } finally {
+        await root.emit("session_shutdown");
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    },
+  );
 
 it("real child session preserves an empty terminal provider error", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "subagent-terminal-error-"));
