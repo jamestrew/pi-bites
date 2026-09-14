@@ -1,4 +1,4 @@
-import { afterEach, expect, test, vi } from "vitest";
+import { beforeEach, afterEach, expect, test, vi } from "vitest";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { RegisterCollaboration } from "../subagents/subagent-context.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -9,6 +9,7 @@ import {
   mockSession,
   waitForCancellation,
 } from "../subagents/test/helpers/agent-manager-mocks.js";
+import registerBashGate from "../bash-gate/index.js";
 import registerCodeMode from "./index.js";
 import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { getCodeModeHostPath } from "./code-mode/binary.js";
@@ -27,6 +28,7 @@ try {
 } catch {
   /* Explicit dependency, never downloaded. */
 }
+beforeEach(() => vi.clearAllMocks());
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
   for (const close of cleanups.splice(0)) await close();
@@ -40,6 +42,7 @@ async function setup(
     model?: string;
     sessionId?: string;
     collaboration?: RegisterCollaboration;
+    autoMode?: Parameters<typeof createSubagents>[1];
   } = {},
 ) {
   const handlers = new Map<string, Function[]>();
@@ -95,7 +98,7 @@ async function setup(
       ? undefined
       : options.collaboration
         ? options.collaboration(pi, allowed)
-        : createSubagents(pi, undefined, undefined, undefined, allowed);
+        : createSubagents(pi, options.autoMode, undefined, undefined, allowed);
   controller?.registerTools();
   const config = { current: {} as import("../config.js").BitesConfig };
   if (options.adapter !== false) adapter = registerCodeMode(pi, config, undefined, controller);
@@ -416,3 +419,219 @@ test("missing hosts fail visibly without exposing standalone agents", async () =
     vi.unstubAllEnvs();
   }
 });
+
+native(
+  "all five child traces restore without live agents and move from exec to wait once",
+  async () => {
+    vi.mocked(runAgent).mockImplementation((_parent, _type, prompt, options) => {
+      const session = mockSession();
+      session.sessionManager = SessionManager.inMemory("/tmp", { id: "render-child" });
+      session.sessionManager.appendMessage({ role: "user", content: prompt, timestamp: 1 });
+      options.onSessionCreated?.(session);
+      return waitForCancellation(options.signal);
+    });
+    const h = await setup();
+    const spawned = await h.exec(
+      'text(await tools.multi_agent_v1__spawn_agent({message:"recognizable child"}))',
+    );
+    const id = values(spawned).agent_id;
+    const sent = await h.exec(
+      `await tools.multi_agent_v1__send_input({target:"${id}",message:"one\\ntwo\\nthree\\nfour\\nfive\\nsix\\nseven\\neight\\nnine\\nten\\neleven"})`,
+    );
+    const waiting = await h.exec(
+      `// @exec: {"yield_time_ms": 0}\ntext(await tools.multi_agent_v1__wait_agent({targets:["${id}"]}))`,
+    );
+    const closed = await h.exec(`await tools.multi_agent_v1__close_agent({target:"${id}"})`);
+    const waited = await h.tools
+      .get("wait")
+      .execute("wait-render", { cell_id: waiting.details.cellId });
+    vi.mocked(openAgentSession).mockResolvedValueOnce(mockSession());
+    const resumed = await h.exec(`await tools.multi_agent_v1__resume_agent({id:"${id}"})`);
+    const saved = JSON.parse(JSON.stringify([spawned, sent, closed, resumed, waiting, waited]));
+    await h.emit("session_tree"); // Display data cannot reopen the closed agents.
+    const fresh = await setup();
+    const plain = {
+      bold: (s: string) => s,
+      fg: (_: string, s: string) => s,
+      bg: (_: string, s: string) => s,
+    };
+    for (const expanded of [false, true]) {
+      const components = saved.map((result: any, i: number) => {
+        const tool = fresh.tools.get(i === 5 ? "wait" : "exec");
+        const context = {
+          state: {},
+          expanded,
+          isError: false,
+          showImages: false,
+          args: { code: "hidden JavaScript" },
+          invalidate() {},
+        };
+        return tool.renderResult(result, { expanded, isPartial: false }, plain, context);
+      });
+      const text = components.flatMap((c: any) => c.render(100)).join("\n");
+      for (const name of CODEX_V1_TOOL_NAMES)
+        expect(text.match(new RegExp(`^${name}\\b`, "gm"))).toHaveLength(1);
+      expect(text).toContain("recognizable child");
+      expect(text).toContain("test/gpt-6 high");
+      expect(text).not.toContain("hidden JavaScript");
+      expect(components[4].render(100)).toEqual([]);
+      for (const width of [1, 7, 40])
+        for (const component of components)
+          expect(component.render(width).every((line: string) => visibleWidth(line) <= width)).toBe(
+            true,
+          );
+    }
+    expect(
+      h.pi.sendMessage.mock.calls.filter(([m]: any[]) => m.customType === "toolResult"),
+    ).toEqual([]);
+  },
+);
+
+native(
+  "tree navigation rejects a late nested resume and disposes its unpublished session once",
+  async () => {
+    const session = mockSession();
+    session.sessionManager = SessionManager.inMemory("/tmp", { id: "late-resume" });
+    session.sessionManager.appendMessage({ role: "user", content: "recover", timestamp: 1 });
+    vi.mocked(runAgent).mockResolvedValue({ responseText: "done", session });
+    const h = await setup();
+    const id = values(
+      await h.exec('text(await tools.multi_agent_v1__spawn_agent({message:"recover"}))'),
+    ).agent_id;
+    await h.exec(`await tools.multi_agent_v1__close_agent({target:"${id}"})`);
+    const opening = Promise.withResolvers<any>();
+    vi.mocked(openAgentSession).mockReturnValueOnce(opening.promise);
+    const pending = await h.exec(
+      `// @exec: {"yield_time_ms": 0}\nawait tools.multi_agent_v1__resume_agent({id:"${id}"})`,
+    );
+    const late = mockSession();
+    try {
+      await vi.waitFor(() => expect(openAgentSession).toHaveBeenCalledOnce());
+      h.pi.sendMessage.mockClear();
+      await h.emit("session_tree");
+    } finally {
+      opening.resolve(late);
+    }
+    await vi.waitFor(() => expect(late.dispose).toHaveBeenCalledOnce());
+    expect(h.pi.sendMessage).not.toHaveBeenCalled();
+    expect(
+      (await h.tools.get("wait").execute("old-wait", { cell_id: pending.details.cellId })).details
+        .errorText,
+    ).toContain("not found");
+    vi.mocked(openAgentSession).mockResolvedValueOnce(mockSession());
+    expect(
+      values(await h.exec(`text(await tools.multi_agent_v1__resume_agent({id:"${id}"}))`)),
+    ).toEqual({ status: "pending_init" });
+  },
+);
+
+native(
+  "branch replacement cancels parallel child command approvals without late launches or stale ctx",
+  async () => {
+    vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) =>
+      waitForCancellation(options.signal),
+    );
+    const decisions = [Promise.withResolvers<any>(), Promise.withResolvers<any>()];
+    const review = vi
+      .fn()
+      .mockImplementationOnce(() => decisions[0]!.promise)
+      .mockImplementationOnce(() => decisions[1]!.promise);
+    const h = await setup({ autoMode: { isEnabled: () => true, review } });
+    const id = values(
+      await h.exec('text(await tools.multi_agent_v1__spawn_agent({message:"approval child"}))'),
+    ).agent_id;
+    const options = vi.mocked(runAgent).mock.calls[0]![3];
+    const childManager = SessionManager.inMemory("/tmp", { id: "approval-child" });
+    childManager.appendCustomEntry("pi-bites:subagent", {
+      agentId: id,
+      type: "worker",
+      title: "approval child",
+      bashGatePolicy: "prompt",
+      agentSessionId: options.agentSessionId,
+    });
+    options.onSessionCreated?.({ ...mockSession(), messages: [], sessionManager: childManager });
+    const gateHandlers = new Map<string, Function>();
+    const childPi = {
+      events: h.pi.events,
+      on: (name: string, fn: Function) => gateHandlers.set(name, fn),
+      registerFlag() {},
+      registerShortcut() {},
+      getFlag: () => false,
+      appendEntry: (type: string, data: unknown) => childManager.appendCustomEntry(type, data),
+    } as any;
+    const gate = registerBashGate(childPi, { current: {} });
+    const childCtx = { ...h.ctx, sessionManager: childManager };
+    gateHandlers.get("session_start")!({}, childCtx);
+    const authorization = gate.captureSession(childCtx);
+    const launch = vi.fn();
+    const requests = ["rm first.txt", "rm second.txt"].map((command, i) =>
+      authorization.authorize(
+        { toolCallId: `child-command-${i}`, toolName: "exec_command", command },
+        launch,
+      ),
+    );
+    const settled = Promise.allSettled(requests);
+    try {
+      await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
+      expect(review.mock.calls.map(([request]) => [request.toolCallId, request.command])).toEqual([
+        ["child-command-0", "rm first.txt"],
+        ["child-command-1", "rm second.txt"],
+      ]);
+      const replacement = { ...h.ctx };
+      for (const key of Object.keys(h.ctx))
+        Object.defineProperty(h.ctx, key, {
+          configurable: true,
+          get() {
+            throw new Error(`stale ctx.${key}`);
+          },
+        });
+      await h.emit("session_tree", replacement);
+      decisions.forEach((decision) => decision.resolve({ outcome: "allow" }));
+      expect((await settled).every((result) => result.status === "rejected")).toBe(true);
+      expect(launch).not.toHaveBeenCalled();
+      expect(h.pi.sendMessage).not.toHaveBeenCalled();
+    } finally {
+      decisions.forEach((decision) => decision.resolve({ outcome: "deny" }));
+      await settled;
+      await gateHandlers.get("session_shutdown")?.({});
+    }
+  },
+);
+
+native(
+  "cell failure retains a published child while tree navigation disposes late initialization",
+  async () => {
+    const initialized = Promise.withResolvers<any>();
+    vi.mocked(runAgent).mockReturnValueOnce(initialized.promise);
+    const h = await setup();
+    const result = await h.exec(
+      'text(await tools.multi_agent_v1__spawn_agent({message:"published"})); throw new Error("cell failed")',
+    );
+    expect(result.details.errorText).toContain("cell failed");
+    const id = JSON.parse(result.details.output).agent_id;
+    expect(
+      values(
+        await h.exec(
+          `text(await tools.multi_agent_v1__send_input({target:"${id}",message:"still controllable"}))`,
+        ),
+      ),
+    ).toEqual({ submission_id: expect.any(String) });
+    const options = vi.mocked(runAgent).mock.calls[0]![3];
+    expect(options.signal?.aborted).toBe(false);
+    const late = mockSession();
+    const navigation = h.emit("session_tree");
+    try {
+      await vi.waitFor(() => expect(options.signal?.aborted).toBe(true));
+      options.onSessionCreated?.(late);
+    } finally {
+      initialized.resolve({ responseText: "late final", session: late });
+      await navigation;
+    }
+    expect(late.dispose).toHaveBeenCalledOnce();
+    expect(h.pi.sendMessage).not.toHaveBeenCalled();
+    const missing = await h.exec(
+      `await tools.multi_agent_v1__send_input({target:"${id}",message:"must not deliver"})`,
+    );
+    expect(missing.details.errorText).toContain("not found");
+  },
+);

@@ -67,11 +67,11 @@ describe("spawn_agent", () => {
       fg: (color: string, text: string) => (color === "dim" ? `<dim>${text}</dim>` : text),
     };
     const collapsed = tool
-      .renderCall(args, dimTheme, { toolCallId: "call-1", expanded: false })
+      .renderCall(args, dimTheme, { state: {}, toolCallId: "call-1", expanded: false })
       .render(200)
       .join("\n");
     const expanded = tool
-      .renderCall(args, dimTheme, { toolCallId: "call-1", expanded: true })
+      .renderCall(args, dimTheme, { state: {}, toolCallId: "call-1", expanded: true })
       .render(200)
       .join("\n");
 
@@ -88,7 +88,7 @@ describe("spawn_agent", () => {
         { content: [], details: undefined },
         { expanded: false, isPartial: false },
         theme,
-        { toolCallId: "call-1" },
+        { state: {}, toolCallId: "call-1" },
       ),
     ).toBeInstanceOf(Container);
   });
@@ -99,6 +99,7 @@ describe("spawn_agent", () => {
 
     const rendered = tool
       .renderCall({ message: "one\ntwo\nthree\nfour" }, theme, {
+        state: {},
         toolCallId: "call-1",
         expanded: false,
       })
@@ -118,6 +119,7 @@ describe("spawn_agent", () => {
 
     const line = tool
       .renderCall({ agent_type: "explorer", message: "Trace the call path" }, styledTheme, {
+        state: {},
         toolCallId: "call-1",
       })
       .render(200)[0];
@@ -134,7 +136,7 @@ describe("spawn_agent", () => {
           message: "hello\u001b[31m red\nunsafe\u001b]52;c;Y29weQ==\u0007 description",
         },
         theme,
-        { toolCallId: "call-1", expanded: true },
+        { state: {}, toolCallId: "call-1", expanded: true },
       )
       .render(200);
     const rendered = lines.join("\n");
@@ -146,10 +148,8 @@ describe("spawn_agent", () => {
 
   it("restores effective model metadata from persisted result details", () => {
     const tool = captureAgentTool();
-    const call = tool.renderCall({ agent_type: "worker", message: "do it" }, theme, {
-      toolCallId: "restored-call",
-      expanded: false,
-    });
+    const context = { state: {}, toolCallId: "restored-call", expanded: false };
+    const call = tool.renderCall({ agent_type: "worker", message: "do it" }, theme, context);
 
     tool.renderResult(
       {
@@ -162,17 +162,40 @@ describe("spawn_agent", () => {
       },
       { expanded: false, isPartial: false },
       theme,
-      { toolCallId: "restored-call" },
+      context,
     );
 
     expect(call.render(200)[0]).toContain("openai/gpt-5.6 xhigh");
     expect(call.render(200)[0]).not.toContain("isolated");
   });
 
+  it("isolates restored spawn metadata between observations of the same call", () => {
+    const tool = captureAgentTool();
+    const args = { message: "work" };
+    const earlier = { toolCallId: "same", state: {}, expanded: false };
+    const later = { toolCallId: "same", state: {}, expanded: false };
+    const call = tool.renderCall(args, theme, earlier);
+    tool.renderResult(
+      { content: [], details: { modelName: "test/earlier", thinking: "high" } },
+      { expanded: false, isPartial: false },
+      theme,
+      earlier,
+    );
+    tool.renderResult(
+      { content: [], details: { modelName: "test/later", thinking: "low" } },
+      { expanded: false, isPartial: false },
+      theme,
+      later,
+    );
+    expect(call.render(200)[0]).toContain("test/earlier high");
+    expect(tool.renderCall(args, theme, later).render(200)[0]).toContain("test/later low");
+  });
+
   it("fits every rendered line at narrow widths", () => {
     const tool = captureAgentTool();
     const lines = tool
       .renderCall({ agent_type: "worker", message: "long prompt" }, theme, {
+        state: {},
         toolCallId: "call-1",
         expanded: false,
       })
@@ -185,6 +208,7 @@ describe("spawn_agent", () => {
     const tool = captureAgentTool();
     const rendered = tool
       .renderCall({ message: "do it" }, theme, {
+        state: {},
         toolCallId: "call-1",
       })
       .render(200)
@@ -199,6 +223,7 @@ describe("spawn_agent", () => {
 
     const line = tool
       .renderCall({ message: "continue", fork_context: true }, theme, {
+        state: {},
         toolCallId: "fork-call",
       })
       .render(200)[0];
@@ -208,7 +233,7 @@ describe("spawn_agent", () => {
 
   it("shows thrown capacity failures from the host on the call row", () => {
     const tool = captureAgentTool();
-    const context = { toolCallId: "capacity-error", isError: true };
+    const context = { state: {}, toolCallId: "capacity-error", isError: true };
     const call = tool.renderCall({ message: "work" }, theme, context);
     tool.renderResult(
       { content: [{ type: "text", text: "No concurrency slot is available." }] },
@@ -219,9 +244,24 @@ describe("spawn_agent", () => {
     expect(call.render(200).join("\n")).toContain("Error: No concurrency slot is available.");
   });
 
+  it("keeps the expansion hint after a failed spawn's prompt and error", () => {
+    const tool = captureAgentTool();
+    const context = { state: {}, toolCallId: "failed-long", isError: true, expanded: false };
+    const call = tool.renderCall({ message: "one\ntwo\nthree\nfour" }, theme, context);
+    tool.renderResult(
+      { content: [{ type: "text", text: "capacity exhausted" }] },
+      { expanded: false, isPartial: false },
+      theme,
+      context,
+    );
+    const lines = call.render(100);
+    expect(lines).toContain("Error: capacity exhausted");
+    expect(lines.at(-1)).toBe("(ctrl+o to expand)");
+  });
+
   it("shows spawn failures on the call row", async () => {
     const tool = captureAgentTool();
-    const context = { toolCallId: "failed-call", isError: true };
+    const context = { state: {}, toolCallId: "failed-call", isError: true };
     const call = tool.renderCall({ message: "work", agent_type: "unknown" }, theme, context);
     const error = await tool
       .execute(
