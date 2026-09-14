@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { CODEX_V1_CONTRACT } from "../codex-v1-contract.js";
 import { createAgentCompletionHandler } from "../agent-completion.js";
-import { registerWaitAgent } from "../register-wait-agent.js";
+import { createWaitAgent } from "../register-wait-agent.js";
 import type { AgentRecord } from "../types.js";
+import { SubagentOperationError } from "../tool-result.js";
 
 function record(id: string, status: AgentRecord["status"]): AgentRecord {
   return {
@@ -29,22 +30,21 @@ function harness(records: AgentRecord[]) {
   const pi = {
     events: { emit: vi.fn() },
     sendMessage: vi.fn(),
-    registerTool: vi.fn(),
   };
   const completion = createAgentCompletionHandler({
     pi: pi as never,
     getRecord: (id) => byId.get(id),
     onAgentFinishedUI: vi.fn(),
   });
-  registerWaitAgent(pi as never, {
+  const tool: any = createWaitAgent({
     waitFor: completion.waitFor,
     getRecord: (id) => byId.get(id),
   });
-  return { completion, pi, tool: pi.registerTool.mock.calls[0]![0] };
+  return { completion, pi, tool };
 }
 
 describe("wait_agent", () => {
-  it("registers the pinned V1 model-facing contract without WaitAgent", () => {
+  it("defines the pinned V1 model-facing contract without WaitAgent", () => {
     const { completion, tool } = harness([]);
 
     expect(tool.name).toBe("wait_agent");
@@ -127,24 +127,26 @@ describe("wait_agent", () => {
   });
 
   it("clamps positive timeouts to the V1 range and rejects zero", async () => {
-    let tool: any;
     const waitFor = vi.fn(async (_targets: string[], _timeoutMs: number) => ({
       outcome: "timeout" as const,
       status: {},
       timed_out: true as const,
       agents: [],
     }));
-    registerWaitAgent({ registerTool: (registered: unknown) => (tool = registered) } as never, {
+    const tool: any = createWaitAgent({
       waitFor,
       getRecord: () => undefined,
     });
 
     await tool.execute("short", { targets: ["a"], timeout_ms: 1 });
     await tool.execute("long", { targets: ["a"], timeout_ms: 4_000_000 });
-    const invalid = await tool.execute("zero", { targets: ["a"], timeout_ms: 0 });
+    const invalid = await tool
+      .execute("zero", { targets: ["a"], timeout_ms: 0 })
+      .catch((error: unknown) => error);
 
     expect(waitFor.mock.calls.map((call) => call[1])).toEqual([10_000, 3_600_000]);
-    expect(invalid.content[0].text).toBe("timeout_ms must be greater than zero");
+    expect(invalid).toBeInstanceOf(SubagentOperationError);
+    expect(invalid.message).toBe("timeout_ms must be greater than zero");
     expect(invalid.details).toMatchObject({
       outcome: "error",
       message: "timeout_ms must be greater than zero",
@@ -152,7 +154,7 @@ describe("wait_agent", () => {
     expect(
       tool
         .renderResult(
-          invalid,
+          { content: [{ type: "text", text: invalid.message }], details: invalid.details },
           { expanded: false },
           {
             bold: (text: string) => text,
@@ -170,9 +172,11 @@ describe("wait_agent", () => {
   it("rejects an empty target list without starting a wait", async () => {
     const { completion, tool } = harness([]);
 
-    const result = await tool.execute("empty", { targets: [] });
-
-    expect(result.content[0].text).toBe("agent ids must be non-empty");
+    await expect(tool.execute("empty", { targets: [] })).rejects.toMatchObject({
+      name: "SubagentOperationError",
+      message: "agent ids must be non-empty",
+      details: expect.objectContaining({ outcome: "error" }),
+    });
     completion.dispose();
   });
 });

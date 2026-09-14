@@ -41,7 +41,14 @@ function makePi() {
     },
     sendMessage: vi.fn(),
     getThinkingLevel: () => "off",
-    getActiveTools: () => ["read"],
+    getActiveTools: () => [
+      "spawn_agent",
+      "send_input",
+      "wait_agent",
+      "close_agent",
+      "resume_agent",
+      "read",
+    ],
   } as any;
   return { pi, tools, lifecycle };
 }
@@ -57,6 +64,7 @@ it.each([false, true])(
       hasUI: true,
       ui,
       model,
+      scopedModels: [],
       modelRegistry: { ...mockCtx.modelRegistry, getAvailable: () => [model] },
     };
     subagentsExtension(pi);

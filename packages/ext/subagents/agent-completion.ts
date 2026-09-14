@@ -60,6 +60,7 @@ type AgentCompletionDeps = {
   getRecord: (id: string) => AgentRecord | undefined;
   onAgentFinishedUI: (id: string) => void;
   onAgentResultPendingUI?: (id: string) => void;
+  shouldNotify?: (record: AgentRecord) => boolean;
   scheduleAutomatic?: (parentSessionId: string, deliver: () => void, cancel: () => void) => boolean;
 };
 
@@ -79,6 +80,7 @@ export function createAgentCompletionHandler({
   onAgentFinishedUI,
   onAgentResultPendingUI,
   scheduleAutomatic,
+  shouldNotify,
 }: AgentCompletionDeps) {
   const completedGeneration = new WeakMap<AgentRecord, number>();
   const waiters = new Map<number, Waiter>();
@@ -169,6 +171,10 @@ export function createAgentCompletionHandler({
 
     resolveWaiters(finished);
     emitCompletionEvent(finished, failed);
+    if (shouldNotify && !shouldNotify(record)) {
+      notifyFinishedUI();
+      return;
+    }
 
     let finishedUI = false;
     const finishUI = () => {

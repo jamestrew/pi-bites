@@ -2,8 +2,9 @@ import { Container, visibleWidth } from "@earendil-works/pi-tui";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CODEX_V1_CONTRACT } from "../codex-v1-contract.js";
-import { registerAgentTool } from "../register-agent-tool.js";
+import { createAgentTool } from "../register-agent-tool.js";
 import { runAsSubagent } from "../subagent-context.js";
+import { SubagentOperationError } from "../tool-result.js";
 
 vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@earendil-works/pi-coding-agent")>()),
@@ -16,14 +17,12 @@ const theme = {
 };
 
 function captureAgentTool(parentAgentType?: string) {
-  let tool: any;
   const pi = {
     events: { on: vi.fn(), emit: vi.fn() },
-    registerTool: vi.fn((registered) => (tool = registered)),
   };
   const noop = vi.fn();
-  const register = () =>
-    registerAgentTool(pi as any, {
+  const create = () =>
+    createAgentTool(pi as any, {
       manager: { setMaxConcurrent: noop } as any,
       agentActivity: new Map(),
       fleet: {} as any,
@@ -31,15 +30,13 @@ function captureAgentTool(parentAgentType?: string) {
       setScopeModelsEnabled: noop,
       setFleetViewEnabled: noop,
     });
-  if (parentAgentType) runAsSubagent(parentAgentType, register);
-  else register();
-  return tool;
+  return (parentAgentType ? runAsSubagent(parentAgentType, create) : create()) as any;
 }
 
 describe("spawn_agent", () => {
   beforeEach(() => vi.mocked(keyHint).mockReturnValue("ctrl+o to expand"));
 
-  it("registers the pinned V1 model-facing contract", () => {
+  it("defines the pinned V1 model-facing contract", () => {
     const tool = captureAgentTool();
 
     expect(tool.name).toBe("spawn_agent");
@@ -227,15 +224,19 @@ describe("spawn_agent", () => {
 
   it("shows spawn failures on the call row", async () => {
     const tool = captureAgentTool();
-    const context = { toolCallId: "failed-call" };
+    const context = { toolCallId: "failed-call", isError: true };
     const call = tool.renderCall({ message: "work", agent_type: "unknown" }, theme, context);
-    const result = await tool.execute(
-      "failed-call",
-      { message: "work", agent_type: "unknown" },
-      undefined,
-      undefined,
-      {} as never,
-    );
+    const error = await tool
+      .execute(
+        "failed-call",
+        { message: "work", agent_type: "unknown" },
+        undefined,
+        undefined,
+        {} as never,
+      )
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(SubagentOperationError);
+    const result = { content: [{ type: "text", text: error.message }], details: error.details };
 
     tool.renderResult(result, { expanded: false, isPartial: false }, theme, context);
 

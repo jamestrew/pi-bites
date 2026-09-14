@@ -1,4 +1,5 @@
-import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { SubagentContext } from "./operation-context.js";
+import type { AgentSession, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
 import type { AgentCloser } from "./agent-close.js";
@@ -44,7 +45,7 @@ export class AgentReopener {
   /** Reopen only an owned conversation. Publication is the cancellation commit point. */
   async open(
     pi: ExtensionAPI,
-    ctx: ExtensionContext,
+    ctx: SubagentContext,
     id: string,
     options: ReopenOptions = {},
   ): Promise<WaitAgentStatus> {
@@ -111,8 +112,9 @@ export class AgentReopener {
       !ctx.scopedModels.some(({ model: m }) => m.provider === model.provider && m.id === model.id)
     )
       throw new Error("Model not in scope for resume.");
-    const allowedTools = pi.getActiveTools();
-    const thinkingLevel = model.reasoning === false ? "off" : pi.getThinkingLevel();
+    const allowedTools = ctx.allowedTools ?? pi.getActiveTools();
+    const thinkingLevel =
+      model.reasoning === false ? "off" : (ctx.thinking ?? pi.getThinkingLevel());
     const record: AgentRecord = {
       id,
       incarnation: randomUUID(),

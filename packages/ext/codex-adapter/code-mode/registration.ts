@@ -10,8 +10,9 @@ import {
   reconcileTools,
   createAdapterToolState,
   getNestedTools,
+  getDelegationTools,
 } from "../activation.js";
-import type { CodexPromptPreview } from "../index.js";
+import type { CodexAdapterController, CodexPromptPreview } from "../index.js";
 import { registerApplyPatchTool } from "../apply-patch/tool.js";
 import { registerExecCommandTool } from "../exec/command-tool.js";
 import { createExecSessionManager } from "../exec/session-manager.js";
@@ -28,7 +29,7 @@ export default function registerCodeMode(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
   gate?: BashGateController,
-): CodexPromptPreview {
+): CodexAdapterController {
   const state = createAdapterToolState();
   const sessions = createExecSessionManager();
   const owned = {
@@ -116,5 +117,8 @@ export default function registerCodeMode(
       await sessions.shutdown();
     }
   });
-  return preview;
+  return {
+    previewPrompt: preview,
+    getAllowedTools: () => getDelegationTools(pi.getActiveTools(), state),
+  };
 }

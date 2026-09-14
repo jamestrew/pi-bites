@@ -141,3 +141,14 @@ export function reconcileTools(
   state.projection = projection;
   return visible;
 }
+
+/** Recover permissions without exposing or enabling anything in the parent session. */
+export function getDelegationTools(active: string[], state: AdapterToolState): string[] {
+  const snapshot = structuredClone(state);
+  const projected = reconcileTools(active, true, snapshot);
+  const underlying = restore(
+    projected,
+    snapshot.projection.kind === "active" ? snapshot.projection.displaced : [],
+  );
+  return [...new Set([...underlying, ...getNestedTools(snapshot)])];
+}

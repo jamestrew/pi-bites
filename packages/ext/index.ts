@@ -16,7 +16,7 @@ import registerSpotme from "./spotme/index.js";
 import registerInlineReferences from "./inline-references/index.js";
 import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
-import registerSubagents from "./subagents/index.js";
+import { createSubagents } from "./subagents/index.js";
 import { getActiveSubagent } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
 import registerGoal from "./goal/index.js";
@@ -48,9 +48,10 @@ export default async function (pi: ExtensionAPI) {
   // Subagent sessions install the same policy directly at Pi's safe
   // prepare-next-turn seam; ctx.compact() would abort their owning invocation.
   if (!isSubagent && !disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
-  const previewCodexPrompt = disabled.has("codexAdapter")
+  const codexAdapter = disabled.has("codexAdapter")
     ? undefined
     : registerCodexAdapter(pi, configRef, bashGate);
+  const previewCodexPrompt = codexAdapter?.previewPrompt;
 
   if (!disabled.has("codegraph")) await registerCodegraph(pi);
 
@@ -60,12 +61,20 @@ export default async function (pi: ExtensionAPI) {
   if (!disabled.has("view")) registerView(pi);
   if (!isNonInteractive && !disabled.has("sessionTracker"))
     registerSessionTracker(pi, configRef, autoMode);
-  if (!disabled.has("subagents"))
-    registerSubagents(pi, autoMode, bashGate, () =>
-      configRef.current.disable?.includes("autoCompaction")
-        ? undefined
-        : (configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD),
-    );
+  const subagents = disabled.has("subagents")
+    ? undefined
+    : createSubagents(
+        pi,
+        autoMode,
+        bashGate,
+        () =>
+          configRef.current.disable?.includes("autoCompaction")
+            ? undefined
+            : (configRef.current.autoCompaction?.thresholdTokens ??
+              DEFAULT_AUTO_COMPACTION_THRESHOLD),
+        codexAdapter?.getAllowedTools,
+      );
+  subagents?.registerTools();
 
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);

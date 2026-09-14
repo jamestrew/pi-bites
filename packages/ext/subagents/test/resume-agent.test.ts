@@ -7,7 +7,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => ({
 }));
 
 import { CODEX_V1_CONTRACT } from "../codex-v1-contract.js";
-import { registerResumeAgent } from "../register-resume-agent.js";
+import { createResumeAgent } from "../register-resume-agent.js";
 
 const textOf = (result: any): string => result.content[0].text;
 const theme = {
@@ -15,10 +15,9 @@ const theme = {
   fg: (color: string, text: string) => `<${color}>${text}</${color}>`,
 };
 
-function register(manager: Record<string, unknown>) {
-  let tool: any;
-  const pi = { registerTool: vi.fn((registered) => (tool = registered)) } as any;
-  registerResumeAgent(
+function create(manager: Record<string, unknown>) {
+  const pi = {} as any;
+  const tool: any = createResumeAgent(
     pi,
     { getClosedRecord: vi.fn(), ...manager } as any,
     () => true,
@@ -51,8 +50,7 @@ describe("resume_agent", () => {
           return controllers.context.signal;
         },
       };
-      let tool: any;
-      const pi = { registerTool: (value: unknown) => (tool = value) } as any;
+      const pi = {} as any;
       const reopen = vi.fn(async (_pi, receivedCtx, id, options) => {
         expect(receivedCtx).toBe(ctx);
         expect(id).toBe("closed");
@@ -65,7 +63,7 @@ describe("resume_agent", () => {
         expect(options.signal.reason).toBe("cancelled");
         return "pending_init" as const;
       });
-      registerResumeAgent(
+      const tool: any = createResumeAgent(
         pi,
         {
           getRecord: vi.fn(),
@@ -96,7 +94,7 @@ describe("resume_agent", () => {
     const manager = {
       getRecord: vi.fn((id) => (id === "agent-1" ? { description: "worker" } : undefined)),
     };
-    const tool = register(manager);
+    const tool = create(manager);
     const state = {};
     const context = { toolCallId: "partial", state, expanded: false };
 
@@ -110,7 +108,7 @@ describe("resume_agent", () => {
   });
 
   it("resolves closed recipients and restores saved result details without a live record", () => {
-    const tool = register({
+    const tool = create({
       getRecord: vi.fn(),
       getClosedRecord: vi.fn(() => ({ description: "saved worker" })),
     });
@@ -118,7 +116,7 @@ describe("resume_agent", () => {
     expect(tool.renderCall({ id: "closed" }, theme, context).render(100)).toEqual([
       "<bold>resume_agent</bold><accent> saved worker</accent>",
     ]);
-    const restored = register({ getRecord: vi.fn() });
+    const restored = create({ getRecord: vi.fn() });
     const restoredContext = { state: {}, expanded: true };
     expect(
       restored
@@ -143,13 +141,13 @@ describe("resume_agent", () => {
     ]);
   });
 
-  it("registers the pinned contract and returns the resumed status", async () => {
+  it("defines the pinned contract and returns the resumed status", async () => {
     const record = { id: "agent-1", description: "trace auth" };
     const manager = {
       getRecord: vi.fn(() => record),
       reopen: vi.fn(async () => "running"),
     };
-    const tool = register(manager);
+    const tool = create(manager);
 
     expect(tool.name).toBe("resume_agent");
     expect(tool.label).toBe("resume_agent");
@@ -183,7 +181,7 @@ describe("resume_agent", () => {
       .mockResolvedValueOnce("pending_init")
       .mockResolvedValueOnce("shutdown")
       .mockRejectedValueOnce(new Error("agent with id missing not found"));
-    const tool = register({
+    const tool = create({
       getRecord: vi.fn((id) => ({ id, description: id })),
       reopen,
     });
@@ -217,7 +215,7 @@ describe("resume_agent", () => {
     ["running", "running", "running"],
     ["completed", { completed: "done" }, "completed"],
   ])("renders a %s id as one styled scanline", async (_name, agentStatus, label) => {
-    const tool = register({
+    const tool = create({
       getRecord: vi.fn(() => ({ description: "worker" })),
       reopen: vi.fn(async () => agentStatus),
     });
@@ -236,7 +234,7 @@ describe("resume_agent", () => {
   });
 
   it("restores a host error as one styled call row without result details", () => {
-    const tool = register({ getRecord: vi.fn() });
+    const tool = create({ getRecord: vi.fn() });
     const context = { toolCallId: "restored-error", state: {}, expanded: false, isError: true };
     tool.renderResult(
       { content: [{ type: "text", text: "agent not found" }] },
@@ -252,7 +250,7 @@ describe("resume_agent", () => {
   });
 
   it.each([false, true])("renders host errors at bounded width (expanded=%s)", async (expanded) => {
-    const tool = register({
+    const tool = create({
       getRecord: vi.fn(),
       reopen: vi.fn(async () => Promise.reject(new Error("x".repeat(300)))),
     });

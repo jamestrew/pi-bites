@@ -1,10 +1,4 @@
-/**
- * agent-manager.ts — Tracks concurrent agents, queued execution, and resume support.
- *
- * Agents are subject to a configurable concurrency limit (default: 4).
- * Excess agents are queued and auto-started as retained agents close.
- */
-
+import type { SubagentContext } from "./operation-context.js";
 import { randomUUID } from "node:crypto";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -64,6 +58,7 @@ interface TurnHooks {
 
 export interface SpawnOptions {
   description: string;
+  allowedTools?: string[];
   /** Explicitly wait for another agent to close when capacity is exhausted. */
   queueIfBusy?: boolean;
   model?: Model<Api>;
@@ -314,7 +309,7 @@ export class AgentManager {
    */
   spawn(
     pi: ExtensionAPI,
-    ctx: ExtensionContext,
+    ctx: SubagentContext,
     requestedType: string,
     prompt: string,
     options: SpawnOptions,
@@ -620,6 +615,7 @@ export class AgentManager {
       isolated: options.isolated,
       thinkingLevel: options.thinkingLevel,
       parentEntries,
+      allowedTools: options.allowedTools,
       autoCompactionThreshold: this.getAutoCompactionThreshold?.(),
       cwd: customCwd,
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
@@ -726,14 +722,16 @@ export class AgentManager {
     return true;
   }
 
-  async cancelAndSteer(id: string, message: string): Promise<boolean> {
+  async cancelAndSteer(id: string, message: string, signal?: AbortSignal): Promise<boolean> {
     const record = this.agents.get(id);
     if (!record?.session || this.closer.isClosing(id) || record.status !== "running") return false;
-    return this.interruptions.interrupt(record, record.session, "cancel_and_steer", message);
+    const source = "cancel_and_steer";
+    return this.interruptions.interrupt(record, record.session, source, message, signal);
   }
 
   /** Submit ordinary input through the manager's close-aware lifecycle gate. */
-  async sendInput(id: string, message: string): Promise<boolean> {
+  async sendInput(id: string, message: string, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
     const record = this.agents.get(id);
     if (!record || this.closer.isClosing(id)) return false;
     if (record.status === "completed" || record.status === "idle")
@@ -856,7 +854,7 @@ export class AgentManager {
     return this.closer.get(id);
   }
 
-  reopen(pi: ExtensionAPI, ctx: ExtensionContext, id: string, options?: ReopenOptions) {
+  reopen(pi: ExtensionAPI, ctx: SubagentContext, id: string, options?: ReopenOptions) {
     return this.reopener.open(pi, ctx, id, options);
   }
 

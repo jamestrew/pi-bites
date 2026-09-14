@@ -139,7 +139,7 @@ complete Codex system prompt or adding local batching advice.
   the current lifecycle owner's signal, so session replacement cannot publish late reopened agents.
   Publication into the manager is the commit point: cancellation or a lost result afterward leaves
   the agent discoverable and controllable, still holding its slot.
-- Shared Code Mode dispatch and broader child role/permission parity remain #306–#309 work. The
+- Nested exposure and broader child role/permission parity remain #307–#309 work. The
   standalone success payload is the pinned `{ status }` object serialized as text; failures throw
   model-facing errors and update the same bounded call renderer. Focused manager tests cover claims,
   rollback, owned lookup and stale contexts; a real Pi-session check exercises conversation/compaction,
@@ -155,6 +155,47 @@ transport adaptation. The broader contract rebaseline belongs to #305; no close 
 is needed. Pi serializes concurrent close requests per agent and returns `shutdown` to subsequent
 callers; upstream does not guarantee concurrent status sampling order.
 
+## Shared owned operations (#306)
+
+`createSubagents` returns a `SubagentController`; `packages/ext/index.ts` injects it into
+standalone registration with `registerTools()`. The root also injects the adapter's
+`getAllowedTools()` snapshot when enabled: it reconstructs permitted capabilities
+without changing the parent's exposure, so Code Mode names cannot strip core tools
+from a child choosing another model or revive explicitly excluded capabilities.
+The five owned tool factories supply
+one implementation, pinned definitions and reusable renderers. The controller exposes
+`capture(ctx, { forkContext })` for deferred consumers; it never discovers executors
+through `getAllTools()`, emits synthetic Pi tool events, or imports the adapter.
+Nested model exposure stays inaccessible until #308 supplies coherent availability.
+
+Capture happens while Pi ctx is active. The returned operation handle contains the
+parent identity, role, model/reasoning, scope policy, allowed tools, provider/model
+registry snapshots, system prompt and explicitly requested fork history. Calls carry
+`callerId`, a nonempty unique in-flight `callId`, cancellation and optional display
+updates. All five direct tools use this same schema/ownership/generation gate. Success
+returns a typed V1 `value` alongside Pi text and display `details`; failures throw,
+including cancelled waits. Lost display callbacks cannot cancel owned work.
+
+Spawn publishes its identity and capacity synchronously, before asynchronous child
+initialization. Cancellation before publication prevents launch; after publication,
+initialization and eventual errors belong to the retained agent, observable through
+Fleet and wait/close. No cell signal is attached to a committed child. Resume instead
+reserves while loading and publishes only after initialization; failure or cancellation
+before that publication tears down and releases its claim. Send commits at manager
+submission (or at the serialized interruption effect); cancellation is checked before
+a queued interruption begins, not presented as rollback after acceptance. A cancelled
+wait removes only its timers/listener, never the agents or another waiter.
+
+Session replacement/reload/shutdown invalidate captured operations. Branch navigation
+also cancels approvals, closes old live conversations into manager-owned recovery data,
+and suppresses their late conversation messages/notifications in the new branch.
+Canonical completion still resolves waiters, emits lifecycle events and clears Fleet
+and session-tracker background activity. Existing manager,
+Fleet and RPC paths remain supported, without becoming the nested execution boundary.
+
+Focused regression checks are in `test/operations.test.ts`, with existing manager
+reopen/interruption and standalone renderer suites covering the underlying lifecycle.
+
 ## Cancellation and navigation ownership
 
 An agent is conversation/session-owned, not cell-owned. Outer `wait` resumes a cell;
@@ -163,7 +204,7 @@ completion, `exit()`, or cell cancellation must not close committed children. Na
 cell finalization still cancels unfinished delegates; it is not an atomic rollback
 transaction for already committed agent effects.
 
-The shared controller must implement these observable commit boundaries (#306):
+The shared controller implements these observable commit boundaries (#306):
 
 | Operation        | Before commit                                                                                       | Commit / cancellation after commit                                                                                                                                                                            |
 | ---------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -258,7 +299,7 @@ for the named follow-ups, not new prompt-only tests or claims that B is active t
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
 | Definitions and bad input      | All five names; omitted defaults; unknown fields, empty message/targets, malformed/unauthorized ID, invalid timeout, unknown role/model/effort, fork plus explicit role reject without side effects; missing target fails except wait returns `not_found` | #306–#308 |
 | History and capabilities       | No-fork defaults to default; full-history fork sees prior turns and inherits role; children inherit actual tools/model/reasoning; explorer can use a permitted write tool and cannot gain a forbidden tool                                                | #307      |
-| Concurrent spawn               | Race two spawns for one slot; only one commits; completed open child still blocks spawn; failed initialization releases reservation                                                                                                                       | #306      |
+| Concurrent spawn               | Race two spawns for one slot; only one commits; completed open child still blocks spawn; failed uncommitted reopen releases reservation; published spawn errors retain their slot until close                                                             | #306      |
 | Input and addressing           | Send during initialization/running/completion, child-to-parent and permitted descendant addressing, forbidden target, interrupt then reuse; preserve turns and submission IDs                                                                             | #307      |
 | Selected wait and notification | Unselected completion does not release wait; selected completion does; timeout is empty; multiple selected finals preserved; notification still arrives independently                                                                                     | #306–#307 |
 | Close/resume                   | Close running/completed subtree once; repeat close; unknown ID error; reopen ordinary child with same identity and prior conversation; resume at capacity fails; simultaneous resume reserves before work; failed reopen rolls back                       | #276–#277 |

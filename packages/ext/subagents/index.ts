@@ -1,3 +1,5 @@
+import type { AgentRecord } from "./types.js";
+import { SubagentController } from "./operations.js";
 /**
  * pi-agents — A pi extension providing Claude Code-style autonomous sub-agents.
  *
@@ -26,11 +28,11 @@ import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import { createSubagentMessenger } from "./subagent-messages.js";
-import { registerAgentTool } from "./register-agent-tool.js";
-import { registerResumeAgent } from "./register-resume-agent.js";
-import { registerCloseAgent } from "./register-close-agent.js";
-import { registerSendInput } from "./register-send-input.js";
-import { registerWaitAgent } from "./register-wait-agent.js";
+import { createAgentTool } from "./register-agent-tool.js";
+import { createResumeAgent } from "./register-resume-agent.js";
+import { createCloseAgent } from "./register-close-agent.js";
+import { createSendInput } from "./register-send-input.js";
+import { createWaitAgent } from "./register-wait-agent.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
@@ -49,11 +51,12 @@ import {
 
 // ---- Shared helpers ----
 
-export default function (
+export function createSubagents(
   pi: ExtensionAPI,
   autoMode?: Pick<AutoModeController, "isEnabled" | "review">,
   bashGate?: Pick<BashGateController, "isYolo">,
   getAutoCompactionThreshold?: () => number | undefined,
+  getAllowedTools: () => string[] = () => pi.getActiveTools(),
 ) {
   // ---- Register custom notification renderers ----
   registerNotificationRenderer(pi);
@@ -67,6 +70,9 @@ export default function (
 
   let manager: AgentManager;
   let fleet: FleetList;
+  let operations: SubagentController;
+  let currentSessionToken: object | undefined;
+  const retiredConversations = new WeakSet<AgentRecord>();
   const completion = createAgentCompletionHandler({
     pi,
     getRecord: (id) => manager.getRecord(id),
@@ -75,6 +81,7 @@ export default function (
       fleet.onAgentFinished(id);
     },
     onAgentResultPendingUI: (id) => fleet.onAgentResultPending(id),
+    shouldNotify: (record) => !retiredConversations.has(record),
     scheduleAutomatic: (parentSessionId, deliver, cancel) =>
       parentMessenger.scheduleFinal(parentSessionId, deliver, cancel),
   });
@@ -102,7 +109,14 @@ export default function (
         compactionCount: record.compactionCount,
       });
     },
-    (parentSessionId, sender, message) => parentMessenger.send(parentSessionId, sender, message),
+    (parentSessionId, sender, message) => {
+      const record = manager.getRecord(sender.id);
+      return (
+        !!record &&
+        !retiredConversations.has(record) &&
+        parentMessenger.send(parentSessionId, sender, message)
+      );
+    },
     getAutoCompactionThreshold,
     (record) => parentAllowances.delete(record.id),
   );
@@ -127,15 +141,8 @@ export default function (
   // --- Cross-extension RPC via pi.events ---
   let approvalOwner = new AbortController();
   let currentCtx: ExtensionContext | undefined;
-  let currentSessionToken: object | undefined;
 
-  // Capture ctx from session_start for the RPC spawn handler.
-  pi.on("session_start", async (_event, ctx) => {
-    approvalOwner.abort();
-    approvalOwner = new AbortController();
-    parentAllowances.clear();
-    currentCtx = ctx;
-    currentSessionToken = {};
+  function startParentMessenger(ctx: ExtensionContext) {
     // The runtime supplies the concrete manager, but ExtensionContext exposes only its read facade.
     // Snapshot this documented append operation now so shutdown never touches a stale ctx.
     const sessionManager = ctx.sessionManager as typeof ctx.sessionManager &
@@ -145,6 +152,17 @@ export default function (
       (customType, content, display, details) =>
         sessionManager.appendCustomMessageEntry(customType, content, display, details),
     );
+  }
+
+  // Capture ctx from session_start for the RPC spawn handler.
+  pi.on("session_start", async (_event, ctx) => {
+    operations.invalidate();
+    approvalOwner.abort();
+    approvalOwner = new AbortController();
+    parentAllowances.clear();
+    currentCtx = ctx;
+    currentSessionToken = {};
+    startParentMessenger(ctx);
   });
 
   pi.on("agent_start", () => parentMessenger.agentStarted());
@@ -163,6 +181,7 @@ export default function (
   });
 
   pi.on("session_before_switch", () => {
+    operations.invalidate();
     approvalOwner.abort();
     parentAllowances.clear();
     currentCtx = undefined;
@@ -414,6 +433,7 @@ export default function (
 
   // Persist queued parent deliveries before aborting children and tearing down.
   pi.on("session_shutdown", async () => {
+    operations.invalidate();
     approvalOwner.abort();
     parentAllowances.clear();
     currentCtx = undefined;
@@ -457,7 +477,7 @@ export default function (
   });
 
   // ---- spawn_agent tool ----
-  registerAgentTool(pi, {
+  const spawn_agent = createAgentTool(pi, {
     manager,
     agentActivity,
     fleet,
@@ -467,13 +487,38 @@ export default function (
   });
 
   // ---- Agent lifecycle tools ----
-  registerWaitAgent(pi, {
+  const wait_agent = createWaitAgent({
     waitFor: completion.waitFor,
     getRecord: (id) => manager.getRecord(id),
   });
-  registerSendInput(pi, manager);
-  registerCloseAgent(pi, manager);
-  registerResumeAgent(pi, manager, isScopeModelsEnabled, () => approvalOwner.signal);
+  const send_input = createSendInput(pi, manager);
+  const close_agent = createCloseAgent(manager);
+  const resume_agent = createResumeAgent(
+    pi,
+    manager,
+    isScopeModelsEnabled,
+    () => approvalOwner.signal,
+  );
+  operations = new SubagentController(
+    pi,
+    { spawn_agent, send_input, wait_agent, close_agent, resume_agent },
+    manager,
+    isScopeModelsEnabled,
+    getAllowedTools,
+  );
+  pi.on("session_tree", async (_event, ctx) => {
+    operations.invalidate();
+    approvalOwner.abort();
+    approvalOwner = new AbortController();
+    parentAllowances.clear();
+    currentCtx = ctx;
+    currentSessionToken = {};
+    parentMessenger.dispose();
+    startParentMessenger(ctx);
+    for (const record of manager.listAgents()) retiredConversations.add(record);
+    // Navigation retires live conversations; explicit resume can recover their owned history.
+    await Promise.allSettled(manager.listAgents().map((record) => manager.close(record.id)));
+  });
 
   // ---- /agents interactive menu ----
   registerAgentsCommand(pi, {
@@ -485,4 +530,11 @@ export default function (
     isFleetViewEnabled,
     setFleetViewEnabled,
   });
+  return operations;
+}
+
+export default function registerSubagents(...args: Parameters<typeof createSubagents>) {
+  const controller = createSubagents(...args);
+  controller.registerTools();
+  return controller;
 }

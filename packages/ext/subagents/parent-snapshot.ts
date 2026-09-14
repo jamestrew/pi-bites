@@ -1,5 +1,6 @@
+import type { SubagentContext } from "./operation-context.js";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionContext, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 
 /** Session data a spawned agent may safely use after its parent context becomes stale. */
 export interface ParentSnapshot {
@@ -11,7 +12,7 @@ export interface ParentSnapshot {
   providers: Array<[string, ProviderConfig]>;
 }
 
-export function snapshotParent(ctx: ExtensionContext): ParentSnapshot {
+export function snapshotParent(ctx: SubagentContext): ParentSnapshot {
   const registry = ctx.modelRegistry;
   const providers: Array<[string, ProviderConfig]> = [];
   for (const id of registry.getRegisteredProviderIds()) {

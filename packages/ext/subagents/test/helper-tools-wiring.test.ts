@@ -8,8 +8,11 @@ vi.mock("../agent-runner.js", async () => {
 import { resumeAgent, runAgent, steerAgent } from "../agent-runner.js";
 import type { AgentManager } from "../agent-manager.js";
 import subagentsExtension from "../index.js";
+import { SubagentOperationError } from "../tool-result.js";
 
-function makePi(active = ["spawn_agent", "read"]) {
+function makePi(
+  active = ["spawn_agent", "send_input", "wait_agent", "close_agent", "resume_agent", "read"],
+) {
   const tools = new Map<string, any>();
   const handlers = new Map<string, (...args: any[]) => unknown>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
@@ -42,6 +45,7 @@ function ctx(idle = true) {
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd: "/tmp",
     model: undefined,
+    scopedModels: [],
     modelRegistry: {
       find: vi.fn(),
       getAvailable: vi.fn(() => []),
@@ -372,8 +376,10 @@ describe("background helper tools", () => {
 
     const missing = await tools
       .get("send_input")
-      .execute("msg", { target: "missing", message: "x" }, undefined, undefined, ctx());
-    expect(textOf(missing)).toContain("agent with id missing not found");
+      .execute("msg", { target: "missing", message: "x" }, undefined, undefined, ctx())
+      .catch((error: unknown) => error);
+    expect(missing).toBeInstanceOf(SubagentOperationError);
+    expect(missing.message).toContain("agent with id missing not found");
     expect(missing.details).toMatchObject({ status: "failed", message: "x" });
 
     finish({ responseText: "done", session });

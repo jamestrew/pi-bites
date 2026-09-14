@@ -1,11 +1,12 @@
+import type { SubagentContext } from "./operation-context.js";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createActivityTracker } from "./activity-tracker.js";
 import type { AgentManager } from "./agent-manager.js";
 import { resolveSpawnAgent } from "./agent-types.js";
 import { resolveAgentInvocationConfig } from "./invocation-config.js";
 import { modelKey, resolveModel } from "./model-resolver.js";
-import { textResult } from "./tool-result.js";
+import { v1Result, SubagentOperationError } from "./tool-result.js";
 import { isThinkingLevel, type AgentInvocation, type ThinkingLevel } from "./types.js";
 import {
   type AgentActivity,
@@ -45,12 +46,18 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
   return async (
     toolCallId: string,
     params: AgentToolParams,
-    _signal: AbortSignal | undefined,
+    signal: AbortSignal | undefined,
     _onUpdate: AgentToolUpdate | undefined,
-    ctx: ExtensionContext,
+    ctx: SubagentContext,
   ) => {
+    signal?.throwIfAborted();
+    ctx.signal?.throwIfAborted();
     if (!params.message.trim()) return failedResult("Empty message can't be sent to an agent.");
-    const role = resolveSpawnAgent(params.agent_type, params.fork_context, parentAgentType);
+    const role = resolveSpawnAgent(
+      params.agent_type,
+      params.fork_context,
+      ctx.parentRole ?? parentAgentType,
+    );
     if ("error" in role) return failedResult(role.error);
     const resolved = role.agent;
     const subagentType = resolved.type;
@@ -75,7 +82,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       }
     }
 
-    if (isScopeModelsEnabled() && model) {
+    if ((ctx.scopeModels ?? isScopeModelsEnabled()) && model) {
       const allowed = new Set(ctx.scopedModels.map(({ model }) => modelKey(model)));
       if (allowed.size > 0 && !allowed.has(modelKey(model))) {
         if (resolvedConfig.modelFromParams) {
@@ -96,7 +103,9 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     }
 
     const thinking: ThinkingLevel =
-      model?.reasoning === false ? "off" : (resolvedConfig.thinking ?? pi.getThinkingLevel());
+      model?.reasoning === false
+        ? "off"
+        : (resolvedConfig.thinking ?? ctx.thinking ?? pi.getThinkingLevel());
     if (model) deps.setRenderMetadata?.(toolCallId, `${model.provider}/${model.id}`, thinking);
 
     const agentInvocation: AgentInvocation = {
@@ -106,12 +115,15 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     const { tags } = buildInvocationTags(agentInvocation);
     const { state, callbacks } = createActivityTracker();
 
+    signal?.throwIfAborted();
+    ctx.signal?.throwIfAborted();
     const id = manager.spawn(pi, ctx, subagentType, params.message, {
       description: displayName,
       model,
       thinkingLevel: thinking,
       forkContext: params.fork_context,
       invocation: agentInvocation,
+      allowedTools: ctx.allowedTools,
       ...callbacks,
     });
 
@@ -122,8 +134,8 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     fleet.update();
 
     const status = record?.status === "queued" ? "queued" : "running";
-    return textResult<AgentDetails>(
-      JSON.stringify({ agent_id: id, nickname: displayName || null }),
+    return v1Result<AgentDetails>(
+      { agent_id: id, nickname: displayName || null },
       {
         displayName,
         description: displayName,
@@ -141,8 +153,8 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
   };
 }
 
-function failedResult(message: string, subagentType = "default") {
-  return textResult<AgentDetails>(message, {
+function failedResult(message: string, subagentType = "default"): never {
+  throw new SubagentOperationError(message, {
     displayName: subagentType,
     description: "",
     subagentType,
