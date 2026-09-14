@@ -1,4 +1,5 @@
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
 import type { AgentCloser } from "./agent-close.js";
 import type { MessageParent } from "./agent-manager.js";
@@ -114,6 +115,7 @@ export class AgentReopener {
     const thinkingLevel = model.reasoning === false ? "off" : pi.getThinkingLevel();
     const record: AgentRecord = {
       id,
+      incarnation: randomUUID(),
       type: closed.type,
       parentSessionId: closed.parentSessionId,
       description: closed.description,
@@ -137,6 +139,7 @@ export class AgentReopener {
         session = await openAgentSession(parent, record.type, {
           pi,
           agentId: id,
+          agentSessionId: record.incarnation,
           model,
           thinkingLevel,
           conversation,
