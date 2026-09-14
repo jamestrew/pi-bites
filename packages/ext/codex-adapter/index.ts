@@ -7,4 +7,9 @@ export type CodexPromptPreview = (
   options: BuildSystemPromptOptions,
 ) => string;
 
+export interface CodexAdapterController {
+  previewPrompt: CodexPromptPreview;
+  getAllowedTools: () => string[];
+}
+
 export { default } from "./code-mode/registration.js";

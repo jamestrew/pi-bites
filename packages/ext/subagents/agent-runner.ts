@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
 import {
+  type FileEntry,
   type AgentSession,
   type AgentSessionEvent,
   createAgentSession,
@@ -15,7 +16,7 @@ import {
 import { installTurnBoundaryAutoCompaction } from "../auto-compaction.js";
 import * as agentSession from "./agent-session-shutdown.js";
 import { resolveAgent } from "./agent-types.js";
-import { createMessageAgent } from "./message-agent.js";
+import type { RegisterCollaboration } from "./subagent-context.js";
 import { extractText } from "./message-text.js";
 import { detectEnv } from "./env.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
@@ -40,16 +41,6 @@ import {
   type ThinkingLevel,
 } from "./types.js";
 import type { AssistantUsage } from "./usage.js";
-
-/** Tool names shared by this extension's registration and subagent exclusion. */
-export const SUBAGENT_TOOL_NAMES = {
-  AGENT: "Agent",
-  WAIT_AGENT: "WaitAgent",
-  MESSAGE_AGENT: "MessageAgent",
-} as const;
-
-/** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES: string[] = Object.values(SUBAGENT_TOOL_NAMES);
 
 /**
  * Try to find the right model for an agent type.
@@ -106,6 +97,7 @@ export const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
 
 export const SubagentMetadataSchema = Type.Object({
   agentId: Type.Optional(Type.String()),
+  agentSessionId: Type.Optional(Type.String()),
   type: Type.String(),
   title: Type.String(),
   bashGatePolicy: Type.Optional(Type.Union([Type.Literal("deny"), Type.Literal("prompt")])),
@@ -118,14 +110,22 @@ export function parseSubagentMetadata(value: unknown): SubagentMetadata | undefi
 }
 
 export interface RunOptions {
+  registerCollaboration?: RegisterCollaboration;
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
-  /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
+  /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `explorer#a1b2c3d4`). */
   agentId?: string;
+  /** Identity of this live conversation, distinct from the retained agent id. */
+  agentSessionId?: string;
   model?: Model<Api>;
   signal?: AbortSignal;
   isolated?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /** Sanitized manager-owned conversation, never extension state. */
+  conversation?: { sessionId: string; cwd: string; entries: FileEntry[] };
+  allowedTools?: string[];
+  /** Active parent conversation entries copied when spawn_agent requests a full-history fork. */
+  parentEntries?: ReturnType<ExtensionContext["sessionManager"]["buildContextEntries"]>;
   /** Pi-bites threshold policy captured by the owning parent extension. */
   autoCompactionThreshold?: number;
   /** Override working directory. */
@@ -147,8 +147,6 @@ export interface RunOptions {
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
   onSessionCreated?: (session: AgentSession) => void;
-  /** Fixed transport to the session that spawned this child. */
-  messageParent: (message: string) => boolean;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /**
@@ -269,12 +267,90 @@ function forwardAbortSignal(
   return () => signal.removeEventListener("abort", listener);
 }
 
-export async function runAgent(
+const providerRequestCounts = new WeakMap<AgentSession, number>();
+
+function instrumentProviderDiagnostics(
+  session: AgentSession,
+  options: {
+    signal?: AbortSignal;
+    onDiagnostic?: (event: string, details?: Record<string, unknown>) => void;
+  },
+) {
+  let requestIndex: number | undefined;
+  let requestStartedAt: number | undefined;
+  const httpIdleTimeoutMs = session.settingsManager.getHttpIdleTimeoutMs();
+  const providerRetrySettings = session.settingsManager.getProviderRetrySettings();
+  const effectiveProviderTimeoutMs =
+    providerRetrySettings.timeoutMs ??
+    (httpIdleTimeoutMs === 0 ? 2_147_483_647 : httpIdleTimeoutMs);
+  const observedAgentSignals = new WeakSet<AbortSignal>();
+  const priorOnPayload = session.agent.onPayload;
+  const priorOnResponse = session.agent.onResponse;
+  const onPayload: NonNullable<typeof session.agent.onPayload> = async (payload, requestModel) => {
+    const transformed = priorOnPayload ? await priorOnPayload(payload, requestModel) : payload;
+    requestIndex = (providerRequestCounts.get(session) ?? 0) + 1;
+    providerRequestCounts.set(session, requestIndex);
+    requestStartedAt = Date.now();
+    observeAbortSignal(session.agent.signal, observedAgentSignals, (signal) => {
+      emitDiagnostic(options.onDiagnostic, "agent_signal_abort", {
+        request_index: requestIndex,
+        reason: abortReason(signal),
+        ...(signal.reason === undefined ? {} : errorInfo(signal.reason)),
+        manager_signal_aborted: options.signal?.aborted ?? false,
+        manager_abort_reason: abortReason(options.signal),
+      });
+    });
+    emitDiagnostic(options.onDiagnostic, "provider_request", {
+      request_index: requestIndex,
+      provider: requestModel.provider,
+      model: requestModel.id,
+      api: requestModel.api,
+      effective_timeout_ms: effectiveProviderTimeoutMs,
+      timeout_deadline: requestStartedAt + effectiveProviderTimeoutMs,
+      ...summarizeProviderPayload(transformed === undefined ? payload : transformed),
+    });
+    return transformed;
+  };
+  const onResponse: NonNullable<typeof session.agent.onResponse> = async (
+    response,
+    responseModel,
+  ) => {
+    emitDiagnostic(options.onDiagnostic, "provider_response", {
+      request_index: requestIndex,
+      provider: responseModel.provider,
+      model: responseModel.id,
+      ...summarizeProviderResponse(response),
+      ...(requestStartedAt === undefined ? {} : { elapsed_ms: Date.now() - requestStartedAt }),
+    });
+    await priorOnResponse?.(response, responseModel);
+  };
+  session.agent.onPayload = onPayload;
+  session.agent.onResponse = onResponse;
+  return {
+    get requestIndex() {
+      return requestIndex;
+    },
+    get requestStartedAt() {
+      return requestStartedAt;
+    },
+    get requestCount() {
+      return providerRequestCounts.get(session) ?? 0;
+    },
+    httpIdleTimeoutMs,
+    providerRetrySettings,
+    effectiveProviderTimeoutMs,
+    dispose() {
+      if (session.agent.onPayload === onPayload) session.agent.onPayload = priorOnPayload;
+      if (session.agent.onResponse === onResponse) session.agent.onResponse = priorOnResponse;
+    },
+  };
+}
+
+export async function openAgentSession(
   parentSource: ParentSnapshot | ExtensionContext,
   type: SubagentType,
-  prompt: string,
   options: RunOptions,
-): Promise<RunResult> {
+): Promise<AgentSession> {
   agentSession.assertAgentNotCancelled(options.signal);
   const parent = "systemPrompt" in parentSource ? parentSource : snapshotParent(parentSource);
   const agentConfig = resolveAgent(type).config;
@@ -304,7 +380,7 @@ export async function runAgent(
 
   const agentDir = getAgentDir();
 
-  // Embedded roles load only this extension, which provides MessageAgent and
+  // Embedded roles load only this extension, which provides collaboration and
   // the parent-mediated bash gate. Isolated RPC spawns load no extensions.
   const loader = new DefaultResourceLoader({
     cwd: configCwd,
@@ -321,7 +397,9 @@ export async function runAgent(
     appendSystemPromptOverride: () => [],
   });
 
-  await runAsSubagent(type, () => loader.reload());
+  await runAsSubagent({ type, registerCollaboration: options.registerCollaboration }, () =>
+    loader.reload(),
+  );
   agentSession.assertAgentNotCancelled(options.signal);
 
   // Resolve model: explicit option > config.model > parent model
@@ -335,16 +413,22 @@ export async function runAgent(
   const extensionToolNames = noExtensions
     ? []
     : loader.getExtensions().extensions.flatMap((extension) => [...extension.tools.keys()]);
-  const allowedTools = [
-    ...new Set([
-      ...toolNames,
-      ...extensionToolNames.filter((name) => !EXCLUDED_TOOL_NAMES.includes(name)),
-      SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
-    ]),
-  ];
+  const allowedTools = [...new Set([...toolNames, ...extensionToolNames])];
 
   const settingsManager = SettingsManager.create(configCwd, agentDir);
-  const sessionManager = SessionManager.inMemory(effectiveCwd);
+  const sessionManager = options.conversation
+    ? SessionManager.inMemory(
+        effectiveCwd,
+        { id: options.conversation.sessionId },
+        options.conversation.entries,
+      )
+    : options.parentEntries
+      ? SessionManager.inMemory(
+          effectiveCwd,
+          { parentSession: parent.sessionId },
+          options.parentEntries,
+        )
+      : SessionManager.inMemory(effectiveCwd);
 
   const modelRuntime = await ModelRuntime.create({
     authPath: join(agentDir, "auth.json"),
@@ -363,8 +447,9 @@ export async function runAgent(
     settingsManager,
     modelRuntime,
     model,
-    tools: allowedTools,
-    customTools: [createMessageAgent(SUBAGENT_TOOL_NAMES.MESSAGE_AGENT, options.messageParent)],
+    tools: options.allowedTools
+      ? allowedTools.filter((name) => options.allowedTools?.includes(name))
+      : allowedTools,
     resourceLoader: loader,
   };
   if (thinkingLevel) {
@@ -372,84 +457,60 @@ export async function runAgent(
   }
 
   const { session } = await createAgentSession(sessionOpts);
-  if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
+  try {
+    if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
 
-  if (options.autoCompactionThreshold !== undefined)
-    installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
+    if (options.autoCompactionThreshold !== undefined)
+      installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
 
-  let requestIndex = 0;
-  let activeRequestIndex: number | undefined, activeRequestStartedAt: number | undefined;
-  const httpIdleTimeoutMs = session.settingsManager.getHttpIdleTimeoutMs();
-  const providerRetrySettings = session.settingsManager.getProviderRetrySettings();
-  const effectiveProviderTimeoutMs =
-    providerRetrySettings.timeoutMs ??
-    (httpIdleTimeoutMs === 0 ? 2_147_483_647 : httpIdleTimeoutMs);
-  const observedAgentSignals = new WeakSet<AbortSignal>();
-  const reportAgentSignalAbort = (signal: AbortSignal) => {
-    emitDiagnostic(options.onDiagnostic, "agent_signal_abort", {
-      request_index: activeRequestIndex,
-      reason: abortReason(signal),
-      ...(signal.reason === undefined ? {} : errorInfo(signal.reason)),
-      manager_signal_aborted: options.signal?.aborted ?? false,
-      manager_abort_reason: abortReason(options.signal),
-    });
-  };
-  const priorOnPayload = session.agent.onPayload;
-  const priorOnResponse = session.agent.onResponse;
-  session.agent.onPayload = async (payload, requestModel) => {
-    const transformed = priorOnPayload ? await priorOnPayload(payload, requestModel) : payload;
-    activeRequestIndex = ++requestIndex;
-    activeRequestStartedAt = Date.now();
-    observeAbortSignal(session.agent.signal, observedAgentSignals, reportAgentSignalAbort);
-    emitDiagnostic(options.onDiagnostic, "provider_request", {
-      request_index: activeRequestIndex,
-      provider: requestModel.provider,
-      model: requestModel.id,
-      api: requestModel.api,
-      effective_timeout_ms: effectiveProviderTimeoutMs,
-      timeout_deadline: activeRequestStartedAt + effectiveProviderTimeoutMs,
-      ...summarizeProviderPayload(transformed === undefined ? payload : transformed),
-    });
-    return transformed;
-  };
-  session.agent.onResponse = async (response, responseModel) => {
-    emitDiagnostic(options.onDiagnostic, "provider_response", {
-      request_index: activeRequestIndex,
-      provider: responseModel.provider,
-      model: responseModel.id,
-      ...summarizeProviderResponse(response),
-      ...(activeRequestStartedAt === undefined
-        ? {}
-        : { elapsed_ms: Date.now() - activeRequestStartedAt }),
-    });
-    await priorOnResponse?.(response, responseModel);
-  };
+    sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
+      agentId: options.agentId,
+      agentSessionId: options.agentSessionId,
+      type,
+      title: agentConfig.displayName ?? agentConfig.name,
+      bashGatePolicy: agentConfig.bashGatePolicy,
+    } satisfies SubagentMetadata);
 
-  sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
-    agentId: options.agentId,
-    type,
-    title: agentConfig.displayName ?? agentConfig.name,
-    bashGatePolicy: agentConfig.bashGatePolicy,
-  } satisfies SubagentMetadata);
+    const baseSessionName = agentConfig.name;
+    session.setSessionName(
+      options.agentId ? `${baseSessionName}#${options.agentId.slice(0, 8)}` : baseSessionName,
+    );
 
-  const baseSessionName = agentConfig.name;
-  session.setSessionName(
-    options.agentId ? `${baseSessionName}#${options.agentId.slice(0, 8)}` : baseSessionName,
-  );
-
-  await agentSession.bindAgentSessionExtensions(
-    session,
-    {
-      onError: (err) => {
-        options.onToolActivity?.({
-          type: "end",
-          toolName: `extension-error:${err.extensionPath}`,
-        });
+    await agentSession.bindAgentSessionExtensions(
+      session,
+      {
+        onError: (err) => {
+          options.onToolActivity?.({
+            type: "end",
+            toolName: `extension-error:${err.extensionPath}`,
+          });
+        },
       },
-    },
-    options.signal,
-  );
-  if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
+      options.signal,
+    );
+    if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
+    options.onSessionCreated?.(session);
+    if (options.allowedTools) {
+      session.setActiveToolsByName(
+        session.getActiveToolNames().filter((name) => options.allowedTools?.includes(name)),
+      );
+    }
+
+    return session;
+  } catch (error) {
+    await agentSession.shutdownAgentSession(session);
+    throw error;
+  }
+}
+
+export async function runAgent(
+  parentSource: ParentSnapshot | ExtensionContext,
+  type: SubagentType,
+  prompt: string,
+  options: RunOptions,
+): Promise<RunResult> {
+  const session = await openAgentSession(parentSource, type, options);
+  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
   emitDiagnostic(options.onDiagnostic, "session_created", {
     session_id: session.sessionManager.getSessionId(),
     provider: session.model?.provider,
@@ -458,14 +519,12 @@ export async function runAgent(
     thinking: session.thinkingLevel,
     transport: session.settingsManager.getTransport(),
     retry: session.settingsManager.getRetrySettings(),
-    provider_retry: providerRetrySettings,
-    http_idle_timeout_ms: httpIdleTimeoutMs,
-    effective_provider_timeout_ms: effectiveProviderTimeoutMs,
+    provider_retry: providerDiagnostics.providerRetrySettings,
+    http_idle_timeout_ms: providerDiagnostics.httpIdleTimeoutMs,
+    effective_provider_timeout_ms: providerDiagnostics.effectiveProviderTimeoutMs,
     websocket_connect_timeout_ms: session.settingsManager.getWebSocketConnectTimeoutMs(),
     compaction: session.settingsManager.getCompactionSettings(),
   });
-
-  options.onSessionCreated?.(session);
 
   let turnCount = 0;
 
@@ -490,8 +549,8 @@ export async function runAgent(
       options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
     }
     recordSessionDiagnostic(session, event, options, {
-      requestIndex: activeRequestIndex,
-      requestStartedAt: activeRequestStartedAt,
+      requestIndex: providerDiagnostics.requestIndex,
+      requestStartedAt: providerDiagnostics.requestStartedAt,
     });
   });
 
@@ -499,7 +558,7 @@ export async function runAgent(
   const cleanupAbort = forwardAbortSignal(session, options.signal, () => {
     emitDiagnostic(options.onDiagnostic, "manager_signal_abort", {
       reason: abortReason(options.signal),
-      request_index: activeRequestIndex,
+      request_index: providerDiagnostics.requestIndex,
     });
   });
 
@@ -512,13 +571,13 @@ export async function runAgent(
     if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
     await session.prompt(prompt);
     emitDiagnostic(options.onDiagnostic, "prompt_resolved", {
-      request_count: requestIndex,
+      request_count: providerDiagnostics.requestCount,
       manager_signal_aborted: options.signal?.aborted ?? false,
     });
   } catch (error) {
     emitDiagnostic(options.onDiagnostic, "prompt_rejected", {
       ...errorInfo(error),
-      request_count: requestIndex,
+      request_count: providerDiagnostics.requestCount,
       manager_signal_aborted: options.signal?.aborted ?? false,
       manager_abort_reason: abortReason(options.signal),
     });
@@ -527,6 +586,7 @@ export async function runAgent(
     unsubTurns();
     collector.unsubscribe();
     cleanupAbort();
+    providerDiagnostics.dispose();
   }
 
   throwTerminalAssistantError(session, invocationStart);
@@ -543,6 +603,8 @@ export async function resumeAgent(
   prompt: string,
   options: {
     onToolActivity?: (activity: ToolActivity) => void;
+    onTurnEnd?: (turnCount: number) => void;
+    onTextDelta?: (delta: string, fullText: string) => void;
     onAssistantUsage?: (usage: AssistantUsage) => void;
     onCompaction?: (info: {
       reason: "manual" | "threshold" | "overflow";
@@ -553,16 +615,31 @@ export async function resumeAgent(
     signal?: AbortSignal;
   } = {},
 ): Promise<string> {
+  agentSession.assertAgentNotCancelled(options.signal);
+  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
   const collector = collectResponseText(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
 
+  let turnCount = 0;
+  let currentMessageText = "";
   const unsubEvents =
     options.onToolActivity ||
+    options.onTurnEnd ||
+    options.onTextDelta ||
     options.onAssistantUsage ||
     options.onCompaction ||
     options.onDiagnostic ||
     options.onAssistantFailure
       ? session.subscribe((event: AgentSessionEvent) => {
+          if (event.type === "turn_end") options.onTurnEnd?.(++turnCount);
+          if (event.type === "message_start") currentMessageText = "";
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent.type === "text_delta"
+          ) {
+            currentMessageText += event.assistantMessageEvent.delta;
+            options.onTextDelta?.(event.assistantMessageEvent.delta, currentMessageText);
+          }
           dispatchToolActivity(event, options.onToolActivity);
           if (event.type === "message_end" && event.message.role === "assistant") {
             options.onAssistantUsage?.(getAssistantUsage(event.message));
@@ -573,7 +650,11 @@ export async function resumeAgent(
               tokensBefore: event.result.tokensBefore,
             });
           }
-          recordSessionDiagnostic(session, event, options, { resumed: true });
+          recordSessionDiagnostic(session, event, options, {
+            resumed: true,
+            requestIndex: providerDiagnostics.requestIndex,
+            requestStartedAt: providerDiagnostics.requestStartedAt,
+          });
         })
       : () => {};
 
@@ -598,6 +679,7 @@ export async function resumeAgent(
     collector.unsubscribe();
     unsubEvents();
     cleanupAbort();
+    providerDiagnostics.dispose();
   }
 
   throwTerminalAssistantError(session, invocationStart);

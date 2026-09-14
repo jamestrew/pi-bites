@@ -81,7 +81,10 @@ export class CodeModeRuntime {
     tools: readonly RuntimeTool[] = this.tools,
     onStarted?: (cellId: string) => void,
   ): Promise<RuntimeResponse> {
-    const enabledTools = tools.map((tool) => ({ ...tool }));
+    const enabledTools = tools.map((tool) => ({
+      ...tool,
+      toolName: { ...(tool.toolName ?? { name: tool.name }) },
+    }));
     if (new Set(enabledTools.map((tool) => tool.name)).size !== enabledTools.length)
       throw new Error("Duplicate Code Mode tool names");
     const parsed = parseExecSource(source);
@@ -114,7 +117,10 @@ export class CodeModeRuntime {
             tool_call_id: `${this.sessionId}:${id}`,
             enabled_tools: enabledTools.map((tool) => ({
               name: tool.name,
-              tool_name: { name: tool.name, namespace: null },
+              tool_name: {
+                name: tool.toolName.name,
+                namespace: tool.toolName.namespace ?? null,
+              },
               description: tool.description,
               kind: tool.kind,
               input_schema: tool.inputSchema ?? null,

@@ -1,3 +1,4 @@
+import { SubagentOperationError } from "../../subagents/tool-result.js";
 import type { ExtensionContext, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { BashGateController, CommandAuthorizationSession } from "../../bash-gate/index.js";
 import type { CodexAdapterConfig } from "../../config.js";
@@ -12,6 +13,7 @@ import {
 export type { OwnedNestedTools } from "./nested-adapters.js";
 
 interface Snapshot {
+  subagents?: ReturnType<NonNullable<OwnedNestedTools["subagents"]>["capture"]>;
   context: ToolExecutionContext;
   authorization: CommandAuthorizationSession;
   signal: AbortSignal;
@@ -35,8 +37,9 @@ export class NestedToolBridge {
     private readonly owned: OwnedNestedTools,
     private readonly gate: BashGateController | undefined,
     getConfig: () => CodexAdapterConfig,
+    subagentsAvailable?: (name: string) => boolean,
   ) {
-    this.adapters = createNestedAdapters(owned, getConfig);
+    this.adapters = createNestedAdapters(owned, getConfig, subagentsAvailable);
   }
 
   capture(ctx: ExtensionContext): void {
@@ -48,6 +51,10 @@ export class NestedToolBridge {
       isProjectTrusted: () => trusted,
     };
     this.snapshot = {
+      // Delegates cannot reacquire ctx. Snapshot fork history only when spawning is permitted.
+      subagents: this.owned.subagents?.capture(ctx, {
+        forkContext: !this.enabled || this.enabled.has("multi_agent_v1__spawn_agent"),
+      }),
       context,
       authorization: this.gate?.captureSession(ctx) ?? {
         async authorize(request, launch) {
@@ -121,6 +128,7 @@ export class NestedToolBridge {
         call,
         signal,
         context: snapshot.context,
+        subagents: snapshot.subagents,
         authorization: snapshot.authorization,
         prepared: (value) => {
           params = value;
@@ -137,7 +145,10 @@ export class NestedToolBridge {
       if (!(error instanceof NestedResultError))
         trace("error", {
           content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }],
-          details: adapter.renderDetails?.(call.callId),
+          details:
+            error instanceof SubagentOperationError
+              ? error.details
+              : adapter.renderDetails?.(call.callId),
         });
       throw error;
     } finally {

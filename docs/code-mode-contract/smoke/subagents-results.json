@@ -1,0 +1,541 @@
+{
+  "measurement": "Compact JSON.stringify UTF-16 character counts; usage is stock provider-reported for whole requests, not attributed to individual tools. Payload hashes identify private local synthetic smoke captures.",
+  "artifacts": {
+    "directDefinitions": {
+      "characters": 11675,
+      "estimatedTokens": 2919
+    },
+    "eagerCodeMode": {
+      "characters": 7952,
+      "estimatedTokens": 1988
+    },
+    "eagerCollaborationDelta": {
+      "characters": 1666,
+      "estimatedTokens": 417
+    },
+    "discoveryText": {
+      "characters": 10710,
+      "estimatedTokens": 2678
+    },
+    "childAppend": {
+      "characters": 665,
+      "estimatedTokens": 167
+    },
+    "explorerRole": {
+      "characters": 2472,
+      "estimatedTokens": 618
+    }
+  },
+  "successful": [
+    {
+      "run": "sol",
+      "route": "openai-codex/gpt-5.6-sol",
+      "scenario": "normal",
+      "date": "2026-09-14T03:19:56.926Z",
+      "status": "passed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "closeResumeSameId": true,
+        "recallWithoutReminder": true,
+        "finalClose": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "outerWait": true,
+        "completeHelp": true,
+        "noToolErrors": true
+      },
+      "approvals": ["printf subagent-approved"],
+      "discovery": {
+        "payload": "payload-2-parent.json",
+        "outputCharacters": 10758,
+        "wrappedHistoryItemCharacters": 11094
+      },
+      "owners": [
+        {
+          "owner": "parent",
+          "requests": 7,
+          "firstPayload": {
+            "owner": "parent",
+            "file": "payload-1-parent.json",
+            "sha256": "149511d6a58e772fe1191002044ea0e7eecad124eba84f1865fb576520b71bc1",
+            "characters": 14519,
+            "toolCharacters": 10928,
+            "instructionCharacters": 1690,
+            "historyCharacters": 1592,
+            "tools": ["exec:custom", "wait:function"]
+          },
+          "lastHistoryCharacters": 28613,
+          "firstUsage": {
+            "input": 3066,
+            "cacheRead": 0,
+            "output": 68
+          },
+          "totalUsage": {
+            "input": 7944,
+            "cacheRead": 33408,
+            "output": 1047
+          }
+        },
+        {
+          "owner": "child",
+          "requests": 5,
+          "firstPayload": {
+            "owner": "child",
+            "file": "payload-4-8e5cd541-73c7-440.json",
+            "sha256": "8866fe8824da0ab56df597f7db3b1fde0932176fb736c2f0ad50881eb3c9e635",
+            "characters": 19339,
+            "toolCharacters": 10928,
+            "instructionCharacters": 7443,
+            "historyCharacters": 659,
+            "tools": ["exec:custom", "wait:function"]
+          },
+          "lastHistoryCharacters": 8121,
+          "firstUsage": {
+            "input": 4214,
+            "cacheRead": 0,
+            "output": 65
+          },
+          "totalUsage": {
+            "input": 9662,
+            "cacheRead": 13056,
+            "output": 242
+          }
+        }
+      ]
+    },
+    {
+      "run": "astra-final",
+      "route": "openai-codex/gpt-6-astra",
+      "scenario": "normal",
+      "date": "2026-09-14T03:17:19.511Z",
+      "status": "passed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "closeResumeSameId": true,
+        "recallWithoutReminder": true,
+        "finalClose": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "outerWait": true,
+        "completeHelp": true,
+        "noToolErrors": true
+      },
+      "approvals": ["printf subagent-approved"],
+      "discovery": {
+        "payload": "payload-2-parent.json",
+        "outputCharacters": 10808,
+        "wrappedHistoryItemCharacters": 11144
+      },
+      "owners": [
+        {
+          "owner": "parent",
+          "requests": 8,
+          "firstPayload": {
+            "owner": "parent",
+            "file": "payload-1-parent.json",
+            "sha256": "387e60cf8446d3979c7d59a386f27f09a2135a3d9968c1c57390552ea4ac7ffb",
+            "characters": 14519,
+            "toolCharacters": 10928,
+            "instructionCharacters": 1690,
+            "historyCharacters": 1592,
+            "tools": ["exec:custom", "wait:function"]
+          },
+          "lastHistoryCharacters": 18687,
+          "firstUsage": {
+            "input": 3064,
+            "cacheRead": 0,
+            "output": 33
+          },
+          "totalUsage": {
+            "input": 7753,
+            "cacheRead": 37888,
+            "output": 528
+          }
+        },
+        {
+          "owner": "child",
+          "requests": 4,
+          "firstPayload": {
+            "owner": "child",
+            "file": "payload-5-4dc467bb-5f57-4ff.json",
+            "sha256": "53e37a98586640068e849cf68d745eea9aab12d30fd6d494255b656d6120d6d4",
+            "characters": 19378,
+            "toolCharacters": 10928,
+            "instructionCharacters": 7443,
+            "historyCharacters": 698,
+            "tools": ["exec:custom", "wait:function"]
+          },
+          "lastHistoryCharacters": 3141,
+          "firstUsage": {
+            "input": 4212,
+            "cacheRead": 0,
+            "output": 42
+          },
+          "totalUsage": {
+            "input": 5084,
+            "cacheRead": 12928,
+            "output": 160
+          }
+        }
+      ]
+    },
+    {
+      "run": "direct-55",
+      "route": "openai-codex/gpt-5.5",
+      "scenario": "normal",
+      "date": "2026-09-14T03:18:35.335Z",
+      "status": "passed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "closeResumeSameId": true,
+        "recallWithoutReminder": true,
+        "finalClose": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "outerWait": true,
+        "completeHelp": true,
+        "noToolErrors": true
+      },
+      "approvals": ["printf subagent-approved"],
+      "owners": [
+        {
+          "owner": "parent",
+          "requests": 8,
+          "firstPayload": {
+            "owner": "parent",
+            "file": "payload-1-parent.json",
+            "sha256": "da670eaaae0e390b2403fdb00889515487ac9f5854ae6e08c9d48cd4e642d6f3",
+            "characters": 17030,
+            "toolCharacters": 12479,
+            "instructionCharacters": 2658,
+            "historyCharacters": 1588,
+            "tools": [
+              "read:function",
+              "bash:function",
+              "edit:function",
+              "write:function",
+              "spawn_agent:function",
+              "send_input:function",
+              "wait_agent:function",
+              "close_agent:function",
+              "resume_agent:function"
+            ]
+          },
+          "lastHistoryCharacters": 10933,
+          "firstUsage": {
+            "input": 3071,
+            "cacheRead": 0,
+            "output": 215
+          },
+          "totalUsage": {
+            "input": 6920,
+            "cacheRead": 22016,
+            "output": 497
+          }
+        },
+        {
+          "owner": "child",
+          "requests": 4,
+          "firstPayload": {
+            "owner": "child",
+            "file": "payload-3-4b959ad9-57bd-492.json",
+            "sha256": "3d4332d00e49853de040bf9fdbf5408e9ef8585d29c52b3def0c00b4a8642a92",
+            "characters": 21670,
+            "toolCharacters": 12479,
+            "instructionCharacters": 8336,
+            "historyCharacters": 550,
+            "tools": [
+              "read:function",
+              "bash:function",
+              "edit:function",
+              "write:function",
+              "spawn_agent:function",
+              "send_input:function",
+              "wait_agent:function",
+              "close_agent:function",
+              "resume_agent:function"
+            ]
+          },
+          "lastHistoryCharacters": 3395,
+          "firstUsage": {
+            "input": 4174,
+            "cacheRead": 0,
+            "output": 60
+          },
+          "totalUsage": {
+            "input": 6353,
+            "cacheRead": 10752,
+            "output": 136
+          }
+        }
+      ]
+    },
+    {
+      "run": "disabled-final",
+      "route": "openai-codex/gpt-5.6-luna",
+      "scenario": "adapter-disabled",
+      "date": "2026-09-14T03:17:22.011Z",
+      "status": "passed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "closeResumeSameId": true,
+        "recallWithoutReminder": true,
+        "finalClose": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "outerWait": true,
+        "completeHelp": true,
+        "noToolErrors": true
+      },
+      "approvals": ["printf subagent-approved"],
+      "owners": [
+        {
+          "owner": "parent",
+          "requests": 8,
+          "firstPayload": {
+            "owner": "parent",
+            "file": "payload-1-parent.json",
+            "sha256": "4282c7ceddd103306fa3476bb582cf1ffe8d36375e58341c79e95d5eb70a5c55",
+            "characters": 17040,
+            "toolCharacters": 12479,
+            "instructionCharacters": 2658,
+            "historyCharacters": 1593,
+            "tools": [
+              "read:function",
+              "bash:function",
+              "edit:function",
+              "write:function",
+              "spawn_agent:function",
+              "send_input:function",
+              "wait_agent:function",
+              "close_agent:function",
+              "resume_agent:function"
+            ]
+          },
+          "lastHistoryCharacters": 17872,
+          "firstUsage": {
+            "input": 3073,
+            "cacheRead": 0,
+            "output": 301
+          },
+          "totalUsage": {
+            "input": 18140,
+            "cacheRead": 12288,
+            "output": 624
+          }
+        },
+        {
+          "owner": "child",
+          "requests": 4,
+          "firstPayload": {
+            "owner": "child",
+            "file": "payload-3-c5335320-2c09-4d1.json",
+            "sha256": "31a1cb5709d31582fba607ef0b52e1889c0eea680f596f21502bf65a4336e356",
+            "characters": 21705,
+            "toolCharacters": 12479,
+            "instructionCharacters": 8336,
+            "historyCharacters": 580,
+            "tools": [
+              "read:function",
+              "bash:function",
+              "edit:function",
+              "write:function",
+              "spawn_agent:function",
+              "send_input:function",
+              "wait_agent:function",
+              "close_agent:function",
+              "resume_agent:function"
+            ]
+          },
+          "lastHistoryCharacters": 4941,
+          "firstUsage": {
+            "input": 4178,
+            "cacheRead": 0,
+            "output": 58
+          },
+          "totalUsage": {
+            "input": 10017,
+            "cacheRead": 7168,
+            "output": 155
+          }
+        }
+      ]
+    }
+  ],
+  "unsuccessful": [
+    {
+      "run": "luna-final",
+      "route": "openai-codex/gpt-5.6-luna",
+      "scenario": "normal",
+      "date": "2026-09-14T03:17:18.495Z",
+      "status": "failed",
+      "failedChecks": ["outerWait", "noToolErrors"],
+      "errors": [
+        {
+          "tool": "wait",
+          "input": {
+            "cell_id": "5922914b-eb07-4831-9222-ca7f2551e2e0",
+            "yield_time_ms": 10000,
+            "max_tokens": 2000
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Script failed\nWall time 0.0 seconds\nOutput:\n"
+            },
+            {
+              "type": "text",
+              "text": "Script error:\nexec cell 5922914b-eb07-4831-9222-ca7f2551e2e0 not found"
+            }
+          ]
+        }
+      ],
+      "failures": []
+    },
+    {
+      "run": "luna-retry",
+      "route": "openai-codex/gpt-5.6-luna",
+      "scenario": "normal",
+      "date": "2026-09-14T03:18:34.336Z",
+      "status": "failed",
+      "failedChecks": ["outerWait", "noToolErrors"],
+      "errors": [
+        {
+          "tool": "wait",
+          "input": {
+            "cell_id": "95f43198-f595-4640-85de-89029c3ba8a3",
+            "yield_time_ms": 2000,
+            "max_tokens": 1000
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Script failed\nWall time 0.0 seconds\nOutput:\n"
+            },
+            {
+              "type": "text",
+              "text": "Script error:\nexec cell 95f43198-f595-4640-85de-89029c3ba8a3 not found"
+            }
+          ]
+        },
+        {
+          "tool": "wait",
+          "input": {
+            "cell_id": "95f43198-f595-4640-85de-89029c3ba8a3",
+            "yield_time_ms": 10000,
+            "max_tokens": 1000
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "Script failed\nWall time 0.0 seconds\nOutput:\n"
+            },
+            {
+              "type": "text",
+              "text": "Script error:\nexec cell 95f43198-f595-4640-85de-89029c3ba8a3 not found"
+            }
+          ]
+        }
+      ],
+      "failures": []
+    },
+    {
+      "run": "direct",
+      "route": "openai-codex/gpt-5.4-mini",
+      "scenario": "normal",
+      "date": "2026-09-14T03:16:14.632Z",
+      "status": "failed",
+      "failedChecks": [
+        "sameModelDefaultChild",
+        "firstCompletion",
+        "closeResumeSameId",
+        "recallWithoutReminder",
+        "finalClose",
+        "parentProgress",
+        "approvedExecution",
+        "independentFinals",
+        "independentProgress",
+        "childPayload"
+      ],
+      "errors": [],
+      "failures": [
+        "Codex error: The 'gpt-5.4-mini' model is not supported when using Codex with a ChatGPT account."
+      ]
+    },
+    {
+      "run": "direct-final",
+      "route": "openai-codex/gpt-5.4",
+      "scenario": "normal",
+      "date": "2026-09-14T03:17:20.739Z",
+      "status": "failed",
+      "failedChecks": [
+        "sameModelDefaultChild",
+        "firstCompletion",
+        "closeResumeSameId",
+        "recallWithoutReminder",
+        "finalClose",
+        "parentProgress",
+        "approvedExecution",
+        "independentFinals",
+        "independentProgress",
+        "childPayload"
+      ],
+      "errors": [],
+      "failures": [
+        "Codex error: The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account."
+      ]
+    },
+    {
+      "run": "luna",
+      "route": "openai-codex/gpt-5.6-luna",
+      "scenario": "normal",
+      "date": "2026-09-14T03:14:39.980Z",
+      "status": "failed",
+      "failedChecks": [],
+      "errors": [],
+      "failures": ["[object Object]"]
+    },
+    {
+      "run": "astra",
+      "route": "openai-codex/gpt-6-astra",
+      "scenario": "normal",
+      "date": "2026-09-14T03:14:41.037Z",
+      "status": "failed",
+      "failedChecks": [],
+      "errors": [],
+      "failures": ["[object Object]"]
+    },
+    {
+      "run": "disabled",
+      "route": "openai-codex/gpt-5.6-luna",
+      "scenario": "adapter-disabled",
+      "date": "2026-09-14T03:16:15.632Z",
+      "status": "failed",
+      "failedChecks": [],
+      "errors": [],
+      "failures": [
+        "ui.onTerminalInput is not a function. (In 'ui.onTerminalInput((data) => this.handleKey(data))', 'ui.onTerminalInput' is undefined)"
+      ]
+    }
+  ]
+}

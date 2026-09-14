@@ -51,11 +51,12 @@ interface ActiveProjection {
 }
 export interface AdapterToolState {
   // Tool selection is first available from session_start, after Pi binds its API.
+  subagentTools: readonly string[];
   selection: SessionSelection | undefined;
   projection: { kind: "inactive" } | ActiveProjection;
 }
-export function createAdapterToolState(): AdapterToolState {
-  return { selection: undefined, projection: { kind: "inactive" } };
+export function createAdapterToolState(subagentTools: readonly string[] = []): AdapterToolState {
+  return { subagentTools, selection: undefined, projection: { kind: "inactive" } };
 }
 export function getNestedTools(state: AdapterToolState): ReadonlySet<string> {
   return state.projection.kind === "active" ? state.projection.nested : new Set();
@@ -121,17 +122,23 @@ export function reconcileTools(
   // Recompute from the current normal selection, including the cores we own.
   // A core removed after restoration must not survive in cached nested membership.
   const projection = activate(restored, selection);
+  if (projection.visible.has("exec") && projection.visible.has("wait"))
+    for (const name of state.subagentTools)
+      if (restored.includes(name)) projection.nested.add(`multi_agent_v1__${name}`);
   const replaces = (name: string) =>
     projection.visible.has("exec") &&
-    (name === "read" || name === "bash"
-      ? projection.nested.has("exec_command")
-      : (name === "edit" || name === "write") && projection.nested.has("apply_patch"));
+    (projection.nested.has(`multi_agent_v1__${name}`) ||
+      (name === "read" || name === "bash"
+        ? projection.nested.has("exec_command")
+        : (name === "edit" || name === "write") && projection.nested.has("apply_patch")));
   for (const [index, name] of restored.entries()) {
     if (replaces(name)) {
       projection.displaced.push({
         name,
         index,
-        before: restored.slice(index + 1).find((tool) => !OWNED.has(tool)),
+        before: restored
+          .slice(index + 1)
+          .find((tool) => !OWNED.has(tool) && !state.subagentTools.includes(tool)),
       });
     }
   }
@@ -140,4 +147,20 @@ export function reconcileTools(
   visible.splice(index, 0, ...CODE_MODE_TOOLS.filter((name) => projection.visible.has(name)));
   state.projection = projection;
   return visible;
+}
+
+/** Recover permissions without exposing or enabling anything in the parent session. */
+export function getDelegationTools(active: string[], state: AdapterToolState): string[] {
+  const snapshot = structuredClone(state);
+  const projected = reconcileTools(active, true, snapshot);
+  const underlying = restore(
+    projected,
+    snapshot.projection.kind === "active" ? snapshot.projection.displaced : [],
+  );
+  return [
+    ...new Set([
+      ...underlying,
+      ...[...getNestedTools(snapshot)].filter((name) => !name.startsWith("multi_agent_v1__")),
+    ]),
+  ];
 }

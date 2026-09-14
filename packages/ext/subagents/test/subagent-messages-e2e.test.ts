@@ -23,7 +23,7 @@ import {
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
 import { createAgentCompletionHandler } from "../agent-completion.js";
-import { registerWaitAgent } from "../register-wait-agent.js";
+import { createWaitAgent } from "../register-wait-agent.js";
 import { createSubagentMessenger, type SubagentSender } from "../subagent-messages.js";
 import type { AgentRecord } from "../types.js";
 
@@ -34,7 +34,7 @@ afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const sender: SubagentSender = { id: "agent-1", type: "explore", title: "trace auth" };
+const sender: SubagentSender = { id: "agent-1", type: "explorer", title: "trace auth" };
 
 function deferred() {
   let resolve!: () => void;
@@ -314,9 +314,10 @@ it("real pi keeps idle and post-terminal mail for the next user turn", async () 
   }
 });
 
-it("real WaitAgent wakes once and exposes child mail only through its tool result", async () => {
+it("real wait_agent wakes only for a final child status", async () => {
   const record: AgentRecord = {
     id: sender.id,
+    generation: 1,
     type: sender.type,
     parentSessionId: "parent",
     prompt: "trace auth",
@@ -336,17 +337,20 @@ it("real WaitAgent wakes once and exposes child mail only through its tool resul
       pi,
       getRecord: (id) => (id === record.id ? record : undefined),
       onAgentFinishedUI: () => {},
+      scheduleAutomatic: () => true,
     });
-    registerWaitAgent(pi, {
-      waitFor: completion.waitFor,
-      getRecord: (id) => (id === record.id ? record : undefined),
-    });
+    pi.registerTool(
+      createWaitAgent({
+        waitFor: completion.waitFor,
+        getRecord: (id) => (id === record.id ? record : undefined),
+      }),
+    );
   };
-  const { model, session } = await makeSession([], [extension], ["WaitAgent"]);
+  const { model, session } = await makeSession([], [extension], ["wait_agent"]);
   const toolStarted = deferred();
   const requests: Context["messages"][] = [];
   const unsubscribe = session.subscribe((event) => {
-    if (event.type === "tool_execution_start" && event.toolName === "WaitAgent") {
+    if (event.type === "tool_execution_start" && event.toolName === "wait_agent") {
       toolStarted.resolve();
     }
   });
@@ -359,8 +363,8 @@ it("real WaitAgent wakes once and exposes child mail only through its tool resul
             {
               type: "toolCall",
               id: "wait",
-              name: "WaitAgent",
-              arguments: { agent_ids: [record.id], timeout_ms: 10_000 },
+              name: "wait_agent",
+              arguments: { targets: [record.id], timeout_ms: 10_000 },
             },
           ],
           "toolUse",
@@ -372,14 +376,15 @@ it("real WaitAgent wakes once and exposes child mail only through its tool resul
     const prompting = session.prompt("wait for child");
     await toolStarted.promise;
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(completion.onAgentMessage(sender, "wake once")).toBe(true);
-    expect(completion.onAgentMessage(sender, "do not duplicate")).toBe(false);
+    record.status = "completed";
+    record.result = "final result";
+    record.completedAt = Date.now();
+    completion.onAgentComplete(record);
     await prompting;
 
     expect(requests).toHaveLength(2);
     const secondRequest = requestText(requests[1]!);
-    expect(secondRequest).toContain("wake once");
-    expect(secondRequest).not.toContain("do not duplicate");
+    expect(secondRequest).toContain('"completed":"final result"');
     expect(session.messages.filter((message) => message.role === "custom")).toHaveLength(0);
   } finally {
     unsubscribe();

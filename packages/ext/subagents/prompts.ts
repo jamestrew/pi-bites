@@ -9,7 +9,7 @@ import type { AgentConfig, EnvInfo } from "./types.js";
  *
  * - "replace" mode: env header + config.systemPrompt (full control, no parent identity)
  * - "append" mode: parent system prompt + sub-agent context + env header + config.systemPrompt
- * - "append" with empty systemPrompt: pure parent clone
+ * - "append" with empty systemPrompt: inherited prompt with sub-agent context
  *
  * Both modes include an `<active_agent name="${config.name}"/>` tag so downstream
  * extensions (e.g. permission/policy systems) can resolve per-agent policy
@@ -39,12 +39,9 @@ Platform: ${env.platform}`;
 
     const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
-- Use the read tool instead of cat/head/tail
-- Use the edit tool instead of sed/awk
-- Use the write tool instead of echo/heredoc
-- Use the find tool instead of bash find/ls for file search
-- Use the grep tool instead of bash grep/rg for content search
-- Make independent tool calls in parallel
+- Use only the tools and permissions actually available in this session; role guidance grants no additional access.
+- Follow this session's direct or Code Mode tool surface and retrieve complete nested declarations before use.
+- Keep delegated work bounded and do not duplicate another agent's assigned work.
 - Use absolute file paths
 - Do not use emojis
 - Be concise but complete
@@ -55,7 +52,15 @@ You are operating as a sub-agent invoked to handle a specific task.
     // placed verbatim (no wrapper tag) so it forms an identical byte prefix
     // with the parent session, maximising KV cache hits. The <active_agent>
     // tag and env block vary per call and are placed after the cached prefix.
-    return identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock;
+    return (
+      identity +
+      "\n\n" +
+      bridge +
+      "\n\n" +
+      activeAgentTag +
+      envBlock +
+      (config.systemPrompt ? "\n\n" + config.systemPrompt : "")
+    );
   }
 
   // "replace" mode — env header + the config's full system prompt
@@ -70,5 +75,5 @@ ${envBlock}`;
 /** Fallback base prompt when parent system prompt is unavailable in append mode. */
 const genericBase = `# Role
 You are a general-purpose coding agent for complex, multi-step tasks.
-You have full access to read, write, edit files, and execute commands.
+Use only the capabilities and permissions made available by the parent session.
 Do what has been asked; nothing more, nothing less.`;

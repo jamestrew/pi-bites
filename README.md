@@ -4,7 +4,7 @@ A small collection of personal extensions for the pi coding agent.
 
 ## What's included
 
-- `explore` subagent tool
+- Codex V1 subagents (`default`, `worker`, and `explorer` roles)
 - Less noisy `read` tool output
 - Tweaked `read` tool description/output to keep file reads less noisy
 - Configurable bash command gate

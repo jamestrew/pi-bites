@@ -3,7 +3,7 @@ import type { SubagentMessageDetails } from "../subagent-messages.js";
 import type { Theme } from "./agent-format.js";
 import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
 
-/** Shared incoming-message block for standalone and WaitAgent delivery. */
+/** Shared incoming-message block for standalone child-message delivery. */
 export function renderSubagentMessage(
   details: SubagentMessageDetails,
   expanded: boolean,

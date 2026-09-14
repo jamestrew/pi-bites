@@ -26,7 +26,7 @@ function setup(initial = ["read", "bash", "edit", "write", "custom"], gate?: Bas
       active = [...names];
     },
   };
-  const preview = registerCodeMode(pi as never, config, gate);
+  const { previewPrompt: preview } = registerCodeMode(pi as never, config, gate);
   const emit = async (name: string, event: any, ctx: any) => {
     let result;
     for (const handler of handlers.get(name) ?? []) result = (await handler(event, ctx)) ?? result;

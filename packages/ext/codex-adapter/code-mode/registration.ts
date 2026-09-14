@@ -1,3 +1,4 @@
+import type { SubagentController } from "../../subagents/operations.js";
 import {
   formatSkillsForPrompt,
   type ExtensionAPI,
@@ -10,8 +11,9 @@ import {
   reconcileTools,
   createAdapterToolState,
   getNestedTools,
+  getDelegationTools,
 } from "../activation.js";
-import type { CodexPromptPreview } from "../index.js";
+import type { CodexAdapterController, CodexPromptPreview } from "../index.js";
 import { registerApplyPatchTool } from "../apply-patch/tool.js";
 import { registerExecCommandTool } from "../exec/command-tool.js";
 import { createExecSessionManager } from "../exec/session-manager.js";
@@ -28,17 +30,32 @@ export default function registerCodeMode(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
   gate?: BashGateController,
-): CodexPromptPreview {
-  const state = createAdapterToolState();
+  subagents?: SubagentController,
+): CodexAdapterController {
+  const state = createAdapterToolState(Object.keys(subagents?.definitions ?? {}));
   const sessions = createExecSessionManager();
   const owned = {
+    subagents,
     apply_patch: registerApplyPatchTool(pi),
     exec_command: registerExecCommandTool(pi, sessions),
     write_stdin: registerWriteStdinTool(pi, sessions),
     view_image: registerViewImageTool(pi),
     web_run: registerWebRunTool(pi, { getConfig: () => configRef.current.codexAdapter ?? {} }),
   };
-  const bridge = new NestedToolBridge(owned, gate, () => configRef.current.codexAdapter ?? {});
+  const bridge = new NestedToolBridge(
+    owned,
+    gate,
+    () => configRef.current.codexAdapter ?? {},
+    (name) => {
+      const active = pi.getActiveTools();
+      return (
+        !configRef.current.disable?.includes("subagents") &&
+        active.includes("exec") &&
+        active.includes("wait") &&
+        getDelegationTools(active, state).includes(name)
+      );
+    },
+  );
   let notify: ExtensionContext["ui"]["notify"] | undefined;
   const getTools = () => nativeTools(bridge.tools());
   const lifecycle = new CodeModeLifecycle(
@@ -59,8 +76,9 @@ export default function registerCodeMode(
     const callable = supported && (next.includes("exec") || next.includes("wait"));
     lifecycle.modelSelected(callable);
     if (callable) {
-      bridge.capture(ctx);
+      pi.setActiveTools(next);
       bridge.setEnabled(getNestedTools(state));
+      bridge.capture(ctx);
       refresh(
         getTools().map((tool) => tool.name),
         usesGrammar(ctx.model),
@@ -116,5 +134,8 @@ export default function registerCodeMode(
       await sessions.shutdown();
     }
   });
-  return preview;
+  return {
+    previewPrompt: preview,
+    getAllowedTools: () => getDelegationTools(pi.getActiveTools(), state),
+  };
 }

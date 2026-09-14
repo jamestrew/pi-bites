@@ -6,6 +6,7 @@ const SHARED_CHANNELS = new Set([
   APPROVAL_CHANNEL,
   "bites:bash_gate",
   "bites:bash_gate_resolved",
+  "subagents:started",
   "subagents:completed",
   "subagents:failed",
 ]);

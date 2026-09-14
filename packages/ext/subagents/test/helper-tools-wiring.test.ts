@@ -1,27 +1,34 @@
+import { registerChildSendInput } from "./helpers/child-send-input.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agent-runner.js", async () => {
   const actual = await vi.importActual<typeof import("../agent-runner.js")>("../agent-runner.js");
-  return { ...actual, runAgent: vi.fn(), steerAgent: vi.fn() };
+  return { ...actual, runAgent: vi.fn(), resumeAgent: vi.fn(), steerAgent: vi.fn() };
 });
 
-import { runAgent, steerAgent } from "../agent-runner.js";
+import { resumeAgent, runAgent, steerAgent } from "../agent-runner.js";
+import type { AgentManager } from "../agent-manager.js";
 import subagentsExtension from "../index.js";
+import { SubagentOperationError } from "../tool-result.js";
 
-function makePi(active = ["Agent", "read"]) {
+function makePi(
+  active = ["spawn_agent", "send_input", "wait_agent", "close_agent", "resume_agent", "read"],
+) {
   const tools = new Map<string, any>();
-  const handlers = new Map<string, (...args: any[]) => void>();
+  const handlers = new Map<string, (...args: any[]) => unknown>();
   const eventHandlers = new Map<string, (data: unknown) => void>();
   const pi = {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((tool: any) => tools.set(tool.name, tool)),
     registerCommand: vi.fn(),
-    on: vi.fn((event: string, handler: (...args: any[]) => void) => handlers.set(event, handler)),
+    on: vi.fn((event: string, handler: (...args: any[]) => unknown) =>
+      handlers.set(event, handler),
+    ),
     events: {
       emit: vi.fn((event: string, data: unknown) => eventHandlers.get(event)?.(data)),
       on: vi.fn((event: string, handler: (data: unknown) => void) => {
         eventHandlers.set(event, handler);
-        return vi.fn();
+        return vi.fn(() => eventHandlers.delete(event));
       }),
     },
     appendEntry: vi.fn(),
@@ -39,6 +46,7 @@ function ctx(idle = true) {
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd: "/tmp",
     model: undefined,
+    scopedModels: [],
     modelRegistry: {
       find: vi.fn(),
       getAvailable: vi.fn(() => []),
@@ -58,12 +66,11 @@ function ctx(idle = true) {
 const textOf = (result: any): string => result.content[0].text;
 
 async function spawnBackground(tools: Map<string, any>, parentCtx = ctx()) {
-  return tools.get("Agent").execute(
+  return tools.get("spawn_agent").execute(
     "bg",
     {
-      prompt: "go",
-      description: "bg",
-      subagent_type: "general-purpose",
+      message: "bg",
+      agent_type: "worker",
     },
     undefined,
     undefined,
@@ -74,17 +81,63 @@ async function spawnBackground(tools: Map<string, any>, parentCtx = ctx()) {
 describe("background helper tools", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it("keeps MessageAgent registered without changing active tools at runtime", async () => {
+  it("rejects tool and registry spawns at capacity until the registry explicitly closes an agent", async () => {
+    vi.mocked(runAgent).mockImplementation(async () => ({
+      responseText: "done",
+      session: { dispose: vi.fn() } as any,
+    }));
+    const { pi, tools, handlers } = makePi();
+    subagentsExtension(pi);
+    const parentCtx = ctx();
+    handlers.get("session_start")?.({}, parentCtx);
+    const registry = Reflect.get(globalThis, Symbol.for("pi-subagents:manager")) as Pick<
+      AgentManager,
+      "spawn" | "close" | "getRecord" | "waitForAll"
+    >;
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      ids.push(registry.spawn(pi, parentCtx, "worker", "task", { description: "task" }));
+    }
+    await registry.waitForAll();
+    const error = "No concurrency slot is available. Close an agent before spawning another.";
+    await expect(spawnBackground(tools, parentCtx)).rejects.toThrow(error);
+    expect(() => registry.spawn(pi, parentCtx, "worker", "task", { description: "task" })).toThrow(
+      error,
+    );
+
+    await expect(registry.close(ids[0]!)).resolves.toEqual({ completed: "done" });
+    const spawned = JSON.parse(textOf(await spawnBackground(tools, parentCtx))).agent_id;
+    await registry.waitForAll();
+    expect(registry.getRecord(spawned)?.status).toBe("completed");
+    await registry.close(spawned);
+    const replacement = registry.spawn(pi, parentCtx, "worker", "replacement", {
+      description: "replacement",
+    });
+    expect(registry.getRecord(replacement)).toBeDefined();
+    await registry.waitForAll();
+    await handlers.get("session_shutdown")?.({}, parentCtx);
+
+    const reply = vi.fn();
+    pi.events.on("subagents:rpc:close:reply:shutdown", reply);
+    pi.events.emit("subagents:rpc:close", { requestId: "shutdown", agentId: replacement });
+    await Promise.resolve();
+    expect(reply).not.toHaveBeenCalled();
+    expect(Reflect.get(globalThis, Symbol.for("pi-subagents:manager"))).toBeUndefined();
+  });
+
+  it("registers send_input instead of MessageAgent without changing active tools", async () => {
     let finish!: (value: any) => void;
     vi.mocked(runAgent).mockReturnValue(new Promise((resolve) => (finish = resolve)));
     const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
     handlers.get("session_start")?.({}, ctx());
 
-    expect([...tools.keys()]).toContain("Agent");
-    expect(tools.get("Agent").parameters.properties).not.toHaveProperty("resume");
-    expect(tools.get("Agent").parameters.properties).not.toHaveProperty("inherit_context");
-    expect([...tools.keys()]).toContain("MessageAgent");
+    expect([...tools.keys()]).toContain("spawn_agent");
+    expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("resume");
+    expect(tools.get("spawn_agent").parameters.properties).not.toHaveProperty("inherit_context");
+    expect([...tools.keys()]).toContain("send_input");
+    expect([...tools.keys()]).toContain("close_agent");
+    expect([...tools.keys()]).not.toContain("MessageAgent");
     expect([...tools.keys()]).not.toContain("get_subagent_result");
     expect([...tools.keys()]).not.toContain("steer_subagent");
     expect(pi.setActiveTools).not.toHaveBeenCalled();
@@ -102,9 +155,9 @@ describe("background helper tools", () => {
   });
 
   it("routes an unselected child message through the safe parent boundary with metadata", async () => {
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise(() => {});
     });
     const { pi, tools, handlers } = makePi();
@@ -114,8 +167,10 @@ describe("background helper tools", () => {
     handlers.get("session_start")?.({}, parentCtx);
     handlers.get("agent_start")?.({}, parentCtx);
 
-    await spawnBackground(tools, parentCtx);
-    expect(messageParent?.("need a decision")).toBe(true);
+    const spawned = await spawnBackground(tools, parentCtx);
+    await expect(sendInput("need a decision")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     handlers.get("turn_end")?.({}, parentCtx);
@@ -124,6 +179,9 @@ describe("background helper tools", () => {
         customType: "subagent-message",
         details: expect.objectContaining({
           sender: expect.objectContaining({
+            id: JSON.parse(textOf(spawned)).agent_id,
+            type: "worker",
+            title: "bg",
             model_name: "openai/gpt-5",
             thinking: "off",
           }),
@@ -135,10 +193,10 @@ describe("background helper tools", () => {
   });
 
   it("delivers queued messages in order before an immediately completed child's final", async () => {
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     let finish!: (value: any) => void;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise((resolve) => {
         finish = resolve;
       });
@@ -149,8 +207,8 @@ describe("background helper tools", () => {
     handlers.get("agent_start")?.({}, ctx());
 
     await spawnBackground(tools);
-    expect(messageParent?.("first")).toBe(true);
-    expect(messageParent?.("second")).toBe(true);
+    await expect(sendInput("first")).resolves.toMatchObject({ details: { status: "queued" } });
+    await expect(sendInput("second")).resolves.toMatchObject({ details: { status: "queued" } });
     finish({ responseText: "done", session: { dispose: vi.fn() } as any });
     await Promise.resolve();
     await Promise.resolve();
@@ -176,9 +234,9 @@ describe("background helper tools", () => {
   });
 
   it("keeps post-terminal child messages queued across a non-idle continuation", async () => {
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise(() => {});
     });
     const { pi, tools, handlers } = makePi();
@@ -191,7 +249,9 @@ describe("background helper tools", () => {
       { message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
       ctx(),
     );
-    expect(messageParent?.("still pending")).toBe(true);
+    await expect(sendInput("still pending")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     handlers.get("turn_end")?.({}, ctx());
 
     handlers.get("agent_settled")?.({}, ctx(false));
@@ -212,9 +272,9 @@ describe("background helper tools", () => {
 
   it("best-effort flushes before shutdown without dereferencing replaced context", async () => {
     const order: string[] = [];
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise((_resolve, reject) => {
         options.signal?.addEventListener(
           "abort",
@@ -243,8 +303,8 @@ describe("background helper tools", () => {
     handlers.get("agent_start")?.({}, parentCtx);
 
     await spawnBackground(tools);
-    expect(messageParent?.("first")).toBe(true);
-    expect(messageParent?.("second")).toBe(true);
+    await expect(sendInput("first")).resolves.toMatchObject({ details: { status: "queued" } });
+    await expect(sendInput("second")).resolves.toMatchObject({ details: { status: "queued" } });
     handlers.get("session_before_switch")?.({}, parentCtx);
     for (const key of ["sessionManager", "isIdle"] as const) {
       Object.defineProperty(parentCtx, key, {
@@ -257,22 +317,22 @@ describe("background helper tools", () => {
     handlers.get("session_shutdown")?.({}, parentCtx);
 
     expect(order).toEqual(["first", "second", "abort"]);
-    expect(messageParent?.("too late")).toBe(false);
+    await expect(sendInput("too late")).rejects.toThrow(/closed|unavailable|owner/i);
   });
 
-  it("renders partial MessageAgent arguments while they stream", () => {
+  it("renders partial send_input arguments while they stream", () => {
     const { pi, tools } = makePi();
     subagentsExtension(pi);
 
     const component = tools
-      .get("MessageAgent")
+      .get("send_input")
       .renderCall(
         {},
         { fg: (_color: string, text: string) => text, bold: (text: string) => text },
         { state: {} },
       );
 
-    expect(component.render(80)).toEqual(["MessageAgent → ", "  "]);
+    expect(component.render(80)).toEqual(["send_input → ", "", ""]);
   });
 
   it("queues a message while the session initializes", async () => {
@@ -280,13 +340,13 @@ describe("background helper tools", () => {
     const { pi, tools } = makePi();
     subagentsExtension(pi);
     const spawn = await spawnBackground(tools);
-    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
+    const id = JSON.parse(textOf(spawn)).agent_id;
 
     const result = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: id, message: "focus here" }, undefined, undefined, ctx());
+      .get("send_input")
+      .execute("msg", { target: id, message: "focus here" }, undefined, undefined, ctx());
 
-    expect(textOf(result)).toContain("Message queued");
+    expect(JSON.parse(textOf(result))).toEqual({ submission_id: expect.any(String) });
     expect(result.details).toMatchObject({
       status: "queued",
       recipient: "bg",
@@ -298,79 +358,47 @@ describe("background helper tools", () => {
     });
   });
 
-  it("messages a live agent and rejects missing or completed agents", async () => {
+  it("queues input for a live agent, rejects missing agents, and resumes completed agents", async () => {
     let finish!: (value: any) => void;
-    const session = { dispose: vi.fn() } as any;
+    const session = { steer: vi.fn(async () => {}), dispose: vi.fn() } as any;
     vi.mocked(runAgent).mockImplementation(async (_ctx, _type, _prompt, options) => {
       options.onSessionCreated?.(session);
       return new Promise((resolve) => (finish = resolve));
     });
-    vi.mocked(steerAgent).mockResolvedValue(undefined);
     const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
     handlers.get("session_start")?.({}, ctx());
     const spawn = await spawnBackground(tools);
-    const id = textOf(spawn).match(/Agent ID: (\S+)/)?.[1];
+    const id = JSON.parse(textOf(spawn)).agent_id;
 
     const sent = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: id, message: "focus here" }, undefined, undefined, ctx());
-    expect(textOf(sent)).toContain("Message sent");
-    expect(textOf(sent)).toContain("assistant response's tool-call batch");
+      .get("send_input")
+      .execute("msg", { target: id, message: "focus here" }, undefined, undefined, ctx());
+    expect(JSON.parse(textOf(sent))).toEqual({ submission_id: expect.any(String) });
     expect(sent.details).toMatchObject({
-      status: "sent",
+      status: "queued",
       recipient: "bg",
       message: "focus here",
     });
-    const messageTool = tools.get("MessageAgent");
-    expect(messageTool.description).toContain("assistant response's tool-call batch");
-    expect(messageTool.description).toContain("Request wrap-up");
-    expect(messageTool.description).toContain("status check is appropriate");
-    expect(messageTool.description).toContain("informs a current decision");
-    expect(messageTool.description).toContain("hurry an agent");
-    expect(messageTool.description).toContain("cut a review short");
-    expect(messageTool.description).toContain("WaitAgent timed out");
-    expect(messageTool.description).toContain("does not confirm");
-    expect(messageTool.description).toContain("terminal status");
-    expect(
-      messageTool
-        .renderCall(
-          { agent_id: id, message: "focus here" },
-          { fg: (_color: string, text: string) => text, bold: (text: string) => text },
-          { toolCallId: "live", state: {} },
-        )
-        .render(80),
-    ).toEqual(["MessageAgent → bg", "  focus here"]);
-
-    const restoredState = {};
-    const restored = messageTool.renderCall(
-      { agent_id: "cleaned-up", message: "persisted" },
-      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
-      { toolCallId: "restored", state: restoredState },
-    );
-    messageTool.renderResult(
-      {
-        content: [],
-        details: { status: "sent", recipient: "saved title", message: "persisted" },
-      },
-      { expanded: false, isPartial: false },
-      { fg: (_color: string, text: string) => text, bold: (text: string) => text },
-      { toolCallId: "restored", state: restoredState },
-    );
-    expect(restored.render(80)[0]).toBe("MessageAgent → saved title");
     expect(steerAgent).toHaveBeenCalledWith(session, "focus here");
 
     const missing = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: "missing", message: "x" }, undefined, undefined, ctx());
-    expect(textOf(missing)).toContain("Agent not found");
+      .get("send_input")
+      .execute("msg", { target: "missing", message: "x" }, undefined, undefined, ctx())
+      .catch((error: unknown) => error);
+    expect(missing).toBeInstanceOf(SubagentOperationError);
+    expect(missing.message).toContain("agent with id missing not found");
     expect(missing.details).toMatchObject({ status: "failed", message: "x" });
 
     finish({ responseText: "done", session });
     await vi.waitFor(() => expect(pi.sendMessage).toHaveBeenCalled());
+    vi.mocked(resumeAgent).mockResolvedValue("continued");
     const completed = await tools
-      .get("MessageAgent")
-      .execute("msg", { agent_id: id, message: "again" }, undefined, undefined, ctx());
-    expect(textOf(completed)).toContain("is not running (status: completed)");
+      .get("send_input")
+      .execute("msg", { target: id, message: "again" }, undefined, undefined, ctx());
+    expect(JSON.parse(textOf(completed))).toEqual({ submission_id: expect.any(String) });
+    await vi.waitFor(() =>
+      expect(resumeAgent).toHaveBeenCalledWith(session, "again", expect.any(Object)),
+    );
   });
 });

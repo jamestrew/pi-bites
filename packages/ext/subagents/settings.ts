@@ -9,6 +9,7 @@ import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
 
 export const SubagentsSettingsSchema = Type.Object({
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1024 })),
   maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
   /**
    * Validate runtime subagent model choices against pi's resolved session scope from
@@ -16,20 +17,16 @@ export const SubagentsSettingsSchema = Type.Object({
    * Caller-selected violations fail; role defaults and inherited violations warn and proceed.
    */
   scopeModels: Type.Optional(Type.Boolean()),
-  toolDescriptionMode: Type.Optional(
-    Type.Union([Type.Literal("full"), Type.Literal("compact"), Type.Literal("custom")]),
-  ),
   fleetView: Type.Optional(Type.Boolean()),
 });
 
 export type SubagentsSettings = Static<typeof SubagentsSettingsSchema>;
-export type ToolDescriptionMode = NonNullable<SubagentsSettings["toolDescriptionMode"]>;
 
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
+  setMaxDepth?: (n: number) => void;
   setMaxConcurrent: (n: number) => void;
   setScopeModels: (enabled: boolean) => void;
-  setToolDescriptionMode: (mode: ToolDescriptionMode) => void;
   setFleetView: (b: boolean) => void;
 }
 
@@ -47,6 +44,14 @@ export function parseSubagentsSettings(value: unknown): SubagentsSettings | unde
   if (typeof value !== "object" || value === null) return undefined;
   const settings: SubagentsSettings = {};
   if (
+    "maxDepth" in value &&
+    typeof value.maxDepth === "number" &&
+    Number.isInteger(value.maxDepth) &&
+    value.maxDepth >= 0 &&
+    value.maxDepth <= 1024
+  )
+    settings.maxDepth = value.maxDepth;
+  if (
     "maxConcurrent" in value &&
     typeof value.maxConcurrent === "number" &&
     Number.isInteger(value.maxConcurrent) &&
@@ -56,13 +61,6 @@ export function parseSubagentsSettings(value: unknown): SubagentsSettings | unde
     settings.maxConcurrent = value.maxConcurrent;
   if ("scopeModels" in value && typeof value.scopeModels === "boolean")
     settings.scopeModels = value.scopeModels;
-  if (
-    "toolDescriptionMode" in value &&
-    (value.toolDescriptionMode === "full" ||
-      value.toolDescriptionMode === "compact" ||
-      value.toolDescriptionMode === "custom")
-  )
-    settings.toolDescriptionMode = value.toolDescriptionMode;
   if ("fleetView" in value && typeof value.fleetView === "boolean")
     settings.fleetView = value.fleetView;
   return Value.Check(SubagentsSettingsSchema, settings) ? settings : undefined;
@@ -115,9 +113,9 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
+  if (typeof s.maxDepth === "number") appliers.setMaxDepth?.(s.maxDepth);
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
-  if (s.toolDescriptionMode) appliers.setToolDescriptionMode(s.toolDescriptionMode);
   if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);
 }
 
