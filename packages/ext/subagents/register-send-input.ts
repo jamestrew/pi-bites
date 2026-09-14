@@ -4,7 +4,6 @@ import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container } from "@earendil-works/pi-tui";
 import type { AgentManager } from "./agent-manager.js";
 import { getSendInputToolParameters } from "./agent-tool-description.js";
-import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
 import { v1Result, SubagentOperationError } from "./tool-result.js";
 import {
@@ -24,7 +23,7 @@ type SendInputDetails = {
 
 export function createSendInput(pi: ExtensionAPI, manager: AgentManager) {
   return defineSubagentTool({
-    name: SUBAGENT_TOOL_NAMES.SEND_INPUT,
+    name: "send_input",
     label: "send_input",
     description: CODEX_V1_CONTRACT.tools.send_input.description,
     parameters: getSendInputToolParameters(),
@@ -73,9 +72,10 @@ export function createSendInput(pi: ExtensionAPI, manager: AgentManager) {
       if (!record && !isParent) return result(`agent with id ${params.target} not found`, "failed");
       if (!params.message.trim())
         return result("Empty message can't be sent to an agent", "failed");
-      if (params.interrupt) {
-        if (isParent) return result("Parent interruption is unavailable", "failed");
-        if (!record?.session || record.status !== "running")
+      if (params.interrupt && isParent)
+        return result("Parent interruption is unavailable", "failed");
+      if (params.interrupt && (record?.status === "running" || record?.status === "queued")) {
+        if (!record.session || record.status !== "running")
           return result(`agent with id ${params.target} is unavailable for interruption`, "failed");
         if (!(await manager.cancelAndSteer(record.id, params.message, signal)))
           return result(`agent with id ${params.target} could not be interrupted`, "failed");

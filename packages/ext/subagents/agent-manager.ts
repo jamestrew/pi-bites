@@ -703,7 +703,8 @@ export class AgentManager {
     signal?.throwIfAborted();
     const record = this.agents.get(id);
     if (!record || this.closer.isClosing(id)) return false;
-    if (record.status === "completed" || record.status === "idle")
+    // A settled open conversation can accept another turn after success, error, or interruption.
+    if (record.status !== "running" && record.status !== "queued")
       return this.startTurn(id, message);
     if (record.session && record.status === "running") {
       await steerAgent(record.session, message);

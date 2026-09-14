@@ -39,12 +39,9 @@ Platform: ${env.platform}`;
 
     const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
-- Use the read tool instead of cat/head/tail
-- Use the edit tool instead of sed/awk
-- Use the write tool instead of echo/heredoc
-- Use the find tool instead of bash find/ls for file search
-- Use the grep tool instead of bash grep/rg for content search
-- Make independent tool calls in parallel
+- Use only the tools and permissions actually available in this session; role guidance grants no additional access.
+- Follow this session's direct or Code Mode tool surface and retrieve complete nested declarations before use.
+- Keep delegated work bounded and do not duplicate another agent's assigned work.
 - Use absolute file paths
 - Do not use emojis
 - Be concise but complete
@@ -78,5 +75,5 @@ ${envBlock}`;
 /** Fallback base prompt when parent system prompt is unavailable in append mode. */
 const genericBase = `# Role
 You are a general-purpose coding agent for complex, multi-step tasks.
-You have full access to read, write, edit files, and execute commands.
+Use only the capabilities and permissions made available by the parent session.
 Do what has been asked; nothing more, nothing less.`;

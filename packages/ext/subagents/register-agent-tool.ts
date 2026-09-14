@@ -5,7 +5,6 @@ import type { AgentManager } from "./agent-manager.js";
 import { getAgentToolParameters } from "./agent-tool-description.js";
 import { createAgentToolExecute } from "./agent-tool-execute.js";
 import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
-import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { resolveAgent, resolveSpawnAgent } from "./agent-types.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
@@ -30,7 +29,7 @@ export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
   const parentAgentType = getActiveSubagent();
 
   return defineSubagentTool({
-    name: SUBAGENT_TOOL_NAMES.SPAWN_AGENT,
+    name: "spawn_agent",
     label: "spawn_agent",
     description: CODEX_V1_CONTRACT.tools.spawn_agent.description,
     parameters: getAgentToolParameters(),

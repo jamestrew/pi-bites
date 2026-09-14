@@ -20,7 +20,7 @@ vi.mock("../subagents/agent-runner.js", async (original) => ({
   openAgentSession: vi.fn(),
   resumeAgent: vi.fn(),
 }));
-import { runAgent, openAgentSession } from "../subagents/agent-runner.js";
+import { runAgent, openAgentSession, resumeAgent } from "../subagents/agent-runner.js";
 
 let host: string | undefined;
 try {
@@ -633,5 +633,115 @@ native(
       `await tools.multi_agent_v1__send_input({target:"${id}",message:"must not deliver"})`,
     );
     expect(missing.details.errorText).toContain("not found");
+  },
+);
+
+native.each([
+  ["direct", false],
+  ["nested", false],
+  ["direct", true],
+  ["nested", true],
+] as const)(
+  "%s settled agents accept interrupting input, retain history, and notify independently (initial error: %s)",
+  async (surface, initialError) => {
+    const session = mockSession();
+    session.sessionManager = SessionManager.inMemory("/tmp", { id: "retained-child" });
+    session.sessionManager.appendMessage({
+      role: "user",
+      content: "remember marker",
+      timestamp: 1,
+    });
+    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      options.onSessionCreated?.(session);
+      if (initialError) throw new Error("first final");
+      return { responseText: "first final", session };
+    });
+    vi.mocked(resumeAgent).mockResolvedValue("second final");
+    const h = await setup({ adapter: surface === "nested" });
+    const call = async (name: string, args: unknown) => {
+      if (surface === "direct") return (await h.direct(name, args)).value;
+      const result = await h.exec(
+        `text(await tools.multi_agent_v1__${name}(${JSON.stringify(args)}))`,
+      );
+      if (result.details.failed) throw new Error(result.details.errorText);
+      return values(result);
+    };
+    const { agent_id: id } = await call("spawn_agent", { message: "first" });
+    expect(await call("wait_agent", { targets: [id] })).toEqual({
+      status: { [id]: initialError ? { errored: "first final" } : { completed: "first final" } },
+      timed_out: false,
+    });
+    expect(h.pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "subagent-notification",
+        content: expect.stringContaining("first final"),
+      }),
+      expect.anything(),
+    );
+    expect(await call("send_input", { target: id, message: "continue", interrupt: true })).toEqual({
+      submission_id: expect.any(String),
+    });
+    expect(await call("wait_agent", { targets: [id] })).toEqual({
+      status: { [id]: { completed: "second final" } },
+      timed_out: false,
+    });
+    expect(h.pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "subagent-notification",
+        content: expect.stringContaining("second final"),
+      }),
+      expect.anything(),
+    );
+    expect(await call("close_agent", { target: id })).toEqual({
+      previous_status: { completed: "second final" },
+    });
+    vi.mocked(openAgentSession).mockImplementation(async (_parent, _type, options) => {
+      expect(options.conversation?.sessionId).toBe("retained-child");
+      expect(JSON.stringify(options.conversation?.entries)).toContain("remember marker");
+      return session;
+    });
+    expect(await call("resume_agent", { id })).toEqual({ status: "pending_init" });
+    expect(
+      await call("send_input", { target: id, message: "after reopen", interrupt: true }),
+    ).toEqual({ submission_id: expect.any(String) });
+    expect(await call("wait_agent", { targets: [id] })).toEqual({
+      status: { [id]: { completed: "second final" } },
+      timed_out: false,
+    });
+    await call("close_agent", { target: id });
+  },
+);
+
+native.each(["direct", "nested"] as const)(
+  "%s role validation preserves case and treats blank fork roles as omitted",
+  async (surface) => {
+    vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) =>
+      waitForCancellation(options.signal),
+    );
+    const h = await setup({ adapter: surface === "nested" });
+    const call = async (args: unknown) => {
+      if (surface === "direct") return (await h.direct("spawn_agent", args)).value;
+      const result = await h.exec(
+        `text(await tools.multi_agent_v1__spawn_agent(${JSON.stringify(args)}))`,
+      );
+      if (result.details.failed) throw new Error(result.details.errorText);
+      return values(result);
+    };
+    await expect(call({ message: "wrong case", agent_type: "EXPLORER" })).rejects.toThrow(
+      "unknown agent_type 'EXPLORER'",
+    );
+    expect(runAgent).not.toHaveBeenCalled();
+    expect(await call({ message: "fork", fork_context: true, agent_type: "  " })).toEqual({
+      agent_id: expect.any(String),
+      nickname: "fork",
+    });
+    expect(runAgent).toHaveBeenCalledWith(
+      expect.anything(),
+      "default",
+      "fork",
+      expect.objectContaining({
+        parentEntries: expect.arrayContaining([expect.objectContaining({ type: "message" })]),
+      }),
+    );
   },
 );

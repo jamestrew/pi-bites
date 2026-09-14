@@ -9,14 +9,10 @@ subagents. [Revision evidence](../../../docs/code-mode-contract/subagents-revisi
 compares the old subagent pin and inspected checkout. The earlier
 [research](../../../docs/code-mode-contract/subagents-research.md) remains historical evidence.
 
-This is the target for #264, not certification of the unfinished integration.
-Existing close work stays in place. #276 supplies retained-state ownership;
-#277 supplies usable resume and reservation; #306 supplies shared operations and
-cancellation; #307 aligns child collaboration and roles; #308 exposes nested
-operations; #309 integrates presentation; #278 runs the combined parity audit.
-Child collaboration and additive explorer guidance are implemented in #307. #308 activates
-[scoped nested exposure](../../../docs/code-mode-contract/subagents-exposure.md), including
-shared execution, discovery, standalone restoration, and existing renderer registration.
+The lifecycle, shared controller, child collaboration, exposure, and presentation work
+is integrated on `subagents-codex`. The [combined validation record](../../../docs/code-mode-contract/subagents-validation.md)
+records #278's parity corrections, automated checks, actual provider payloads, and live-route
+limitations. Integration into `master` remains a separate maintainer/runner action.
 
 ## One engine, two entry points
 
@@ -61,6 +57,10 @@ Status is `pending_init`, `running`, `interrupted`, `shutdown`, `not_found`,
 agent IDs to final statuses. Direct Pi results serialize these objects as JSON text;
 nested success resolves to the object, not a Pi content envelope or JSON string.
 Nested validation/execution failures reject. Renderer details are not model payloads.
+Pi agent/session IDs are opaque manager-owned identifiers, not Codex ThreadId UUIDs;
+unknown strings use the local lookup error (or `not_found` for wait). No arbitrary
+session path is accepted. Model lookup and initialization errors retain Pi provider
+and scope diagnostics rather than pretending to be Codex backend errors.
 
 Tool definitions and broader orchestration/model templates are separate. Preserve
 additive Pi-bites, project, skill, and extension prompts rather than importing the
@@ -68,12 +68,13 @@ complete Codex system prompt or adding local batching advice.
 
 ## Roles, messaging, waits, and capacity
 
-- Built-in roles are `default`, `worker`, and `explorer`. Explorer is role guidance,
+- Built-in roles are `default`, `worker`, and `explorer`. Role names are trimmed
+  and case-sensitive; blank means omitted, including on full-history forks. Explorer is role guidance,
   **not a read-only permission boundary**. Inherit actual parent tools, permissions,
   model, and reasoning unless a supported, authorized override applies. A role must
   neither grant missing capabilities nor manufacture an extra restriction.
 - `fork_context: true` copies full parent history, inherits the parent role, and
-  rejects explicit `agent_type`. False/omitted starts from the initial prompt and
+  rejects a nonblank explicit `agent_type`. False/omitted starts from the initial prompt and
   defaults to `default`. Preserve parent/child addressing, depth and capacity limits,
   target permissions, and descendant ownership. Children register the same V1 operations;
   there is no separately injected parent-message tool.
@@ -82,11 +83,15 @@ complete Codex system prompt or adding local batching advice.
   Native errors/defaults and revision-specific behavior are in the revision evidence;
   unsupported fields must not be silently accepted as working controls.
 - `send_input` queues by default; `interrupt: true` interrupts current work before
-  submitting input. Reuse an open completed agent for another turn. Preserve retained
+  submitting input. Reuse an open settled agent after completion, error, or interruption for another turn.
+  `interrupt: true` on a settled or newly resumed conversation submits input without
+  requiring a running turn to abort. During initial session creation, interrupting input
+  fails explicitly until a live session exists; ordinary input can queue. Preserve retained
   conversation and submission identity. Delivery occurs at Pi's next model boundary,
   not by injecting into an already ongoing inference.
 - `wait_agent` observes only explicit selected targets and returns when any selected
-  target has final status. Default timeout is 30,000 ms; positive values clamp to
+  target has final status. `interrupted` is not final: wait continues through the next
+  turn, times out, or observes close; interruption alone sends no final notification. Default timeout is 30,000 ms; positive values clamp to
   10,000–3,600,000 ms. A valid missing target reports `not_found`. Timeout returns `{ status: {}, timed_out: true }` without
   cancelling work. Final-status notification and selected wait are independent:
   both may contain the same completion. UI progress is neither delivery channel.
@@ -200,8 +205,7 @@ remain in force. The obsolete helper and its renderer are removed.
 
 Verification covers shared depth/capacity, same-tree and foreign-root targeting,
 throwing-getter captures, reopen cancellation, independent retained delivery, real
-supported/unsupported child sessions, and two-hop approval forwarding. Live provider
-smokes and end-to-end nested Code Mode exposure remain #308/#278 work.
+supported/unsupported child sessions, and two-hop approval forwarding. Live provider smokes and nested execution evidence are in the combined validation record.
 
 ## Shared owned operations (#306)
 
@@ -214,7 +218,7 @@ The five owned tool factories supply
 one implementation, pinned definitions and reusable renderers. The controller exposes
 `capture(ctx, { forkContext })` for deferred consumers; it never discovers executors
 through `getAllTools()`, emits synthetic Pi tool events, or imports the adapter.
-Nested model exposure stays inaccessible until #308 supplies coherent availability.
+The adapter exposes these operations through the scoped #308 integration.
 
 Capture happens while Pi ctx is active. The returned operation handle contains the
 parent identity, role, model/reasoning, scope policy, allowed tools, provider/model
@@ -332,16 +336,15 @@ Report distinct measurements, not a single budget:
 Historical evidence from #271: old three-tool estimate **1,605**; V1 serialized
 `ceil(characters / 4)` estimate **2,902**, compared with a former soft target **2,000**.
 These are comparison points, not an exact token count or a hard ceiling. No prose
-shortening is authorized by the target. Nested eager/history/provider measurements
-remain pending #308/#278 until the surface actually runs.
+shortening is authorized by the target. The combined validation record reports eager/history/provider measurements separately.
 
 ## Scenario-based parity checks
 
 Run each scenario through (A) registered direct Pi tool execution and (B) native
 `exec` using the matching `tools.multi_agent_v1__<name>`. Compare parsed direct JSON
 to nested objects and semantic errors; exclude renderer-only metadata. Use controlled
-child turns and clocks/signals, not arbitrary sleeps. These are acceptance scenarios
-for the named follow-ups, not new prompt-only tests or claims that B is active today.
+child turns and clocks/signals, not arbitrary sleeps. Both paths are active; the combined validation record maps these scenarios to the
+existing behavioral seams and distinguishes controlled sessions from live inference.
 
 | Scenario                       | Observable check                                                                                                                                                                                                                                          | Delivery  |
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
@@ -358,6 +361,4 @@ for the named follow-ups, not new prompt-only tests or claims that B is active t
 | Presentation and routes        | Structured nested errors, progress, Fleet/navigation, images, restored and expanded traces; no raw JS by default or duplicate model output; actual grammar and structured-fallback routes                                                                 | #309/#278 |
 | Discovery/accounting           | Complete ALL_TOOLS declarations without search, rediscovery after compaction, separate eager/discoverable/history/provider measurements                                                                                                                   | #308/#278 |
 
-Existing focused behavioral checks cover direct spawn, send, wait, and close. Run
-those and final `bun check` for this rebaseline; #278 records actual live-route coverage
-and any unavailable routes after the remaining implementation lands.
+Run the focused checks and final `bun check` listed in the combined validation record.

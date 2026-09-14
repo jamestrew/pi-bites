@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAgentCompletionHandler } from "../agent-completion.js";
-import type { AgentRecord } from "../types.js";
+import { AgentCloser } from "../agent-close.js";
+import type { AgentRecord, WaitAgentOutcome } from "../types.js";
 
 function makeRecord(id: string, overrides: Partial<AgentRecord> = {}): AgentRecord {
   return {
@@ -43,6 +44,7 @@ function makeHarness(
   return {
     completion,
     pi,
+    records: byId,
     onAgentFinishedUI,
     removeRecord: (id: string) => byId.delete(id),
   };
@@ -223,4 +225,74 @@ describe("agent completion delivery", () => {
     expect(pi.sendMessage).toHaveBeenCalledOnce();
     completion.dispose();
   });
+});
+
+it.each([false, true])(
+  "waits across interruption into the next turn (already interrupted: %s)",
+  async (alreadyInterrupted) => {
+    const record = makeRecord("a", {
+      status: alreadyInterrupted ? "stopped" : "running",
+      abort: { source: "interrupt", reason: "interrupt", timestamp: 1 },
+    });
+    const { completion, pi } = makeHarness([record]);
+    try {
+      let resolved = false;
+      const waiting = completion.waitFor([record.id], 30_000).then((outcome) => {
+        resolved = true;
+        return outcome;
+      });
+      record.status = "stopped";
+      completion.onAgentComplete(record);
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+      expect(pi.sendMessage).not.toHaveBeenCalled();
+      record.generation++;
+      record.status = "completed";
+      record.result = "continued";
+      completion.onAgentComplete(record);
+      expect((await waiting).status).toEqual({ a: { completed: "continued" } });
+      expect(pi.sendMessage).toHaveBeenCalledOnce();
+    } finally {
+      completion.dispose();
+    }
+  },
+);
+
+it("waits started before and during interrupted-agent teardown both observe shutdown", async () => {
+  const record = makeRecord("a", {
+    status: "stopped",
+    abort: { source: "interrupt", reason: "interrupt", timestamp: 1 },
+    session: {} as AgentRecord["session"],
+  });
+  const { completion, pi, records } = makeHarness([record]);
+  const teardown = Promise.withResolvers<void>();
+  const enteredTeardown = Promise.withResolvers<void>();
+  const closer = new AgentCloser(records, {
+    invalidate: completion.onAgentStatusChanged,
+    abort: () => {},
+    teardown: () => {
+      enteredTeardown.resolve();
+      return teardown.promise;
+    },
+    releaseReservation: () => {},
+  });
+  let closing: Promise<unknown> | undefined;
+  try {
+    completion.onAgentComplete(record);
+    const early = completion.waitFor([record.id], 30_000);
+    closing = closer.close(record.id);
+    await enteredTeardown.promise;
+    expect((await early).status).toEqual({ a: "shutdown" });
+    let lateOutcome: WaitAgentOutcome | undefined;
+    void completion.waitFor([record.id], 30_000).then((outcome) => {
+      lateOutcome = outcome;
+    });
+    await Promise.resolve();
+    expect(lateOutcome?.status).toEqual({ a: "shutdown" });
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+  } finally {
+    teardown.resolve();
+    await closing;
+    completion.dispose();
+  }
 });

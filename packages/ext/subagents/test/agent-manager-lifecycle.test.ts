@@ -276,7 +276,7 @@ describe("AgentManager — detached lifecycle", () => {
     });
     expect((manager as any).runningCount).toBe(0);
 
-    expect(manager.startTurn(id, "third")).toBe(true);
+    await expect(manager.sendInput(id, "third")).resolves.toBe(true);
     await manager.getRecord(id)!.promise;
     expect(manager.getRecord(id)).toMatchObject({
       generation: 3,

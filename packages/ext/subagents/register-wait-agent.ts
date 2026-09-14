@@ -2,7 +2,6 @@ import { defineSubagentTool } from "./operation-context.js";
 import { buildWaitAgentResult } from "./agent-completion.js";
 import { getWaitAgentToolParameters } from "./agent-tool-description.js";
 import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
-import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { v1Result, SubagentOperationError } from "./tool-result.js";
 import type { AgentRecord, WaitAgentDetails, WaitAgentOutcome, WaitAgentResult } from "./types.js";
 import { renderWaitAgent } from "./ui/wait-agent-render.js";
@@ -39,7 +38,7 @@ export function createWaitAgent(deps: WaitAgentDeps) {
   };
 
   return defineSubagentTool({
-    name: SUBAGENT_TOOL_NAMES.WAIT_AGENT,
+    name: "wait_agent",
     label: "wait_agent",
     description: CODEX_V1_CONTRACT.tools.wait_agent.description,
     parameters: getWaitAgentToolParameters(),

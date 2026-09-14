@@ -12,10 +12,9 @@ import type {
 } from "./types.js";
 import { getLifetimeTotal } from "./usage.js";
 
-const TERMINAL_STATUSES = new Set(["completed", "error", "stopped"]);
-
 function isTerminal(record: AgentRecord): boolean {
-  return TERMINAL_STATUSES.has(record.status);
+  const status = getAgentStatus(record);
+  return status !== "pending_init" && status !== "running" && status !== "interrupted";
 }
 
 export function buildWaitAgentResult(record: AgentRecord, includeOutput: boolean): WaitAgentResult {
@@ -118,10 +117,11 @@ export function createAgentCompletionHandler({
   }
 
   function resolveWaiters(completedRecord: AgentRecord): void {
+    if (!isTerminal(completedRecord)) return;
     for (const waiter of waiters.values()) {
       if (
         waiter.agentIds.includes(completedRecord.id) &&
-        waiter.generations.get(completedRecord.id) === completedRecord.generation
+        (waiter.generations.get(completedRecord.id) ?? Infinity) <= completedRecord.generation
       ) {
         finish(waiter, terminalOutcome(waiter.agentIds, completedRecord));
       }
@@ -173,7 +173,7 @@ export function createAgentCompletionHandler({
 
     resolveWaiters(finished);
     emitCompletionEvent(finished, failed);
-    if (shouldNotify && !shouldNotify(record)) {
+    if (!isTerminal(finished) || (shouldNotify && !shouldNotify(record))) {
       notifyFinishedUI();
       return;
     }
@@ -284,6 +284,7 @@ export function createAgentCompletionHandler({
   return {
     waitFor,
     onAgentComplete,
+    onAgentStatusChanged: resolveWaiters,
     dispose(): void {
       disposed = true;
       for (const waiter of waiters.values()) {

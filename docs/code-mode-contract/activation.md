@@ -114,3 +114,18 @@ host build; stock Responses/Codex Responses/Completions payloads were captured f
 both capability settings without sending requests. Contract regeneration compared
 byte-for-byte after formatting, and the generator's locked offline Cargo build/test
 and formatting check passed. No live model route or arm64 execution is claimed.
+
+## V1 collaboration cutover (#278)
+
+With subagents enabled, eligible Code Mode sessions expose only the five selected
+`tools.multi_agent_v1__<name>` functions, discovered through `ALL_TOOLS`. Other models
+and `disable: ["codexAdapter"]` use flat `spawn_agent`, `send_input`, `wait_agent`,
+`close_agent`, and `resume_agent`; `disable: ["subagents"]` removes both surfaces.
+Explicit tool selections and unrelated tools survive transitions. Each child chooses
+its own model's exposure and inherits actual permitted capabilities. Configuration
+changes to the disable list take effect when extensions reload.
+
+The [combined validation](subagents-validation.md) records live parent/child routes,
+exact-command scripted approval, payload measurements, and unavailable routes.
+A cell ending does not close a committed agent; close completed agents to release
+capacity. Agent waits and outer cell waits are independent.

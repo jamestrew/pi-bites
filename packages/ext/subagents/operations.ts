@@ -157,7 +157,7 @@ export class SubagentController {
           event.systemPrompt +
           "\nYour parent agent id is " +
           parentId +
-          ". Use send_input with this target for substantive parent messages. Delivery waits for the next model boundary; still return a final response.",
+          ". Use send_input (tools.multi_agent_v1__send_input inside Code Mode) with this target for substantive parent messages, when available. Delivery waits for the next model boundary; still return a final response.",
       }));
     }
     for (const name of Object.keys(this.tools) as SubagentOperation[]) {

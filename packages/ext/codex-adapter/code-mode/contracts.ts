@@ -70,4 +70,5 @@ Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructio
 Before using collaboration, retrieve and read the complete generated input/return declarations in a separate exec call:
 text(ALL_TOOLS.filter((tool) => tool.name.startsWith("multi_agent_v1__")));
 Rediscover when those declarations leave context, including after compaction. Discovery does not start agents, enable tools, or grant permissions. Each child inherits permitted capabilities and chooses its own model's tool surface.
+Completed open agents retain capacity until close_agent. Selected-target waits and automatic final notifications are independent; both may report the same completion.
 Nested wait_agent({targets,...}) observes session-owned agents; outer wait({cell_id,...}) resumes a yielded exec cell. Agents outlive cells; completing or cancelling a cell does not close committed agents.`;

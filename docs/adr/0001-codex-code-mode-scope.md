@@ -44,3 +44,12 @@ history, and provider payload separately. Omit unsupported `items` and `service_
 explicitly. Roles inherit actual parent capabilities; explorer is not an additional
 read-only boundary. #305 records the target; #306–#309 activate it after usable
 close/resume (#276–#277), with combined validation in #278.
+
+## Combined V1 validation (#278)
+
+The two entry points are implemented on the integration branch. The
+[combined audit](../code-mode-contract/subagents-validation.md) records actual route
+and payload evidence, precise remaining limitations, and the existing behavioral
+checks. Keep additive role/project guidance separate from pinned declarations;
+child prompts refer to available capabilities rather than assuming direct core tools.
+The final merge into `master` is a separate integration action, not part of this audit PR.

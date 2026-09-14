@@ -2,7 +2,6 @@ import { defineSubagentTool } from "./operation-context.js";
 import { Container } from "@earendil-works/pi-tui";
 import type { AgentManager } from "./agent-manager.js";
 import { getCloseAgentToolParameters } from "./agent-tool-description.js";
-import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
 import { v1Result } from "./tool-result.js";
 import type { WaitAgentStatus } from "./types.js";
@@ -18,7 +17,7 @@ type CloseAgentDetails = {
 
 export function createCloseAgent(manager: AgentManager) {
   return defineSubagentTool({
-    name: SUBAGENT_TOOL_NAMES.CLOSE_AGENT,
+    name: "close_agent",
     label: "close_agent",
     description: CODEX_V1_CONTRACT.tools.close_agent.description,
     parameters: getCloseAgentToolParameters(),

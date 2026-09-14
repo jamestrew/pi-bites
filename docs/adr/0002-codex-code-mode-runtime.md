@@ -34,3 +34,8 @@ manager-owned recoverable data and current permissions. See the
 accepted input, interruption, shutdown, and published children cannot be promised
 atomic rollback when a cell loses its result. Resume reserves capacity while reopening
 and rolls back failed reopening, rather than waiting for the next turn to reserve.
+
+The #278 parity audit confirms that interruption is not a final V1 wait status.
+Selected waits continue across an interrupted turn and release on a later final
+status or explicit close. Settled open conversations accept subsequent input with
+or without `interrupt: true`; neither completion nor interruption releases capacity.

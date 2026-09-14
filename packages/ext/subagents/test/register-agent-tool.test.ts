@@ -277,6 +277,6 @@ describe("spawn_agent", () => {
 
     tool.renderResult(result, { expanded: false, isPartial: false }, theme, context);
 
-    expect(call.render(200).join("\n")).toContain("Error: Unknown agent_type 'unknown'.");
+    expect(call.render(200).join("\n")).toContain("Error: unknown agent_type 'unknown'");
   });
 });

@@ -227,3 +227,14 @@ existing host protocol without a host/source upgrade. Complete declarations use
 `ALL_TOOLS`; standalone tools remain available outside Code Mode. See the
 [exposure validation](../../../docs/code-mode-contract/subagents-exposure.md) for
 shared execution, selection fallback, ownership, and validation boundaries.
+
+## Combined V1 audit (#278)
+
+The [combined validation record](../../../docs/code-mode-contract/subagents-validation.md)
+records parity corrections at the unchanged pin: case-sensitive trimmed roles,
+blank fork roles treated as omitted, input reuse after settled turns, and non-final
+interruption across selected waits. Child guidance follows the actual direct/nested
+surface without granting tools or permission. No legacy Agent/MessageAgent/WaitAgent
+registrations or aliases remain; historical research and internal wait-result type
+names are not model-facing compatibility tools. Native source, generated declarations,
+protocol, inventory, and provider transports are unchanged.

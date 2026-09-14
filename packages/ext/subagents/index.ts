@@ -127,6 +127,7 @@ export function createSubagents(
     },
     getAutoCompactionThreshold,
     (record) => {
+      completion.onAgentStatusChanged(record);
       parentAllowances.delete(record.id);
       childControllers.get(record.id)?.invalidate();
     },

@@ -100,6 +100,10 @@ export class AgentCloser {
   }
 
   private async finishClose(record: AgentRecord): Promise<void> {
+    // Interrupted is non-final; publish shutdown before notifying observers so
+    // waits started during teardown see the same state as existing waiters.
+    if (record.status === "stopped" && record.abort?.source === "interrupt")
+      record.abort = { timestamp: Date.now(), source: "shutdown", reason: "close" };
     // This is the lifecycle commit point, not the delayed completion UI event.
     this.hooks.invalidate(record);
     // Defer stops until every record is claimed. Each stop runs before awaiting

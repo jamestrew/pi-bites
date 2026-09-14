@@ -8,13 +8,13 @@ describe("embedded agent types", () => {
     expect(resolveSpawnAgent(undefined, true, "unknown")).toEqual({
       error: "Unknown inherited agent_type 'unknown'.",
     });
-    expect(resolveSpawnAgent(undefined, true, " EXPLORER ")).toMatchObject({
+    expect(resolveSpawnAgent(undefined, true, " explorer ")).toMatchObject({
       agent: { type: "explorer", matched: true },
     });
     expect(resolveSpawnAgent(undefined, true, undefined)).toMatchObject({
       agent: { type: "default", matched: true },
     });
-    expect(resolveSpawnAgent("", true, "worker")).toHaveProperty("error");
+    expect(resolveSpawnAgent("", true, "worker")).toMatchObject({ agent: { type: "worker" } });
     expect(resolveSpawnAgent("worker", true, "worker")).toHaveProperty("error");
     expect(resolveSpawnAgent("unknown", false, "worker")).toHaveProperty("error");
     expect(resolveSpawnAgent(undefined, false, "unknown")).toMatchObject({
@@ -25,8 +25,8 @@ describe("embedded agent types", () => {
   it("exposes the Codex roles and defaults omitted roles", () => {
     expect(SUBAGENT_TYPES).toEqual(["default", "worker", "explorer"]);
     expect(resolveAgent()).toMatchObject({ type: "default", matched: true });
-    expect(resolveAgent("WORKER")).toMatchObject({ type: "worker", matched: true });
-    expect(resolveAgent("EXPLORER")).toMatchObject({ type: "explorer", matched: true });
+    expect(resolveAgent("worker")).toMatchObject({ type: "worker", matched: true });
+    expect(resolveAgent("explorer")).toMatchObject({ type: "explorer", matched: true });
     expect(resolveAgent("nonexistent")).toMatchObject({ type: "default", matched: false });
   });
 

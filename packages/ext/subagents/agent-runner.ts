@@ -42,15 +42,6 @@ import {
 } from "./types.js";
 import type { AssistantUsage } from "./usage.js";
 
-/** Tool names shared by this extension's registration and subagent exclusion. */
-export const SUBAGENT_TOOL_NAMES = {
-  SPAWN_AGENT: "spawn_agent",
-  WAIT_AGENT: "wait_agent",
-  SEND_INPUT: "send_input",
-  CLOSE_AGENT: "close_agent",
-  RESUME_AGENT: "resume_agent",
-} as const;
-
 /**
  * Try to find the right model for an agent type.
  * Priority: explicit option > config.model > parent model.
@@ -122,7 +113,7 @@ export interface RunOptions {
   registerCollaboration?: RegisterCollaboration;
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
-  /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
+  /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `explorer#a1b2c3d4`). */
   agentId?: string;
   /** Identity of this live conversation, distinct from the retained agent id. */
   agentSessionId?: string;

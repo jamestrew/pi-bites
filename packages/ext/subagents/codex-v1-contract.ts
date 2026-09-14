@@ -12,12 +12,6 @@ export const CODEX_V1_TOOL_NAMES = [
   "resume_agent",
 ] as const;
 
-/** Historical measurements, not limits: preserve complete upstream wording. */
-export const CODEX_V1_TOKEN_BUDGET = {
-  currentBaseline: 1_605,
-  softFinal: 2_000,
-} as const;
-
 export const CODEX_V1_CONTRACT = generated.contract;
 /** Native namespace-derived identities and full input/return declarations, metadata only. */
 export const CODEX_V1_NESTED_TOOLS = generated.nested_tools;
