@@ -1,3 +1,4 @@
+import { registerChildSendInput } from "./helpers/child-send-input.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agent-runner.js", async () => {
@@ -94,7 +95,7 @@ describe("background helper tools", () => {
       "spawn" | "close" | "getRecord" | "waitForAll"
     >;
     const ids: string[] = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       ids.push(registry.spawn(pi, parentCtx, "worker", "task", { description: "task" }));
     }
     await registry.waitForAll();
@@ -154,9 +155,9 @@ describe("background helper tools", () => {
   });
 
   it("routes an unselected child message through the safe parent boundary with metadata", async () => {
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise(() => {});
     });
     const { pi, tools, handlers } = makePi();
@@ -166,8 +167,10 @@ describe("background helper tools", () => {
     handlers.get("session_start")?.({}, parentCtx);
     handlers.get("agent_start")?.({}, parentCtx);
 
-    await spawnBackground(tools, parentCtx);
-    expect(messageParent?.("need a decision")).toBe(true);
+    const spawned = await spawnBackground(tools, parentCtx);
+    await expect(sendInput("need a decision")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     expect(pi.sendMessage).not.toHaveBeenCalled();
 
     handlers.get("turn_end")?.({}, parentCtx);
@@ -176,6 +179,9 @@ describe("background helper tools", () => {
         customType: "subagent-message",
         details: expect.objectContaining({
           sender: expect.objectContaining({
+            id: JSON.parse(textOf(spawned)).agent_id,
+            type: "worker",
+            title: "bg",
             model_name: "openai/gpt-5",
             thinking: "off",
           }),
@@ -187,10 +193,10 @@ describe("background helper tools", () => {
   });
 
   it("delivers queued messages in order before an immediately completed child's final", async () => {
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     let finish!: (value: any) => void;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise((resolve) => {
         finish = resolve;
       });
@@ -201,8 +207,8 @@ describe("background helper tools", () => {
     handlers.get("agent_start")?.({}, ctx());
 
     await spawnBackground(tools);
-    expect(messageParent?.("first")).toBe(true);
-    expect(messageParent?.("second")).toBe(true);
+    await expect(sendInput("first")).resolves.toMatchObject({ details: { status: "queued" } });
+    await expect(sendInput("second")).resolves.toMatchObject({ details: { status: "queued" } });
     finish({ responseText: "done", session: { dispose: vi.fn() } as any });
     await Promise.resolve();
     await Promise.resolve();
@@ -228,9 +234,9 @@ describe("background helper tools", () => {
   });
 
   it("keeps post-terminal child messages queued across a non-idle continuation", async () => {
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise(() => {});
     });
     const { pi, tools, handlers } = makePi();
@@ -243,7 +249,9 @@ describe("background helper tools", () => {
       { message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
       ctx(),
     );
-    expect(messageParent?.("still pending")).toBe(true);
+    await expect(sendInput("still pending")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     handlers.get("turn_end")?.({}, ctx());
 
     handlers.get("agent_settled")?.({}, ctx(false));
@@ -264,9 +272,9 @@ describe("background helper tools", () => {
 
   it("best-effort flushes before shutdown without dereferencing replaced context", async () => {
     const order: string[] = [];
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-      messageParent = options.messageParent;
+      sendInput = registerChildSendInput(options, ctx());
       return new Promise((_resolve, reject) => {
         options.signal?.addEventListener(
           "abort",
@@ -295,8 +303,8 @@ describe("background helper tools", () => {
     handlers.get("agent_start")?.({}, parentCtx);
 
     await spawnBackground(tools);
-    expect(messageParent?.("first")).toBe(true);
-    expect(messageParent?.("second")).toBe(true);
+    await expect(sendInput("first")).resolves.toMatchObject({ details: { status: "queued" } });
+    await expect(sendInput("second")).resolves.toMatchObject({ details: { status: "queued" } });
     handlers.get("session_before_switch")?.({}, parentCtx);
     for (const key of ["sessionManager", "isIdle"] as const) {
       Object.defineProperty(parentCtx, key, {
@@ -309,7 +317,7 @@ describe("background helper tools", () => {
     handlers.get("session_shutdown")?.({}, parentCtx);
 
     expect(order).toEqual(["first", "second", "abort"]);
-    expect(messageParent?.("too late")).toBe(false);
+    await expect(sendInput("too late")).rejects.toThrow(/closed|unavailable|owner/i);
   });
 
   it("renders partial send_input arguments while they stream", () => {

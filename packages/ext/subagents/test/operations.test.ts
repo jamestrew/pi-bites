@@ -14,6 +14,7 @@ vi.mock("../agent-runner.js", async (original) => ({
 vi.mock("../settings.js", () => ({
   applyAndEmitLoaded: vi.fn((settings) => settings.setScopeModels(true)),
 }));
+import { applyAndEmitLoaded } from "../settings.js";
 import { runAgent, openAgentSession } from "../agent-runner.js";
 
 const model = { provider: "test", id: "current", name: "Current", reasoning: true } as any;
@@ -54,7 +55,7 @@ function harness() {
   } as any;
   const controller = registerSubagents(pi);
   const emit = async (name: string) => {
-    for (const fn of handlers.get(name) ?? []) await fn({}, ctx);
+    await Promise.all((handlers.get(name) ?? []).map((fn) => fn({}, ctx)));
   };
   void emit("session_start");
   cleanups.push(() => emit("session_shutdown"));
@@ -368,5 +369,139 @@ it.each(names)(
       h.direct.get(name).execute("invalid", { unexpected: true }, undefined, undefined, h.ctx),
     ).rejects.toThrow("Invalid arguments");
     expect(runAgent).not.toHaveBeenCalled();
+  },
+);
+
+it("registers children on the shared tree and preserves caller identity and shared capacity", async () => {
+  pendingChild();
+  vi.mocked(applyAndEmitLoaded).mockImplementationOnce((settings) => {
+    settings.setMaxDepth?.(2);
+    settings.setMaxConcurrent(4);
+    return {};
+  });
+  const h = harness();
+  const root = h.capture();
+  const id = idOf(await root.execute("spawn_agent", { message: "child" }, call("child")));
+  const options = vi.mocked(runAgent).mock.calls[0]![3];
+  const childHandlers = new Map<string, Function[]>();
+  const childPi = {
+    ...h.pi,
+    on: (name: string, fn: Function) =>
+      childHandlers.set(name, [...(childHandlers.get(name) ?? []), fn]),
+    sendMessage: vi.fn(),
+  };
+  const childCtx = {
+    ...h.ctx,
+    sessionManager: SessionManager.inMemory("/tmp", { id: "child-session" }),
+  };
+  const session = { ...mockSession(), sessionManager: childCtx.sessionManager };
+  options.onSessionCreated?.(session);
+  const child = options.registerCollaboration!(childPi);
+  for (const fn of childHandlers.get("session_start") ?? []) await fn({}, childCtx);
+  const captured = child.capture(childCtx);
+  const childCall = (callId: string) => ({ callerId: captured.callerId, callId });
+  expect(
+    (
+      await captured.execute(
+        "send_input",
+        { target: "parent-session", message: "progress" },
+        childCall("up"),
+      )
+    ).value,
+  ).toEqual({ submission_id: expect.any(String) });
+  expect(h.pi.sendMessage).toHaveBeenCalled();
+  const grandchild = idOf(
+    await captured.execute("spawn_agent", { message: "descendant" }, childCall("down")),
+  );
+  await root.execute("spawn_agent", { message: "sibling" }, call("sibling"));
+  await root.execute("spawn_agent", { message: "last slot" }, call("last"));
+  await expect(
+    captured.execute("spawn_agent", { message: "over budget" }, childCall("over")),
+  ).rejects.toThrow("concurrency");
+  expect(
+    (await root.execute("send_input", { target: grandchild, message: "same tree" }, call("tree")))
+      .value,
+  ).toEqual({ submission_id: expect.any(String) });
+  await expect(captured.execute("close_agent", { target: id }, childCall("self"))).rejects.toThrow(
+    "calling agent",
+  );
+  await root.execute("close_agent", { target: id }, call("close-tree"));
+  expect(vi.mocked(runAgent).mock.calls[1]![3].signal?.aborted).toBe(true);
+  await expect(
+    captured.execute("spawn_agent", { message: "late" }, childCall("late")),
+  ).rejects.toThrow();
+});
+
+it("enforces the root depth limit before delegation or reopen can reserve capacity", async () => {
+  pendingChild();
+  const h = harness();
+  const root = h.capture();
+  await root.execute("spawn_agent", { message: "child" }, call("spawn"));
+  const options = vi.mocked(runAgent).mock.calls[0]![3];
+  const childCtx = {
+    ...h.ctx,
+    sessionManager: SessionManager.inMemory("/tmp", { id: "depth-child" }),
+  };
+  options.onSessionCreated?.({ ...mockSession(), sessionManager: childCtx.sessionManager });
+  const child = options.registerCollaboration!({ ...h.pi, on: vi.fn() });
+  const operation = child.capture(childCtx);
+  const childCall = { callerId: operation.callerId, callId: "depth" };
+  await expect(
+    operation.execute("spawn_agent", { message: "too deep" }, childCall),
+  ).rejects.toThrow("depth");
+  await expect(operation.execute("resume_agent", { id: "unknown" }, childCall)).rejects.toThrow(
+    "depth",
+  );
+  expect(runAgent).toHaveBeenCalledTimes(1);
+});
+
+it.each(["gpt-6", "unsupported"])(
+  "publishes the %s child's own permitted capabilities without widening the tree boundary",
+  async (modelId) => {
+    pendingChild();
+    const h = harness();
+    const root = h.capture();
+    await root.execute("spawn_agent", { message: "child" }, call("spawn"));
+    const options = vi.mocked(runAgent).mock.calls[0]![3];
+    const childCtx = {
+      ...h.ctx,
+      model: { ...model, id: modelId },
+      sessionManager: SessionManager.inMemory("/tmp", { id: "child-session" }),
+    };
+    options.onSessionCreated?.({ ...mockSession(), sessionManager: childCtx.sessionManager });
+    const child = options.registerCollaboration!({ ...h.pi, on: vi.fn() }, () => [
+      "read",
+      "send_input",
+    ]);
+    const capture = child.capture(childCtx);
+    expect(capture.model?.id).toBe(modelId);
+    expect(capture.capabilities).toEqual(["send_input"]);
+    expect(root.model?.id).toBe("current");
+    await expect(
+      capture.execute(
+        "spawn_agent",
+        { message: "forbidden" },
+        { callerId: capture.callerId, callId: "forbidden" },
+      ),
+    ).rejects.toThrow("unavailable");
+    const foreignCtx = {
+      ...h.ctx,
+      sessionManager: SessionManager.inMemory("/tmp", { id: "foreign-root" }),
+    };
+    const foreign = h.controller.capture(foreignCtx);
+    const foreignId = idOf(
+      await foreign.execute(
+        "spawn_agent",
+        { message: "foreign" },
+        { callerId: foreign.callerId, callId: "foreign" },
+      ),
+    );
+    await expect(
+      capture.execute(
+        "send_input",
+        { target: foreignId, message: "forbidden" },
+        { callerId: capture.callerId, callId: "cross-tree" },
+      ),
+    ).rejects.toThrow("not owned");
   },
 );

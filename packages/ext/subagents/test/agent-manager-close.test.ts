@@ -198,6 +198,7 @@ describe("AgentManager.close", () => {
     expect(manager.getClosedRecord(id)).toEqual({
       id,
       recoverable: true,
+      rootSessionId: "parent-session",
       sessionFile: "/sessions/agent.jsonl",
       type: "explorer",
       parentSessionId: "parent-session",
@@ -230,6 +231,7 @@ describe("AgentManager.close", () => {
     expect(manager.getClosedRecord(id)).toEqual({
       id,
       recoverable: true,
+      rootSessionId: "parent-session",
       sessionFile: "/sessions/late-agent.jsonl",
       type: "explorer",
       parentSessionId: "parent-session",
@@ -377,6 +379,7 @@ describe("AgentManager.close", () => {
 
   it("closes the target and descendants represented by parent session ids", async () => {
     manager = new AgentManager();
+    manager.tree.setMaxDepth(2);
     const sessions = [mockSession(), mockSession(), mockSession(), mockSession()];
     Object.assign(sessions[0]!, {
       sessionManager: { getSessionId: () => "target-session" },

@@ -1,3 +1,4 @@
+import { getAgentSessionId } from "./agent-tree.js";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { getAgentStatus } from "./agent-status.js";
 import type { AgentRecord, SubagentType, WaitAgentStatus } from "./types.js";
@@ -10,6 +11,7 @@ export type ClosedAgentRecord =
       sessionFile: string;
       type: SubagentType;
       parentSessionId: string;
+      rootSessionId?: string;
       description: string;
     }
   | {
@@ -18,6 +20,7 @@ export type ClosedAgentRecord =
       conversation: { sessionId: string; cwd: string; entries: FileEntry[] };
       type: SubagentType;
       parentSessionId: string;
+      rootSessionId?: string;
       description: string;
     };
 
@@ -77,10 +80,7 @@ export class AgentCloser {
       if (!record || seen.has(record.id)) continue;
       seen.add(record.id);
       result.push(record);
-      let sessionId: string | undefined;
-      try {
-        sessionId = record.session?.sessionManager.getSessionId();
-      } catch {}
+      const sessionId = getAgentSessionId(record);
       if (sessionId === undefined) continue;
       for (const candidate of all) {
         if (!seen.has(candidate.id) && candidate.parentSessionId === sessionId) {
@@ -136,6 +136,7 @@ export class AgentCloser {
       recoverable: true as const,
       type: record.type,
       parentSessionId: record.parentSessionId,
+      ...(record.rootSessionId ? { rootSessionId: record.rootSessionId } : {}),
       description: record.description,
     };
     const manager = record.session?.sessionManager;

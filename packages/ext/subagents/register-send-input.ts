@@ -51,8 +51,10 @@ export function createSendInput(pi: ExtensionAPI, manager: AgentManager) {
         });
       return new Container();
     },
-    execute: async (_toolCallId, params, signal) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
       signal?.throwIfAborted();
+      const caller = ctx.callerAgentId ? manager.getRecord(ctx.callerAgentId) : undefined;
+      const isParent = caller?.parentSessionId === params.target;
       const record = manager.getRecord(params.target);
       const recipient = record?.description ?? params.target;
       const result = (text: string, status: SendInputStatus, submissionId?: string) => {
@@ -68,11 +70,12 @@ export function createSendInput(pi: ExtensionAPI, manager: AgentManager) {
         return v1Result({ submission_id: submissionId }, details);
       };
 
-      if (!record) return result(`agent with id ${params.target} not found`, "failed");
+      if (!record && !isParent) return result(`agent with id ${params.target} not found`, "failed");
       if (!params.message.trim())
         return result("Empty message can't be sent to an agent", "failed");
       if (params.interrupt) {
-        if (!record.session || record.status !== "running")
+        if (isParent) return result("Parent interruption is unavailable", "failed");
+        if (!record?.session || record.status !== "running")
           return result(`agent with id ${params.target} is unavailable for interruption`, "failed");
         if (!(await manager.cancelAndSteer(record.id, params.message, signal)))
           return result(`agent with id ${params.target} could not be interrupted`, "failed");
@@ -82,17 +85,20 @@ export function createSendInput(pi: ExtensionAPI, manager: AgentManager) {
         return result(JSON.stringify({ submission_id: submissionId }), "interrupted", submissionId);
       }
       try {
-        if (!(await manager.sendInput(record.id, params.message, signal)))
-          return result(`input was not submitted to agent ${record.id}`, "failed");
+        const accepted = isParent
+          ? manager.sendParent(caller, params.message)
+          : record && (await manager.sendInput(record.id, params.message, signal));
+        if (!accepted) return result(`input was not submitted to agent ${params.target}`, "failed");
       } catch (error) {
         return result(
-          `input was not submitted to agent ${record.id}: ${error instanceof Error ? error.message : String(error)}`,
+          `input was not submitted to agent ${params.target}: ${error instanceof Error ? error.message : String(error)}`,
           "failed",
         );
       }
 
       const submissionId = randomUUID();
-      pi.events.emit("subagents:steered", { id: record.id, message: params.message });
+      if (!isParent && record)
+        pi.events.emit("subagents:steered", { id: record.id, message: params.message });
       return result(JSON.stringify({ submission_id: submissionId }), "queued", submissionId);
     },
   });

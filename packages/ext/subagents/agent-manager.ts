@@ -1,3 +1,5 @@
+import { AgentTree, getAgentSessionId } from "./agent-tree.js";
+import type { RegisterCollaboration } from "./subagent-context.js";
 import type { SubagentContext } from "./operation-context.js";
 import { randomUUID } from "node:crypto";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -14,7 +16,7 @@ import { assertValidSpawnCwd } from "./spawn-cwd.js";
 import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
-import type { AgentInvocation, AgentRecord, SubagentType, ThinkingLevel } from "./types.js";
+import type { AgentRecord, SubagentType, SpawnOptions } from "./types.js";
 import { addUsage, appendSubagentUsageRecord, type AssistantUsage } from "./usage.js";
 
 export type OnAgentComplete = (record: AgentRecord, generation: number) => void;
@@ -28,7 +30,7 @@ export type MessageParent = (
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 /** Default max concurrent agents. */
-const DEFAULT_MAX_CONCURRENT = 4;
+const DEFAULT_MAX_CONCURRENT = 6;
 export const MAX_RETAINED_TOOL_CALLS = 200;
 
 interface SpawnArgs {
@@ -56,41 +58,11 @@ interface TurnHooks {
   onAssistantFailure: (failure: AgentRecord["failureHistory"][number]) => void;
 }
 
-export interface SpawnOptions {
-  description: string;
-  allowedTools?: string[];
-  /** Explicitly wait for another agent to close when capacity is exhausted. */
-  queueIfBusy?: boolean;
-  model?: Model<Api>;
-  isolated?: boolean;
-  thinkingLevel?: ThinkingLevel;
-  /** Copy the active parent conversation into the child session. */
-  forkContext?: boolean;
-  /**
-   * Working directory for the agent (absolute path). Default: parent session
-   * cwd. The agent's tools operate here, but .pi config (extensions, skills,
-   * settings) still loads from the parent session's project — the
-   * target directory's `.pi` extensions never execute.
-   */
-  cwd?: string;
-  /** Resolved invocation snapshot captured for UI display. */
-  invocation?: AgentInvocation;
-  /** Called on tool start/end with activity info (for streaming progress to UI). */
-  onToolActivity?: (activity: ToolActivity) => void;
-  /** Called on streaming text deltas from the assistant response. */
-  onTextDelta?: (delta: string, fullText: string) => void;
-  /** Called when the agent session is created (for accessing session stats). */
-  onSessionCreated?: (session: AgentSession) => void;
-  /** Called at the end of each agentic turn with the cumulative count. */
-  onTurnEnd?: (turnCount: number) => void;
-  /** Called once per assistant message_end with that message's usage delta. */
-  onAssistantUsage?: (usage: AssistantUsage) => void;
-  /** Called when the session successfully compacts. */
-  onCompaction?: (info: CompactionInfo) => void;
-}
+export type { SpawnOptions } from "./types.js";
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
+  readonly tree = new AgentTree(this.agents, (id) => this.isClosing(id));
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
@@ -124,6 +96,7 @@ export class AgentManager {
     messageParent?: MessageParent,
     getAutoCompactionThreshold?: () => number | undefined,
     onAgentInvalidated?: (record: AgentRecord) => void,
+    private registerCollaboration?: (record: AgentRecord) => RegisterCollaboration,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
@@ -148,14 +121,19 @@ export class AgentManager {
       },
     });
     this.closer = new AgentCloser(this.agents, {
-      invalidate: (record) => this.onAgentInvalidated?.(record),
+      invalidate: (record) => {
+        this.onAgentInvalidated?.(record);
+        void this.reopener.cancelChildren(getAgentSessionId(record));
+      },
       abort: (id) => void this.abort(id),
       teardown: async (record) => {
+        await this.reopener.cancelChildren(getAgentSessionId(record));
         if (record.session) await this.teardownSession(record.session);
       },
       releaseReservation: (record) => this.releaseReservation(record),
     });
     this.reopener = new AgentReopener(this.agents, this.closer, {
+      assertOwnerAvailable: (parentId, rootId) => this.tree.assertOwnerAvailable(parentId, rootId),
       reserve: (record) => this.reserve(record),
       release: (record) => this.releaseReservation(record),
       commit: (record) => {
@@ -166,7 +144,7 @@ export class AgentManager {
           thinkingLevel: record.invocation?.thinking,
         });
       },
-      messageParent,
+      registerCollaboration,
       autoCompactionThreshold: getAutoCompactionThreshold,
     });
   }
@@ -315,6 +293,7 @@ export class AgentManager {
     options: SpawnOptions,
   ): string {
     if (this.closing) throw new Error("AgentManager is shutting down.");
+    this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
     const resolved = resolveAgent(requestedType);
     if (!requestedType.trim() || !resolved.matched)
       throw new Error(`Unknown agent type '${requestedType}'.`);
@@ -339,6 +318,7 @@ export class AgentManager {
       generation: 1,
       type,
       parentSessionId: parent.sessionId,
+      rootSessionId: this.tree.rootSessionId(parent.sessionId),
       prompt,
       description: options.description,
       status: "queued",
@@ -609,6 +589,7 @@ export class AgentManager {
     const resumeHooks = this.createTurnHooks(record, options, generation, "increment");
     const started = runAgent(parent, type, prompt, {
       pi,
+      registerCollaboration: this.registerCollaboration?.(record),
       agentId: id,
       agentSessionId: record.incarnation,
       model: options.model,
@@ -621,18 +602,6 @@ export class AgentManager {
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,
       ...initialHooks,
-      messageParent: (message) =>
-        this.messageParent?.(
-          parent.sessionId,
-          {
-            id,
-            type,
-            title: options.description,
-            ...(options.invocation?.modelName ? { model_name: options.invocation.modelName } : {}),
-            ...(options.invocation?.thinking ? { thinking: options.invocation.thinking } : {}),
-          },
-          message,
-        ) ?? false,
       onSessionCreated: (session) => {
         record.session = session;
         if (abortController.signal.aborted) {
@@ -842,6 +811,26 @@ export class AgentManager {
     return true;
   }
 
+  sendParent(record: AgentRecord, message: string): boolean {
+    return (
+      this.messageParent?.(
+        record.parentSessionId,
+        {
+          id: record.id,
+          type: record.type,
+          title: record.description,
+          ...(record.invocation?.modelName ? { model_name: record.invocation.modelName } : {}),
+          ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
+        },
+        message,
+      ) ?? false
+    );
+  }
+
+  isClosing(id: string): boolean {
+    return this.closer.isClosing(id) || this.closing;
+  }
+
   getRecord(id: string): AgentRecord | undefined {
     return this.agents.get(id);
   }
@@ -855,7 +844,11 @@ export class AgentManager {
   }
 
   reopen(pi: ExtensionAPI, ctx: SubagentContext, id: string, options?: ReopenOptions) {
-    return this.reopener.open(pi, ctx, id, options);
+    this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
+    return this.reopener.open(pi, ctx, id, {
+      ...options,
+      rootSessionId: this.tree.rootSessionId(ctx.sessionManager.getSessionId()),
+    });
   }
 
   /** Close a retained agent and every descendant represented by this manager. */

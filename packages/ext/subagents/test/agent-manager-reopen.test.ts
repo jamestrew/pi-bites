@@ -316,3 +316,43 @@ it.each(["interrupt", "redirect"])(
     }
   },
 );
+
+it("closing an owning subtree cancels a sibling-initiated descendant reopen before publication", async () => {
+  manager.setMaxConcurrent(3);
+  manager.tree.setMaxDepth(2);
+  const parentSession = SessionManager.inMemory("/tmp", { id: "owner-session" });
+  vi.mocked(runAgent).mockResolvedValueOnce({
+    session: { ...mockSession(), sessionManager: parentSession },
+    responseText: "owner ready",
+  });
+  const owner = manager.spawn(pi, ctx, "worker", "owner", { description: "owner" });
+  await manager.getRecord(owner)!.promise;
+  const childCtx = { ...ctx, sessionManager: parentSession };
+  const descendantSession = SessionManager.inMemory("/tmp", { id: "descendant-session" });
+  descendantSession.appendMessage({ role: "user", content: "saved", timestamp: 1 });
+  vi.mocked(runAgent).mockResolvedValueOnce({
+    session: { ...mockSession(), sessionManager: descendantSession },
+    responseText: "done",
+  });
+  const descendant = manager.spawn(pi, childCtx, "worker", "descendant", {
+    description: "descendant",
+  });
+  await manager.getRecord(descendant)!.promise;
+  await manager.close(descendant);
+  vi.mocked(openAgentSession).mockImplementation(
+    (_parent, _type, options) =>
+      new Promise((_resolve, reject) => {
+        options.signal!.addEventListener("abort", () => reject(options.signal!.reason), {
+          once: true,
+        });
+      }),
+  );
+  const reopening = manager.reopen(pi, ctx, descendant);
+  const rejected = expect(reopening).rejects.toThrow("owner closed");
+  await Promise.resolve();
+  await manager.close(owner);
+  await rejected;
+  expect(manager.getRecord(descendant)).toBeUndefined();
+  await expect(manager.reopen(pi, ctx, descendant)).rejects.toThrow("owner is closed");
+  expect(openAgentSession).toHaveBeenCalledTimes(1);
+});

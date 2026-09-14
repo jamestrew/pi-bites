@@ -23,6 +23,8 @@ export interface SubagentContext {
   thinking?: ReturnType<ExtensionAPI["getThinkingLevel"]>;
   allowedTools?: string[];
   parentRole?: string;
+  /** Assigned by the session-tree controller, never by model arguments. */
+  callerAgentId?: string;
   scopeModels?: boolean;
 }
 

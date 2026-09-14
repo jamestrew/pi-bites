@@ -120,7 +120,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     //     finishes → the child's own model turn actually runs (≥3 calls).
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const respond = async (ctx: Context) => {
-      const isParent = (ctx.tools ?? []).some((t) => t.name === "spawn_agent");
+      const isParent = !ctx.systemPrompt?.includes("<active_agent ");
       if (!isParent) {
         await sleep(80); // child takes long enough that a non-held parent exits first
         return "CHILD_BG_RAN";
@@ -160,7 +160,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     mkdirSync(join(cwd, ".pi"), { recursive: true });
     writeFileSync(
       join(cwd, ".pi", "pi-bites.json"),
-      JSON.stringify({ autoCompaction: { thresholdTokens: 15_000 } }),
+      JSON.stringify({ autoCompaction: { thresholdTokens: 10_000 } }),
     );
     writeFileSync(join(cwd, "large.txt"), "x".repeat(49_000));
 
@@ -170,7 +170,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       maxModelCalls: 8,
       respond: (ctx) => {
         const toolNames = new Set((ctx.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has("spawn_agent")) {
+        if (toolNames.has("spawn_agent") && !ctx.systemPrompt?.includes("<active_agent ")) {
           const spawned = ctx.messages.some(
             (message) =>
               message.role === "toolResult" &&

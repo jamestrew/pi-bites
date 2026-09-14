@@ -1,3 +1,7 @@
+import type { CompactionInfo } from "./agent-manager.js";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ToolActivity } from "./agent-runner.js";
+import type { AssistantUsage } from "./usage.js";
 /**
  * types.ts — Type definitions for the subagent system.
  */
@@ -57,6 +61,8 @@ export interface AgentRecord {
   generation: number;
   type: SubagentType;
   parentSessionId: string;
+  /** Root conversation trust boundary shared by every descendant. */
+  rootSessionId?: string;
   /** Raw task supplied by the caller, without inherited parent context. */
   prompt: string;
   description: string;
@@ -223,4 +229,37 @@ export interface EnvInfo {
   isGitRepo: boolean;
   branch: string;
   platform: string;
+}
+
+export interface SpawnOptions {
+  description: string;
+  allowedTools?: string[];
+  /** Explicitly wait for another agent to close when capacity is exhausted. */
+  queueIfBusy?: boolean;
+  model?: Model<Api>;
+  isolated?: boolean;
+  thinkingLevel?: ThinkingLevel;
+  /** Copy the active parent conversation into the child session. */
+  forkContext?: boolean;
+  /**
+   * Working directory for the agent (absolute path). Default: parent session
+   * cwd. The agent's tools operate here, but .pi config (extensions, skills,
+   * settings) still loads from the parent session's project — the
+   * target directory's `.pi` extensions never execute.
+   */
+  cwd?: string;
+  /** Resolved invocation snapshot captured for UI display. */
+  invocation?: AgentInvocation;
+  /** Called on tool start/end with activity info (for streaming progress to UI). */
+  onToolActivity?: (activity: ToolActivity) => void;
+  /** Called on streaming text deltas from the assistant response. */
+  onTextDelta?: (delta: string, fullText: string) => void;
+  /** Called when the agent session is created (for accessing session stats). */
+  onSessionCreated?: (session: AgentSession) => void;
+  /** Called at the end of each agentic turn with the cumulative count. */
+  onTurnEnd?: (turnCount: number) => void;
+  /** Called once per assistant message_end with that message's usage delta. */
+  onAssistantUsage?: (usage: AssistantUsage) => void;
+  /** Called when the session successfully compacts. */
+  onCompaction?: (info: CompactionInfo) => void;
 }

@@ -14,8 +14,7 @@ Existing close work stays in place. #276 supplies retained-state ownership;
 #277 supplies usable resume and reservation; #306 supplies shared operations and
 cancellation; #307 aligns child collaboration and roles; #308 exposes nested
 operations; #309 integrates presentation; #278 runs the combined parity audit.
-Current read-only explorer configuration and child collaboration exclusions are
-**implementation gaps**, not accepted platform adaptations. Keep partial nested integration inaccessible until coherent.
+Child collaboration and additive explorer guidance are implemented in #307. Keep partial nested integration inaccessible until coherent.
 
 ## One engine, two entry points
 
@@ -74,8 +73,8 @@ complete Codex system prompt or adding local batching advice.
 - `fork_context: true` copies full parent history, inherits the parent role, and
   rejects explicit `agent_type`. False/omitted starts from the initial prompt and
   defaults to `default`. Preserve parent/child addressing, depth and capacity limits,
-  target permissions, and descendant ownership. Replace the obsolete injected
-  `MessageAgent` helper and unconditional collaboration exclusions in #307.
+  target permissions, and descendant ownership. Children register the same V1 operations;
+  there is no separately injected parent-message tool.
 - Validate inputs and supported overrides before launching, reserving, or submitting.
   Reject empty messages and invalid targets. Reject incompatible fork/role selection.
   Native errors/defaults and revision-specific behavior are in the revision evidence;
@@ -154,6 +153,53 @@ pin `25af12f7e61572b0bc18ddb1008be543b91519b0` (`rust-v0.145.0`), verified again
 transport adaptation. The broader contract rebaseline belongs to #305; no close declaration rewrite
 is needed. Pi serializes concurrent close requests per agent and returns `shutdown` to subsequent
 callers; upstream does not guarantee concurrent status sampling order.
+
+## Child collaboration (#307)
+
+Every embedded child receives a registrar from its root-owned manager at the shared
+extension/session-tree boundary. Registration creates a caller-bound controller and
+delivery endpoint, not another manager, Fleet, approval broker, or capacity counter.
+The global async role marker stays string-compatible with older installed entrypoints
+that resource discovery may evaluate before filtering; the registrar has its own
+async-local slot. Raw/isolated SDK runners without a root registrar have no collaboration.
+
+The child's `capture(ctx)` publishes its own `model` and permitted `capabilities`,
+alongside the caller-bound executor. Parent and child model families may differ;
+the inherited underlying tool ceiling and the child's actual active selection both
+remain authoritative. These are standalone capabilities here; #308 projects them into
+exactly one direct/nested surface. No third-party executors are inherited.
+
+V1 addresses known agent IDs within the same root conversation, including siblings
+and descendants, rather than arbitrary Pi sessions. Root identity survives retained
+close/resume. Child guidance supplies its immediate parent's session ID for
+`send_input`; this uses the same queued-message state machine and sender identity
+as the existing parent delivery channel. Final notifications route to the owning
+parent node, independently of explicit waits, including across retained turns.
+Neither channel promises injection into active inference.
+
+The pinned defaults are six open slots shared across the whole root tree and maximum
+depth one (root depth zero). Completed open agents retain slots. Set `maxDepth: 2`
+in `.pi/subagents.json` (or the global `subagents.json`) to permit grandchildren;
+`maxConcurrent` adjusts the same root budget. Settings load from the active root cwd,
+not separately in each child. Depth is checked before spawn and resume reservation.
+Closing a subtree invalidates child captures and cancels pending descendant reopen
+claims, including claims initiated by a different same-tree caller. A descendant
+cannot reopen while its owning parent remains closed.
+
+Pi transport limitations: parent-session `send_input` is queued, not interrupting;
+self/ancestor `close_agent` from that descendant's own tool call is rejected because
+waiting for the calling Pi invocation to tear down would deadlock. External/root close
+still shuts down the complete owning subtree. These limits do not add a V2 task hierarchy.
+
+Explorer is additive role guidance and uses the same builtin baseline as default and
+worker. Full-history forks inherit and validate the parent role; prompt-only children
+default to default. Actual parent/user/project restrictions and bash-gate authorization
+remain in force. The obsolete helper and its renderer are removed.
+
+Verification covers shared depth/capacity, same-tree and foreign-root targeting,
+throwing-getter captures, reopen cancellation, independent retained delivery, real
+supported/unsupported child sessions, and two-hop approval forwarding. Live provider
+smokes and end-to-end nested Code Mode exposure remain #308/#278 work.
 
 ## Shared owned operations (#306)
 

@@ -1,3 +1,4 @@
+import type { AgentRecord } from "./types.js";
 import type { TSchema } from "typebox";
 import type {
   ExtensionAPI,
@@ -42,6 +43,7 @@ export class SubagentController {
     private manager: AgentManager,
     private isScopeModelsEnabled: () => boolean,
     private getAllowedTools: () => string[],
+    private child?: AgentRecord,
   ) {}
 
   invalidate(): void {
@@ -56,6 +58,8 @@ export class SubagentController {
     owner.throwIfAborted();
     const forkContext = options.forkContext === true;
     const snapshot = captureSubagentContext(this.pi, ctx, forkContext, this.getAllowedTools());
+    snapshot.callerAgentId = this.child?.id;
+    snapshot.parentRole = this.child?.type ?? snapshot.parentRole;
     snapshot.scopeModels = this.isScopeModelsEnabled();
     const callerId = snapshot.sessionManager.getSessionId();
     const activeCalls = this.activeCalls;
@@ -69,6 +73,12 @@ export class SubagentController {
         ...[snapshot.signal, call.signal].filter((s): s is AbortSignal => !!s),
       ]);
       signal.throwIfAborted();
+      if (
+        this.child &&
+        (this.manager.getRecord(this.child.id) !== this.child ||
+          this.manager.isClosing(this.child.id))
+      )
+        throw new Error("Subagent owner is closed");
       if (callerId !== call.callerId) throw new Error("Subagent caller does not own this session");
       if (!call.callId.trim() || activeCalls.has(call.callId))
         throw new Error("Subagent call id must be unique and nonempty");
@@ -84,8 +94,15 @@ export class SubagentController {
           ? (params.targets as string[])
           : [params.target ?? params.id].filter((id): id is string => typeof id === "string");
       for (const id of targets) {
+        if (this.child && name === "close_agent" && this.manager.tree.containsSession(id, callerId))
+          throw new Error("Cannot close the calling agent or its ancestors from its own tool call");
         const record = this.manager.getRecord(id) ?? this.manager.getClosedRecord(id);
-        if (record && "parentSessionId" in record && record.parentSessionId !== callerId)
+        if (
+          record &&
+          "parentSessionId" in record &&
+          (record.rootSessionId ?? record.parentSessionId) !==
+            (this.child?.rootSessionId ?? this.child?.parentSessionId ?? callerId)
+        )
           throw new Error(`agent with id ${id} is not owned by this session`);
       }
       activeCalls.add(call.callId);
@@ -111,10 +128,38 @@ export class SubagentController {
         activeCalls.delete(call.callId);
       }
     };
-    return { callerId, execute };
+    const capabilities = Object.keys(this.tools).filter((name) =>
+      snapshot.allowedTools?.includes(name),
+    );
+    return { callerId, model: snapshot.model, capabilities, execute };
+  }
+
+  forChild(
+    pi: ExtensionAPI,
+    record: AgentRecord,
+    getAllowedTools: () => string[],
+  ): SubagentController {
+    return new SubagentController(
+      pi,
+      this.tools,
+      this.manager,
+      this.isScopeModelsEnabled,
+      getAllowedTools,
+      record,
+    );
   }
 
   registerTools(): void {
+    if (this.child) {
+      const parentId = this.child.parentSessionId;
+      this.pi.on("before_agent_start", (event) => ({
+        systemPrompt:
+          event.systemPrompt +
+          "\nYour parent agent id is " +
+          parentId +
+          ". Use send_input with this target for substantive parent messages. Delivery waits for the next model boundary; still return a final response.",
+      }));
+    }
     for (const name of Object.keys(this.tools) as SubagentOperation[]) {
       const tool = this.tools[name] as ToolDefinition<TSchema, unknown>;
       this.pi.registerTool<TSchema, unknown>({

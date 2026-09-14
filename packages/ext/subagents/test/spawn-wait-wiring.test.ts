@@ -1,3 +1,4 @@
+import { registerChildSendInput } from "./helpers/child-send-input.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agent-runner.js", async () => {
@@ -234,8 +235,10 @@ describe("spawn-and-wait orchestration", () => {
     const harness = makeHarness();
     await spawn(harness.tools, harness.ctx, "tool-only child");
 
-    const messageParent = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
-    expect(messageParent?.("actual finding")).toBe(true);
+    const sendInput = registerChildSendInput(vi.mocked(runAgent).mock.calls[0]![3], harness.ctx);
+    await expect(sendInput("actual finding")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     child.resolve({ responseText: "", session: { dispose: vi.fn() } });
 
     await vi.waitFor(() => expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2));
@@ -271,8 +274,13 @@ describe("spawn-and-wait orchestration", () => {
     let waitSettled = false;
     void waiting.then(() => (waitSettled = true));
 
-    const unselectedMessage = vi.mocked(runAgent).mock.calls[1]?.[3].messageParent;
-    expect(unselectedMessage?.("ordinary delivery")).toBe(true);
+    const unselectedMessage = registerChildSendInput(
+      vi.mocked(runAgent).mock.calls[1]![3],
+      harness.ctx,
+    );
+    await expect(unselectedMessage("ordinary delivery")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     await Promise.resolve();
 
     expect(waitSettled).toBe(false);
@@ -284,8 +292,13 @@ describe("spawn-and-wait orchestration", () => {
       { triggerTurn: false },
     );
 
-    const selectedMessage = vi.mocked(runAgent).mock.calls[0]?.[3].messageParent;
-    expect(selectedMessage?.("ordinary selected delivery")).toBe(true);
+    const selectedMessage = registerChildSendInput(
+      vi.mocked(runAgent).mock.calls[0]![3],
+      harness.ctx,
+    );
+    await expect(selectedMessage("ordinary selected delivery")).resolves.toMatchObject({
+      details: { status: "queued" },
+    });
     await Promise.resolve();
     expect(waitSettled).toBe(false);
     expect(harness.pi.sendMessage).toHaveBeenCalledTimes(2);

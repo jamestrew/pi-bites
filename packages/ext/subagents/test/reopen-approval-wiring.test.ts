@@ -1,3 +1,4 @@
+import { registerChildSendInput } from "./helpers/child-send-input.js";
 import { beforeEach, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { requestSubagentApproval } from "../../bash-gate/events.js";
@@ -78,12 +79,13 @@ it.each([false, true])(
     const finished = Promise.withResolvers<any>();
     vi.mocked(runAgent).mockImplementationOnce((_parent, _type, _prompt, options) => {
       options.onSessionCreated?.(child);
-      // A queued intermediate message holds completion delivery until the parent settles.
-      expect(options.messageParent("progress")).toBe(true);
       return finished.promise;
     });
     try {
       const id = manager.spawn(pi, ctx, "worker", "work", { description: "approval regression" });
+      // A queued intermediate message holds completion delivery until the parent settles.
+      const sendInput = registerChildSendInput(vi.mocked(runAgent).mock.calls.at(-1)![3], ctx);
+      await expect(sendInput("progress")).resolves.toMatchObject({ details: { status: "queued" } });
       const oldRecord = manager.getRecord(id);
       const oldIncarnation = vi.mocked(runAgent).mock.calls.at(-1)![3].agentSessionId;
       expect(oldIncarnation).toEqual(expect.any(String));

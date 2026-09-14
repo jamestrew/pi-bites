@@ -1,3 +1,4 @@
+import { registerChildSendInput } from "./helpers/child-send-input.js";
 /**
  * fleet-wiring.test.ts — end-to-end wiring of the FleetView through the REAL
  * extension (src/index.ts), not the FleetList class in isolation.
@@ -898,7 +899,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("keeps a finished agent visible until its deferred final is delivered", async () => {
     vi.useFakeTimers();
-    let messageParent: ((message: string) => boolean) | undefined;
+    let sendInput!: ReturnType<typeof registerChildSendInput>;
     let finish!: (value: any) => void;
     const { pi, tools, lifecycle } = makePi();
     const ui = uiCtx();
@@ -906,7 +907,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     try {
       vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-        messageParent = options.messageParent;
+        sendInput = registerChildSendInput(options, ctx);
         return new Promise((resolve) => {
           finish = resolve;
         });
@@ -926,7 +927,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         undefined,
         ctx,
       );
-      expect(messageParent?.("progress")).toBe(true);
+      await expect(sendInput("progress")).resolves.toMatchObject({ details: { status: "queued" } });
       finish({ responseText: "done", session: { dispose: vi.fn() } as any });
       await vi.advanceTimersByTimeAsync(1_000);
 

@@ -9,6 +9,7 @@ import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
 
 export const SubagentsSettingsSchema = Type.Object({
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1024 })),
   maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
   /**
    * Validate runtime subagent model choices against pi's resolved session scope from
@@ -23,6 +24,7 @@ export type SubagentsSettings = Static<typeof SubagentsSettingsSchema>;
 
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
+  setMaxDepth?: (n: number) => void;
   setMaxConcurrent: (n: number) => void;
   setScopeModels: (enabled: boolean) => void;
   setFleetView: (b: boolean) => void;
@@ -41,6 +43,14 @@ export type SettingsEmit = <K extends keyof SettingsEventMap>(
 export function parseSubagentsSettings(value: unknown): SubagentsSettings | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const settings: SubagentsSettings = {};
+  if (
+    "maxDepth" in value &&
+    typeof value.maxDepth === "number" &&
+    Number.isInteger(value.maxDepth) &&
+    value.maxDepth >= 0 &&
+    value.maxDepth <= 1024
+  )
+    settings.maxDepth = value.maxDepth;
   if (
     "maxConcurrent" in value &&
     typeof value.maxConcurrent === "number" &&
@@ -103,6 +113,7 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
+  if (typeof s.maxDepth === "number") appliers.setMaxDepth?.(s.maxDepth);
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
   if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);

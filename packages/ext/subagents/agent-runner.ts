@@ -16,7 +16,7 @@ import {
 import { installTurnBoundaryAutoCompaction } from "../auto-compaction.js";
 import * as agentSession from "./agent-session-shutdown.js";
 import { resolveAgent } from "./agent-types.js";
-import { createMessageAgent } from "./message-agent.js";
+import type { RegisterCollaboration } from "./subagent-context.js";
 import { extractText } from "./message-text.js";
 import { detectEnv } from "./env.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
@@ -49,11 +49,7 @@ export const SUBAGENT_TOOL_NAMES = {
   SEND_INPUT: "send_input",
   CLOSE_AGENT: "close_agent",
   RESUME_AGENT: "resume_agent",
-  MESSAGE_AGENT: "MessageAgent",
 } as const;
-
-/** Names of tools registered by this extension that subagents must NOT inherit. */
-const EXCLUDED_TOOL_NAMES: string[] = Object.values(SUBAGENT_TOOL_NAMES);
 
 /**
  * Try to find the right model for an agent type.
@@ -123,6 +119,7 @@ export function parseSubagentMetadata(value: unknown): SubagentMetadata | undefi
 }
 
 export interface RunOptions {
+  registerCollaboration?: RegisterCollaboration;
   /** ExtensionAPI instance — used for pi.exec() instead of execSync. */
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
@@ -159,8 +156,6 @@ export interface RunOptions {
   /** Called on streaming text deltas from the assistant response. */
   onTextDelta?: (delta: string, fullText: string) => void;
   onSessionCreated?: (session: AgentSession) => void;
-  /** Fixed transport to the session that spawned this child. */
-  messageParent: (message: string) => boolean;
   /** Called at the end of each agentic turn with the cumulative count. */
   onTurnEnd?: (turnCount: number) => void;
   /**
@@ -394,7 +389,7 @@ export async function openAgentSession(
 
   const agentDir = getAgentDir();
 
-  // Embedded roles load only this extension, which provides MessageAgent and
+  // Embedded roles load only this extension, which provides collaboration and
   // the parent-mediated bash gate. Isolated RPC spawns load no extensions.
   const loader = new DefaultResourceLoader({
     cwd: configCwd,
@@ -411,7 +406,9 @@ export async function openAgentSession(
     appendSystemPromptOverride: () => [],
   });
 
-  await runAsSubagent(type, () => loader.reload());
+  await runAsSubagent({ type, registerCollaboration: options.registerCollaboration }, () =>
+    loader.reload(),
+  );
   agentSession.assertAgentNotCancelled(options.signal);
 
   // Resolve model: explicit option > config.model > parent model
@@ -425,13 +422,7 @@ export async function openAgentSession(
   const extensionToolNames = noExtensions
     ? []
     : loader.getExtensions().extensions.flatMap((extension) => [...extension.tools.keys()]);
-  const allowedTools = [
-    ...new Set([
-      ...toolNames,
-      ...extensionToolNames.filter((name) => !EXCLUDED_TOOL_NAMES.includes(name)),
-      SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
-    ]),
-  ];
+  const allowedTools = [...new Set([...toolNames, ...extensionToolNames])];
 
   const settingsManager = SettingsManager.create(configCwd, agentDir);
   const sessionManager = options.conversation
@@ -466,12 +457,8 @@ export async function openAgentSession(
     modelRuntime,
     model,
     tools: options.allowedTools
-      ? allowedTools.filter(
-          (name) =>
-            options.allowedTools?.includes(name) || name === SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
-        )
+      ? allowedTools.filter((name) => options.allowedTools?.includes(name))
       : allowedTools,
-    customTools: [createMessageAgent(SUBAGENT_TOOL_NAMES.MESSAGE_AGENT, options.messageParent)],
     resourceLoader: loader,
   };
   if (thinkingLevel) {
@@ -514,12 +501,7 @@ export async function openAgentSession(
     options.onSessionCreated?.(session);
     if (options.allowedTools) {
       session.setActiveToolsByName(
-        session
-          .getActiveToolNames()
-          .filter(
-            (name) =>
-              options.allowedTools?.includes(name) || name === SUBAGENT_TOOL_NAMES.MESSAGE_AGENT,
-          ),
+        session.getActiveToolNames().filter((name) => options.allowedTools?.includes(name)),
       );
     }
 

@@ -1,3 +1,4 @@
+import { applyAndEmitLoaded } from "./settings.js";
 import type { AgentRecord } from "./types.js";
 import { SubagentController } from "./operations.js";
 /**
@@ -15,11 +16,7 @@ import { SubagentController } from "./operations.js";
 
 import { withApprovalDialog, waitForAuthorization } from "../bash-gate/pending.js";
 import { randomUUID } from "node:crypto";
-import {
-  type ExtensionAPI,
-  type ExtensionContext,
-  type SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
@@ -27,7 +24,7 @@ import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
-import { createSubagentMessenger } from "./subagent-messages.js";
+import { createSubagentMessenger, bindSubagentMessenger } from "./subagent-messages.js";
 import { createAgentTool } from "./register-agent-tool.js";
 import { createResumeAgent } from "./register-resume-agent.js";
 import { createCloseAgent } from "./register-close-agent.js";
@@ -62,6 +59,15 @@ export function createSubagents(
   registerNotificationRenderer(pi);
   registerSubagentMessageRenderer(pi);
   const parentMessenger = createSubagentMessenger(pi);
+  const deliveries = new Map<
+    string,
+    { pi: ExtensionAPI; messenger: ReturnType<typeof createSubagentMessenger> }
+  >();
+  const childControllers = new Map<string, SubagentController>();
+  const startParentMessenger = bindSubagentMessenger(pi, parentMessenger, (id) => {
+    deliveries.clear();
+    deliveries.set(id, { pi, messenger: parentMessenger });
+  });
 
   // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
@@ -82,8 +88,10 @@ export function createSubagents(
     },
     onAgentResultPendingUI: (id) => fleet.onAgentResultPending(id),
     shouldNotify: (record) => !retiredConversations.has(record),
+    deliveryPi: (id) => deliveries.get(id)?.pi,
     scheduleAutomatic: (parentSessionId, deliver, cancel) =>
-      parentMessenger.scheduleFinal(parentSessionId, deliver, cancel),
+      deliveries.get(parentSessionId)?.messenger.scheduleFinal(parentSessionId, deliver, cancel) ??
+      false,
   });
 
   manager = new AgentManager(
@@ -114,11 +122,55 @@ export function createSubagents(
       return (
         !!record &&
         !retiredConversations.has(record) &&
-        parentMessenger.send(parentSessionId, sender, message)
+        (deliveries.get(parentSessionId)?.messenger.send(parentSessionId, sender, message) ?? false)
       );
     },
     getAutoCompactionThreshold,
-    (record) => parentAllowances.delete(record.id),
+    (record) => {
+      parentAllowances.delete(record.id);
+      childControllers.get(record.id)?.invalidate();
+    },
+    (record) =>
+      (childPi, getChildTools = () => childPi.getActiveTools()) => {
+        const child = operations.forChild(childPi, record, getChildTools);
+        childControllers.set(record.id, child);
+        const messenger = createSubagentMessenger(childPi);
+        let sessionId: string | undefined;
+        const start = bindSubagentMessenger(childPi, messenger, (id) => {
+          sessionId = id;
+          deliveries.set(id, { pi: childPi, messenger });
+        });
+        childPi.on("session_start", (_event, ctx) => start(ctx));
+        const retireDescendants = async () => {
+          if (!sessionId) return;
+          const descendants = manager
+            .listAgents()
+            .filter(
+              (candidate) =>
+                candidate.id !== record.id &&
+                manager.tree.containsSession(record.id, candidate.parentSessionId),
+            );
+          for (const descendant of descendants) retiredConversations.add(descendant);
+          await Promise.allSettled(descendants.map((descendant) => manager.close(descendant.id)));
+        };
+        childPi.on("session_shutdown", async () => {
+          child.invalidate();
+          messenger.flushForShutdown();
+          messenger.dispose();
+          if (sessionId && deliveries.get(sessionId)?.messenger === messenger)
+            deliveries.delete(sessionId);
+          if (childControllers.get(record.id) === child) childControllers.delete(record.id);
+          await retireDescendants();
+        });
+        childPi.on("session_before_switch", () => child.invalidate());
+        childPi.on("session_tree", async (_event, ctx) => {
+          child.invalidate();
+          messenger.dispose();
+          start(ctx);
+          await retireDescendants();
+        });
+        return child;
+      },
   );
 
   // Expose manager via Symbol.for() global registry for cross-package access.
@@ -142,18 +194,6 @@ export function createSubagents(
   let approvalOwner = new AbortController();
   let currentCtx: ExtensionContext | undefined;
 
-  function startParentMessenger(ctx: ExtensionContext) {
-    // The runtime supplies the concrete manager, but ExtensionContext exposes only its read facade.
-    // Snapshot this documented append operation now so shutdown never touches a stale ctx.
-    const sessionManager = ctx.sessionManager as typeof ctx.sessionManager &
-      Pick<SessionManager, "appendCustomMessageEntry">;
-    parentMessenger.sessionStarted(
-      sessionManager.getSessionId(),
-      (customType, content, display, details) =>
-        sessionManager.appendCustomMessageEntry(customType, content, display, details),
-    );
-  }
-
   // Capture ctx from session_start for the RPC spawn handler.
   pi.on("session_start", async (_event, ctx) => {
     operations.invalidate();
@@ -162,22 +202,17 @@ export function createSubagents(
     parentAllowances.clear();
     currentCtx = ctx;
     currentSessionToken = {};
+    applyAndEmitLoaded(
+      {
+        setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
+        setMaxDepth: (n) => manager.tree.setMaxDepth(n),
+        setScopeModels: setScopeModelsEnabled,
+        setFleetView: setFleetViewEnabled,
+      },
+      (event, payload) => pi.events.emit(event, payload),
+      ctx.cwd,
+    );
     startParentMessenger(ctx);
-  });
-
-  pi.on("agent_start", () => parentMessenger.agentStarted());
-  pi.on("turn_start", () => parentMessenger.turnStarted());
-  pi.on("message_end", (event) => {
-    if (event.message.role === "assistant") {
-      parentMessenger.assistantMessageEnded(
-        !event.message.content.some((part) => part.type === "toolCall"),
-        event.message.stopReason === "aborted",
-      );
-    }
-  });
-  pi.on("turn_end", () => parentMessenger.turnEnded());
-  pi.on("agent_settled", (_event, ctx) => {
-    if (ctx.isIdle()) parentMessenger.agentSettled();
   });
 
   pi.on("session_before_switch", () => {
@@ -482,8 +517,6 @@ export function createSubagents(
     agentActivity,
     fleet,
     isScopeModelsEnabled,
-    setScopeModelsEnabled,
-    setFleetViewEnabled,
   });
 
   // ---- Agent lifecycle tools ----

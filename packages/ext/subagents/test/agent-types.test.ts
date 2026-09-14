@@ -1,9 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { resolveAgent } from "../agent-types.js";
+import { resolveAgent, resolveSpawnAgent } from "../agent-types.js";
 import { DEFAULT_AGENTS } from "../default-agents.js";
 import { SUBAGENT_TYPES } from "../types.js";
 
 describe("embedded agent types", () => {
+  it("validates inherited roles rather than silently falling back during full-history forks", () => {
+    expect(resolveSpawnAgent(undefined, true, "unknown")).toEqual({
+      error: "Unknown inherited agent_type 'unknown'.",
+    });
+    expect(resolveSpawnAgent(undefined, true, " EXPLORER ")).toMatchObject({
+      agent: { type: "explorer", matched: true },
+    });
+    expect(resolveSpawnAgent(undefined, true, undefined)).toMatchObject({
+      agent: { type: "default", matched: true },
+    });
+    expect(resolveSpawnAgent("", true, "worker")).toHaveProperty("error");
+    expect(resolveSpawnAgent("worker", true, "worker")).toHaveProperty("error");
+    expect(resolveSpawnAgent("unknown", false, "worker")).toHaveProperty("error");
+    expect(resolveSpawnAgent(undefined, false, "unknown")).toMatchObject({
+      agent: { type: "default", matched: true },
+    });
+  });
+
   it("exposes the Codex roles and defaults omitted roles", () => {
     expect(SUBAGENT_TYPES).toEqual(["default", "worker", "explorer"]);
     expect(resolveAgent()).toMatchObject({ type: "default", matched: true });
@@ -22,18 +40,21 @@ describe("embedded agent types", () => {
     expect(resolveAgent("explorer").config.thinking).toBeUndefined();
   });
 
-  it("maps the write-capable behavior to worker", () => {
-    const { config } = resolveAgent("worker");
+  it.each(SUBAGENT_TYPES)(
+    "gives %s the inherited builtin baseline and additive guidance",
+    (type) => {
+      const { config } = resolveAgent(type);
 
-    expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
-    expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
-    expect(config.promptMode).toBe("append");
-  });
+      expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
+      expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
+      expect(config.promptMode).toBe("append");
+    },
+  );
 
-  it("keeps explorer read-only and scoped to factual retrieval", () => {
+  it("keeps explorer scoped to factual retrieval", () => {
     const { config } = resolveAgent("explorer");
 
-    expect(config.builtinToolNames).toEqual(["read", "ls", "bash"]);
+    expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
     expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
     expect(config.description).toContain("files, symbols, definitions, references, call paths");
     expect(config.description).toContain("documentation or third-party source reading");
