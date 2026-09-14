@@ -110,6 +110,7 @@ export const SUBAGENT_METADATA_ENTRY = "pi-bites:subagent";
 
 export const SubagentMetadataSchema = Type.Object({
   agentId: Type.Optional(Type.String()),
+  agentSessionId: Type.Optional(Type.String()),
   type: Type.String(),
   title: Type.String(),
   bashGatePolicy: Type.Optional(Type.Union([Type.Literal("deny"), Type.Literal("prompt")])),
@@ -126,6 +127,8 @@ export interface RunOptions {
   pi: ExtensionAPI;
   /** Manager-assigned id; suffixes session name to disambiguate parallel spawns (e.g. `Explore#a1b2c3d4`). */
   agentId?: string;
+  /** Identity of this live conversation, distinct from the retained agent id. */
+  agentSessionId?: string;
   model?: Model<Api>;
   signal?: AbortSignal;
   isolated?: boolean;
@@ -484,6 +487,7 @@ export async function openAgentSession(
 
     sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
       agentId: options.agentId,
+      agentSessionId: options.agentSessionId,
       type,
       title: agentConfig.displayName ?? agentConfig.name,
       bashGatePolicy: agentConfig.bashGatePolicy,

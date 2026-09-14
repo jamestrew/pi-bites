@@ -251,6 +251,7 @@ export default function registerBashGate(
                   {
                     toolCallId,
                     agentId: metadata.agentId,
+                    agentSessionId: metadata.agentSessionId,
                     title: metadata.title,
                     command,
                     toolName,

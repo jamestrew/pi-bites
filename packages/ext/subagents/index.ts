@@ -62,6 +62,8 @@ export default function (
 
   // ---- Agent activity tracking ----
   const agentActivity = new Map<string, AgentActivity>();
+  // Session approvals are scoped to a live child conversation, never its retained id.
+  const parentAllowances = new Map<string, { incarnation?: string; keys: Set<string> }>();
 
   let manager: AgentManager;
   let fleet: FleetList;
@@ -69,7 +71,6 @@ export default function (
     pi,
     getRecord: (id) => manager.getRecord(id),
     onAgentFinishedUI: (id) => {
-      parentAllowances.delete(id);
       agentActivity.delete(id);
       fleet.onAgentFinished(id);
     },
@@ -103,6 +104,7 @@ export default function (
     },
     (parentSessionId, sender, message) => parentMessenger.send(parentSessionId, sender, message),
     getAutoCompactionThreshold,
+    (record) => parentAllowances.delete(record.id),
   );
 
   // Expose manager via Symbol.for() global registry for cross-package access.
@@ -123,7 +125,6 @@ export default function (
   });
 
   // --- Cross-extension RPC via pi.events ---
-  const parentAllowances = new Map<string, Set<string>>();
   let approvalOwner = new AbortController();
   let currentCtx: ExtensionContext | undefined;
   let currentSessionToken: object | undefined;
@@ -178,14 +179,27 @@ export default function (
       approvalOwner.signal,
       ...[ctx.signal, request.signal].filter((value): value is AbortSignal => value !== undefined),
     ]);
-    const isAllowed = () =>
-      !!request.agentId &&
-      parentAllowances.get(request.agentId)?.has(request.sessionAllowKey) === true;
+    const hasLiveIncarnation = () =>
+      !request.agentId ||
+      !request.agentSessionId ||
+      manager.getRecord(request.agentId)?.incarnation === request.agentSessionId;
+    const isAllowed = () => {
+      if (!request.agentId || !hasLiveIncarnation()) return false;
+      const allowance = parentAllowances.get(request.agentId);
+      return (
+        allowance?.incarnation === request.agentSessionId &&
+        allowance?.keys.has(request.sessionAllowKey) === true
+      );
+    };
     const rememberAllowance = () => {
-      if (!request.agentId) return;
-      const keys = parentAllowances.get(request.agentId) ?? new Set<string>();
+      if (!request.agentId || !hasLiveIncarnation()) return;
+      const allowance = parentAllowances.get(request.agentId);
+      const keys =
+        allowance?.incarnation === request.agentSessionId && allowance
+          ? allowance.keys
+          : new Set<string>();
       keys.add(request.sessionAllowKey);
-      parentAllowances.set(request.agentId, keys);
+      parentAllowances.set(request.agentId, { incarnation: request.agentSessionId, keys });
     };
     const sessionChanged = (): BashGateApprovalResult | undefined =>
       !signal.aborted && ownerSessionToken && ownerSessionToken === currentSessionToken

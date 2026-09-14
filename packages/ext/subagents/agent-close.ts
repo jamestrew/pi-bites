@@ -22,6 +22,7 @@ export type ClosedAgentRecord =
     };
 
 type CloseHooks = {
+  invalidate: (record: AgentRecord) => void;
   abort: (id: string) => void;
   teardown: (record: AgentRecord) => Promise<void>;
   releaseReservation: (record: AgentRecord) => void;
@@ -99,6 +100,8 @@ export class AgentCloser {
   }
 
   private async finishClose(record: AgentRecord): Promise<void> {
+    // This is the lifecycle commit point, not the delayed completion UI event.
+    this.hooks.invalidate(record);
     // Defer stops until every record is claimed. Each stop runs before awaiting
     // runners, so a stalled or failing parent cannot leave descendants running.
     const stop = Promise.resolve().then(() => {

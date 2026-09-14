@@ -12,6 +12,7 @@ export interface ApprovalRequest {
   toolCallId?: string;
   signal?: AbortSignal;
   agentId?: string;
+  agentSessionId?: string;
   title: string;
   command: string;
   toolName?: "bash" | "exec_command";

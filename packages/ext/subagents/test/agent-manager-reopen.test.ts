@@ -117,6 +117,18 @@ it("claims capacity before loading and serializes concurrent resumes", async () 
   expect(await second).toBe("pending_init");
 });
 
+it("invalidates approvals when closing and reopening a conversation", async () => {
+  const invalidated = vi.fn();
+  await manager.dispose();
+  manager = new AgentManager(undefined, 1, undefined, undefined, undefined, undefined, invalidated);
+  const id = await closedAgent();
+  expect(invalidated).toHaveBeenCalledTimes(1);
+
+  vi.mocked(openAgentSession).mockResolvedValueOnce(mockSession());
+  await manager.reopen(pi, ctx, id);
+  expect(invalidated).toHaveBeenCalledTimes(2);
+});
+
 it("fails at capacity before loading, and failed reopen can retry without leaking slots", async () => {
   const id = await closedAgent();
   vi.mocked(runAgent).mockResolvedValueOnce({ session: mockSession(), responseText: "done" });

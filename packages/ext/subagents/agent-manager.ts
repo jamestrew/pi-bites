@@ -99,6 +99,7 @@ export class AgentManager {
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
   private onCompact?: OnAgentCompact;
+  private onAgentInvalidated?: (record: AgentRecord) => void;
   private messageParent?: MessageParent;
   private getAutoCompactionThreshold?: () => number | undefined;
   private maxConcurrent: number;
@@ -127,12 +128,14 @@ export class AgentManager {
     onCompact?: OnAgentCompact,
     messageParent?: MessageParent,
     getAutoCompactionThreshold?: () => number | undefined,
+    onAgentInvalidated?: (record: AgentRecord) => void,
   ) {
     this.onComplete = onComplete;
     this.onStart = onStart;
     this.onCompact = onCompact;
     this.messageParent = messageParent;
     this.getAutoCompactionThreshold = getAutoCompactionThreshold;
+    this.onAgentInvalidated = onAgentInvalidated;
     this.maxConcurrent = maxConcurrent;
     this.interruptions = new AgentInterrupter({
       isSettled: (record, generation) => (this.settledGeneration.get(record) ?? 0) >= generation,
@@ -150,6 +153,7 @@ export class AgentManager {
       },
     });
     this.closer = new AgentCloser(this.agents, {
+      invalidate: (record) => this.onAgentInvalidated?.(record),
       abort: (id) => void this.abort(id),
       teardown: async (record) => {
         if (record.session) await this.teardownSession(record.session);
@@ -160,6 +164,7 @@ export class AgentManager {
       reserve: (record) => this.reserve(record),
       release: (record) => this.releaseReservation(record),
       commit: (record) => {
+        this.onAgentInvalidated?.(record);
         this.options.set(record, {
           description: record.description,
           model: record.session?.model,
@@ -335,6 +340,7 @@ export class AgentManager {
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
+      incarnation: randomUUID(),
       generation: 1,
       type,
       parentSessionId: parent.sessionId,
@@ -609,6 +615,7 @@ export class AgentManager {
     const started = runAgent(parent, type, prompt, {
       pi,
       agentId: id,
+      agentSessionId: record.incarnation,
       model: options.model,
       isolated: options.isolated,
       thinkingLevel: options.thinkingLevel,

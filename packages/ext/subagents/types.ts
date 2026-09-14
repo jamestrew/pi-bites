@@ -51,6 +51,8 @@ export interface AgentConfig {
 
 export interface AgentRecord {
   id: string;
+  /** Random token for this live session; a reopened conversation gets a new one. */
+  incarnation?: string;
   /** Turn generation within this live session. An idle reopen reserves generation 1 for its first input. */
   generation: number;
   type: SubagentType;
