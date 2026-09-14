@@ -845,29 +845,4 @@ describe("AgentManager — detached lifecycle", () => {
     expect(manager.getRecord(id)?.result).toBeUndefined();
     expect(onComplete).toHaveBeenCalledOnce();
   });
-
-  it("fixes child messages to the spawning parent and sender identity", () => {
-    const messageParent = vi.fn(() => true);
-    manager = new AgentManager(undefined, 4, undefined, undefined, messageParent);
-    mockPendingRun();
-
-    const id = manager.spawn(mockPi, mockCtx, "explorer", "task", {
-      description: "trace auth flow",
-      invocation: { modelName: "openai/gpt-5", thinking: "high" },
-    });
-    const transport = vi.mocked(runAgent).mock.calls.at(-1)?.[3].messageParent;
-
-    expect(transport?.("found it")).toBe(true);
-    expect(messageParent).toHaveBeenCalledWith(
-      "parent-session",
-      {
-        id,
-        type: "explorer",
-        title: "trace auth flow",
-        model_name: "openai/gpt-5",
-        thinking: "high",
-      },
-      "found it",
-    );
-  });
 });

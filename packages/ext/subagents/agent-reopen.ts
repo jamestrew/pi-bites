@@ -1,9 +1,9 @@
+import type { RegisterCollaboration } from "./subagent-context.js";
 import type { SubagentContext } from "./operation-context.js";
 import type { AgentSession, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
 import type { AgentCloser } from "./agent-close.js";
-import type { MessageParent } from "./agent-manager.js";
 import { openAgentSession } from "./agent-runner.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";
 import { getAgentStatus } from "./agent-status.js";
@@ -15,26 +15,40 @@ import type { AgentRecord, WaitAgentStatus } from "./types.js";
 export interface ReopenOptions {
   signal?: AbortSignal;
   scopeModels?: boolean;
+  rootSessionId?: string;
 }
 
 /** Owns reopen claims and rollback; the manager remains the sole capacity owner. */
 export class AgentReopener {
   private reopening = new Map<string, Promise<WaitAgentStatus>>();
   private lifetime = new AbortController();
+  private owners = new Map<string, { sessionId: string; abort: AbortController }>();
   constructor(
     private agents: Map<string, AgentRecord>,
     private closer: AgentCloser,
     private hooks: {
+      assertOwnerAvailable: (parentSessionId: string, rootSessionId: string) => void;
       reserve: (record: AgentRecord) => boolean;
       release: (record: AgentRecord) => void;
       commit: (record: AgentRecord) => void;
-      messageParent?: MessageParent;
+      registerCollaboration?: (record: AgentRecord) => RegisterCollaboration;
       autoCompactionThreshold?: () => number | undefined;
     },
   ) {}
 
   pending(id: string): Promise<WaitAgentStatus> | undefined {
     return this.reopening.get(id);
+  }
+
+  cancelChildren(sessionId: string | undefined): Promise<unknown> {
+    const pending: Promise<WaitAgentStatus>[] = [];
+    for (const [id, owner] of this.owners) {
+      if (owner.sessionId !== sessionId) continue;
+      owner.abort.abort(new Error("Subagent owner closed"));
+      const operation = this.reopening.get(id);
+      if (operation) pending.push(operation);
+    }
+    return Promise.allSettled(pending);
   }
 
   shutdown(): Promise<unknown> {
@@ -49,7 +63,9 @@ export class AgentReopener {
     id: string,
     options: ReopenOptions = {},
   ): Promise<WaitAgentStatus> {
+    const ownerAbort = new AbortController();
     const signal = AbortSignal.any([
+      ownerAbort.signal,
       this.lifetime.signal,
       ...[options.signal, ctx.signal].filter((s): s is AbortSignal => !!s),
     ]);
@@ -59,8 +75,10 @@ export class AgentReopener {
     const active = this.agents.get(id);
     const closed = this.closer.get(id);
     const owner =
-      active?.parentSessionId ?? (closed?.recoverable ? closed.parentSessionId : undefined);
-    if (owner && owner !== parent.sessionId)
+      active?.rootSessionId ??
+      active?.parentSessionId ??
+      (closed?.recoverable ? (closed.rootSessionId ?? closed.parentSessionId) : undefined);
+    if (owner && owner !== (options.rootSessionId ?? parent.sessionId))
       throw new Error(`agent with id ${id} is not owned by this session`);
     if (this.closer.isClosing(id)) throw new Error(`agent with id ${id} is closing`);
     const pending = this.reopening.get(id);
@@ -70,6 +88,8 @@ export class AgentReopener {
     if (!closed.recoverable || !("conversation" in closed))
       throw new Error(`agent with id ${id} has no recoverable conversation`);
     if (!resolveAgent(closed.type).matched) throw new Error(`Unknown agent type '${closed.type}'.`);
+    const rootSessionId = closed.rootSessionId ?? closed.parentSessionId;
+    this.hooks.assertOwnerAvailable(closed.parentSessionId, rootSessionId);
     const conversation = closed.conversation;
     const header = conversation.entries[0];
     if (
@@ -120,6 +140,7 @@ export class AgentReopener {
       incarnation: randomUUID(),
       type: closed.type,
       parentSessionId: closed.parentSessionId,
+      ...(closed.rootSessionId ? { rootSessionId: closed.rootSessionId } : {}),
       description: closed.description,
       generation: 1,
       prompt: "",
@@ -140,6 +161,7 @@ export class AgentReopener {
       try {
         session = await openAgentSession(parent, record.type, {
           pi,
+          registerCollaboration: this.hooks.registerCollaboration?.(record),
           agentId: id,
           agentSessionId: record.incarnation,
           model,
@@ -150,14 +172,9 @@ export class AgentReopener {
           configCwd: parent.cwd,
           signal,
           autoCompactionThreshold: this.hooks.autoCompactionThreshold?.(),
-          messageParent: (message) =>
-            this.hooks.messageParent?.(
-              record.parentSessionId,
-              { id, type: record.type, title: record.description },
-              message,
-            ) ?? false,
         });
         signal.throwIfAborted();
+        this.hooks.assertOwnerAvailable(record.parentSessionId, rootSessionId);
         record.session = session;
         this.hooks.commit(record);
         this.agents.set(id, record);
@@ -172,11 +189,13 @@ export class AgentReopener {
         throw error;
       } finally {
         this.reopening.delete(id);
+        this.owners.delete(id);
       }
     };
     // Register the claim before any loader or extension can re-enter the manager.
     const operation = Promise.resolve().then(reopen);
     this.reopening.set(id, operation);
+    this.owners.set(id, { sessionId: record.parentSessionId, abort: ownerAbort });
     return operation;
   }
 }

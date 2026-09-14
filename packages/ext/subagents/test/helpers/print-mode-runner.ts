@@ -193,10 +193,10 @@ function resolveReply(reply: FauxReply | ((ctx: Context) => FauxReply), ctx: Con
 /**
  * The common single-spawn flow as a responder. Routes by inspecting the calling
  * session's own context:
- *   - PARENT  (its tool set includes `spawn_agent`):
+ *   - PARENT (no active_agent identity tag):
  *       · `parentInitial` until an `spawn_agent` tool result is in history (the spawn),
  *       · then `parentFinal` for later parent turns, including automatic completion.
- *   - SUBAGENT (no `spawn_agent` tool): `subagent`.
+ *   - SUBAGENT (active_agent identity tag): `subagent`.
  * Each route may be a value or a `(ctx) => value` function.
  */
 export function routeBySession(routes: {
@@ -205,7 +205,7 @@ export function routeBySession(routes: {
   subagent: FauxReply | ((ctx: Context) => FauxReply);
 }): FauxResponder {
   return (context) => {
-    const isParent = (context.tools ?? []).some((t) => t.name === "spawn_agent");
+    const isParent = !context.systemPrompt?.includes("<active_agent ");
     if (!isParent) return resolveReply(routes.subagent, context);
     const spawned = context.messages.some(
       (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "spawn_agent",

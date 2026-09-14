@@ -60,6 +60,7 @@ type AgentCompletionDeps = {
   getRecord: (id: string) => AgentRecord | undefined;
   onAgentFinishedUI: (id: string) => void;
   onAgentResultPendingUI?: (id: string) => void;
+  deliveryPi?: (parentSessionId: string) => Pick<ExtensionAPI, "sendMessage"> | undefined;
   shouldNotify?: (record: AgentRecord) => boolean;
   scheduleAutomatic?: (parentSessionId: string, deliver: () => void, cancel: () => void) => boolean;
 };
@@ -81,6 +82,7 @@ export function createAgentCompletionHandler({
   onAgentResultPendingUI,
   scheduleAutomatic,
   shouldNotify,
+  deliveryPi,
 }: AgentCompletionDeps) {
   const completedGeneration = new WeakMap<AgentRecord, number>();
   const waiters = new Map<number, Waiter>();
@@ -128,7 +130,7 @@ export function createAgentCompletionHandler({
 
   function emitAutomatic(record: AgentRecord): void {
     const details = buildNotificationDetails(record);
-    pi.sendMessage<NotificationDetails>(
+    (deliveryPi ? deliveryPi(record.parentSessionId) : pi)?.sendMessage<NotificationDetails>(
       {
         customType: "subagent-notification",
         content: formatTaskNotification(record),

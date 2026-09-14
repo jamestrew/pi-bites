@@ -24,7 +24,7 @@ export function resolveSpawnAgent(
   parentType: string | undefined,
 ): SpawnAgentResolution {
   const requested = requestedType?.trim() || undefined;
-  if (forkContext && requested) {
+  if (forkContext && requestedType !== undefined) {
     return {
       error:
         "Full-history forked agents inherit the parent agent type; omit agent_type, or spawn without a full-history fork.",
@@ -32,5 +32,6 @@ export function resolveSpawnAgent(
   }
   const agent = resolveAgent(requested ?? (forkContext ? parentType : undefined));
   if (requested && !agent.matched) return { error: `Unknown agent_type '${requested}'.` };
+  if (!agent.matched) return { error: `Unknown inherited agent_type '${parentType}'.` };
   return { agent };
 }

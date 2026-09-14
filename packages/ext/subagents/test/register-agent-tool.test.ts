@@ -20,15 +20,12 @@ function captureAgentTool(parentAgentType?: string) {
   const pi = {
     events: { on: vi.fn(), emit: vi.fn() },
   };
-  const noop = vi.fn();
   const create = () =>
     createAgentTool(pi as any, {
-      manager: { setMaxConcurrent: noop } as any,
+      manager: {} as any,
       agentActivity: new Map(),
       fleet: {} as any,
       isScopeModelsEnabled: () => false,
-      setScopeModelsEnabled: noop,
-      setFleetViewEnabled: noop,
     });
   return (parentAgentType ? runAsSubagent(parentAgentType, create) : create()) as any;
 }

@@ -9,7 +9,7 @@ import type { AgentConfig, EnvInfo } from "./types.js";
  *
  * - "replace" mode: env header + config.systemPrompt (full control, no parent identity)
  * - "append" mode: parent system prompt + sub-agent context + env header + config.systemPrompt
- * - "append" with empty systemPrompt: pure parent clone
+ * - "append" with empty systemPrompt: inherited prompt with sub-agent context
  *
  * Both modes include an `<active_agent name="${config.name}"/>` tag so downstream
  * extensions (e.g. permission/policy systems) can resolve per-agent policy
@@ -55,7 +55,15 @@ You are operating as a sub-agent invoked to handle a specific task.
     // placed verbatim (no wrapper tag) so it forms an identical byte prefix
     // with the parent session, maximising KV cache hits. The <active_agent>
     // tag and env block vary per call and are placed after the cached prefix.
-    return identity + "\n\n" + bridge + "\n\n" + activeAgentTag + envBlock;
+    return (
+      identity +
+      "\n\n" +
+      bridge +
+      "\n\n" +
+      activeAgentTag +
+      envBlock +
+      (config.systemPrompt ? "\n\n" + config.systemPrompt : "")
+    );
   }
 
   // "replace" mode — env header + the config's full system prompt

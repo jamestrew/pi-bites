@@ -83,7 +83,6 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
         agentId: "capabilities-e2e",
         model: childModel,
         allowedTools,
-        messageParent: () => false,
         onToolActivity,
       },
     );
@@ -92,7 +91,7 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
     expect(child.model?.id).toBe(modelId);
     expect(child.messages).toEqual([]); // Initialization only: no prompt or provider request.
     const active = child.getActiveToolNames();
-    expect(active).toContain("MessageAgent");
+    expect(active).not.toContain("MessageAgent");
     expect(active).not.toContain("spawn_agent");
     expect(active).not.toContain("wait_agent");
     for (const name of omitted) {

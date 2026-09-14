@@ -1,4 +1,8 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import type { WaitAgentSender } from "./types.js";
 
 export type SubagentSender = WaitAgentSender;
@@ -190,4 +194,34 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
       return persist(details);
     },
   };
+}
+
+/** Bind the same delivery state machine at each live session-tree node. */
+export function bindSubagentMessenger(
+  pi: ExtensionAPI,
+  messenger: ReturnType<typeof createSubagentMessenger>,
+  started?: (id: string) => void,
+) {
+  const start = (ctx: ExtensionContext) => {
+    const manager = ctx.sessionManager as SessionManager;
+    const id = manager.getSessionId();
+    messenger.sessionStarted(id, (type, content, display, details) =>
+      manager.appendCustomMessageEntry(type, content, display, details),
+    );
+    started?.(id);
+  };
+  pi.on("agent_start", () => messenger.agentStarted());
+  pi.on("turn_start", () => messenger.turnStarted());
+  pi.on("message_end", (event) => {
+    if (event.message.role === "assistant")
+      messenger.assistantMessageEnded(
+        !event.message.content.some((part) => part.type === "toolCall"),
+        event.message.stopReason === "aborted",
+      );
+  });
+  pi.on("turn_end", () => messenger.turnEnded());
+  pi.on("agent_settled", (_event, ctx) => {
+    if (ctx.isIdle()) messenger.agentSettled();
+  });
+  return start;
 }

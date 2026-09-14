@@ -20,6 +20,7 @@ export const mockCtx = {
 
 export const mockSession = () =>
   ({
+    sessionManager: { getSessionId: () => "child-session" },
     abort: vi.fn(async () => {}),
     clearQueue: vi.fn(() => ({ steering: [], followUp: [] })),
     dispose: vi.fn(),

@@ -17,7 +17,7 @@ import registerInlineReferences from "./inline-references/index.js";
 import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
 import { createSubagents } from "./subagents/index.js";
-import { getActiveSubagent } from "./subagents/subagent-context.js";
+import { getActiveSubagent, getChildCollaboration } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
 import registerGoal from "./goal/index.js";
 import registerCodexAdapter from "./codex-adapter/index.js";
@@ -55,7 +55,13 @@ export default async function (pi: ExtensionAPI) {
 
   if (!disabled.has("codegraph")) await registerCodegraph(pi);
 
-  if (isSubagent) return;
+  if (isSubagent) {
+    if (!disabled.has("subagents")) {
+      const subagents = getChildCollaboration()?.(pi, codexAdapter?.getAllowedTools);
+      subagents?.registerTools();
+    }
+    return;
+  }
 
   if (!disabled.has("goal")) registerGoal(pi);
   if (!disabled.has("view")) registerView(pi);

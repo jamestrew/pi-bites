@@ -7,7 +7,6 @@ import { createAgentToolExecute } from "./agent-tool-execute.js";
 import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
 import { SUBAGENT_TOOL_NAMES } from "./agent-runner.js";
 import { resolveAgent, resolveSpawnAgent } from "./agent-types.js";
-import { applyAndEmitLoaded } from "./settings.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
 import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./ui/text-lines.js";
@@ -18,20 +17,9 @@ type RegisterAgentToolDeps = {
   agentActivity: Map<string, AgentActivity>;
   fleet: FleetList;
   isScopeModelsEnabled: () => boolean;
-  setScopeModelsEnabled: (enabled: boolean) => void;
-  setFleetViewEnabled: (enabled: boolean) => void;
 };
 
 export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
-  applyAndEmitLoaded(
-    {
-      setMaxConcurrent: (n) => deps.manager.setMaxConcurrent(n),
-      setScopeModels: deps.setScopeModelsEnabled,
-      setFleetView: deps.setFleetViewEnabled,
-    },
-    (event, payload) => pi.events.emit(event, payload),
-  );
-
   const parentAgentType = getActiveSubagent();
   const renderMetadata = new Map<
     string,

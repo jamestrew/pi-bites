@@ -129,6 +129,7 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
 
   function snapshotSettings(): SubagentsSettings {
     return {
+      maxDepth: manager.tree.getMaxDepth(),
       maxConcurrent: manager.getMaxConcurrent(),
       scopeModels: isScopeModelsEnabled(),
       fleetView: isFleetViewEnabled(),

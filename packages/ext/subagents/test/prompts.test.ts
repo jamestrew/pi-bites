@@ -23,6 +23,8 @@ describe("buildAgentPrompt", () => {
       );
 
       expect(prompt).toContain("Filesystem: shared with the parent session and other agents");
+      expect(prompt).toContain("Do the task.");
+      if (promptMode === "append") expect(prompt.startsWith("Parent prompt.\n\n")).toBe(true);
     },
   );
 });
