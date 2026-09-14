@@ -14,7 +14,9 @@ Existing close work stays in place. #276 supplies retained-state ownership;
 #277 supplies usable resume and reservation; #306 supplies shared operations and
 cancellation; #307 aligns child collaboration and roles; #308 exposes nested
 operations; #309 integrates presentation; #278 runs the combined parity audit.
-Child collaboration and additive explorer guidance are implemented in #307. Keep partial nested integration inaccessible until coherent.
+Child collaboration and additive explorer guidance are implemented in #307. #308 activates
+[scoped nested exposure](../../../docs/code-mode-contract/subagents-exposure.md), including
+shared execution, discovery, standalone restoration, and existing renderer registration.
 
 ## One engine, two entry points
 

@@ -58,7 +58,12 @@ async function loadExtension(
     if (modulePath === "./automode/index.js") spy.mockReturnValue(autoMode);
     registerSpies.set(modulePath, spy);
     if (modulePath === "./subagents/index.js") {
-      spy.mockReturnValue({ registerTools: vi.fn() });
+      spy.mockReturnValue({
+        registerTools: vi.fn(),
+        definitions: {},
+        capture: vi.fn(),
+        renderers: vi.fn(),
+      });
       vi.doMock(modulePath, () => ({ createSubagents: spy }));
     } else vi.doMock(modulePath, () => ({ default: spy }));
   }
@@ -155,6 +160,7 @@ describe("extension entrypoint", () => {
         loaded.pi,
         expect.any(Object),
         loaded.bashGate,
+        loaded.registerSpies.get("./subagents/index.js")!.mock.results[0]!.value,
       );
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,

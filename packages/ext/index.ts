@@ -20,7 +20,7 @@ import { createSubagents } from "./subagents/index.js";
 import { getActiveSubagent, getChildCollaboration } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
 import registerGoal from "./goal/index.js";
-import registerCodexAdapter from "./codex-adapter/index.js";
+import registerCodexAdapter, { type CodexAdapterController } from "./codex-adapter/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
 
@@ -48,40 +48,36 @@ export default async function (pi: ExtensionAPI) {
   // Subagent sessions install the same policy directly at Pi's safe
   // prepare-next-turn seam; ctx.compact() would abort their owning invocation.
   if (!isSubagent && !disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
-  const codexAdapter = disabled.has("codexAdapter")
+  let codexAdapter: CodexAdapterController | undefined;
+  const getAllowedTools = () => codexAdapter?.getAllowedTools() ?? pi.getActiveTools();
+  const subagents = disabled.has("subagents")
     ? undefined
-    : registerCodexAdapter(pi, configRef, bashGate);
+    : isSubagent
+      ? getChildCollaboration()?.(pi, getAllowedTools)
+      : createSubagents(
+          pi,
+          autoMode,
+          bashGate,
+          () =>
+            configRef.current.disable?.includes("autoCompaction")
+              ? undefined
+              : (configRef.current.autoCompaction?.thresholdTokens ??
+                DEFAULT_AUTO_COMPACTION_THRESHOLD),
+          getAllowedTools,
+        );
+  subagents?.registerTools();
+  codexAdapter = disabled.has("codexAdapter")
+    ? undefined
+    : registerCodexAdapter(pi, configRef, bashGate, subagents);
   const previewCodexPrompt = codexAdapter?.previewPrompt;
 
   if (!disabled.has("codegraph")) await registerCodegraph(pi);
-
-  if (isSubagent) {
-    if (!disabled.has("subagents")) {
-      const subagents = getChildCollaboration()?.(pi, codexAdapter?.getAllowedTools);
-      subagents?.registerTools();
-    }
-    return;
-  }
+  if (isSubagent) return;
 
   if (!disabled.has("goal")) registerGoal(pi);
   if (!disabled.has("view")) registerView(pi);
   if (!isNonInteractive && !disabled.has("sessionTracker"))
     registerSessionTracker(pi, configRef, autoMode);
-  const subagents = disabled.has("subagents")
-    ? undefined
-    : createSubagents(
-        pi,
-        autoMode,
-        bashGate,
-        () =>
-          configRef.current.disable?.includes("autoCompaction")
-            ? undefined
-            : (configRef.current.autoCompaction?.thresholdTokens ??
-              DEFAULT_AUTO_COMPACTION_THRESHOLD),
-        codexAdapter?.getAllowedTools,
-      );
-  subagents?.registerTools();
-
   if (!isNonInteractive && !disabled.has("footer")) registerFooter(pi);
   if (!isNonInteractive && !disabled.has("statusline")) registerStatusline(pi, configRef);
   if (!isNonInteractive && !disabled.has("tokenCount")) registerTokenCount(pi);

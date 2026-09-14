@@ -36,7 +36,7 @@ export class Delegates {
   bind(cellId: string, tools: readonly RuntimeTool[]): void {
     if (this.stopped) throw new Error("Code Mode runtime is closed");
     this.cells.set(cellId, {
-      tools: new Map(tools.map((tool) => [tool.name, tool])),
+      tools: new Map(tools.map((tool) => [toolIdentity(tool.toolName ?? tool), tool])),
       closed: false,
       notifications: [],
       bytes: 0,
@@ -124,10 +124,7 @@ export class Delegates {
         result = { status: "ok", value: { type: "notification/delivered" } };
       } else {
         const invocation = request.invocation;
-        const tool =
-          invocation.tool_name.namespace !== undefined
-            ? undefined
-            : cell.tools.get(invocation.tool_name.name);
+        const tool = cell.tools.get(toolIdentity(invocation.tool_name));
         if (!tool || tool.kind !== invocation.tool_kind)
           throw new Error(`Unknown Code Mode tool: ${invocation.tool_name.name}`);
         const value = await tool.invoke(invocation.input, {
@@ -167,4 +164,8 @@ export class Delegates {
       this.options.fail(error instanceof Error ? error : new Error(String(error)));
     }
   }
+}
+
+function toolIdentity(tool: { name: string; namespace?: string }): string {
+  return JSON.stringify([tool.namespace ?? null, tool.name]);
 }

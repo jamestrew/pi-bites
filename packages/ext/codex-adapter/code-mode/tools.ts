@@ -1,4 +1,8 @@
-import type { ExtensionAPI, AgentToolUpdateCallback } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  AgentToolUpdateCallback,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { contract, execDescription } from "./contracts.js";
 import { unsignedInteger } from "./exec-source.js";
@@ -35,7 +39,9 @@ export function registerCodeModeTools(
       params: { code: string },
       signal?: AbortSignal,
       onUpdate?: AgentToolUpdateCallback<CodeModeDetails>,
+      ctx?: ExtensionContext,
     ) {
+      if (ctx) bridge.capture(ctx);
       const runtime = lifecycle.current();
       const tools = getTools();
       const observation = observeCodeMode(bridge.traces, onUpdate);
@@ -68,7 +74,9 @@ export function registerCodeModeTools(
       params: { cell_id: string; yield_time_ms?: number; max_tokens?: number; terminate?: boolean },
       signal?: AbortSignal,
       onUpdate?: AgentToolUpdateCallback<CodeModeDetails>,
+      ctx?: ExtensionContext,
     ) {
+      if (ctx) bridge.capture(ctx);
       const maxTokens = unsignedInteger(params.max_tokens ?? 10_000, "max_tokens");
       const delay = unsignedInteger(params.yield_time_ms ?? 10_000, "yield_time_ms");
       signal?.throwIfAborted();
