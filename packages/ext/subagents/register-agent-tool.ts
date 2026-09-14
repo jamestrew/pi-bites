@@ -19,12 +19,15 @@ type RegisterAgentToolDeps = {
   isScopeModelsEnabled: () => boolean;
 };
 
+type SpawnRenderState = {
+  model?: string;
+  thinking?: string;
+  subagentType?: string;
+  error?: string;
+};
+
 export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
   const parentAgentType = getActiveSubagent();
-  const renderMetadata = new Map<
-    string,
-    { model?: string; thinking?: string; subagentType?: string; error?: string }
-  >();
 
   return defineSubagentTool({
     name: SUBAGENT_TOOL_NAMES.SPAWN_AGENT,
@@ -33,6 +36,7 @@ export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
     parameters: getAgentToolParameters(),
 
     renderCall(args, theme, context) {
+      const state = context.state as { metadata?: SpawnRenderState };
       const role = resolveSpawnAgent(args.agent_type, args.fork_context, parentAgentType);
       const initialType =
         ("agent" in role ? role.agent.type : undefined) ?? args.agent_type?.trim() ?? "default";
@@ -40,7 +44,7 @@ export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
 
       return {
         render(width: number): string[] {
-          const effective = renderMetadata.get(context.toolCallId);
+          const effective = state.metadata;
           const subagentType = effective?.subagentType ?? initialType;
           const config = resolveAgent(subagentType).config;
           const model = effective?.model ?? args.model ?? config.model;
@@ -60,14 +64,14 @@ export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
           for (const line of visiblePromptLines) {
             lines.push(fitLine(theme.fg("dim", line), width));
           }
-          if (!context.expanded && promptLines.slice(3).some((line) => line.trim().length > 0))
-            lines.push(fitLine(theme.fg("dim", `(${expandHint()})`), width));
           if (effective?.error) {
             lines.push(
               "",
               fitLine(theme.fg("dim", `Error: ${sanitizeSingleLine(effective.error)}`), width),
             );
           }
+          if (!context.expanded && promptLines.slice(3).some((line) => line.trim().length > 0))
+            lines.push(fitLine(theme.fg("dim", `(${expandHint()})`), width));
           return lines;
         },
         invalidate() {},
@@ -75,26 +79,27 @@ export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
     },
 
     renderResult(result, _options, _theme, context) {
+      const state = context.state as { metadata?: SpawnRenderState };
       const details = result.details;
       const thinking =
         details?.thinking ??
         details?.tags?.find((tag) => tag.startsWith("thinking: "))?.slice("thinking: ".length);
       if (details?.modelName || thinking || details?.subagentType || details?.error) {
-        renderMetadata.set(context.toolCallId, {
+        state.metadata = {
           model: details?.modelName,
           thinking,
           subagentType: details?.subagentType,
           error: details?.error,
-        });
+        };
       }
       if (context.isError) {
-        renderMetadata.set(context.toolCallId, {
-          ...renderMetadata.get(context.toolCallId),
+        state.metadata = {
+          ...state.metadata,
           error: result.content
             .filter((block) => block.type === "text")
             .map((block) => block.text)
             .join("\n"),
-        });
+        };
       }
       return new Container();
     },
@@ -104,8 +109,6 @@ export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
       agentActivity: deps.agentActivity,
       fleet: deps.fleet,
       isScopeModelsEnabled: deps.isScopeModelsEnabled,
-      setRenderMetadata: (toolCallId, model, thinking) =>
-        renderMetadata.set(toolCallId, { model, thinking }),
     }),
   });
 }

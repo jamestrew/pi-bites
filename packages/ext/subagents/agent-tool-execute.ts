@@ -37,7 +37,6 @@ type AgentToolExecuteDeps = {
   agentActivity: Map<string, AgentActivity>;
   fleet: FleetList;
   isScopeModelsEnabled: () => boolean;
-  setRenderMetadata?: (toolCallId: string, model: string, thinking: ThinkingLevel) => void;
 };
 
 export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
@@ -106,7 +105,6 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       model?.reasoning === false
         ? "off"
         : (resolvedConfig.thinking ?? ctx.thinking ?? pi.getThinkingLevel());
-    if (model) deps.setRenderMetadata?.(toolCallId, `${model.provider}/${model.id}`, thinking);
 
     const agentInvocation: AgentInvocation = {
       modelName: model ? `${model.provider}/${model.id}` : undefined,
