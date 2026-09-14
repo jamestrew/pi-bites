@@ -53,10 +53,14 @@ async function loadExtension(
     const spy = vi.fn();
     if (modulePath === "./bash-gate/index.js") spy.mockReturnValue(bashGate);
     if (modulePath === "./ponytail/index.js") spy.mockReturnValue(previewPonytailPrompt);
-    if (modulePath === "./codex-adapter/index.js") spy.mockReturnValue(previewCodexPrompt);
+    if (modulePath === "./codex-adapter/index.js")
+      spy.mockReturnValue({ previewPrompt: previewCodexPrompt, getAllowedTools: vi.fn(() => []) });
     if (modulePath === "./automode/index.js") spy.mockReturnValue(autoMode);
     registerSpies.set(modulePath, spy);
-    vi.doMock(modulePath, () => ({ default: spy }));
+    if (modulePath === "./subagents/index.js") {
+      spy.mockReturnValue({ registerTools: vi.fn() });
+      vi.doMock(modulePath, () => ({ createSubagents: spy }));
+    } else vi.doMock(modulePath, () => ({ default: spy }));
   }
 
   vi.doMock("@earendil-works/pi-coding-agent", () => ({}));
@@ -142,6 +146,7 @@ describe("extension entrypoint", () => {
         loaded.pi,
         expect.objectContaining({ isEnabled: expect.any(Function) }),
         loaded.bashGate,
+        expect.any(Function),
         expect.any(Function),
       );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);

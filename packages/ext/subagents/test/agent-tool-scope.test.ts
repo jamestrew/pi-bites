@@ -61,13 +61,14 @@ function harness(
   return { notify, run, spawn };
 }
 
-test("caller-selected out-of-scope models return the resolved allowed models", async () => {
+test("caller-selected out-of-scope models throw with the resolved allowed models", async () => {
   const { run, spawn } = harness([{ model: inside, thinkingLevel: "high" }]);
 
-  const result = await run("test/outside");
-
-  expect(result.content[0]?.text).toContain('Model not in scope: "test/outside"');
-  expect(result.content[0]?.text).toContain("  test/inside");
+  await expect(run("test/outside")).rejects.toMatchObject({
+    name: "SubagentOperationError",
+    message: expect.stringMatching(/Model not in scope: "test\/outside"[\s\S]*  test\/inside/),
+    details: expect.any(Object),
+  });
   expect(spawn).not.toHaveBeenCalled();
 });
 
@@ -120,9 +121,11 @@ test("omitted agent_type uses default and derives display metadata from the mess
 
 test("rejects an explicit role on a full-history fork", async () => {
   const runtime = harness();
-  const rejected = await runtime.run(undefined, { fork_context: true });
-
-  expect(rejected.content[0]?.text).toContain("inherit the parent agent type");
+  await expect(runtime.run(undefined, { fork_context: true })).rejects.toMatchObject({
+    name: "SubagentOperationError",
+    message: expect.stringContaining("inherit the parent agent type"),
+    details: expect.any(Object),
+  });
   expect(runtime.spawn).not.toHaveBeenCalled();
 });
 
@@ -143,8 +146,10 @@ test("a full-history fork inherits the parent agent type", async () => {
 test("rejects an unsupported reasoning effort without spawning", async () => {
   const runtime = harness();
 
-  const result = await runtime.run(undefined, { reasoning_effort: "extreme" });
-
-  expect(result.content[0]?.text).toContain("Unsupported reasoning_effort 'extreme'");
+  await expect(runtime.run(undefined, { reasoning_effort: "extreme" })).rejects.toMatchObject({
+    name: "SubagentOperationError",
+    message: expect.stringContaining("Unsupported reasoning_effort 'extreme'"),
+    details: expect.any(Object),
+  });
   expect(runtime.spawn).not.toHaveBeenCalled();
 });

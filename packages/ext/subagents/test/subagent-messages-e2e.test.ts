@@ -23,7 +23,7 @@ import {
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
 import { createAgentCompletionHandler } from "../agent-completion.js";
-import { registerWaitAgent } from "../register-wait-agent.js";
+import { createWaitAgent } from "../register-wait-agent.js";
 import { createSubagentMessenger, type SubagentSender } from "../subagent-messages.js";
 import type { AgentRecord } from "../types.js";
 
@@ -339,10 +339,12 @@ it("real wait_agent wakes only for a final child status", async () => {
       onAgentFinishedUI: () => {},
       scheduleAutomatic: () => true,
     });
-    registerWaitAgent(pi, {
-      waitFor: completion.waitFor,
-      getRecord: (id) => (id === record.id ? record : undefined),
-    });
+    pi.registerTool(
+      createWaitAgent({
+        waitFor: completion.waitFor,
+        getRecord: (id) => (id === record.id ? record : undefined),
+      }),
+    );
   };
   const { model, session } = await makeSession([], [extension], ["wait_agent"]);
   const toolStarted = deferred();

@@ -32,6 +32,13 @@ function makePi() {
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getThinkingLevel: vi.fn(() => "off"),
+    getActiveTools: vi.fn(() => [
+      "spawn_agent",
+      "send_input",
+      "wait_agent",
+      "close_agent",
+      "resume_agent",
+    ]),
   } as any;
   return { pi, tools, handlers, eventHandlers };
 }
@@ -42,6 +49,7 @@ function ctx() {
     ui: { setStatus: vi.fn(), setWidget: vi.fn(), notify: vi.fn() },
     cwd: "/tmp",
     model: undefined,
+    scopedModels: [],
     modelRegistry: {
       find: vi.fn(),
       getAvailable: vi.fn(() => []),

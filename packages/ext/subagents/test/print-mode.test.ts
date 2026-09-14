@@ -35,6 +35,13 @@ function makePi() {
       },
       appendEntry: vi.fn(),
       getThinkingLevel: vi.fn(() => "off"),
+      getActiveTools: vi.fn(() => [
+        "spawn_agent",
+        "send_input",
+        "wait_agent",
+        "close_agent",
+        "resume_agent",
+      ]),
       sendMessage: vi.fn(() => {
         throw new Error("stale extension context");
       }),
@@ -50,9 +57,11 @@ function makeHeadlessCtx() {
     ui: {
       setStatus: vi.fn(),
       setWidget: vi.fn(),
+      notify: vi.fn(),
     },
     cwd: "/tmp",
     model: undefined,
+    scopedModels: [],
     modelRegistry: {
       find: vi.fn(),
       getAvailable: vi.fn(() => []),

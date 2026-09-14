@@ -42,7 +42,14 @@ function makeHarness() {
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getThinkingLevel: vi.fn(() => "off"),
-    getActiveTools: vi.fn(() => ["spawn_agent", "wait_agent", "send_input", "read"]),
+    getActiveTools: vi.fn(() => [
+      "spawn_agent",
+      "wait_agent",
+      "send_input",
+      "resume_agent",
+      "close_agent",
+      "read",
+    ]),
     setActiveTools: vi.fn(),
   } as any;
   const ctx = {
@@ -407,8 +414,12 @@ describe("spawn-and-wait orchestration", () => {
     const spawned = await spawn(harness.tools, harness.ctx);
     const id = agentId(spawned);
 
-    const closed = await harness.tools.get("close_agent").execute("close", { target: id });
-    const repeated = await harness.tools.get("close_agent").execute("close-again", { target: id });
+    const closed = await harness.tools
+      .get("close_agent")
+      .execute("close", { target: id }, undefined, undefined, harness.ctx);
+    const repeated = await harness.tools
+      .get("close_agent")
+      .execute("close-again", { target: id }, undefined, undefined, harness.ctx);
 
     expect(JSON.parse(closed.content[0].text)).toEqual({ previous_status: "running" });
     expect(JSON.parse(repeated.content[0].text)).toEqual({ previous_status: "shutdown" });
@@ -461,10 +472,12 @@ describe("spawn-and-wait orchestration", () => {
     );
 
     controller.abort();
-    const cancelled = await waiting;
-    expect(cancelled.details).toMatchObject({
-      outcome: "cancelled",
-      agents: [expect.objectContaining({ status: "running" })],
+    await expect(waiting).rejects.toMatchObject({
+      name: "SubagentOperationError",
+      details: {
+        outcome: "cancelled",
+        agents: [expect.objectContaining({ status: "running" })],
+      },
     });
 
     child.resolve({ responseText: "late result", session: { dispose: vi.fn() } });

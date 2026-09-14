@@ -21,10 +21,12 @@ export class AgentInterrupter {
     session: AgentSession,
     source: Source,
     message?: string,
+    signal?: AbortSignal,
   ): Promise<boolean> {
     const generation = record.generation;
     const promise = record.promise;
     return this.serialize(record, async () => {
+      signal?.throwIfAborted();
       if (!this.isRunningGeneration(record, session, generation, promise)) return false;
 
       const previousAbort = record.abort;

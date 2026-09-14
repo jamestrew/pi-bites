@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerSendInput } from "../register-send-input.js";
+import { createSendInput } from "../register-send-input.js";
+import { SubagentOperationError } from "../tool-result.js";
 
 const textOf = (result: any): string => result.content[0].text;
 const plainTheme = {
@@ -7,13 +8,11 @@ const plainTheme = {
   bold: (text: string) => text,
 };
 
-function register(manager: Record<string, unknown>) {
-  let tool: any;
+function create(manager: Record<string, unknown>) {
   const pi = {
-    registerTool: vi.fn((registered) => (tool = registered)),
     events: { emit: vi.fn() },
   } as any;
-  registerSendInput(pi, manager as any);
+  const tool: any = createSendInput(pi, manager as any);
   return { pi, tool };
 }
 
@@ -22,7 +21,7 @@ describe("send_input", () => {
     const manager = {
       getRecord: vi.fn((id) => (id === "agent-1" ? { description: "worker" } : undefined)),
     };
-    const { tool } = register(manager);
+    const { tool } = create(manager);
     const state = {};
     const context = { toolCallId: "partial", state, expanded: false };
 
@@ -56,7 +55,7 @@ describe("send_input", () => {
         return true;
       }),
     };
-    const { tool } = register(manager);
+    const { tool } = create(manager);
 
     expect(tool.name).toBe("send_input");
     expect(tool.description).toContain("Use interrupt=true to redirect work immediately");
@@ -119,7 +118,7 @@ describe("send_input", () => {
         return false;
       }),
     };
-    const { tool } = register(manager);
+    const { tool } = create(manager);
     const staleCtx = Object.create(null);
     Object.defineProperty(staleCtx, "sessionManager", {
       get: () => {
@@ -137,32 +136,32 @@ describe("send_input", () => {
     expect(JSON.parse(textOf(queued))).toEqual({ submission_id: expect.any(String) });
     expect(manager.steer).toHaveBeenCalledWith(pending.id, "queued early");
 
-    const empty = await tool.execute(
-      "empty",
-      { target: pending.id, message: " \n" },
-      undefined,
-      undefined,
-      staleCtx,
-    );
-    expect(textOf(empty)).toBe("Empty message can't be sent to an agent");
+    const empty = await tool
+      .execute("empty", { target: pending.id, message: " \n" }, undefined, undefined, staleCtx)
+      .catch((error: unknown) => error);
+    expect(empty).toBeInstanceOf(SubagentOperationError);
+    expect(empty.message).toBe("Empty message can't be sent to an agent");
+    expect(empty.details.status).toBe("failed");
 
-    const unavailable = await tool.execute(
-      "unavailable",
-      { target: pending.id, message: "now", interrupt: true },
-      undefined,
-      undefined,
-      staleCtx,
-    );
-    expect(textOf(unavailable)).toContain("unavailable for interruption");
+    const unavailable = await tool
+      .execute(
+        "unavailable",
+        { target: pending.id, message: "now", interrupt: true },
+        undefined,
+        undefined,
+        staleCtx,
+      )
+      .catch((error: unknown) => error);
+    expect(unavailable).toBeInstanceOf(SubagentOperationError);
+    expect(unavailable.message).toContain("unavailable for interruption");
+    expect(unavailable.details.status).toBe("failed");
 
-    const missing = await tool.execute(
-      "missing",
-      { target: "missing", message: "hello" },
-      undefined,
-      undefined,
-      staleCtx,
-    );
-    expect(textOf(missing)).toBe("agent with id missing not found");
+    const missing = await tool
+      .execute("missing", { target: "missing", message: "hello" }, undefined, undefined, staleCtx)
+      .catch((error: unknown) => error);
+    expect(missing).toBeInstanceOf(SubagentOperationError);
+    expect(missing.message).toBe("agent with id missing not found");
+    expect(missing.details.status).toBe("failed");
 
     pending.status = "completed";
     const resumed = await tool.execute(
@@ -177,14 +176,12 @@ describe("send_input", () => {
 
     for (const status of ["stopped", "error"] as const) {
       pending.status = status;
-      const terminal = await tool.execute(
-        status,
-        { target: pending.id, message: "hello" },
-        undefined,
-        undefined,
-        staleCtx,
-      );
-      expect(textOf(terminal)).toContain(`input was not submitted to agent ${pending.id}`);
+      const terminal = await tool
+        .execute(status, { target: pending.id, message: "hello" }, undefined, undefined, staleCtx)
+        .catch((error: unknown) => error);
+      expect(terminal).toBeInstanceOf(SubagentOperationError);
+      expect(terminal.message).toContain(`input was not submitted to agent ${pending.id}`);
+      expect(terminal.details.status).toBe("failed");
     }
   });
 
@@ -197,17 +194,20 @@ describe("send_input", () => {
         throw new Error("blocked");
       }),
     };
-    const { tool } = register(manager);
+    const { tool } = create(manager);
 
-    const rejected = await tool.execute(
-      "rejected",
-      { target: record.id, message: "next boundary" },
-      undefined,
-      undefined,
-      {},
-    );
+    const rejected = await tool
+      .execute(
+        "rejected",
+        { target: record.id, message: "next boundary" },
+        undefined,
+        undefined,
+        {},
+      )
+      .catch((error: unknown) => error);
 
-    expect(textOf(rejected)).toContain("input was not submitted to agent agent-1: blocked");
+    expect(rejected).toBeInstanceOf(SubagentOperationError);
+    expect(rejected.message).toContain("input was not submitted to agent agent-1: blocked");
     expect(rejected.details.status).toBe("failed");
     expect(manager.sendInput).toHaveBeenCalledOnce();
   });
@@ -223,17 +223,20 @@ describe("send_input", () => {
       getRecord: vi.fn(() => record),
       cancelAndSteer: vi.fn(async () => false),
     };
-    const { pi, tool } = register(manager);
+    const { pi, tool } = create(manager);
 
-    const failed = await tool.execute(
-      "interrupt",
-      { target: record.id, message: "change course", interrupt: true },
-      undefined,
-      undefined,
-      {},
-    );
+    const failed = await tool
+      .execute(
+        "interrupt",
+        { target: record.id, message: "change course", interrupt: true },
+        undefined,
+        undefined,
+        {},
+      )
+      .catch((error: unknown) => error);
 
-    expect(textOf(failed)).toBe(`agent with id ${record.id} could not be interrupted`);
+    expect(failed).toBeInstanceOf(SubagentOperationError);
+    expect(failed.message).toBe(`agent with id ${record.id} could not be interrupted`);
     expect(failed.details).toMatchObject({ status: "failed", interrupt: true });
     expect(failed.details.submissionId).toBeUndefined();
     expect(pi.events.emit).not.toHaveBeenCalled();

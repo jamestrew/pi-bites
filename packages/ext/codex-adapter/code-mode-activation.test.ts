@@ -4,6 +4,7 @@ import {
   reconcileTools,
   createAdapterToolState,
   getNestedTools,
+  getDelegationTools,
 } from "./activation.js";
 
 test("only GPT-5.6/GPT-6 families and recognized prefixes enter Code Mode", () => {
@@ -159,4 +160,39 @@ test("re-enabling exec honors core capabilities removed while it was disabled", 
   );
   expect(reconcileTools([...readonly, "exec"], true, state)).toEqual(["read", "exec", "wait"]);
   expect([...getNestedTools(state)]).toEqual([]);
+});
+
+test("delegation snapshots recover permitted capabilities without changing parent exposure", () => {
+  const state = createAdapterToolState();
+  const selected = [
+    "read",
+    "bash",
+    "custom",
+    "exec",
+    "wait",
+    "exec_command",
+    "write_stdin",
+    "apply_patch",
+  ];
+  const active = reconcileTools(selected, true, state);
+  expect(active).toEqual(["exec", "wait", "custom"]);
+  const before = structuredClone(state);
+  const allowed = getDelegationTools(active, state);
+  expect(allowed).toEqual(
+    expect.arrayContaining([
+      "read",
+      "bash",
+      "custom",
+      "exec",
+      "wait",
+      "exec_command",
+      "write_stdin",
+    ]),
+  );
+  expect(allowed).not.toContain("edit");
+  expect(allowed).not.toContain("write");
+  expect(allowed).not.toContain("apply_patch");
+  expect(state).toEqual(before);
+  const outside = reconcileTools(active, false, state);
+  expect(getDelegationTools(outside, state)).toEqual(expect.arrayContaining(allowed));
 });
