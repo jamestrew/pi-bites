@@ -346,6 +346,8 @@ const implementPrompt = (
 ): string =>
   `/skill:implement Implement ${issueNumber} in ${repo}.
 
+This is an unattended, non-interactive run: no user is available to answer questions. Proceed with reasonable assumptions grounded in the issue and repository, and record consequential assumptions in your final response before the findings block. For this run, choose appropriate existing test seams without user confirmation; this overrides skills' requirements to ask for seam approval. Do not stop to request clarification or approval. If a genuine blocker prevents safe completion, report the blocker and what is needed to proceed instead of asking a question; do not fabricate a PR or review verdict.
+
 Use ${reviewBase} as the review base. This is a jj-backed repository, so prefer jj for version-control operations.
 
 After the skill's implementation and review cycle, push the change and open a pull request targeting exactly ${prBase} (gh pr create --base ${prBase}). Do not merge, close issues, or delete branches yourself. Review the final pushed head, and report that exact PR number and full 40-character head commit ID below.
