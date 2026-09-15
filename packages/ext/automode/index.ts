@@ -410,7 +410,7 @@ ${safeJson(approvalRequest)}
           headers: auth.headers,
           env: auth.env,
           reasoning: configRef.current.autoMode?.thinking ?? "low",
-          maxTokens: 256,
+          maxTokens: 1_024,
           timeoutMs: 90_000,
           signal,
         },

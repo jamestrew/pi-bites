@@ -383,7 +383,7 @@ describe("automode reviewer model and completion", () => {
     expect(completeSimple).toHaveBeenCalledWith(
       configuredModel,
       expect.objectContaining({ systemPrompt: expect.stringContaining("custom policy") }),
-      expect.objectContaining({ reasoning: "high", maxTokens: 256 }),
+      expect.objectContaining({ reasoning: "high", maxTokens: 1_024 }),
     );
   });
 
