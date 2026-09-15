@@ -56,21 +56,53 @@ export default function registerAutoCompaction(
   configRef: { current: BitesConfig },
 ): void {
   let compactionPending = false;
+  let resumeAfterCompaction = false;
 
-  const compactAtThreshold = (ctx: ExtensionContext, resume: boolean) => {
+  const tokensAtThreshold = (ctx: ExtensionContext): number | undefined => {
     if (ctx.mode === "print" || ctx.mode === "json") return;
     const threshold =
       configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD;
     const tokens = ctx.getContextUsage()?.tokens;
-    if (compactionPending || tokens == null || tokens < threshold) return;
+    return tokens != null && tokens >= threshold ? tokens : undefined;
+  };
+
+  const reset = () => {
+    resumeAfterCompaction = false;
+  };
+  pi.on("session_start", reset);
+  pi.on("session_tree", reset);
+
+  pi.on("turn_end", (event, ctx) => {
+    if (
+      resumeAfterCompaction ||
+      ctx.signal?.aborted ||
+      ctx.hasPendingMessages() ||
+      tokensAtThreshold(ctx) === undefined ||
+      event.message.role !== "assistant" ||
+      !event.message.content.some((block) => block.type === "toolCall")
+    ) {
+      return;
+    }
+
+    // End the run cleanly before manual compaction; ctx.compact() aborts an
+    // active run and races with tools such as Code Mode's exec invocation.
+    resumeAfterCompaction = true;
+    ctx.abort();
+  });
+
+  pi.on("agent_settled", (_event, ctx) => {
+    const tokens = tokensAtThreshold(ctx);
+    if (compactionPending || tokens === undefined) return;
 
     compactionPending = true;
+    const resume = resumeAfterCompaction;
+    resumeAfterCompaction = false;
     const ui = ctx.hasUI ? ctx.ui : undefined;
     ui?.notify(`Compacting at ${tokens.toLocaleString()} tokens`, "info");
-    ctx.compact({
-      onComplete: () => {
-        compactionPending = false;
-        if (resume) {
+    const finish = () => {
+      compactionPending = false;
+      if (resume) {
+        try {
           pi.sendMessage(
             {
               customType: "auto-compaction-continuation",
@@ -79,21 +111,18 @@ export default function registerAutoCompaction(
             },
             { triggerTurn: true, deliverAs: "followUp" },
           );
+        } catch {
+          // Session replacement invalidates the old extension API; the new
+          // session owns any continuation from that point onward.
         }
-      },
+      }
+    };
+    ctx.compact({
+      onComplete: finish,
       onError: (error) => {
-        compactionPending = false;
         ui?.notify(`Compaction failed: ${error.message}`, "error");
+        finish();
       },
     });
-  };
-
-  pi.on("turn_end", (event, ctx) => {
-    const resume =
-      ctx.hasPendingMessages() ||
-      (event.message.role === "assistant" &&
-        event.message.content.some((block) => block.type === "toolCall"));
-    compactAtThreshold(ctx, resume);
   });
-  pi.on("agent_settled", (_event, ctx) => compactAtThreshold(ctx, false));
 }

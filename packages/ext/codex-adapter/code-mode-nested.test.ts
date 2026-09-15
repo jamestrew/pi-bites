@@ -60,11 +60,12 @@ function setup(
     baseUrl: "https://work.example/v1",
     input: ["text", "image"],
   };
+  const run = new AbortController();
   const dependencies = {
     ...gate.ctx,
     cwd,
     model,
-    signal: new AbortController().signal,
+    signal: run.signal,
     isProjectTrusted: () => true,
     modelRegistry: {
       getAll: () => [model],
@@ -104,6 +105,7 @@ function setup(
     owned,
     config,
     model,
+    abortRun: () => run.abort(),
     expire: () => {
       stale = true;
     },
@@ -147,6 +149,21 @@ test("denial and cancelled approval never launch processes", async () => {
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(existsSync(join(cwd, "late"))).toBe(false);
   expect(sessions.listSessions()).toEqual([]);
+});
+
+test("yielded nested work survives the outer Pi run ending", async () => {
+  const { runtime, abortRun } = setup();
+  const yielded = await runtime.execute(
+    `const pending = tools.exec_command({cmd:"sleep .1; printf survived",login:false});
+     await yield_control();
+     text(await pending);`,
+  );
+  expect(yielded.kind).toBe("yielded");
+
+  abortRun();
+
+  const [result] = values(await runtime.wait(yielded.cellId));
+  expect(result).toMatchObject({ output: "survived", exit_code: 0 });
 });
 
 test("explicit cell cancellation terminates only its owned shells; completed cells leave resumable sessions", async () => {

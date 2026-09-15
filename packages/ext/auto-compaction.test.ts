@@ -7,11 +7,17 @@ import registerAutoCompaction, {
 function setup(thresholdTokens?: number, mode = "tui") {
   const handlers = new Map<string, (...args: never[]) => void>();
   const compact = vi.fn();
-  let tokens: number | null = 0;
+  const run = new AbortController();
+  const abort = vi.fn(() => run.abort());
   const sendMessage = vi.fn();
+  let apiIsStale = false;
+  let tokens: number | null = 0;
   const pi = {
     on: vi.fn((event: string, handler: (...args: never[]) => void) => handlers.set(event, handler)),
-    sendMessage,
+    sendMessage: (...args: unknown[]) => {
+      if (apiIsStale) throw new Error("stale extension API");
+      sendMessage(...args);
+    },
   };
   const configRef = {
     current: thresholdTokens === undefined ? {} : { autoCompaction: { thresholdTokens } },
@@ -22,6 +28,8 @@ function setup(thresholdTokens?: number, mode = "tui") {
   const ctx = {
     mode,
     getContextUsage: () => (tokens == null ? undefined : { tokens }),
+    signal: run.signal,
+    abort,
     hasPendingMessages: () => false,
     compact,
     get hasUI() {
@@ -36,8 +44,12 @@ function setup(thresholdTokens?: number, mode = "tui") {
 
   return {
     compact,
+    abort,
     notify,
     sendMessage,
+    signal: run.signal,
+    cancelRun: () => run.abort(),
+    invalidateApi: () => (apiIsStale = true),
     invalidateContext: () => (contextIsStale = true),
     setTokens: (value: number | null) => (tokens = value),
     turnEnd: (hasToolCall = false) =>
@@ -47,6 +59,7 @@ function setup(thresholdTokens?: number, mode = "tui") {
             role: "assistant",
             content: hasToolCall ? [{ type: "toolCall" }] : [],
           },
+          toolResults: [],
         } as never,
         ctx as never,
       ),
@@ -55,35 +68,20 @@ function setup(thresholdTokens?: number, mode = "tui") {
 }
 
 describe("auto compaction", () => {
-  test("compacts once when the threshold is crossed between tool-loop turns", () => {
-    const { agentSettled, compact, setTokens, turnEnd } = setup();
+  test("stops, compacts, and resumes a tool loop at the configured threshold", () => {
+    const { abort, agentSettled, compact, sendMessage, setTokens, turnEnd } = setup(42_000);
 
-    setTokens(DEFAULT_AUTO_COMPACTION_THRESHOLD - 1);
+    setTokens(41_999);
     turnEnd();
     expect(compact).not.toHaveBeenCalled();
 
-    setTokens(DEFAULT_AUTO_COMPACTION_THRESHOLD);
-    turnEnd();
+    setTokens(42_000);
+    turnEnd(true);
+    expect(abort).toHaveBeenCalledOnce();
+    expect(compact).not.toHaveBeenCalled();
+
     agentSettled();
     expect(compact).toHaveBeenCalledTimes(1);
-  });
-
-  test.each(["print", "json"])("leaves %s-mode tool loops to Pi's overflow compaction", (mode) => {
-    const { agentSettled, compact, setTokens, turnEnd } = setup(1, mode);
-
-    setTokens(100);
-    turnEnd(true);
-    agentSettled();
-
-    expect(compact).not.toHaveBeenCalled();
-  });
-
-  test("resumes an interrupted tool loop after compaction", () => {
-    const { compact, sendMessage, setTokens, turnEnd } = setup();
-
-    setTokens(DEFAULT_AUTO_COMPACTION_THRESHOLD);
-    turnEnd(true);
-    expect(sendMessage).not.toHaveBeenCalled();
 
     compact.mock.calls[0]?.[0].onComplete();
     expect(sendMessage).toHaveBeenCalledWith(
@@ -94,6 +92,29 @@ describe("auto compaction", () => {
       },
       { triggerTurn: true, deliverAs: "followUp" },
     );
+  });
+
+  test("does not resume a tool loop canceled before its turn ended", () => {
+    const { abort, agentSettled, cancelRun, compact, sendMessage, setTokens, turnEnd } = setup();
+
+    setTokens(DEFAULT_AUTO_COMPACTION_THRESHOLD);
+    cancelRun();
+    turnEnd(true);
+    expect(abort).not.toHaveBeenCalled();
+
+    agentSettled();
+    compact.mock.calls[0]?.[0].onComplete();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  test.each(["print", "json"])("leaves %s-mode tool loops to Pi's overflow compaction", (mode) => {
+    const { agentSettled, compact, setTokens, turnEnd } = setup(1, mode);
+
+    setTokens(100);
+    turnEnd(true);
+    agentSettled();
+
+    expect(compact).not.toHaveBeenCalled();
   });
 
   test("compacts at the default fixed threshold after the agent settles", () => {
@@ -145,6 +166,18 @@ describe("auto compaction", () => {
 
     expect(() => compact.mock.calls[0]?.[0].onError(new Error("failed"))).not.toThrow();
     expect(notify).toHaveBeenLastCalledWith("Compaction failed: failed", "error");
+  });
+
+  test("ignores a continuation after its extension API becomes stale", () => {
+    const { agentSettled, compact, invalidateApi, sendMessage, setTokens, turnEnd } = setup(42_000);
+
+    setTokens(42_000);
+    turnEnd(true);
+    agentSettled();
+    invalidateApi();
+
+    expect(() => compact.mock.calls[0]?.[0].onComplete()).not.toThrow();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
 

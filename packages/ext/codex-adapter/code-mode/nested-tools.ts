@@ -43,6 +43,11 @@ export class NestedToolBridge {
   }
 
   capture(ctx: ExtensionContext): void {
+    // Cell cancellation is carried by DelegateCall.signal. Do not retain the
+    // outer Pi run signal: a yielded cell can legitimately outlive that run.
+    const signal = new AbortController().signal;
+    const cellCtx = Object.create(ctx) as ExtensionContext;
+    Object.defineProperty(cellCtx, "signal", { value: signal });
     const trusted = ctx.isProjectTrusted();
     const context: ToolExecutionContext = {
       cwd: ctx.cwd,
@@ -52,17 +57,17 @@ export class NestedToolBridge {
     };
     this.snapshot = {
       // Delegates cannot reacquire ctx. Snapshot fork history only when spawning is permitted.
-      subagents: this.owned.subagents?.capture(ctx, {
+      subagents: this.owned.subagents?.capture(cellCtx, {
         forkContext: !this.enabled || this.enabled.has("multi_agent_v1__spawn_agent"),
       }),
       context,
-      authorization: this.gate?.captureSession(ctx) ?? {
+      authorization: this.gate?.captureSession(cellCtx) ?? {
         async authorize(request, launch) {
           request.signal?.throwIfAborted();
           return launch();
         },
       },
-      signal: ctx.signal ?? new AbortController().signal,
+      signal,
     };
   }
 
