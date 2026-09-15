@@ -100,53 +100,75 @@ export function createCodeModeRendering(owned: OwnedNestedTools) {
       const children = (context.state.children ??= new Map<string, ChildState>());
       for (const id of children.keys())
         if (!traces.some((trace) => trace.callId === id)) children.delete(id);
+      let body: Container | undefined;
+      let renderedVisible: boolean | undefined;
+      let renderedEmissions = -1;
+      let renderedFallbackError: boolean | undefined;
+      let renderedWidth: number | undefined;
+      let renderedLines: string[] | undefined;
+      const buildBody = (visible: boolean, fallbackError: boolean) => {
+        const body = new Container();
+        if (visible)
+          for (const trace of traces) {
+            const child = children.get(trace.callId) ?? { state: {} };
+            children.set(trace.callId, child);
+            body.addChild(
+              renderChild(renderers[trace.name], trace, child, theme, context, emitted),
+            );
+          }
+        const error = details?.errorText;
+        const standalone = traces.length === 0 && (visible || !!details?.output);
+        if (error || fallbackError || standalone) {
+          const text = fallbackError
+            ? textContent(result)
+            : standalone
+              ? (details?.output ?? textContent({ ...result, content: result.content.slice(1) }))
+              : "";
+          const status = options.isPartial
+            ? name === "exec"
+              ? "executing"
+              : "waiting"
+            : details?.failed || fallbackError
+              ? "failed"
+              : details?.state === "yielded"
+                ? "running"
+                : details?.state === "terminated"
+                  ? "terminated"
+                  : "completed";
+          const box = frame(theme, options.isPartial, !!error || fallbackError);
+          box.addChild(new Text(scanline(name, status, theme), 0, 0));
+          if (text || error) box.addChild(output(text, options.expanded, theme, error));
+          body.addChild(box);
+        }
+        return body;
+      };
       return {
         render(width: number) {
           // Keep this owner alive with its component, without retaining the transcript globally.
           const current = details?.codeMode ? owners.get(details.cellId) : undefined;
           const visible = !current || owner.version >= current.version;
-          const body = new Container();
-          if (visible)
-            for (const trace of traces) {
-              const child = children.get(trace.callId) ?? { state: {} };
-              children.set(trace.callId, child);
-              body.addChild(
-                renderChild(renderers[trace.name], trace, child, theme, context, emitted),
-              );
-            }
-          const error = details?.errorText;
           const fallbackError = context.isError && !details?.codeMode;
-          const standalone = traces.length === 0 && (visible || !!details?.output);
-          if (error || fallbackError || standalone) {
-            const text = fallbackError
-              ? textContent(result)
-              : standalone
-                ? (details?.output ?? textContent({ ...result, content: result.content.slice(1) }))
-                : "";
-            const status = options.isPartial
-              ? name === "exec"
-                ? "executing"
-                : "waiting"
-              : details?.failed || fallbackError
-                ? "failed"
-                : details?.state === "yielded"
-                  ? "running"
-                  : details?.state === "terminated"
-                    ? "terminated"
-                    : "completed";
-            const box = frame(theme, options.isPartial, !!error || fallbackError);
-            box.addChild(new Text(scanline(name, status, theme), 0, 0));
-            if (text || error) box.addChild(output(text, options.expanded, theme, error));
-            body.addChild(box);
+          if (
+            !body ||
+            visible !== renderedVisible ||
+            emitted.size !== renderedEmissions ||
+            fallbackError !== renderedFallbackError
+          ) {
+            body = buildBody(visible, fallbackError);
+            renderedVisible = visible;
+            renderedEmissions = emitted.size;
+            renderedFallbackError = fallbackError;
+            renderedLines = undefined;
           }
-          return fitLines(body.render(width), width);
+          if (!renderedLines || width !== renderedWidth) {
+            renderedLines = fitLines(body.render(width), width);
+            renderedWidth = width;
+          }
+          return renderedLines;
         },
         invalidate() {
-          for (const child of children.values()) {
-            child.call?.invalidate();
-            child.result?.invalidate();
-            for (const image of child.images?.values() ?? []) image.invalidate();
-          }
+          body?.invalidate();
+          renderedLines = undefined;
         },
       };
     },

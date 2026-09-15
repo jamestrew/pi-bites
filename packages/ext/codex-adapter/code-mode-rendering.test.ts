@@ -60,6 +60,9 @@ function setup() {
         );
         call = tool.renderCall(context.args, theme, context);
       },
+      invalidate() {
+        body?.invalidate();
+      },
       lines(width = 100) {
         return [...call.render(width), ...(body?.render(width) ?? [])];
       },
@@ -142,6 +145,21 @@ test("registered exec/wait transfer nested display ownership on restore, indepen
   exec.update(snapshot([command("first", "running")], 1, "yielded"));
   expect(exec.text()).toBe("");
   expect(wait.text()).not.toMatch(/secretJavaScript|cell_id|^wait /m);
+});
+
+test("restored redraws retain nested components across widths and invalidation", () => {
+  const row = setup().row("exec", "outer");
+  row.update(snapshot([command("first")]));
+  const first = row.lines();
+  const children = (row.context.state as { children: Map<string, { call: unknown }> }).children;
+  const call = children.get("first")!.call;
+  expect(call).toBeDefined();
+  expect(row.lines()).toEqual(first);
+  expect(children.get("first")!.call).toBe(call);
+  expect(row.lines(20).every((line: string) => visibleWidth(line) <= 20)).toBe(true);
+  row.invalidate();
+  expect(row.lines()).toEqual(first);
+  expect(children.get("first")!.call).toBe(call);
 });
 
 test("a pending wait keeps the known children visible until a newer result takes ownership", () => {

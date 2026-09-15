@@ -394,6 +394,7 @@ export async function runPiSessionsPicker(
 }
 
 export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions) {
+  let generation = 0;
   let timer: ReturnType<typeof setInterval> | undefined;
 
   return {
@@ -402,10 +403,24 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
         ui: { setStatus(id: string, text: string | undefined): void; theme?: SessionTrackerTheme };
       },
     ) {
+      const currentGeneration = ++generation;
       if (timer) options.clearInterval(timer);
+      timer = undefined;
+      const unset = Symbol("unset");
+      let renderedStatus: string | undefined | typeof unset = unset;
+      let ui: typeof ctx.ui;
+      let theme: SessionTrackerTheme | undefined;
+      try {
+        ui = ctx.ui;
+        theme = ui.theme;
+      } catch {
+        return; // The lifecycle context has already expired.
+      }
       const setStatus = (text: string | undefined) => {
+        if (text === renderedStatus) return;
         try {
-          ctx.ui.setStatus("session-tracker", text);
+          ui.setStatus("session-tracker", text);
+          renderedStatus = text;
         } catch {
           /* stale ctx */
         }
@@ -413,14 +428,16 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
       const update = async () => {
         try {
           const response = await options.send(options.socketPath, { type: "snapshot" });
+          if (generation !== currentGeneration) return;
           logTrackerRecovery(options, "footer snapshot");
           setStatus(
             colorizeSessionTrackerFooter(
               formatSessionTrackerFooter(response.records ?? [], options.paneId),
-              ctx.ui.theme,
+              theme,
             ),
           );
         } catch (error) {
+          if (generation !== currentGeneration) return;
           logTrackerFailure(options, "footer snapshot", error);
           setStatus(undefined);
         }
@@ -430,6 +447,7 @@ export function createSessionTrackerFooterRuntime(options: TrackerFooterOptions)
       timer.unref();
     },
     stop(ctx?: { ui?: { setStatus(id: string, text: string | undefined): void } }) {
+      generation++;
       if (timer) options.clearInterval(timer);
       timer = undefined;
       try {
