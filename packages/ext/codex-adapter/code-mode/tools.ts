@@ -60,6 +60,7 @@ export function registerCodeModeTools(
     name: "wait",
     label: "wait",
     description: contract.wait_description,
+    constrainedSampling: false as const,
     parameters: Type.Object(
       {
         cell_id: Type.String(contract.wait_schema.properties.cell_id),

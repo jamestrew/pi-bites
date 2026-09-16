@@ -84,6 +84,9 @@ Example:
 
 `codexAdapter` exposes Code Mode through `exec` and `wait` for GPT-5.6 and GPT-6 base IDs and hyphenated variants. The five owned capabilities—`exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`—are callable inside `exec`, subject to session selection and availability. Unrelated direct tools remain available. Other model families use normal Pi core tools, with no standalone adapter web tool.
 
+Codex wire-format parity requires a patched Pi host; installing this extension alone
+does not replace the host’s pi-ai serializer. See [patch installation and validation](patches/README.md).
+
 The four core nested contracts are documented eagerly. Web help is loaded on demand through `text(ALL_TOOLS.filter(tool => tool.name === "web_run"));` before browsing, including after compaction removes previously loaded help. Initial guidance retains browsing triggers. Discovery is documentation only and does not enable unavailable web routes or credential fallback. It leaves tool definitions and the system prompt stable; it does not guarantee provider cache savings.
 
 Recognized model-ID prefixes are `openai/`, `openai-codex/`, `azure/`, `azure-openai/`, `github-copilot/`, and `openrouter/`. A provider name alone never enables the adapter. The obsolete `codexAdapter.providers` option has been removed; existing unknown configuration keys are ignored, so it no longer selects models.

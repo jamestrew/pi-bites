@@ -1,0 +1,37 @@
+--- a/packages/ai/src/api/constrained-sampling.ts
++++ b/packages/ai/src/api/constrained-sampling.ts
+@@ -207,6 +207,7 @@
+ 
+ export function resolveJsonSchemaStrictSampling(tool: Tool, supportsStrictMode: boolean): boolean | undefined {
+ 	const config = tool.constrainedSampling;
++	if (config === false) return false;
+ 	if (!config || config.type !== "json_schema") return undefined;
+ 
+ 	if (supportsStrictMode) {
+--- a/packages/ai/src/api/openai-responses-shared.ts
++++ b/packages/ai/src/api/openai-responses-shared.ts
+@@ -78,6 +78,24 @@
+ 	model: Model<TApi>,
+ 	content: readonly (TextContent | ImageContent)[],
+ ): string | ToolResultOutputContent {
++	if (model.api === "openai-codex-responses") {
++		const output: ToolResultOutputContent = [];
++		for (const item of content) {
++			if (item.type === "text") {
++				output.push({ type: "input_text", text: sanitizeSurrogates(item.text) });
++			} else if (model.input.includes("image")) {
++				output.push({
++					type: "input_image",
++					detail: "auto",
++					image_url: `data:${item.mimeType};base64,${item.data}`,
++				});
++			}
++		}
++		if (output.length === 0 && content.length > 0) {
++			output.push({ type: "input_text", text: "(see attached image)" });
++		}
++		return output;
++	}
+ 	const textResult = content
+ 		.filter((c): c is TextContent => c.type === "text")
+ 		.map((c) => c.text)
