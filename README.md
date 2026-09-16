@@ -26,6 +26,21 @@ pi install git:github.com/jamestrew/pi-bites
 
 For exact release pins and the compatibility policy, see [Releases](RELEASES.md).
 
+On Linux x64 or arm64, Code Mode also needs its standalone host installed on
+`PATH`; the Pi package does not download it automatically. From the pi-bites
+checkout (or the installed package directory), run:
+
+```bash
+bash scripts/code-mode-install.sh
+# Or install it in another directory:
+bash scripts/code-mode-install.sh --install-dir "$HOME/bin"
+```
+
+This installs `codex-code-mode-host`, which includes the required V8 runtime;
+you do **not** need to install V8 separately. Restart Pi, or run `/reload`
+after changing `PATH`. To use pi-bites without Code Mode, add
+`"codexAdapter"` to the `disable` list instead.
+
 ## Configuration
 
 `pi-bites` reads JSON config from two places:
