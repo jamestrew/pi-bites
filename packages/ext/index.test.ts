@@ -4,7 +4,6 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 const registerModules = [
   "./bash-gate/index.js",
-  "./codegraph.js",
   "./statusline.js",
   "./footer/index.js",
   "./token-count/index.js",
@@ -141,7 +140,6 @@ describe("extension entrypoint", () => {
     try {
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./codegraph.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledWith(
         loaded.pi,
         expect.any(Object),
@@ -184,19 +182,8 @@ describe("extension entrypoint", () => {
     try {
       expect(loaded.registerSpies.get("./bash-gate/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./codegraph.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./auto-compaction.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
-    } finally {
-      loaded.restoreArgv();
-    }
-  });
-
-  test("can disable CodeGraph without probing its executable", async () => {
-    const loaded = await loadExtension({ disable: ["codegraph"] });
-    try {
-      expect(loaded.registerSpies.get("./codegraph.js")).not.toHaveBeenCalled();
-      expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
     } finally {
       loaded.restoreArgv();
     }

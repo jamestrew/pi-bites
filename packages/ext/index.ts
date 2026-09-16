@@ -1,5 +1,4 @@
 import registerBashGate from "./bash-gate/index.js";
-import registerCodegraph from "./codegraph.js";
 import registerStatusline from "./statusline.js";
 import registerFooter from "./footer/index.js";
 import registerTokenCount from "./token-count/index.js";
@@ -71,7 +70,6 @@ export default async function (pi: ExtensionAPI) {
     : registerCodexAdapter(pi, configRef, bashGate, subagents);
   const previewCodexPrompt = codexAdapter?.previewPrompt;
 
-  if (!disabled.has("codegraph")) await registerCodegraph(pi);
   if (isSubagent) return;
 
   if (!disabled.has("goal")) registerGoal(pi);

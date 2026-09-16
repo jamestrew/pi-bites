@@ -110,16 +110,6 @@ through grammar tools where the actual API/model supports them; other routes sen
 `{"code":"..."}` through the stock structured fallback. Details and reproducible
 contract generation are in [the integration record](docs/code-mode-contract/activation.md). See [cutover validation and live smoke instructions](docs/code-mode-contract/cutover.md) for coverage and route availability.
 
-## CodeGraph exploration
-
-When `codegraph --version` succeeds on `PATH`, pi-bites registers `codegraph_explore({ query, maxFiles? })` as the primary tool for unfamiliar code understanding. Install the standalone CodeGraph CLI separately and run `codegraph init` in your repository; installing after startup requires `/reload`. No SDK, MCP server, instruction-file edits, or watcher is used.
-
-Each call finds the nearest ancestor with a `.codegraph/` index from the session cwd, syncs it, then explores. Calls are serialized per indexed root, and `maxFiles` accepts 1–20 (omit it for adaptive results). Missing indexes fall back to built-in tools with initialization guidance. Large output is truncated to Pi's standard limits with a full-output temporary file.
-
-Freshness is best effort if an external CodeGraph process holds `.codegraph/codegraph.lock`: CodeGraph 1.6 can skip sync yet report success indistinguishable from a clean no-op. Serialization prevents contention only among this extension's own calls.
-
-Use CodeGraph's Linux x64 distribution on Ubuntu, any working `codegraph` on `PATH` on NixOS, or Linux arm64 on a 64-bit Raspberry Pi OS/userspace; upstream does not support 32-bit ARM. Disable with `"disable": ["codegraph"]`.
-
 ## Disabling extensions
 
 Use slash commands inside pi:
@@ -133,7 +123,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal, codexAdapter, codegraph
+bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal, codexAdapter
 ```
 
 You can also edit config directly:
