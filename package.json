@@ -1,6 +1,6 @@
 {
   "name": "pi-bites",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "keywords": [
     "pi-package"
   ],
@@ -16,7 +16,8 @@
     "check": "bun run lint && bun run fmt && bun run typecheck && bun run test",
     "loop": "bun scripts/loop.ts",
     "smoke:goal-model": "./scripts/goal-model-smoke.sh",
-    "update:pi": "./scripts/update-pi.sh"
+    "update:pi": "./scripts/update-pi.sh",
+    "release": "bun scripts/release.ts"
   },
   "dependencies": {
     "@ff-labs/fff-node": "0.9.6",

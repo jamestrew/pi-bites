@@ -5,8 +5,6 @@ A small collection of personal extensions for the pi coding agent.
 ## What's included
 
 - Codex V1 subagents (`default`, `worker`, and `explorer` roles)
-- Less noisy `read` tool output
-- Tweaked `read` tool description/output to keep file reads less noisy
 - Configurable bash command gate
 - Optional model-reviewed automode for bash-gate approvals
 - Better fuzzy finding for `@` file mentions powered by `fff`
@@ -25,6 +23,8 @@ A small collection of personal extensions for the pi coding agent.
 ```bash
 pi install git:github.com/jamestrew/pi-bites
 ```
+
+For exact release pins and the compatibility policy, see [Releases](RELEASES.md).
 
 ## Configuration
 
