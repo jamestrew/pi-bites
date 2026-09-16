@@ -123,6 +123,28 @@ export default function registerCodeMode(
     });
     if (prompt !== event.systemPrompt) return { systemPrompt: prompt };
   });
+  pi.on("before_provider_request", (event, ctx) => {
+    if (
+      !enabled(ctx.model) ||
+      ctx.model?.api !== "openai-codex-responses" ||
+      !pi.getActiveTools().includes("wait")
+    )
+      return;
+    const payload = event.payload;
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      !("tools" in payload) ||
+      !Array.isArray(payload.tools)
+    )
+      return;
+    // Stock pi-ai ignores constrainedSampling:false; opt out at the supported wire hook.
+    for (const item of payload.tools as unknown[]) {
+      if (!item || typeof item !== "object") continue;
+      const tool = item as Record<string, unknown>;
+      if (tool.type === "function" && tool.name === "wait") tool.strict = false;
+    }
+  });
   pi.on("turn_start", (_event, ctx) => reconcile(ctx));
   pi.on("session_shutdown", async (event) => {
     lifecycle.shutdown(event.reason === "reload" ? "reload" : "shutdown");
