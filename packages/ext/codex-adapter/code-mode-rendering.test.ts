@@ -1,3 +1,5 @@
+import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
+import { stripVTControlCharacters } from "node:util";
 import { expect, test, vi } from "vitest";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import registerCodeMode from "./code-mode/registration.js";
@@ -167,9 +169,33 @@ test("a pending wait keeps the known children visible until a newer result takes
   const exec = h.row("exec", "outer-1");
   exec.update(snapshot([command("first")], 1, "yielded"));
   const wait = h.row("wait", "outer-2");
+  expect(wait.text()).toBe("");
+  expect(exec.text()).toContain("Exec printf first");
   wait.update(snapshot([command("first")], 2, "yielded"), true);
   expect(exec.text()).toBe("");
   expect(wait.text()).toContain("Exec printf first");
+  const next = h.row("wait", "outer-3");
+  expect(next.text()).toBe("");
+  expect(wait.text()).toContain("Exec printf first");
+  next.update({ content: [{ type: "text", text: "Wait interrupted" }] });
+  next.context.isError = true;
+  expect(next.text()).toContain("wait failed");
+  expect(next.text()).toContain("Wait interrupted");
+});
+
+test("a wait without a matching display owner keeps its placeholder and errors", () => {
+  const h = setup();
+  const wait = h.row("wait", "standalone");
+  expect(wait.text()).toBe("\nwait waiting\n");
+  const exec = h.row("exec", "other-cell");
+  const other = snapshot([command("other")]);
+  other.details.cellId = "other-cell";
+  exec.update(other);
+  expect(wait.text()).toBe("\nwait waiting\n");
+  wait.update({ content: [{ type: "text", text: "Unknown cell" }] });
+  wait.context.isError = true;
+  expect(wait.text()).toContain("wait failed");
+  expect(wait.text()).toContain("Unknown cell");
 });
 
 test("streamed calls retain invocation order, independent approval state, styles, and one set of padding", () => {
@@ -444,4 +470,44 @@ test("an earlier emitted image deduplicates the visible wait even when restored 
   expect(wait.text()).not.toContain("image/png");
   expect(wait.context.invalidate).toHaveBeenCalled();
   expect(exec.text()).toBe("");
+});
+
+test("Pi renders one View row after streaming and completing an image call", () => {
+  initTheme("dark");
+  const h = setup();
+  const component = new ToolExecutionComponent(
+    "exec",
+    "outer",
+    { code: 'image(await tools.view_image({path:"picture.png"}));' },
+    { showImages: false },
+    h.tools.get("exec"),
+    { requestRender() {} } as never,
+    "/tmp",
+  );
+  component.markExecutionStarted();
+  component.setArgsComplete();
+  const trace: NestedTrace = {
+    cellId: "cell",
+    callId: "image",
+    name: "view_image",
+    state: "running",
+    input: { path: "picture.png" },
+  };
+  component.updateResult({ ...snapshot([trace]), isError: false }, true);
+  component.render(100);
+  trace.state = "completed";
+  trace.result = { content: [{ type: "image", data: png, mimeType: "image/png" }], details: {} };
+  component.updateResult({ ...snapshot([trace]), isError: false }, true);
+  component.render(100);
+  const final = snapshot([trace]);
+  final.content.push({ type: "image", data: png, mimeType: "image/png" });
+  component.updateResult({ ...final, isError: false });
+  expect(
+    stripVTControlCharacters(component.render(100).join("\n")).match(/View picture.png/g),
+  ).toHaveLength(1);
+  for (const expanded of [false, true]) {
+    component.setExpanded(expanded);
+    const text = stripVTControlCharacters(component.render(100).join("\n"));
+    expect(text.match(/View picture.png/g)).toHaveLength(1);
+  }
 });

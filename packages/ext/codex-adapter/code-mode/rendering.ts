@@ -38,6 +38,7 @@ interface RenderState {
   children?: Map<string, ChildState>;
 }
 interface Owner {
+  toolCallId: string;
   version: number;
   invalidate: () => void;
 }
@@ -66,14 +67,21 @@ export function createCodeModeRendering(owned: OwnedNestedTools) {
   >();
   const forTool = (name: "exec" | "wait") => ({
     renderShell: "self" as const,
-    renderCall(_args: unknown, theme: Theme, context: ToolRenderContext<RenderState>) {
+    renderCall(args: unknown, theme: Theme, context: ToolRenderContext<RenderState>) {
+      const cellId =
+        name === "wait" && args && typeof args === "object" && "cell_id" in args
+          ? args.cell_id
+          : undefined;
       const pending = frame(theme, true, false);
       pending.addChild(
         new Text(scanline(name, name === "exec" ? "executing" : "waiting", theme), 0, 0),
       );
       return {
         render: (width: number) =>
-          context.state.hasResult ? [] : fitLines(pending.render(width), width),
+          context.state.hasResult ||
+          (typeof cellId === "string" && owners.get(cellId)?.owner.deref())
+            ? []
+            : fitLines(pending.render(width), width),
         invalidate: () => pending.invalidate(),
       };
     },
@@ -91,12 +99,22 @@ export function createCodeModeRendering(owned: OwnedNestedTools) {
       const emitted = previous?.emitted ?? new Set<string>();
       const previousEmissions = emitted.size;
       for (const item of result.content) if (item.type === "image") emitted.add(imageKey(item));
-      const owner: Owner = { version, invalidate: context.invalidate };
+      const owner: Owner = {
+        toolCallId: context.toolCallId,
+        version,
+        invalidate: context.invalidate,
+      };
       if (details?.codeMode && (!previous || version >= previous.version)) {
         owners.set(details.cellId, { version, owner: new WeakRef(owner), emitted });
-        if (previous && version > previous.version) previous.owner.deref()?.invalidate();
       }
-      if (previous && emitted.size !== previousEmissions) previous.owner.deref()?.invalidate();
+      const previousOwner = previous?.owner.deref();
+      // Pi invalidation rebuilds synchronously; never re-enter the row currently being built.
+      if (
+        previousOwner &&
+        previousOwner.toolCallId !== context.toolCallId &&
+        (version > previousOwner.version || emitted.size !== previousEmissions)
+      )
+        previousOwner.invalidate();
       const children = (context.state.children ??= new Map<string, ChildState>());
       for (const id of children.keys())
         if (!traces.some((trace) => trace.callId === id)) children.delete(id);
