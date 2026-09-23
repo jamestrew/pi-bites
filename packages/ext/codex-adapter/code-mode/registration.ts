@@ -61,6 +61,7 @@ export default function registerCodeMode(
   const lifecycle = new CodeModeLifecycle(
     () => ({
       tools: getTools(),
+      waitForApprovals: bridge.captureApprovalWaiter(),
       shells: sessions,
       onFailure: (error) => notify?.(error.message, "error"),
     }),

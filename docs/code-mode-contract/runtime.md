@@ -69,6 +69,24 @@ shared shell manager or affecting unrelated cells. Exit events release retained
 ownership. The existing shell manager remains responsible for process-group
 termination and escalation.
 
+## Approval response barrier (#324)
+
+Registered `exec` and non-terminating `wait` hold their model-visible responses
+until all pending nested command authorizations in their runtime generation clear.
+This follows Codex's `elicitations.wait_until_clear()` response boundary in
+`core/src/tools/code_mode/{execute_handler,wait_handler}.rs`, without changing
+native yield timers or polling internally. The local barrier covers bash-gate
+classification, queued human dialogs, and automated reviews, not arbitrary
+elicitation types.
+
+The bridge tracks authorization separately from bounded presentation traces and
+releases each hold before launching its command, or on denial/cancellation.
+Running commands still yield normally. The runtime keeps its cancellation and
+observation ownership through the barrier; termination bypasses it. The barrier
+captures the bridge generation, not an ephemeral context. Session invalidation
+aborts old waiters and starts with an empty approval set; late approvals cannot
+launch cancelled delegates or release a replacement generation's holds.
+
 ## Lifecycle hooks and context safety
 
 `code-mode/lifecycle.ts` exports `CodeModeLifecycle`. It creates a runtime lazily

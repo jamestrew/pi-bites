@@ -1,3 +1,4 @@
+import { waitForAuthorization } from "../../bash-gate/pending.js";
 import { SubagentOperationError } from "../../subagents/tool-result.js";
 import type { ExtensionContext, AgentToolResult } from "@earendil-works/pi-coding-agent";
 import type { BashGateController, CommandAuthorizationSession } from "../../bash-gate/index.js";
@@ -31,6 +32,7 @@ export class NestedToolBridge {
     this.enabled = new Set(names);
   }
   private owner = new AbortController();
+  private approvals = new Set<Promise<void>>();
   private readonly adapters: NestedAdapter[];
 
   constructor(
@@ -74,9 +76,25 @@ export class NestedToolBridge {
   clear(): void {
     this.owner.abort(new Error("Code Mode tool session was cleared"));
     this.owner = new AbortController();
+    this.approvals = new Set();
     this.snapshot = undefined;
     this.traces.clear();
     this.owned.web_run.resetNavigationState();
+  }
+
+  /** Bind the response barrier to this runtime generation, not a later captured ctx. */
+  captureApprovalWaiter(): (signal?: AbortSignal) => Promise<void> {
+    const owner = this.owner.signal;
+    const approvals = this.approvals;
+    return async (signal) => {
+      const waiting = signal ? AbortSignal.any([owner, signal]) : owner;
+      waiting.throwIfAborted();
+      // Recheck for approvals added while an earlier batch was resolving.
+      while (approvals.size) {
+        await waitForAuthorization(Promise.all(approvals), waiting);
+        waiting.throwIfAborted();
+      }
+    };
   }
 
   tools(): RuntimeTool[] {
@@ -134,7 +152,28 @@ export class NestedToolBridge {
         signal,
         context: snapshot.context,
         subagents: snapshot.subagents,
-        authorization: snapshot.authorization,
+        authorization: {
+          authorize: async (request, launch) => {
+            const approvals = this.approvals;
+            const { promise, resolve } = Promise.withResolvers<void>();
+            approvals.add(promise);
+            const release = () => {
+              approvals.delete(promise);
+              resolve();
+            };
+            signal.addEventListener("abort", release, { once: true });
+            try {
+              return await snapshot.authorization.authorize(request, () => {
+                // Gate time blocks model responses; command execution must still yield.
+                release();
+                return launch();
+              });
+            } finally {
+              signal.removeEventListener("abort", release);
+              release();
+            }
+          },
+        },
         prepared: (value) => {
           params = value;
           trace("running");

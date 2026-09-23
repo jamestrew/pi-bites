@@ -21,6 +21,8 @@ export interface RuntimeOptions {
     terminateSession(id: number): boolean;
     onSessionExit(listener: (id: number) => void): () => void;
   };
+  /** Hold model-visible responses during session-owned command authorization. */
+  waitForApprovals?: (signal?: AbortSignal) => Promise<void>;
   onNotification?: (cellId: string, text: string) => void;
   onFailure?: (error: Error) => void;
 }
@@ -37,7 +39,7 @@ export class CodeModeRuntime {
   private readonly startingExecutions = new Set<symbol>();
   private readonly observing = new Set<string>();
 
-  constructor(options: RuntimeOptions) {
+  constructor(private readonly options: RuntimeOptions) {
     this.tools = [...options.tools];
     if (new Set(this.tools.map((tool) => tool.name)).size !== this.tools.length)
       throw new Error("Duplicate Code Mode tool names");
@@ -143,6 +145,8 @@ export class CodeModeRuntime {
         },
       );
       const response = this.consume(await initial, cellId);
+      await this.options.waitForApprovals?.(signal);
+      this.assertActive();
       signal?.throwIfAborted();
       return { ...this.expose(response), maxOutputTokens: parsed.maxOutputTokens };
     } catch (error) {
@@ -233,8 +237,14 @@ export class CodeModeRuntime {
         void this.connection.close(new Error("Invalid Code Mode wait outcome"));
         throw new Error("Invalid Code Mode wait outcome");
       }
+      const response = this.consume(wrapped, nativeId);
+      if (waiting) {
+        await this.options.waitForApprovals?.(signal);
+        this.assertActive();
+        signal?.throwIfAborted();
+      }
       return {
-        ...this.expose(this.consume(wrapped, nativeId)),
+        ...this.expose(response),
         ...(isMissingRuntimeOutcome(value) ? { missingCell: true } : {}),
       };
     } finally {

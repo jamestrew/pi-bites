@@ -409,3 +409,174 @@ test("a missing host fails visibly without changing the default tool interface",
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test
+  .skipIf(!host)
+  .each(
+    (["exec", "wait"] as const).flatMap((tool) =>
+      (["Allow", "Deny", "abort", "replacement"] as const).map((resolution) => ({
+        tool,
+        resolution,
+      })),
+    ),
+  )(
+  "$tool holds approval-time yields and releases on $resolution",
+  async ({ tool, resolution }) => {
+    const { mkdtempSync, symlinkSync, rmSync, existsSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const directory = mkdtempSync(join(tmpdir(), "code-mode-approval-"));
+    symlinkSync(host!, join(directory, "codex-code-mode-host"));
+    vi.stubEnv("PATH", `${directory}:${process.env.PATH ?? ""}`);
+    const marker = join(directory, "launched");
+    const choice = Promise.withResolvers<string>();
+    const prompted = Promise.withResolvers<void>();
+    const gate = createBashGateHarness([], false, undefined, true, {
+      bashGate: { rules: [{ cmd: "touch" }] },
+    });
+    gate.ui.select.mockImplementation(() => {
+      prompted.resolve();
+      return choice.promise;
+    });
+    const h = setup(undefined, gate.gate);
+    let stale = false;
+    const ctx = new Proxy(
+      { ...context(), ui: gate.ui },
+      {
+        get(target, key) {
+          if (stale) throw new Error(`stale ctx ${String(key)}`);
+          return Reflect.get(target, key);
+        },
+      },
+    );
+    const controller = new AbortController();
+    let pending: Promise<any> | undefined;
+    try {
+      await h.emit("session_start", {}, ctx);
+      const command = `touch ${JSON.stringify(marker)}`;
+      const code = `text(await tools.exec_command({cmd:${JSON.stringify(command)},login:false}));`;
+      let cellId: string | undefined;
+      if (tool === "wait") {
+        // The first observation yields before authorization starts; wait observes the gate.
+        const initial = await h.tools.get("exec").execute("initial", {
+          code: `// @exec: {"yield_time_ms":0}\nawait new Promise(r => setTimeout(r,100)); ${code}`,
+        });
+        cellId = initial.details.cellId;
+        await prompted.promise;
+      }
+      let settled = false;
+      pending = h.tools
+        .get(tool)
+        .execute(
+          "approval",
+          tool === "exec"
+            ? {
+                code: `// @exec: {"yield_time_ms":25}\n${code}`,
+              }
+            : { cell_id: cellId, yield_time_ms: 25 },
+          controller.signal,
+        )
+        .then((result: any) => {
+          settled = true;
+          return result;
+        });
+      await prompted.promise;
+      stale = true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(settled).toBe(false);
+      expect(existsSync(marker)).toBe(false);
+      if (resolution === "abort") controller.abort();
+      else if (resolution === "replacement") await h.emit("session_start", {}, context());
+      else choice.resolve(resolution);
+      const yielded = await pending;
+      if (resolution === "abort" || resolution === "replacement") {
+        expect(yielded.details.failed).toBe(true);
+        choice.resolve("Allow"); // A late approval cannot launch the old command.
+        const fresh = await h.tools.get("exec").execute("fresh", { code: 'text("fresh");' });
+        expect(fresh.content).toContainEqual({ type: "text", text: "fresh" });
+        expect(existsSync(marker)).toBe(false);
+      } else {
+        expect(yielded.details.state).toBe("yielded");
+        const completed = await h.tools
+          .get("wait")
+          .execute("completion", { cell_id: yielded.details.cellId });
+        expect(completed.details.failed).toBe(resolution === "Deny");
+        expect(existsSync(marker)).toBe(resolution === "Allow");
+      }
+    } finally {
+      choice.resolve("Deny");
+      controller.abort();
+      await h.emit("session_shutdown", { reason: "quit" }, {});
+      await pending;
+      vi.unstubAllEnvs();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test.skipIf(!host)(
+  "queued approvals hold all cell responses but running commands do not",
+  async () => {
+    const { mkdtempSync, symlinkSync, rmSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const directory = mkdtempSync(join(tmpdir(), "code-mode-queued-approval-"));
+    symlinkSync(host!, join(directory, "codex-code-mode-host"));
+    vi.stubEnv("PATH", `${directory}:${process.env.PATH ?? ""}`);
+    const firstChoice = Promise.withResolvers<string>();
+    const secondChoice = Promise.withResolvers<string>();
+    const gate = createBashGateHarness([], false, undefined, true, {
+      bashGate: { rules: [{ cmd: "sleep" }] },
+    });
+    gate.ui.select
+      .mockImplementationOnce(() => firstChoice.promise)
+      .mockImplementationOnce(() => secondChoice.promise);
+    const h = setup(undefined, gate.gate);
+    const calls: Promise<any>[] = [];
+    const settled: string[] = [];
+    const approving = new Set<string>();
+    try {
+      await h.emit("session_start", {}, { ...context(), ui: gate.ui });
+      for (const id of ["first", "second"]) {
+        calls.push(
+          h.tools
+            .get("exec")
+            .execute(
+              id,
+              {
+                code: '// @exec: {"yield_time_ms":25}\nawait tools.exec_command({cmd:"sleep 60",login:false,yield_time_ms:30000});',
+              },
+              undefined,
+              (update: any) => {
+                if (update.details.traces.some((trace: any) => trace.state === "approval"))
+                  approving.add(id);
+              },
+            )
+            .then((result: any) => {
+              settled.push(id);
+              return result;
+            }),
+        );
+      }
+      await expect.poll(() => approving.size).toBe(2);
+      await expect.poll(() => gate.ui.select.mock.calls.length).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(settled).toEqual([]);
+      firstChoice.resolve("Allow");
+      await expect.poll(() => gate.ui.select.mock.calls.length).toBe(2);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(settled).toEqual([]);
+      secondChoice.resolve("Allow");
+      // Neither 60-second shell (nor its 30-second initial poll) should hold these responses.
+      const results = await Promise.all(calls);
+      expect(results.map((result) => result.details.state)).toEqual(["yielded", "yielded"]);
+    } finally {
+      firstChoice.resolve("Deny");
+      secondChoice.resolve("Deny");
+      await h.emit("session_shutdown", { reason: "quit" }, {});
+      await Promise.allSettled(calls);
+      vi.unstubAllEnvs();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
