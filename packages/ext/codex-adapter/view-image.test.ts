@@ -7,12 +7,13 @@ import {
   truncateSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
 import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
-import { getCapabilities, setCapabilities } from "@earendil-works/pi-tui";
 import { describe, expect, test, vi } from "vitest";
 
 import { formatNativeBinaryError } from "./native-binary-error.js";
@@ -185,7 +186,11 @@ describe("view_image", () => {
     expect(tool.renderResult).toBeUndefined();
   });
 
-  test("uses Pi's inline-image rendering and capability-aware text fallback", () => {
+  test("uses Pi's inline-image rendering and capability-aware text fallback", async () => {
+    // Capability state must belong to the TUI instance used by ToolExecutionComponent.
+    const requireFromPi = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
+    const { getCapabilities, setCapabilities }: typeof import("@earendil-works/pi-tui") =
+      await import(pathToFileURL(requireFromPi.resolve("@earendil-works/pi-tui")).href);
     initTheme("dark");
     const previousCapabilities = getCapabilities();
     const image = {
