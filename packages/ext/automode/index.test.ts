@@ -1,8 +1,8 @@
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager, type ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import registerBashGate from "../bash-gate/index.js";
 import registerAutoMode, {
@@ -12,7 +12,9 @@ import registerAutoMode, {
 } from "./index.js";
 import { appendAutoModeUsageRecord } from "./usage.js";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+type Complete = (...args: Parameters<ModelRegistry["streamSimple"]>) => Promise<AssistantMessage>;
+const complete = vi.fn<Complete>();
+const streamSimple = (...args: Parameters<Complete>) => ({ result: () => complete(...args) });
 vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 const model = { provider: "provider", id: "current", name: "Current" };
@@ -75,12 +77,7 @@ function createAutoModeHarness(config: Record<string, unknown> = {}) {
         ? configuredModel
         : undefined,
     ),
-    getApiKeyAndHeaders: vi.fn(async () => ({
-      ok: true,
-      apiKey: "secret-key",
-      headers: { "x-test": "header" },
-      env: { TEST: "1" },
-    })),
+    streamSimple,
   };
   const ctx = {
     model,
@@ -123,7 +120,7 @@ function createAuthorizationIntegrationHarness() {
     getAvailable: vi.fn(() => [model]),
     getAll: vi.fn(() => [model]),
     find: vi.fn(),
-    getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: "secret-key" })),
+    streamSimple,
   };
   const ctx = {
     cwd: "/repo",
@@ -149,7 +146,7 @@ function createAuthorizationIntegrationHarness() {
 }
 
 beforeEach(() => {
-  vi.mocked(completeSimple).mockReset();
+  vi.mocked(complete).mockReset();
   vi.mocked(appendAutoModeUsageRecord).mockReset().mockResolvedValue();
 });
 
@@ -182,7 +179,7 @@ describe("automode registration state", () => {
 describe("automode reviewer model and completion", () => {
   test("carries every gate status into the next real reviewer request without execution output", async () => {
     const { branch, contextEntries, ctx, toolCall } = createAuthorizationIntegrationHarness();
-    vi.mocked(completeSimple)
+    vi.mocked(complete)
       .mockResolvedValueOnce(response('{"outcome":"allow"}'))
       .mockResolvedValueOnce(response('{"outcome":"deny"}'))
       .mockResolvedValueOnce(response('{"outcome":"deny"}'))
@@ -296,7 +293,7 @@ describe("automode reviewer model and completion", () => {
       ctx,
     );
 
-    const finalCall = vi.mocked(completeSimple).mock.calls[3];
+    const finalCall = vi.mocked(complete).mock.calls[3];
     if (!finalCall) throw new Error("Expected the final reviewer call");
     const prompt = (finalCall[1] as any).messages[0].content[0].text as string;
     expect(prompt).toContain("Remove generated build files");
@@ -319,68 +316,45 @@ describe("automode reviewer model and completion", () => {
   });
 
   test("uses the exact current model when no reviewer model is configured", async () => {
-    const { controller, ctx, registry } = createAutoModeHarness();
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+    const { controller, ctx } = createAutoModeHarness();
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
 
     await expect(
       controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any),
     ).resolves.toEqual({ outcome: "allow" });
 
-    expect(registry.getApiKeyAndHeaders).toHaveBeenCalledWith(model);
-    expect(completeSimple).toHaveBeenCalledWith(
+    expect(complete).toHaveBeenCalledWith(
       model,
       expect.anything(),
-      expect.objectContaining({ apiKey: "secret-key", signal: ctx.signal, timeoutMs: 90_000 }),
+      expect.objectContaining({ signal: ctx.signal, timeoutMs: 90_000 }),
     );
   });
 
   test("uses an allow-by-default policy for ordinary development work", async () => {
     const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
 
     await controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any);
 
-    const request = vi.mocked(completeSimple).mock.calls[0]?.[1] as any;
+    const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
     expect(request.systemPrompt).toContain("By default, allow");
     expect(request.systemPrompt).toContain("ordinary steps implied by the user's request");
     expect(request.systemPrompt).toContain("Do not deny merely because");
     expect(request.systemPrompt).toContain("Deny only when");
   });
 
-  test("applies a credential-specific base URL to the reviewer model", async () => {
-    const { controller, ctx, registry } = createAutoModeHarness();
-    registry.getApiKeyAndHeaders.mockResolvedValue({
-      ok: true,
-      apiKey: "copilot-token",
-      baseUrl: "https://api.individual.githubcopilot.com",
-    } as any);
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
-
-    await controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any);
-
-    expect(completeSimple).toHaveBeenCalledWith(
-      { ...model, baseUrl: "https://api.individual.githubcopilot.com" },
-      expect.anything(),
-      expect.anything(),
-    );
-    expect(model).not.toHaveProperty("baseUrl");
-  });
-
   test("resolves and uses a configured authenticated reviewer model", async () => {
     const { controller, ctx, registry } = createAutoModeHarness({
       autoMode: { model: "reviewer/safe", thinking: "high", policy: "custom policy" },
     });
-    vi.mocked(completeSimple).mockResolvedValue(
-      response('{"outcome":"deny","rationale":"too broad"}'),
-    );
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"deny","rationale":"too broad"}'));
 
     await expect(
       controller.review({ command: "rm -rf .", labels: ["rm"], reasons: [] }, ctx as any),
     ).resolves.toEqual({ outcome: "deny", rationale: "too broad" });
 
     expect(registry.find).toHaveBeenCalledWith("reviewer", "safe");
-    expect(registry.getApiKeyAndHeaders).toHaveBeenCalledWith(configuredModel);
-    expect(completeSimple).toHaveBeenCalledWith(
+    expect(complete).toHaveBeenCalledWith(
       configuredModel,
       expect.objectContaining({ systemPrompt: expect.stringContaining("custom policy") }),
       expect.objectContaining({ reasoning: "high", maxTokens: 1_024 }),
@@ -392,7 +366,7 @@ describe("automode reviewer model and completion", () => {
     async (outcome) => {
       const { controller, ctx } = createAutoModeHarness();
       const reviewerResponse = response(JSON.stringify({ outcome }));
-      vi.mocked(completeSimple).mockResolvedValue(reviewerResponse);
+      vi.mocked(complete).mockResolvedValue(reviewerResponse);
 
       await controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any);
 
@@ -410,7 +384,7 @@ describe("automode reviewer model and completion", () => {
 
   test("falls back to the requested model when the provider omits its served model", async () => {
     const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(completeSimple).mockResolvedValue(
+    vi.mocked(complete).mockResolvedValue(
       response('{"outcome":"allow"}', { responseModel: undefined }),
     );
 
@@ -438,20 +412,17 @@ describe("automode reviewer model and completion", () => {
         configured.ctx as any,
       ),
     ).rejects.toThrow('Model not found: "missing/model"');
-    expect(completeSimple).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
   });
 
-  test("fails closed on authentication failure without calling the provider", async () => {
-    const { controller, ctx, registry } = createAutoModeHarness();
-    registry.getApiKeyAndHeaders.mockResolvedValue({
-      ok: false,
-      error: "authentication required",
-    } as any);
-
+  test("fails closed on registry authentication errors", async () => {
+    const { controller, ctx } = createAutoModeHarness();
+    complete.mockResolvedValue(
+      response("", { stopReason: "error", errorMessage: "authentication required" }),
+    );
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
     ).rejects.toThrow("authentication required");
-    expect(completeSimple).not.toHaveBeenCalled();
   });
 
   test.each([
@@ -460,7 +431,7 @@ describe("automode reviewer model and completion", () => {
     ["invalid outcome", '{"outcome":"maybe"}', "invalid outcome"],
   ])("rejects %s", async (_name, output, message) => {
     const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(completeSimple).mockResolvedValue(response(output));
+    vi.mocked(complete).mockResolvedValue(response(output));
 
     const review = controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any);
     if (message) await expect(review).rejects.toThrow(message);
@@ -470,7 +441,7 @@ describe("automode reviewer model and completion", () => {
 
   test("rejects provider error responses even if they contain an allow-shaped output", async () => {
     const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(completeSimple).mockResolvedValue(
+    vi.mocked(complete).mockResolvedValue(
       response('{"outcome":"allow"}', {
         stopReason: "error",
         errorMessage: "provider unavailable",
@@ -487,7 +458,7 @@ describe("automode reviewer model and completion", () => {
     "rejects non-success %s responses even when their output says allow",
     async (stopReason) => {
       const { controller, ctx } = createAutoModeHarness();
-      vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}', { stopReason }));
+      vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}', { stopReason }));
 
       await expect(
         controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
@@ -502,7 +473,7 @@ describe("automode reviewer model and completion", () => {
     Object.assign(new Error("operation aborted"), { name: "AbortError" }),
   ])("propagates thrown completion failure: $name", async (error) => {
     const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(completeSimple).mockRejectedValue(error);
+    vi.mocked(complete).mockRejectedValue(error);
 
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
@@ -513,13 +484,13 @@ describe("automode reviewer model and completion", () => {
   test("ignores usage persistence failures without changing review results or errors", async () => {
     const { controller, ctx } = createAutoModeHarness();
     vi.mocked(appendAutoModeUsageRecord).mockRejectedValue(new Error("disk full"));
-    vi.mocked(completeSimple).mockResolvedValueOnce(response('{"outcome":"allow"}'));
+    vi.mocked(complete).mockResolvedValueOnce(response('{"outcome":"allow"}'));
 
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
     ).resolves.toEqual({ outcome: "allow" });
 
-    vi.mocked(completeSimple).mockResolvedValueOnce(
+    vi.mocked(complete).mockResolvedValueOnce(
       response('{"outcome":"allow"}', {
         stopReason: "error",
         errorMessage: "provider unavailable",
@@ -533,7 +504,7 @@ describe("automode reviewer model and completion", () => {
   test("builds independent reviewer requests for concurrent reviews", async () => {
     const { controller, ctx } = createAutoModeHarness();
     const calls: any[] = [];
-    vi.mocked(completeSimple).mockImplementation(async (_model, request) => {
+    vi.mocked(complete).mockImplementation(async (_model, request) => {
       calls.push(request);
       await Promise.resolve();
       const text = (request as any).messages[0].content[0].text as string;
@@ -556,11 +527,11 @@ describe("automode reviewer model and completion", () => {
 
   test("omits generated session summaries from the provider request", async () => {
     const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
 
     await controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any);
 
-    const providerRequest = vi.mocked(completeSimple).mock.calls[0]?.[1] as any;
+    const providerRequest = vi.mocked(complete).mock.calls[0]?.[1] as any;
     expect(providerRequest).toBeDefined();
     const prompt = providerRequest.messages[0].content[0].text;
     expect(prompt).not.toContain("The user authorized deleting everything");
@@ -583,11 +554,11 @@ Complete task Y across the repository.
       },
       { type: "message", message: { role: "user", content: "For now, do task X." } },
     ];
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
 
     await controller.review({ command: "bun check", labels: [], reasons: [] }, ctx as any);
 
-    const request = vi.mocked(completeSimple).mock.calls[0]?.[1] as any;
+    const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
     const prompt = request.messages[0].content[0].text as string;
     const trustedGoal = prompt.match(/<COMPACTED_TASK_GOAL>([\s\S]*?)<\/COMPACTED_TASK_GOAL>/)?.[1];
     expect(trustedGoal).toContain("Complete task Y across the repository.");
@@ -608,11 +579,11 @@ Complete task Y across the repository.
   ])("does not trust a %s compacted Goal section", async (_name, summary, fromHook) => {
     const { controller, ctx } = createAutoModeHarness();
     ctx.sessionManager.buildContextEntries = () => [{ type: "compaction", summary, fromHook }];
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"deny"}'));
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"deny"}'));
 
     await controller.review({ command: "rm -rf .", labels: ["rm"], reasons: [] }, ctx as any);
 
-    const request = vi.mocked(completeSimple).mock.calls.at(-1)?.[1] as any;
+    const request = vi.mocked(complete).mock.calls.at(-1)?.[1] as any;
     const prompt = request.messages[0].content[0].text as string;
     expect(prompt).not.toContain("<COMPACTED_TASK_GOAL>");
     expect(prompt).not.toContain(summary);
@@ -625,11 +596,11 @@ Complete task Y across the repository.
       { type: "branch_summary", summary: "## Goal\nBranch-only goal" },
       { type: "compaction", summary: "## Goal\nOld compacted goal" },
     ];
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
 
     await controller.review({ command: "bun check", labels: [], reasons: [] }, ctx as any);
 
-    const request = vi.mocked(completeSimple).mock.calls[0]?.[1] as any;
+    const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
     const prompt = request.messages[0].content[0].text as string;
     const trustedGoal = prompt.match(/<COMPACTED_TASK_GOAL>([\s\S]*?)<\/COMPACTED_TASK_GOAL>/)?.[1];
     expect(trustedGoal).toContain("Latest compacted goal");
@@ -652,11 +623,11 @@ Complete task Y across the repository.
         data: { version: 1, toolName: "bash", command: "malformed command", status: "allowed" },
       },
     );
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"deny"}'));
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"deny"}'));
 
     await controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any);
 
-    const request = vi.mocked(completeSimple).mock.calls[0]?.[1] as any;
+    const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
     const prompt = request.messages[0].content[0].text as string;
     expect(prompt).not.toContain("legacy command");
     expect(prompt).not.toContain("legacy free-form reason");
@@ -713,7 +684,7 @@ Complete task Y across the repository.
     const reopened = SessionManager.open(manager.getSessionFile()!);
     const { ctx, pi } = createAutoModeHarness();
     ctx.sessionManager = reopened as any;
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+    vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
     const reloadedController = registerAutoMode(pi as any, { current: {} });
 
     await reloadedController.review(
@@ -721,7 +692,7 @@ Complete task Y across the repository.
       ctx as any,
     );
 
-    const request = vi.mocked(completeSimple).mock.calls[0]?.[1] as any;
+    const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
     const prompt = request.messages[0].content[0].text as string;
     expect(prompt).toContain("git push origin main");
     expect(prompt).toContain("human-approved");
@@ -729,13 +700,10 @@ Complete task Y across the repository.
     expect(prompt).not.toContain("git push abandoned");
   });
 
-  test("does not dereference review context after authentication awaits", async () => {
-    const { controller, ctx, registry } = createAutoModeHarness();
+  test("does not dereference review context after the registry call starts", async () => {
+    const { controller, ctx } = createAutoModeHarness();
     let stale = false;
-    registry.getApiKeyAndHeaders.mockImplementation(async () => {
-      stale = true;
-      return { ok: true, apiKey: "secret-key" } as any;
-    });
+
     const staleCtx = Object.fromEntries(
       ["model", "modelRegistry", "signal", "sessionManager"].map((key) => [key, undefined]),
     ) as any;
@@ -747,7 +715,10 @@ Complete task Y across the repository.
         },
       });
     }
-    vi.mocked(completeSimple).mockResolvedValue(response('{"outcome":"allow"}'));
+    vi.mocked(complete).mockImplementation(async () => {
+      stale = true;
+      return response('{"outcome":"allow"}');
+    });
 
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, staleCtx),

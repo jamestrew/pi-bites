@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -25,6 +25,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createAgentCompletionHandler } from "../agent-completion.js";
 import { createWaitAgent } from "../register-wait-agent.js";
 import { createSubagentMessenger, type SubagentSender } from "../subagent-messages.js";
+import registerAtMentionContext from "../../at-mention-context/index.js";
+import { ShellAuthorizationTransactions } from "../../bash-gate/authorization.js";
 import type { AgentRecord } from "../types.js";
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -129,7 +131,7 @@ async function makeSession(
     resourceLoader: loader,
   });
   await session.bindExtensions({});
-  return { model, session, sessionManager };
+  return { model, session, sessionManager, cwd };
 }
 
 function wireMessenger(session: AgentSession, sessionManager: SessionManager) {
@@ -232,7 +234,10 @@ it.each(["parallel", "sequential"] as const)(
       gatedTool("first_gate", firstStarted, releaseFirst.promise),
       gatedTool("second_gate", secondStarted, releaseSecond.promise),
     ];
-    const { model, session, sessionManager } = await makeSession(tools);
+    const { model, session, sessionManager, cwd } = await makeSession(tools, [
+      registerAtMentionContext,
+    ]);
+    writeFileSync(join(cwd, "note.txt"), "batch metadata");
     const { messenger, unsubscribe } = wireMessenger(session, sessionManager);
     const requests: Context["messages"][] = [];
     session.agent.streamFunction = (_model, context) => {
@@ -258,6 +263,10 @@ it.each(["parallel", "sequential"] as const)(
       await firstStarted.promise;
       if (executionMode === "parallel") await secondStarted.promise;
       expect(messenger.send(sessionManager.getSessionId(), sender, "tool-time finding")).toBe(true);
+      // Explicit non-steering flush exercises the messenger's triggerTurn:false path.
+      messenger.flush();
+      await session.extensionRunner.emitInput("@note.txt", undefined, "interactive");
+      expect(session.messages.filter((message) => message.role === "custom")).toHaveLength(0);
 
       releaseFirst.resolve();
       if (executionMode === "sequential") await secondStarted.promise;
@@ -268,6 +277,19 @@ it.each(["parallel", "sequential"] as const)(
 
       expect(requests).toHaveLength(2);
       expect(requestText(requests[1]!)).toContain("tool-time finding");
+      expect(requestText(requests[1]!)).toContain("batch metadata");
+      const start = session.messages.findIndex((message) => message.role === "assistant");
+      const batch = session.messages.slice(start, start + 5);
+      expect(batch.map((message) => message.role)).toEqual([
+        "assistant",
+        "toolResult",
+        "toolResult",
+        "custom",
+        "custom",
+      ]);
+      expect(
+        batch.slice(1, 3).map((message) => message.role === "toolResult" && message.toolCallId),
+      ).toEqual(["first", "second"]);
     } finally {
       unsubscribe();
       session.dispose();
@@ -392,3 +414,103 @@ it("real wait_agent wakes only for a final child status", async () => {
     session.dispose();
   }
 });
+
+it.each([
+  ["parallel", "terminate"],
+  ["sequential", "terminate"],
+  ["parallel", "allow"],
+  ["sequential", "allow"],
+  ["parallel", "deny"],
+  ["sequential", "deny"],
+] as const)(
+  "real pi preserves terminating denials in a %s batch with a %s sibling",
+  async (executionMode, sibling) => {
+    const execute = vi.fn(async () => ({
+      content: [{ type: "text" as const, text: "allowed" }],
+      details: {},
+    }));
+    const tool = defineTool({
+      name: "gated",
+      label: "gated",
+      description: "test authorization",
+      executionMode,
+      parameters: Type.Object({}),
+      execute,
+    });
+    let messenger!: ReturnType<typeof createSubagentMessenger>;
+    const extension = (pi: ExtensionAPI) => {
+      const authorization = new ShellAuthorizationTransactions(pi);
+      messenger = createSubagentMessenger(pi);
+      pi.on("session_start", (_event, ctx) => {
+        authorization.sessionStarted();
+        messenger.sessionStarted(ctx.sessionManager.getSessionId());
+      });
+      pi.on("tool_call", async (event, ctx) => {
+        // During the batch, these metadata messages must not revive a terminated run.
+        if (event.toolCallId === "second") {
+          messenger.send(ctx.sessionManager.getSessionId(), sender, "denial metadata");
+        }
+        return authorization
+          .begin({
+            version: 1,
+            toolCallId: event.toolCallId,
+            toolName: "bash",
+            command: "test-only",
+          })
+          .complete(
+            event.toolCallId === "second" && sibling === "allow"
+              ? { outcome: "allow", authorization: "human-approved" }
+              : {
+                  outcome: "block",
+                  reason: "test denial",
+                  terminate: event.toolCallId === "first" || sibling === "terminate",
+                },
+          );
+      });
+    };
+    const { model, session, sessionManager } = await makeSession([tool], [extension]);
+    const requests: Context["messages"][] = [];
+    session.agent.streamFunction = (_model, context) => {
+      requests.push(structuredClone(context.messages));
+      return requests.length === 1
+        ? response(
+            model,
+            [
+              { type: "toolCall", id: "first", name: "gated", arguments: {} },
+              { type: "toolCall", id: "second", name: "gated", arguments: {} },
+            ],
+            "toolUse",
+          )
+        : response(model, [{ type: "text", text: "continued" }]);
+    };
+    try {
+      await session.prompt("test authorization");
+      expect(execute).toHaveBeenCalledTimes(sibling === "allow" ? 1 : 0);
+      expect(requests).toHaveLength(sibling === "terminate" ? 1 : 2);
+      const start = session.messages.findIndex((message) => message.role === "assistant");
+      expect(session.messages.slice(start, start + 4).map((message) => message.role)).toEqual([
+        "assistant",
+        "toolResult",
+        "toolResult",
+        "custom",
+      ]);
+      const results = session.messages.filter((message) => message.role === "toolResult");
+      expect(results.map((message) => [message.toolCallId, message.isError])).toEqual([
+        ["first", true],
+        ["second", sibling !== "allow"],
+      ]);
+      expect(
+        sessionManager
+          .getEntries()
+          .filter((entry) => entry.type === "custom")
+          .map((entry) => entry.data),
+      ).toMatchObject([
+        { toolCallId: "first", status: "blocked" },
+        { toolCallId: "second", status: sibling === "allow" ? "human-approved" : "blocked" },
+      ]);
+      if (sibling !== "terminate") expect(requestText(requests[1]!)).toContain("denial metadata");
+    } finally {
+      session.dispose();
+    }
+  },
+);

@@ -24,7 +24,7 @@ export function installTurnBoundaryAutoCompaction(
     if (!autoSession._runAutoCompaction) return snapshot;
 
     const abortCompaction = () => session.abortCompaction();
-    // _runAutoCompaction creates its abort controller only after async auth.
+    // Older Pi runtimes create the compaction abort controller only after auth.
     // If cancellation lands during auth, retry the abort immediately after the
     // controller is announced so no summarization outlives the owning run.
     const stopWatching = signal

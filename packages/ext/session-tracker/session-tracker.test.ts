@@ -3,7 +3,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEndEvent, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import registerSessionTracker, {
   colorizeSessionTrackerFooter,
   createNeedsInputLifecycle,
@@ -336,37 +336,29 @@ test("parses idle and rejects malformed classifier output", () => {
 
 test("asks the small model to classify rather than answer the assistant message", async () => {
   const model = { provider: "test", id: "small" };
+  const streamSimple = vi.fn(
+    (_model: unknown, request: { messages: { content: { text: string }[] }[] }) => ({
+      result: async () => ({
+        content: [
+          {
+            type: "text",
+            text: request.messages[0]!.content[0]!.text.startsWith("Classify the assistant message")
+              ? "NEEDS_INPUT"
+              : "Permission should take priority.",
+          },
+        ],
+        stopReason: "stop",
+      }),
+    }),
+  );
   const ctx = {
     model,
-    modelRegistry: {
-      getAll: () => [model],
-      getAvailable: () => [model],
-      find: () => model,
-      getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
-    },
+    modelRegistry: { getAll: () => [model], find: () => model, streamSimple },
   } as unknown as ExtensionContext;
-
   await expect(
-    inferNeedsInputFromAssistantText(
-      "Which should take priority when both occur?",
-      ctx,
-      { smallModel: { model: "test/small" } },
-      async (_model, request) =>
-        ({
-          role: "assistant",
-          content: [
-            {
-              type: "text",
-              text: (
-                (request.messages[0]?.content ?? []) as { type: string; text: string }[]
-              )[0]?.text.startsWith("Classify the assistant message")
-                ? "NEEDS_INPUT"
-                : "Permission should take priority.",
-            },
-          ],
-          stopReason: "stop",
-        }) as never,
-    ),
+    inferNeedsInputFromAssistantText("Which should take priority when both occur?", ctx, {
+      smallModel: { model: "test/small" },
+    }),
   ).resolves.toBe(true);
 });
 
