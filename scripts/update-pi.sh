@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 version=$(pi -v)
 
-bun update --latest \
+bun update \
   "@earendil-works/pi-coding-agent@$version" \
   "@earendil-works/pi-server@$version" \
   "@earendil-works/pi-tui@$version"

@@ -11,7 +11,7 @@
     "lint:fix": "oxlint . --fix",
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check .",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run packages && bun --bun vitest run scripts packages/ext/codex-adapter/code-mode-runtime.test.ts packages/ext/codex-adapter/code-mode-connection.test.ts packages/ext/codex-adapter/code-mode-nested.test.ts packages/ext/codex-adapter/code-mode-registration.test.ts packages/ext/codex-adapter/code-mode-transport.test.ts",
     "check": "bun run lint && bun run fmt && bun run typecheck && bun run test",
     "loop": "bun scripts/loop.ts",
