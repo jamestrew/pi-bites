@@ -1,10 +1,18 @@
 import {
   formatSkillsForPrompt,
+  SessionManager,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type RegisteredCommand,
   type BuildSystemPromptOptions,
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { availableContextTokens, buildContextBreakdown, renderContextMarkdown } from "./context.js";
+import registerContext, {
+  availableContextTokens,
+  buildContextBreakdown,
+  renderContextMarkdown,
+} from "./context.js";
 
 const sourceInfo = {
   path: "<builtin:read>",
@@ -186,5 +194,73 @@ describe("buildContextBreakdown", () => {
     expect(result.parts.find((part) => part.label === "Messages")?.tokens).toBe(3);
     expect(result.parts.reduce((sum, part) => sum + part.tokens, 0)).toBe(8);
     expect(availableContextTokens(result)).toBe(996);
+  });
+});
+
+it("inspector estimates projected messages without changing raw history", async () => {
+  const manager = SessionManager.inMemory("/tmp");
+  manager.appendMessage({
+    role: "system",
+    content: "12345678",
+    toolsAdded: [
+      { name: "read", description: "Read a file.", parameters: { type: "object", properties: {} } },
+    ],
+    timestamp: 0,
+  });
+  const omitted = manager.appendMessage({
+    role: "user",
+    content: "omitted ".repeat(100),
+    timestamp: 1,
+  });
+  const replaced = manager.appendMessage({
+    role: "user",
+    content: "replaced ".repeat(100),
+    timestamp: 2,
+  });
+  manager.appendContextEdit(omitted, null);
+  manager.appendContextEdit(replaced, { content: "12345678" });
+  let handler!: RegisteredCommand["handler"];
+  registerContext({
+    registerCommand(_name: string, command: Omit<RegisteredCommand, "name" | "sourceInfo">) {
+      handler = command.handler;
+    },
+    getAllTools: () => [
+      {
+        name: "read",
+        description: "Read a file.",
+        parameters: { type: "object", properties: {} },
+        sourceInfo,
+      },
+    ],
+    getActiveTools: () => ["read"],
+  } as unknown as ExtensionAPI);
+  let lines: string[] = [];
+  const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+  await handler("", {
+    mode: "tui",
+    model: { id: "test", contextWindow: 10000 },
+    sessionManager: manager,
+    getSystemPrompt: () => "12345678",
+    getSystemPromptOptions: () => ({ cwd: "/tmp" }),
+    getContextUsage: () => undefined,
+    ui: {
+      custom: async (
+        factory: (
+          _tui: unknown,
+          theme: unknown,
+          _kb: unknown,
+          done: () => void,
+        ) => { render(width: number): string[] },
+      ) => {
+        lines = factory(undefined, theme, undefined, () => {}).render(120);
+      },
+    },
+  } as unknown as ExtensionCommandContext);
+  expect(lines.join("\n")).toContain("Messages: ~2 tokens");
+  expect(lines.join("\n")).toContain("System tools: ~24 tokens");
+  expect(lines.join("\n")).toContain("28/10k tokens");
+  expect(manager.getEntry(omitted)).toMatchObject({ message: { content: "omitted ".repeat(100) } });
+  expect(manager.getEntry(replaced)).toMatchObject({
+    message: { content: "replaced ".repeat(100) },
   });
 });

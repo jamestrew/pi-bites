@@ -230,7 +230,7 @@ test("back-to-back stale aborts consume late first-turn terminals without pausin
     assert.equal(harness.abortCount, 2);
 
     now = 4_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -368,7 +368,7 @@ test("compaction between stale context abort and cleanup does not persist, accou
     assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
     assert.equal(harness.snapshot().goal?.usage.activeSeconds, 0);
 
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -381,7 +381,7 @@ test("compaction between stale context abort and cleanup does not persist, accou
     now = 6_000;
     await emitQueuedTurnThroughContext(harness, [userMessage], 1);
     now = 8_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("stop", { input: 7, output: 3 }),
@@ -437,7 +437,7 @@ test("mixed stale and current follow-up batch neutralizes stale work without abo
   });
   assert.deepEqual(providerContextMessageAt(contextResult, 1).details, currentMessage.details);
 
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("stop", { input: 9, output: 1 }),

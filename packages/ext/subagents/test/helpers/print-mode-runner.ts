@@ -44,6 +44,7 @@ import {
   fauxText,
   fauxToolCall,
   getApiProvider,
+  getCurrentSystemPrompt,
   getModel,
   type Model,
   registerFauxProvider,
@@ -205,7 +206,7 @@ export function routeBySession(routes: {
   subagent: FauxReply | ((ctx: Context) => FauxReply);
 }): FauxResponder {
   return (context) => {
-    const isParent = !context.systemPrompt?.includes("<active_agent ");
+    const isParent = !getCurrentSystemPrompt(context.messages).includes("<active_agent ");
     if (!isParent) return resolveReply(routes.subagent, context);
     const spawned = context.messages.some(
       (m) => m.role === "toolResult" && (m as { toolName?: string }).toolName === "spawn_agent",

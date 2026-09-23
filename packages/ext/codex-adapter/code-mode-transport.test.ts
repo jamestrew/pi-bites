@@ -1,4 +1,10 @@
-import type { Model, Tool, StreamFunction } from "@earendil-works/pi-ai";
+import {
+  normalizeContext,
+  type JsonValue,
+  type Model,
+  type Tool,
+  type StreamFunction,
+} from "@earendil-works/pi-ai";
 import { stream as responses } from "@earendil-works/pi-ai/api/openai-responses";
 import { stream as codex } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { stream as completions } from "@earendil-works/pi-ai/api/openai-completions";
@@ -9,6 +15,45 @@ import {
 } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { expect, test, vi } from "vitest";
 import registerCodeMode from "./index.js";
+import { parseHostMessage } from "./code-mode/host-protocol.js";
+import { v1Result } from "../subagents/tool-result.js";
+
+test("readonly JSON arguments and subagent results cross the host protocol", () => {
+  const input = { items: ["one", { enabled: true }, null] } as const satisfies JsonValue;
+  const result = v1Result({ status: { child: { completed: "done" } }, timed_out: false }, {});
+  result.value satisfies JsonValue;
+  result.content satisfies JsonValue;
+  expect(
+    parseHostMessage({
+      type: "delegate/request",
+      id: 1,
+      sessionId: "session",
+      request: {
+        type: "tool/invoke",
+        invocation: {
+          cell_id: "cell",
+          runtime_tool_call_id: "call",
+          tool_kind: "function",
+          tool_name: { name: "test" },
+          input,
+        },
+      },
+    }),
+  ).toMatchObject({
+    request: { invocation: { input: { items: ["one", { enabled: true }, null] } } },
+  });
+  expect(
+    parseHostMessage({
+      type: "operation/response",
+      id: 1,
+      result: { status: "ok", value: result.value },
+    }),
+  ).toEqual({
+    type: "operation/response",
+    id: 1,
+    result: { status: "ok", value: { status: { child: { completed: "done" } }, timed_out: false } },
+  });
+});
 
 function registered(disabled = false, active = true) {
   const handlers: ((event: any, ctx: any) => unknown)[] = [];
@@ -95,15 +140,11 @@ for (const [api, stream] of [
         payload = await request(value, model);
         throw new Error("captured before network");
       };
-      await (stream as StreamFunction<any>)(
-        model,
-        { messages: [], tools },
-        {
-          apiKey: jwt,
-          transport: "sse",
-          onPayload,
-        },
-      ).result();
+      await (stream as StreamFunction<any>)(model, normalizeContext({ messages: [], tools }), {
+        apiKey: jwt,
+        transport: "sse",
+        onPayload,
+      }).result();
       expect(payload).toBeDefined();
       expect(payload).toEqual(expected);
       expect(payload.tools[0].type).toBe(supportsOpenAIGrammarTools ? "custom" : "function");
@@ -135,11 +176,11 @@ for (const [api, stream] of [
       };
       await (stream as StreamFunction<any>)(
         model,
-        {
+        normalizeContext({
           systemPrompt: "stable project instructions",
           messages: [discovery as never],
           tools,
-        },
+        }),
         {
           apiKey: jwt,
           transport: "sse",
@@ -151,11 +192,11 @@ for (const [api, stream] of [
       const subsequent = payload;
       await (stream as StreamFunction<any>)(
         model,
-        {
+        normalizeContext({
           systemPrompt: "stable project instructions",
           messages: [],
           tools,
-        },
+        }),
         {
           apiKey: jwt,
           transport: "sse",

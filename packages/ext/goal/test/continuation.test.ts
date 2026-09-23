@@ -27,7 +27,7 @@ test("aborted turns account usage without changing active status or queuing cont
     cacheWrite: 600,
     totalTokens: 1_142,
   });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: aborted,
@@ -58,7 +58,7 @@ test("a new user-driven agent start leaves an aborted goal active", async () => 
   const harness = createRuntimeHarness();
   await harness.runCommand("ship it");
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("aborted", { input: 8, output: 2 }),
@@ -169,7 +169,7 @@ test("idle and compaction boundaries continue only active goals", async () => {
           const harness = createRuntimeHarness();
           await harness.runTool("create_goal", { objective: "ship it", token_budget: 1 });
           await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-          await harness.emit("turn_end", {
+          await harness.emitTurnEnd({
             type: "turn_end",
             turnIndex: 0,
             message: assistantMessage("stop", { input: 1, output: 0 }),
@@ -218,7 +218,7 @@ test("completed turns count input plus output and continue active goals", async 
     type: "message_start",
     message: queuedMessage,
   });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("stop", {
@@ -248,7 +248,7 @@ test("tool-use turn ends do not queue continuation before tool execution finishe
   harness.sentMessages.length = 0;
 
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("toolUse", { input: 10, output: 3 }),
@@ -264,7 +264,7 @@ test("budget crossing sends one hidden budget-limit steering message", async () 
   await harness.runTool("create_goal", { objective: "ship it", token_budget: 10 });
 
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("toolUse", { input: 8, output: 3 }),
@@ -301,7 +301,7 @@ test("replacement during an in-flight turn does not charge old tokens to the new
   const replacement = harness.snapshot().goal;
   assert.equal(replacement?.objective, "new goal");
 
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("stop", { input: 80, output: 20 }),
@@ -492,7 +492,7 @@ test("auto-queued continuations reinject current objective, usage, and steering"
     systemPromptOptions: {},
   });
   await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("stop", { input: 1, output: 1 }),
@@ -581,7 +581,7 @@ test("session compaction accelerates an existing idle retry after length stops",
       type: "message_start",
       message: queuedMessage,
     });
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("length", { input: 30, output: 12 }),

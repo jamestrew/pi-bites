@@ -32,7 +32,7 @@ describe("vendored goal lifecycle", () => {
       type: "message_start",
       message: queuedCustomMessage(initialTurn),
     });
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("stop", { input: 10, output: 2 }),

@@ -4,7 +4,6 @@ import { join } from "node:path";
 import {
   estimateTokens,
   formatSkillsForPrompt,
-  sessionEntryToContextMessages,
   type BuildSystemPromptOptions,
   type ExtensionAPI,
   type ExtensionCommandContext,
@@ -234,8 +233,8 @@ class ContextComponent {
 
 function estimateMessages(ctx: ExtensionCommandContext): number {
   return ctx.sessionManager
-    .buildContextEntries()
-    .flatMap(sessionEntryToContextMessages)
+    .buildSessionProjection()
+    .messages.filter((message) => message.role !== "system")
     .reduce((sum, message) => sum + estimateTokens(message), 0);
 }
 

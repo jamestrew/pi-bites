@@ -79,7 +79,7 @@ test("cumulative snapshots charge only non-decreasing per-turn deltas", async ()
   assert.equal((await publicUsage(harness)).tokensUsed, 15);
 
   await emitToolExecutionEnd(harness);
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: finalMessage,
@@ -99,7 +99,7 @@ test("goal creation during a turn establishes a fresh usage baseline", async () 
   await emitToolExecutionEnd(harness);
   assert.equal(harness.snapshot().goal?.usage.tokensUsed, 0);
 
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: finalMessage,
@@ -196,7 +196,7 @@ test("replacement makes delayed turn accounting and status effects no-ops", asyn
 
   await harness.emit("message_end", { type: "message_end", message: delayed });
   await emitToolExecutionEnd(harness);
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: delayed,
@@ -237,7 +237,7 @@ test("exact budget equality persists usage and limits before continuation", asyn
   assert.equal(harness.snapshot().goal?.status, "budgetLimited");
 
   await emitToolExecutionEnd(harness);
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: finalMessage,

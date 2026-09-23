@@ -72,7 +72,7 @@ for (const source of ["interactive", "rpc"] as const) {
     assert.equal(harness.snapshot().goal?.status, "complete");
     assert.equal(harness.abortCount, 0);
 
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("stop", { input: 1, output: 1 }),
@@ -243,7 +243,7 @@ test("stale prompt-based queued work does not pause or charge a replacement goal
   await emitQueuedTurnThroughContext(harness, [oldMessage]);
   assert.equal(harness.abortCount, 1);
 
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -281,7 +281,7 @@ test("stale prompt-based queued work with stop terminal does not corrupt replace
   await emitQueuedTurnThroughContext(harness, [oldMessage]);
   assert.equal(harness.abortCount, 1);
 
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex: 0,
     message: assistantMessage("stop", { input: 20, output: 5 }),
@@ -319,7 +319,7 @@ test("stale custom queued work aborts without pausing, charging, or requeueing a
     await emitQueuedTurnThroughContext(harness, [oldMessage]);
     assert.equal(harness.abortCount, 1);
 
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -367,7 +367,7 @@ test("stale custom abort without agent_end does not suppress the next current fo
     assert.equal(harness.abortCount, 1);
 
     now = 2_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -379,7 +379,7 @@ test("stale custom abort without agent_end does not suppress the next current fo
     now = 3_000;
     await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
     now = 5_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("stop", { input: 30, output: 12 }),

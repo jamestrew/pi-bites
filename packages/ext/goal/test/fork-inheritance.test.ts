@@ -16,6 +16,7 @@ import {
   createAgentSessionRuntime,
   createAgentSessionServices,
   type CreateAgentSessionRuntimeFactory,
+  type ExtensionFactory,
   ModelRuntime,
   SessionManager,
   SettingsManager,
@@ -69,7 +70,7 @@ function response(model: Model<any>, message: AssistantMessage): ReturnType<Stre
   return stream;
 }
 
-async function createForkRuntime(monotonicNow?: () => number) {
+async function createForkRuntime(monotonicNow?: () => number, observe?: ExtensionFactory) {
   const root = mkdtempSync(join(tmpdir(), "pi-goal-fork-e2e-"));
   tempDirs.push(root);
   const cwd = join(root, "worktree");
@@ -114,7 +115,10 @@ async function createForkRuntime(monotonicNow?: () => number) {
       resourceLoaderOptions: {
         noContextFiles: true,
         noExtensions: true,
-        extensionFactories: [(pi) => goalExtension(pi, { monotonicNow })],
+        extensionFactories: [
+          (pi) => goalExtension(pi, { monotonicNow }),
+          ...(observe ? [observe] : []),
+        ],
       },
     });
     const created = await createAgentSessionFromServices({
@@ -406,12 +410,24 @@ describe("goal fork inheritance through Pi runtime", () => {
 
     const duplicateTerminal = assistantMessage(env.model, { input: 1, output: 1 }, "error");
     for (let duplicate = 0; duplicate < 2; duplicate += 1) {
-      await reloaded.session.extensionRunner.emit({
-        type: "turn_end",
-        turnIndex: 1,
-        message: duplicateTerminal,
-        toolResults: [],
-      });
+      await reloaded.session.extensionRunner.emitBoundary(
+        {
+          type: "turn_end",
+          turnIndex: 1,
+          message: duplicateTerminal,
+          toolResults: [],
+          messageEntryId: "duplicate-terminal",
+          toolResultEntryIds: [],
+          outcome: "error",
+        },
+        () => ({
+          contextEntries: [],
+          contextMessages: [duplicateTerminal],
+          llmMessages: [],
+          pendingMessages: [],
+          canContinue: false,
+        }),
+      );
       await reloaded.session.extensionRunner.emit({
         type: "agent_end",
         messages: [duplicateTerminal],
@@ -867,4 +883,63 @@ describe("goal fork inheritance through Pi runtime", () => {
     expect(runtime.session.sessionManager).toBe(manager);
     await runtime.dispose();
   });
+});
+
+test("a requested next run waits for all settled handlers, including unsubscribed dispatch snapshots", async () => {
+  const order: string[] = [];
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const settling = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let first = true;
+  const env = await createForkRuntime(undefined, (pi) => {
+    pi.on("agent_settled", async () => {
+      if (!first) return;
+      first = false;
+      order.push("settled:start");
+      pi.sendUserMessage("next run");
+      unsubscribe();
+      unsubscribe();
+      entered();
+      await gate;
+      order.push("settled:end");
+    });
+    const unsubscribe = pi.on("agent_settled", () => {
+      order.push("settled:tail");
+    });
+  });
+  const runtime = await env.createRuntime({
+    cwd: env.cwd,
+    agentDir: join(env.root, "agent"),
+    sessionManager: SessionManager.inMemory(env.cwd),
+    sessionStartEvent: { type: "session_start", reason: "startup" },
+  });
+  let calls = 0;
+  runtime.session.agent.streamFunction = (model) => {
+    order.push(`request:${++calls}`);
+    return response(model, assistantMessage(model));
+  };
+  try {
+    const prompting = runtime.session.prompt("first run");
+    await settling;
+    expect(order).toEqual(["request:1", "settled:start"]);
+    release();
+    await prompting;
+    await expect.poll(() => calls).toBe(2);
+    await runtime.session.agent.waitForIdle();
+    expect(order).toEqual([
+      "request:1",
+      "settled:start",
+      "settled:end",
+      "settled:tail",
+      "request:2",
+    ]);
+  } finally {
+    release();
+    runtime.session.dispose();
+  }
 });

@@ -114,7 +114,7 @@ test("back-to-back stale aborts unblock continuation when active id-less agent_e
     assert.equal(harness.abortCount, 2);
 
     now = 4_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -186,7 +186,7 @@ test("same-goal stale abort unblocks continuation when active agent_end arrives 
     };
 
     now = 4_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("aborted", { input: 20, output: 5 }),

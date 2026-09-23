@@ -15,7 +15,13 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxText, fauxToolCall, type Context } from "@earendil-works/pi-ai/compat";
+import {
+  fauxText,
+  fauxToolCall,
+  getCurrentSystemPrompt,
+  getCurrentTools,
+  type Context,
+} from "@earendil-works/pi-ai/compat";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentCall,
@@ -120,7 +126,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     //     finishes → the child's own model turn actually runs (≥3 calls).
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const respond = async (ctx: Context) => {
-      const isParent = !ctx.systemPrompt?.includes("<active_agent ");
+      const isParent = !getCurrentSystemPrompt(ctx.messages).includes("<active_agent ");
       if (!isParent) {
         await sleep(80); // child takes long enough that a non-held parent exits first
         return "CHILD_BG_RAN";
@@ -169,8 +175,11 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       prompt: "Delegate the compaction probe.",
       maxModelCalls: 8,
       respond: (ctx) => {
-        const toolNames = new Set((ctx.tools ?? []).map((tool) => tool.name));
-        if (toolNames.has("spawn_agent") && !ctx.systemPrompt?.includes("<active_agent ")) {
+        const toolNames = new Set(getCurrentTools(ctx.messages).map((tool) => tool.name));
+        if (
+          toolNames.has("spawn_agent") &&
+          !getCurrentSystemPrompt(ctx.messages).includes("<active_agent ")
+        ) {
           const spawned = ctx.messages.some(
             (message) =>
               message.role === "toolResult" &&

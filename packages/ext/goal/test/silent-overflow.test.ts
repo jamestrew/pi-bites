@@ -65,7 +65,7 @@ test("host compaction clears pending overflow and a successful retry continues o
     await harness.emit("agent_start", { type: "agent_start" });
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 2 });
     const success = assistantMessage("stop", { input: 10, output: 2 });
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: success,

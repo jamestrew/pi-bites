@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { vi } from "vitest";
 
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  ExtensionContext,
-  ExtensionEvent,
+import {
+  buildSessionProjection,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type ExtensionContext,
+  type ExtensionEvent,
+  type TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
+
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import goalExtension, { __testHooks } from "../../index.js";
 import { isContextOverflowError } from "../../recovery.js";
@@ -143,6 +147,13 @@ export function createRuntimeHarness(
     const currentHandlers = handlers.get(event) ?? [];
     currentHandlers.push(handler);
     handlers.set(event, currentHandlers);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      const index = currentHandlers.indexOf(handler);
+      if (index !== -1) currentHandlers.splice(index, 1);
+    };
   }) as ExtensionAPI["on"];
 
   const registerCommand: ExtensionAPI["registerCommand"] = (name, options) => {
@@ -240,6 +251,7 @@ export function createRuntimeHarness(
 
   const sessionManager: ExtensionCommandContext["sessionManager"] = {
     buildContextEntries: () => branch,
+    buildSessionProjection: () => buildSessionProjection(branch),
     getBranch: () => branch,
     getCwd: () => "/tmp",
     getEntries: () => entries,
@@ -379,7 +391,8 @@ export function createRuntimeHarness(
       }
     }
     const results: unknown[] = [];
-    for (const handler of handlers.get(event) ?? []) {
+    const snapshot = (handlers.get(event) ?? []).slice();
+    for (const handler of snapshot) {
       results.push(await handler(payload, ctx));
     }
     return results;
@@ -395,6 +408,31 @@ export function createRuntimeHarness(
     compactCalls,
     footerStatuses,
     emit,
+    async emitTurnEnd(input: Pick<TurnEndEvent, "type" | "turnIndex" | "message" | "toolResults">) {
+      const event: TurnEndEvent = {
+        ...input,
+        messageEntryId: `assistant-${input.turnIndex}`,
+        toolResultEntryIds: input.toolResults.map((_, index) => `tool-${input.turnIndex}-${index}`),
+        entries: [],
+        continue: false,
+        outcome:
+          input.message.role === "assistant" && input.message.stopReason === "aborted"
+            ? "aborted"
+            : input.message.role === "assistant" && input.message.stopReason === "error"
+              ? "error"
+              : "completed",
+        context: {
+          contextEntries: [],
+          contextMessages: [input.message, ...input.toolResults],
+          llmMessages: [],
+          pendingMessages: [],
+          canContinue:
+            input.message.role === "assistant" &&
+            !["aborted", "error"].includes(input.message.stopReason),
+        },
+      };
+      return emit("turn_end", event);
+    },
     entries,
     runCommand,
     runTool,
@@ -611,14 +649,14 @@ export function assistantMessage(
   stopReason: "stop" | "aborted" | "length" | "toolUse" | "error",
   usage: TestAssistantUsage,
   errorMessage?: string,
-) {
+): AssistantMessage {
   const cacheRead = usage.cacheRead ?? 0;
   const cacheWrite = usage.cacheWrite ?? 0;
 
   return {
     role: "assistant",
     content: [],
-    api: "test",
+    api: "openai-completions",
     provider: "test",
     model: "test",
     usage: {
@@ -648,7 +686,7 @@ export async function emitPersistentAssistantError(
 ): Promise<void> {
   const message = assistantMessage("error", { input: 1, output: 1 }, errorMessage);
   await harness.emit("turn_start", { type: "turn_start", turnIndex, timestamp: turnIndex + 1 });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex,
     message,
@@ -678,7 +716,7 @@ export async function emitSilentContextOverflow(
   message: ReturnType<typeof assistantMessage>,
 ): Promise<void> {
   await harness.emit("turn_start", { type: "turn_start", turnIndex, timestamp: turnIndex + 1 });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex,
     message,

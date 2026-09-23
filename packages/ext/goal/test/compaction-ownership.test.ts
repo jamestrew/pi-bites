@@ -24,7 +24,7 @@ async function emitToolUseTurnEnd(harness: RuntimeHarness, turnIndex: number): P
     turnIndex,
     timestamp: turnIndex + 1,
   });
-  await harness.emit("turn_end", {
+  await harness.emitTurnEnd({
     type: "turn_end",
     turnIndex,
     message: assistantMessage("toolUse", { input: 10, output: 2 }),

@@ -115,7 +115,7 @@ test("tool completion and turn_end durably persist their own deltas", async () =
     await emitToolExecutionEnd(harness);
     assert.equal(countGoalSetEntries(harness.entries, goalId), 1);
 
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("toolUse", { input: 10, output: 2 }),
@@ -188,7 +188,7 @@ test("each elapsed delta is durable before turn_end", async () => {
     assert.equal(countGoalSetEntries(harness.entries, goalId), initialSetEntries);
     assert.equal(countGoalUsageEntries(harness.entries, goalId), 4);
 
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("toolUse", { input: 10, output: 2 }),
@@ -267,7 +267,7 @@ test("compaction with unchanged budgetLimited goal appends no new entry", async 
     assert.ok(goalId);
 
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("stop", { input: 8, output: 3 }),
@@ -311,7 +311,7 @@ test("session_shutdown with unchanged budgetLimited goal appends no new entry", 
     assert.ok(goalId);
 
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 0, timestamp: 1 });
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("stop", { input: 8, output: 3 }),

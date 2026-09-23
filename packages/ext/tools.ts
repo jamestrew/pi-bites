@@ -9,7 +9,6 @@ import {
   type ReadToolDetails,
   createReadTool,
   createReadToolDefinition,
-  createBashTool,
   createBashToolDefinition,
   createEditTool,
   createEditToolDefinition,
@@ -117,7 +116,6 @@ export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
   const originalRead = createReadTool(cwd);
   const originalReadDef = createReadToolDefinition(cwd);
-  const originalBash = createBashTool(cwd);
   const originalBashDef = createBashToolDefinition(cwd);
   const originalEdit = createEditTool(cwd);
   const { prepareArguments: _builtInPrepareArguments, ...editToolBase } = originalEdit;
@@ -151,7 +149,8 @@ export default function (pi: ExtensionAPI) {
 
     renderCall(args, theme, context) {
       const state = context.state as EditRenderAdapterState;
-      const adapterKey = JSON.stringify(args);
+      const adapterKey = JSON.stringify([context.cwd, args]);
+      const invalidate = context.invalidate;
       if (state.adapterKey !== adapterKey) {
         state.adapterKey = adapterKey;
         state.adapterArgs = undefined;
@@ -160,7 +159,7 @@ export default function (pi: ExtensionAPI) {
 
       if (context.argsComplete && !state.adapterArgs && !state.adapterPending) {
         state.adapterPending = true;
-        void prepareEdit(cwd, args, false)
+        void prepareEdit(context.cwd, args, false)
           .then(({ filePath, plan }) => {
             if (state.adapterKey === adapterKey) {
               state.adapterArgs = {
@@ -180,7 +179,7 @@ export default function (pi: ExtensionAPI) {
           .finally(() => {
             if (state.adapterKey === adapterKey) {
               state.adapterPending = false;
-              context.invalidate();
+              invalidate();
             }
           });
       }
@@ -201,16 +200,18 @@ export default function (pi: ExtensionAPI) {
       );
     },
 
-    async execute(toolCallId, params, signal, onUpdate) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
+      const executionContext = { ...ctx };
+      const sessionCwd = executionContext.cwd;
       const unresolvedPath = resolve(
-        cwd,
+        sessionCwd,
         params.path.startsWith("@") ? params.path.slice(1) : params.path,
       );
       const queuePath = await realpath(unresolvedPath).catch(() => unresolvedPath);
 
       return serializeEdit(queuePath, async () => {
-        const { filePath, plan } = await prepareEdit(cwd, params, true);
-        const guardedEdit = createEditTool(cwd, {
+        const { filePath, plan } = await prepareEdit(sessionCwd, params, true);
+        const guardedEdit = createEditToolDefinition(sessionCwd, {
           operations: {
             access: (path) => access(path, constants.R_OK | constants.W_OK),
             async readFile(path) {
@@ -235,6 +236,7 @@ export default function (pi: ExtensionAPI) {
           },
           signal,
           onUpdate,
+          executionContext,
         );
         const fuzzyNotice = plan.matchTier === "exact" ? "" : ` Used ${plan.matchTier} matching.`;
         const details = result.details as EditToolDetails | undefined;
@@ -257,14 +259,14 @@ export default function (pi: ExtensionAPI) {
   const executeStartTimes = new Map<string, number>();
 
   pi.registerTool({
-    ...originalBash,
+    ...originalBashDef,
 
-    async execute(toolCallId, params, signal, onUpdate) {
+    async execute(toolCallId, params, signal, onUpdate, ctx) {
       // Record now — this runs after bash-gate resolves, so the elapsed timer
       // will start from the moment the process is actually about to spawn.
       executeStartTimes.set(toolCallId, Date.now());
       try {
-        return await originalBash.execute(toolCallId, params, signal, onUpdate);
+        return await originalBashDef.execute(toolCallId, params, signal, onUpdate, ctx);
       } finally {
         executeStartTimes.delete(toolCallId);
       }

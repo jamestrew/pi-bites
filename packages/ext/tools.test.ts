@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { initTheme, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -7,14 +7,14 @@ import registerTools from "./tools.js";
 
 const tempDirectories: string[] = [];
 
-async function captureEditTool() {
-  let edit: any;
+async function captureTool(name = "edit") {
+  let registered: any;
   registerTools({
     registerTool: vi.fn((tool) => {
-      if (tool.name === "edit") edit = tool;
+      if (tool.name === name) registered = tool;
     }),
   } as any);
-  return edit;
+  return registered;
 }
 
 async function tempFile(content: string) {
@@ -43,13 +43,41 @@ async function execute(
     { path, old_string, new_string, ...(replace_all === undefined ? {} : { replace_all }) },
     undefined,
     undefined,
-    {},
+    { cwd: process.cwd() },
   );
 }
 
 describe("edit tool", () => {
+  test("bash and edit use session cwd rather than registration cwd", async () => {
+    const path = await tempFile("old\n");
+    const cwd = dirname(path);
+    const bash = await captureTool("bash");
+    const result = await bash.execute("bash-cwd", { command: "pwd" }, undefined, undefined, {
+      cwd,
+      sessionManager: { getSessionId: () => "test", getSessionFile: () => undefined },
+    });
+    expect(result.content[0].text.trim()).toBe(cwd);
+    const edit = await captureTool();
+    let active = true;
+    const editing = edit.execute(
+      "edit-cwd",
+      { path: "@target.txt", old_string: "old", new_string: "new" },
+      undefined,
+      undefined,
+      {
+        get cwd() {
+          if (!active) throw new Error("stale execution context");
+          return cwd;
+        },
+      },
+    );
+    active = false;
+    await editing;
+    expect(await readFile(path, "utf8")).toBe("new\n");
+  });
+
   test("registers the single-replacement contract and performs an exact edit", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("alpha\nbeta\n");
 
     expect(Object.keys(tool.parameters.properties)).toEqual([
@@ -70,7 +98,7 @@ describe("edit tool", () => {
   });
 
   test("rejects ambiguous matches by default and replaces all when requested", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("old old old\n");
 
     await expect(execute(tool, path, "old", "new")).rejects.toThrow("Found 3 matches");
@@ -82,7 +110,7 @@ describe("edit tool", () => {
   });
 
   test("uses whitespace and Unicode normalization while preserving surrounding bytes", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("before  \nconst label = “old”;  \nafter\t\n");
 
     const result = await execute(tool, path, 'const label = "old";', 'const label = "new";');
@@ -93,7 +121,7 @@ describe("edit tool", () => {
   });
 
   test("replaces every match at a fuzzy tier", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("first  \nsecond\nfirst\t\nsecond\n");
 
     const result = await execute(tool, path, "first\nsecond", "done", true);
@@ -103,7 +131,7 @@ describe("edit tool", () => {
   });
 
   test("falls back to indentation-tolerant per-line matching", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("  first\n\tsecond\nkeep\n");
 
     const result = await execute(tool, path, "first\nsecond", "changed\nblock");
@@ -113,7 +141,7 @@ describe("edit tool", () => {
   });
 
   test("uses the first matching tier and detects fuzzy ambiguity", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const exactPath = await tempFile('"x"\n“x”\n');
 
     const exact = await execute(tool, exactPath, '"x"', '"y"');
@@ -126,7 +154,7 @@ describe("edit tool", () => {
   });
 
   test("rejects missing, empty, and no-op replacements without changing the file", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("same\n");
 
     await expect(execute(tool, path, "missing", "new")).rejects.toThrow(
@@ -141,7 +169,7 @@ describe("edit tool", () => {
   });
 
   test("does not invent indentation matches at end of file", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const noNewline = await tempFile("foo");
 
     await expect(execute(tool, noNewline, "foo\n", "bar")).rejects.toThrow(
@@ -157,7 +185,7 @@ describe("edit tool", () => {
   });
 
   test("supports CRLF input and rejects nonexistent files", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("one\r\ntwo\r\n");
 
     await execute(tool, path, "one\ntwo", "three\nfour");
@@ -167,7 +195,7 @@ describe("edit tool", () => {
   });
 
   test("rejects a stale plan when another queued mutation changes the file", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("foo  \n");
     let release = () => {};
     let locked = () => {};
@@ -190,7 +218,7 @@ describe("edit tool", () => {
   });
 
   test("supports project-relative paths and leading at-sign path references", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const path = await tempFile("old\n");
     const relativePath = relative(process.cwd(), path);
 
@@ -202,16 +230,16 @@ describe("edit tool", () => {
 
   test("renders the target path and resulting diff", async () => {
     initTheme("dark", false);
-    const tool = await captureEditTool();
-    const path = await tempFile("old\n");
-    const args = { path, old_string: "old", new_string: "new" };
+    const tool = await captureTool();
+    const path = await tempFile("  old\n    second\n");
+    const args = { path: "target.txt", old_string: "old\nsecond", new_string: "new" };
     const context = {
       args,
       toolCallId: "render-call",
       invalidate: vi.fn(),
       lastComponent: undefined,
       state: {},
-      cwd: process.cwd(),
+      cwd: dirname(path),
       executionStarted: true,
       argsComplete: true,
       isPartial: false,
@@ -226,19 +254,19 @@ describe("edit tool", () => {
     };
 
     const call = tool.renderCall(args, theme, context);
-    expect(call.render(200).join("\n")).toContain(path);
+    expect(call.render(200).join("\n")).toContain("target.txt");
 
     await vi.waitFor(() => expect(context.invalidate).toHaveBeenCalledTimes(1));
     tool.renderCall(args, theme, context);
     await vi.waitFor(() => expect(context.invalidate).toHaveBeenCalledTimes(2));
     tool.renderCall(args, theme, context);
-    expect(call.render(200).join("\n")).toContain("-1 old");
+    expect(call.render(200).join("\n")).toContain("-1   old");
     expect(call.render(200).join("\n")).toContain("+1 new");
-    expect(await readFile(path, "utf8")).toBe("old\n");
+    expect(await readFile(path, "utf8")).toBe("  old\n    second\n");
 
-    const result = await execute(tool, path, "old", "new");
+    const result = await execute(tool, path, "old\nsecond", "new");
     tool.renderResult(result, { expanded: false, isPartial: false }, theme, context);
-    expect(call.render(200).join("\n")).toContain("-1 old");
+    expect(call.render(200).join("\n")).toContain("-1   old");
     expect(call.render(200).join("\n")).toContain("+1 new");
 
     const missingArgs = { ...args, old_string: "missing" };
@@ -252,7 +280,7 @@ describe("edit tool", () => {
   });
 
   test("guidance tells agents to read first and use replace_all intentionally", async () => {
-    const tool = await captureEditTool();
+    const tool = await captureTool();
     const guidance = tool.promptGuidelines.join(" ");
 
     expect(guidance).toContain("Read a target file before using edit");

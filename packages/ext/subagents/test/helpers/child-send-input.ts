@@ -8,7 +8,7 @@ export function registerChildSendInput(options: RunOptions, parentCtx: Extension
   const childPi = {
     ...options.pi,
     registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
-    on: () => {},
+    on: () => () => {},
   } as RunOptions["pi"];
   const target = parentCtx.sessionManager.getSessionId();
   const childSessionId = randomUUID();

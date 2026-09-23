@@ -40,7 +40,7 @@ test("late stale turn_end after the next current follow-up starts is ignored", a
     await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
 
     now = 4_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -51,7 +51,7 @@ test("late stale turn_end after the next current follow-up starts is ignored", a
     assert.equal(harness.sentMessages.length, 0);
 
     now = 5_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("stop", { input: 30, output: 12 }),
@@ -101,7 +101,7 @@ test("late stale turn_end with stop before next current context event is ignored
     await harness.emit("message_end", { type: "message_end", message: currentMessage });
 
     now = 4_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("stop", { input: 20, output: 5 }),
@@ -114,7 +114,7 @@ test("late stale turn_end with stop before next current context event is ignored
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("stop", { input: 30, output: 12 }),
@@ -164,7 +164,7 @@ test("late stale turn_end before next current context event is ignored", async (
     await harness.emit("message_end", { type: "message_end", message: currentMessage });
 
     now = 4_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("aborted", { input: 20, output: 5 }),
@@ -177,7 +177,7 @@ test("late stale turn_end before next current context event is ignored", async (
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("stop", { input: 30, output: 12 }),
@@ -247,7 +247,7 @@ test("late stale agent_end with stop before next current context event is ignore
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("stop", { input: 30, output: 12 }),
@@ -298,7 +298,7 @@ for (const stopReason of ["aborted", "stop", "error"] as const) {
       await harness.emit("message_end", { type: "message_end", message: currentMessage });
 
       now = 4_000;
-      await harness.emit("turn_end", {
+      await harness.emitTurnEnd({
         type: "turn_end",
         turnIndex: 0,
         message: assistantMessage(stopReason, { input: 20, output: 5 }),
@@ -320,7 +320,7 @@ for (const stopReason of ["aborted", "stop", "error"] as const) {
       await emitProviderContext(harness, [currentMessage]);
 
       now = 5_000;
-      await harness.emit("turn_end", {
+      await harness.emitTurnEnd({
         type: "turn_end",
         turnIndex: 1,
         message: assistantMessage("stop", { input: 30, output: 12 }),
@@ -391,7 +391,7 @@ test("late stale agent_end before next current context event is ignored", async 
     await emitProviderContext(harness, [currentMessage]);
 
     now = 5_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("stop", { input: 30, output: 12 }),
@@ -442,7 +442,7 @@ test("current id-less agent_end error after stale abort release and current cont
     now = 5_000;
     const errorMessage = assistantMessage("error", { input: 30, output: 12 }, "websocket closed");
     await harness.emit("turn_start", { type: "turn_start", turnIndex: 1, timestamp: 5 });
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: errorMessage,
@@ -494,7 +494,7 @@ test("current follow-up abort is not swallowed by a pending late stale turn_end"
     now = 3_000;
     await emitQueuedTurnThroughContext(harness, [currentMessage], 1);
     now = 5_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 1,
       message: assistantMessage("aborted", { input: 30, output: 12 }),
@@ -509,7 +509,7 @@ test("current follow-up abort is not swallowed by a pending late stale turn_end"
     assert.equal(harness.sentMessages.length, 0);
 
     now = 6_000;
-    await harness.emit("turn_end", {
+    await harness.emitTurnEnd({
       type: "turn_end",
       turnIndex: 0,
       message: assistantMessage("aborted", { input: 20, output: 5 }),

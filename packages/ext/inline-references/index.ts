@@ -152,7 +152,7 @@ function registerInlineReferenceContext(pi: ExtensionAPI) {
 
     const skills = refs
       .filter((ref) => ref.kind === "skill")
-      .map((ref) => event.systemPromptOptions.skills?.find((skill) => skill.name === ref.name))
+      .map((ref) => event.systemPromptOptions.skills.find((skill) => skill.name === ref.name))
       .filter((skill) => skill !== undefined);
 
     const loadedPrompts = loadDefaultPromptTemplates(ctx.cwd);
