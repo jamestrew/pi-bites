@@ -14,6 +14,8 @@ import { sanitizeText } from "../../subagents/ui/text-lines.js";
 import { formatUnifiedExecResult } from "./format.js";
 import type { ExecSessionManager, UnifiedExecResult } from "./session-manager.js";
 
+import { notifySkillReads } from "./skill-notification.js";
+
 const COLLAPSED_OUTPUT_LINES = 5;
 
 interface RenderTheme {
@@ -218,11 +220,13 @@ export function createExecCommandTool(
     async execute(_toolCallId, params, signal, onUpdate, ctx: ToolExecutionContext) {
       // Pi extension contexts are session-bound. Snapshot everything before the
       // first await so continuations cannot dereference a replaced session.
+      const ui = ctx.hasUI ? ctx.ui : undefined;
       const cwd = ctx.cwd;
       const projectTrusted = ctx.isProjectTrusted();
       const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
       const defaultShell = getShellConfig(settings.getShellPath()).shell;
       const input = { ...params, defaultShell };
+      if (ui) void notifySkillReads(params.cmd, ui.notify.bind(ui));
       const result = await sessions.exec(input, cwd, signal, (update) =>
         onUpdate?.(toolResult(update, params.cmd)),
       );

@@ -52,6 +52,8 @@ export class NestedToolBridge {
     Object.defineProperty(cellCtx, "signal", { value: signal });
     const trusted = ctx.isProjectTrusted();
     const context: ToolExecutionContext = {
+      hasUI: ctx.hasUI,
+      ui: ctx.ui,
       cwd: ctx.cwd,
       model: ctx.model,
       modelRegistry: ctx.modelRegistry,
