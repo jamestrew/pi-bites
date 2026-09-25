@@ -161,14 +161,27 @@ describe("bounded reviewer conversation lifecycle", () => {
         });
       }
       const pending = controller.review(rmRequest("rm pending"), guarded as any);
+      let resolveFork!: (value: AssistantMessage) => void;
+      complete.mockImplementationOnce(
+        () =>
+          new Promise((done) => {
+            resolveFork = done;
+          }),
+      );
+      const fork = controller.review(
+        { ...rmRequest("rm fork"), subagentContext: "CHILD" },
+        guarded as any,
+      );
       stale = true;
       lifecycle.get(event)!({}, ctx);
       resolve(response('{"outcome":"allow"}'));
       await expect(pending).rejects.toThrow("context changed");
+      resolveFork(response('{"outcome":"allow"}'));
+      await expect(fork).rejects.toThrow("context changed");
       complete.mockResolvedValueOnce(response('{"outcome":"deny"}'));
       await controller.review(rmRequest("rm next"), ctx as any);
-      expect(complete.mock.calls[2]![1].messages).toHaveLength(1);
-      expect(complete.mock.calls[2]![2]?.sessionId).not.toBe(complete.mock.calls[0]![2]?.sessionId);
+      expect(complete.mock.calls[3]![1].messages).toHaveLength(1);
+      expect(complete.mock.calls[3]![2]?.sessionId).not.toBe(complete.mock.calls[0]![2]?.sessionId);
     },
   );
 
@@ -218,41 +231,47 @@ describe("bounded reviewer conversation lifecycle", () => {
     expect(complete.mock.calls[2]![2]?.sessionId).toBe(complete.mock.calls[0]![2]?.sessionId);
   });
 
-  test("overlapping and forwarded reviews use isolated histories and never mutate or commit into the sequential conversation", async () => {
-    const { controller, ctx } = createAutoModeHarness();
-    complete.mockResolvedValueOnce(response('{"outcome":"allow"}'));
-    await controller.review(rmRequest("rm first"), ctx as any);
-    let resolve!: (value: AssistantMessage) => void;
-    complete.mockImplementationOnce(
-      () =>
-        new Promise((done) => {
-          resolve = done;
-        }),
-    );
-    const pending = controller.review(rmRequest("rm pending"), ctx as any);
-    const frozenPayload = structuredClone(complete.mock.calls[1]![1]);
-    complete.mockResolvedValue(response('{"outcome":"deny"}'));
-    await controller.review(
-      { ...rmRequest("rm overlapping"), execution: { cwd: "/other" } },
-      ctx as any,
-    );
-    await controller.review(
-      { ...rmRequest("rm child"), subagentContext: "child evidence" },
-      ctx as any,
-    );
-    for (const index of [2, 3]) {
-      expect(complete.mock.calls[index]![1].messages).toHaveLength(1);
-      expect(complete.mock.calls[index]![2]?.sessionId).not.toBe(
-        complete.mock.calls[1]![2]?.sessionId,
+  test.each([false, true])(
+    "compatible forks share a prefix with reverse completion = %s",
+    async (reverse) => {
+      const { controller, ctx } = createAutoModeHarness();
+      complete.mockResolvedValueOnce(response('{"outcome":"allow"}'));
+      await controller.review(rmRequest("rm first"), ctx as any);
+      const resolvers: ((value: AssistantMessage) => void)[] = [];
+      complete.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
+      const owner = controller.review(rmRequest("rm owner"), ctx as any);
+      const sibling = controller.review(rmRequest("rm sibling"), ctx as any);
+      const child = controller.review(
+        { ...rmRequest("rm child"), subagentContext: "CHILD_ONLY" },
+        ctx as any,
       );
-    }
-    expect(complete.mock.calls[1]![1]).toEqual(frozenPayload);
-    resolve(response('{"outcome":"allow"}'));
-    await pending;
-    await controller.review(rmRequest("rm next"), ctx as any);
-    const next = complete.mock.calls[4]![1];
-    expect(next.messages).toHaveLength(5);
-    expect(JSON.stringify(next)).not.toMatch(/rm overlapping|rm child|child evidence/);
-    expect(next.messages.slice(0, frozenPayload.messages.length)).toEqual(frozenPayload.messages);
-  });
+      const payloads = complete.mock.calls.slice(1).map((call) => structuredClone(call[1]));
+      for (const index of [1, 2, 3]) {
+        expect(complete.mock.calls[index]![2]?.sessionId).toBe(
+          complete.mock.calls[0]![2]?.sessionId,
+        );
+        expect(complete.mock.calls[index]![1].messages).toHaveLength(3);
+        expect(complete.mock.calls[index]![1].messages.slice(0, 2)).toEqual(
+          payloads[0]!.messages.slice(0, 2),
+        );
+      }
+      expect(JSON.stringify(payloads[0])).not.toMatch(/rm sibling|rm child|CHILD_ONLY/);
+      expect(JSON.stringify(payloads[1])).not.toMatch(/rm owner|rm child|CHILD_ONLY/);
+      expect(JSON.stringify(payloads[2])).not.toMatch(/rm owner|rm sibling/);
+      expect(JSON.stringify(payloads[2])).toContain("never direct human authorization");
+      const order = reverse ? [2, 1, 0] : [0, 1, 2];
+      const pending = [owner, sibling, child];
+      for (const index of order) {
+        resolvers[index]!(response(index === 1 ? '{"outcome":"deny"}' : '{"outcome":"allow"}'));
+        expect((await pending[index])!.outcome).toBe(index === 1 ? "deny" : "allow");
+      }
+      expect(complete.mock.calls.slice(1).map((call) => call[1])).toEqual(payloads);
+      complete.mockResolvedValueOnce(response('{"outcome":"allow"}'));
+      await controller.review(rmRequest("rm next"), ctx as any);
+      const next = complete.mock.calls[4]![1];
+      expect(next.messages).toHaveLength(5);
+      expect(JSON.stringify(next)).toContain("rm owner");
+      expect(JSON.stringify(next)).not.toMatch(/rm sibling|rm child|CHILD_ONLY/);
+    },
+  );
 });

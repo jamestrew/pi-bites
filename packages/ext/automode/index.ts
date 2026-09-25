@@ -392,8 +392,8 @@ export default function registerAutoMode(
         systemPrompt,
         contextWindow: model.contextWindow,
         outputReserve: REVIEW_OUTPUT_TOKENS + THINKING_BUDGETS[budgetLevel],
-        // Forwarded requests do not yet carry a stable child-session identity.
-        isolated: subagentContext !== undefined,
+        // Child evidence is request-local: it must never enter the parent trunk.
+        readOnly: subagentContext !== undefined,
         prompt: (contextOffset, branchOffset) => {
           const transcript = buildReviewerTranscript(
             contextEntries

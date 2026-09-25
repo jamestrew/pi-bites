@@ -133,10 +133,8 @@ retention remain unchanged. No provider-specific transport is introduced.
 
 Intentional deviations from Codex:
 
-- Overlapping calls build isolated bounded requests, without waiting for the busy
-  conversation or committing their results into it. Shared-prefix concurrent forks
-  are deferred. Forwarded subagent reviews also stay isolated because the reviewer
-  boundary currently has no stable child-session identity.
+- Compatible overlapping and forwarded reviews fork the committed parent prefix;
+  only the idle parent trunk owner can commit, as detailed below for #330.
 - The input ceiling is 96,000 serialized UTF-8 bytes, further constrained by the
   model context window minus 1,024 response tokens and the selected thinking
   budget (1,024 minimal / 2,048 low / 8,192 medium / 16,384 high or above).
@@ -172,10 +170,58 @@ cold and repeat warm for each implementation with the same provider/model/thinki
 Record each invocation, assessment, latency, and the existing `automode.jsonl` usage
 rows; compare uncached input, cache reads/writes, output/reasoning, and cost separately.
 Also repeat after compaction and with two overlapping reviews to expose resets and
-isolated fallback costs. Do not infer provider cache hits from mock payload tests.
+concurrent fork costs. Do not infer provider cache hits from mock payload tests.
 
 The issue's earlier 100-record observational baseline reports 42 reviews with cache
 reads, 172,544 cached versus 268,685 uncached input tokens (39.1% cached), and 55/97
 repeat-session/model reviews with no reads. These are historical observations, not
 measurements of this patch or proof that omission of `sessionId` caused cache misses.
 No live-model cache, policy-quality, or cost improvement is claimed by this change.
+
+## Concurrent review forks (#330)
+
+The local Codex checkout is re-verified at
+`a62e98d18c6550e3bea152ed1b89d1e931dca961`. In addition to the sources above,
+`ext/guardian-reviewer/src/pool.rs` forks a busy compatible trunk from its last
+committed snapshot, commits only reusable trunk completions before releasing
+ownership, and never promotes ephemeral forks. `core/src/guardian/tests.rs`
+checks shared cache identity, transcript deltas, and exclusion of in-flight actions.
+
+Pi follows that owner-only commit rule: the first parent review while the trunk is
+idle owns its next commit. Compatible concurrent reviews independently clone the
+committed messages and append only their own exact action, new parent evidence,
+and labeled request-local subagent evidence. They reuse the prefix's reviewer
+`sessionId` without waiting for other model reviews. Human-dialog serialization
+remains unchanged. A cold trunk has no committed prefix to borrow; cold forks use
+independent identities until a parent assessment successfully commits.
+
+Only a successfully parsed, noncancelled owner assessment may advance history,
+including a policy denial. This is stricter than Codex's pool-level `Completed`
+rule. Forks never commit or promote, even if the owner fails, or if they finish
+after a newer owner. Thus out-of-order completions cannot overwrite newer history.
+The evidence cursors advance only with the owning snapshot: evidence observed by
+a fork alone is sent again on the next trunk review, not skipped or merged from
+another pending action. Failed/cancelled assessments leave the prefix intact.
+
+Forwarded subagent reviews are deliberately read-only borrowers of compatible
+**parent** history. No stable child-session identity is needed because child prose
+and actions never enter the trunk or another child's request. Their current packet
+labels child prose as untrusted agent-generated context, never direct human
+authorization. Session/model/policy/branch compatibility and execution scope still
+bound reuse; incompatible child requests stay cold without evicting parent history.
+Lifecycle resets invalidate both owners and forks, using snapshotted dependencies
+rather than deferred access to ephemeral Pi `ctx` getters.
+
+Each fork independently applies the same whole-request and output budgets. If the
+prefix plus current action cannot fit, that request rebuilds cold with a new cache
+identity; rebuilds and failed requests do not evict the shared prefix. Retained
+history is still bounded to one committed conversation, with no queue of completed
+forks. Per-request cancellation and usage recording remain independent. This does
+not cap the number of concurrent callers or promise provider cache hits.
+
+`history.test.ts` and `forks.test.ts` exercise both completion orders, late forks
+behind newer commits, incremental evidence, parent/child isolation, cold and
+incompatible forks, budget rebuilds, allow/deny/error/cancellation, independent
+command launch and usage, and lifecycle invalidation with throwing stale-ctx
+getters. These mocked integrations demonstrate request isolation and launch safety,
+not live-model decision quality or measured cache savings.

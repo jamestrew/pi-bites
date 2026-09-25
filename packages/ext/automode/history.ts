@@ -58,7 +58,7 @@ export class ReviewerHistory {
     systemPrompt: string;
     contextWindow: number;
     outputReserve: number;
-    isolated: boolean;
+    readOnly: boolean;
     prompt: (contextOffset: number, branchOffset: number) => string;
   }) {
     const compatible = (snapshot: Snapshot) =>
@@ -66,21 +66,26 @@ export class ReviewerHistory {
       extendsCursor(input.context, snapshot.context) &&
       extendsCursor(input.branch, snapshot.branch);
     if (
-      !input.isolated &&
+      !input.readOnly &&
       ((this.committed && !compatible(this.committed)) ||
         (this.pending && !compatible(this.pending)))
     )
       this.reset();
 
-    const isolated = input.isolated || !!this.pending;
-    let previous = isolated || this.committed?.scope !== input.scope ? undefined : this.committed;
+    // Only the parent review that acquires the idle trunk can advance it.
+    // Busy and forwarded reviews borrow the committed prefix but never promote.
+    const canCommit = !input.readOnly && !this.pending;
+    let previous =
+      this.committed?.scope === input.scope && compatible(this.committed)
+        ? this.committed
+        : undefined;
     const limit = Math.min(MAX_INPUT_BYTES, input.contextWindow - input.outputReserve);
     const fits = (messages: Message[]) =>
       Buffer.byteLength(JSON.stringify({ systemPrompt: input.systemPrompt, messages }), "utf8") +
         256 * (messages.length + 1) <=
       limit;
     const build = (): Message[] => [
-      ...(previous?.messages ?? []),
+      ...structuredClone(previous?.messages ?? []),
       {
         role: "user",
         content: [
@@ -94,7 +99,6 @@ export class ReviewerHistory {
     ];
     let messages = build();
     if (!fits(messages) && previous) {
-      this.committed = undefined;
       previous = undefined;
       messages = build();
     }
@@ -110,7 +114,7 @@ export class ReviewerHistory {
     };
     const generation = this.generation;
     const sessionId = previous?.sessionId ?? `pi-bites-reviewer-${randomUUID()}`;
-    if (!isolated) this.pending = snapshot;
+    if (canCommit) this.pending = snapshot;
     return {
       messages,
       sessionId,
@@ -124,9 +128,9 @@ export class ReviewerHistory {
         }
       },
       commit: (response: AssistantMessage) => {
-        if (!isolated && generation === this.generation && this.pending === snapshot) {
+        if (canCommit && generation === this.generation && this.pending === snapshot) {
           // Never mutate the array sent to an in-flight provider request.
-          const completed = [...messages, structuredClone(response)];
+          const completed = structuredClone([...messages, response]);
           this.committed = fits(completed)
             ? { ...snapshot, scope: input.scope, sessionId, messages: completed }
             : undefined;
