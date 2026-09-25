@@ -1,3 +1,4 @@
+import { parseAutoModeDecision, type AutoModeDecision } from "../automode/index.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
@@ -485,11 +486,18 @@ test("queued real commands recheck a shared session allowance and safe work proc
 test.each(["allow", "deny", "review-error", "escalation-error", "cancel"] as const)(
   "real nested Auto Mode %s settles authorization before process creation",
   async (outcome) => {
-    const pendingReview = Promise.withResolvers<{ outcome: "allow" }>();
+    const pendingReview = Promise.withResolvers<AutoModeDecision>();
     const review = vi.fn(async () => {
       if (outcome === "review-error") throw new Error("review unavailable");
       if (outcome === "cancel") return pendingReview.promise;
-      return { outcome: outcome === "allow" ? ("allow" as const) : ("deny" as const) };
+      return parseAutoModeDecision(
+        JSON.stringify({
+          risk_level: "medium",
+          user_authorization: "low",
+          outcome: outcome === "allow" ? "allow" : "deny",
+          rationale: "Fixture decision",
+        }),
+      );
     });
     const { runtime, gate, cwd, expire } = setup({}, {}, { isEnabled: () => true, review });
     gate.ui.select.mockResolvedValue("Deny");
@@ -503,7 +511,7 @@ test.each(["allow", "deny", "review-error", "escalation-error", "cancel"] as con
     if (outcome === "cancel") {
       await expect.poll(() => review.mock.calls.length).toBe(1);
       await runtime.terminate(result.cellId);
-      pendingReview.resolve({ outcome: "allow" });
+      pendingReview.resolve(parseAutoModeDecision('{"outcome":"allow"}'));
       await new Promise((resolve) => setTimeout(resolve, 30));
     } else {
       if (result.kind === "yielded") result = await runtime.wait(result.cellId);

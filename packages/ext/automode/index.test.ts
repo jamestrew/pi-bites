@@ -1,3 +1,4 @@
+import policyScenarios from "./fixtures/policy-scenarios.json" with { type: "json" };
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -8,7 +9,6 @@ import registerBashGate from "../bash-gate/index.js";
 import registerAutoMode, {
   buildReviewerTranscript,
   buildSubagentReviewerTranscript,
-  parseAutoModeDecision,
 } from "./index.js";
 import { appendAutoModeUsageRecord } from "./usage.js";
 
@@ -138,11 +138,11 @@ function createAuthorizationIntegrationHarness() {
   };
   const configRef = { current: { bashGate: { mode: "auto" } } as any };
   const autoMode = registerAutoMode(pi as any, configRef);
-  registerBashGate(pi as any, configRef, autoMode);
+  const gate = registerBashGate(pi as any, configRef, autoMode);
   for (const start of lifecycle.get("session_start") ?? []) start({}, ctx);
   const toolCall = lifecycle.get("tool_call")?.[0];
   if (!toolCall) throw new Error("Bash Gate did not register tool_call");
-  return { branch, contextEntries, ctx, toolCall };
+  return { branch, contextEntries, ctx, toolCall, gate };
 }
 
 beforeEach(() => {
@@ -321,26 +321,13 @@ describe("automode reviewer model and completion", () => {
 
     await expect(
       controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any),
-    ).resolves.toEqual({ outcome: "allow" });
+    ).resolves.toMatchObject({ outcome: "allow" });
 
     expect(complete).toHaveBeenCalledWith(
       model,
       expect.anything(),
       expect.objectContaining({ signal: ctx.signal, timeoutMs: 90_000 }),
     );
-  });
-
-  test("uses an allow-by-default policy for ordinary development work", async () => {
-    const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
-
-    await controller.review({ command: "rm build.txt", labels: ["rm"], reasons: [] }, ctx as any);
-
-    const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
-    expect(request.systemPrompt).toContain("By default, allow");
-    expect(request.systemPrompt).toContain("ordinary steps implied by the user's request");
-    expect(request.systemPrompt).toContain("Do not deny merely because");
-    expect(request.systemPrompt).toContain("Deny only when");
   });
 
   test("resolves and uses a configured authenticated reviewer model", async () => {
@@ -351,7 +338,7 @@ describe("automode reviewer model and completion", () => {
 
     await expect(
       controller.review({ command: "rm -rf .", labels: ["rm"], reasons: [] }, ctx as any),
-    ).resolves.toEqual({ outcome: "deny", rationale: "too broad" });
+    ).resolves.toMatchObject({ outcome: "deny", rationale: "too broad" });
 
     expect(registry.find).toHaveBeenCalledWith("reviewer", "safe");
     expect(complete).toHaveBeenCalledWith(
@@ -454,7 +441,7 @@ describe("automode reviewer model and completion", () => {
     expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
   });
 
-  test.each(["aborted", "length", "toolUse"])(
+  test.each(["aborted", "length", "toolUse", "pending", "deferred"])(
     "rejects non-success %s responses even when their output says allow",
     async (stopReason) => {
       const { controller, ctx } = createAutoModeHarness();
@@ -488,7 +475,7 @@ describe("automode reviewer model and completion", () => {
 
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, ctx as any),
-    ).resolves.toEqual({ outcome: "allow" });
+    ).resolves.toMatchObject({ outcome: "allow" });
 
     vi.mocked(complete).mockResolvedValueOnce(
       response('{"outcome":"allow"}', {
@@ -516,7 +503,7 @@ describe("automode reviewer model and completion", () => {
       controller.review({ command: "rm second.txt", labels: ["rm"], reasons: [] }, ctx as any),
     ]);
 
-    expect([first, second]).toEqual([{ outcome: "allow" }, { outcome: "deny" }]);
+    expect([first, second]).toMatchObject([{ outcome: "allow" }, { outcome: "deny" }]);
     expect(calls[0]).not.toBe(calls[1]);
     expect(calls[0].messages).not.toBe(calls[1].messages);
     expect(calls[0].messages[0].content[0].text).toContain("first.txt");
@@ -722,7 +709,7 @@ Complete task Y across the repository.
 
     await expect(
       controller.review({ command: "rm x", labels: ["rm"], reasons: [] }, staleCtx),
-    ).resolves.toEqual({ outcome: "allow" });
+    ).resolves.toMatchObject({ outcome: "allow" });
   });
 });
 
@@ -898,12 +885,82 @@ describe("automode reviewer transcript safety", () => {
     expect(transcript.length).toBeLessThanOrEqual(40_000);
   });
 
-  test("parses strict outcomes and rejects invalid responses", () => {
-    expect(parseAutoModeDecision('{"outcome":"allow"}')).toEqual({ outcome: "allow" });
-    expect(parseAutoModeDecision('{"outcome":"deny","rationale":"too broad"}')).toEqual({
-      outcome: "deny",
-      rationale: "too broad",
-    });
-    expect(() => parseAutoModeDecision('{"outcome":"maybe"}')).toThrow("invalid outcome");
+  test("preserves a structured assessment through the reviewer boundary", async () => {
+    const { controller, ctx } = createAutoModeHarness();
+    const assessment = {
+      risk_level: "high",
+      user_authorization: "medium",
+      outcome: "allow",
+      rationale: "Narrow production restart is authorized in substance.",
+    };
+    complete.mockResolvedValue(response(JSON.stringify(assessment)));
+    await expect(
+      controller.review({ command: "restart service", labels: [], reasons: [] }, ctx as any),
+    ).resolves.toEqual(assessment);
+  });
+});
+
+// These replay authored assessments; they test transport/gating, not live model policy quality.
+describe("Guardian assessment gate fixtures", () => {
+  test.each(
+    policyScenarios.flatMap((scenario) =>
+      ["hook", "nested"].map((route) => ({ ...scenario, route })),
+    ),
+  )("$name through $route", async ({ messages, command, assessment, route }) => {
+    const { gate, branch, contextEntries, ctx, toolCall } = createAuthorizationIntegrationHarness();
+    contextEntries.splice(
+      0,
+      contextEntries.length,
+      ...messages.map((message) => ({ type: "message", message })),
+    );
+    complete.mockResolvedValue(response(JSON.stringify(assessment)));
+    if (route === "hook") {
+      const result = await toolCall(
+        { toolCallId: "fixture", toolName: "bash", input: { command } },
+        ctx,
+      );
+      if (assessment.outcome === "allow") expect(result).toBeUndefined();
+      else
+        expect(result).toMatchObject({
+          block: true,
+          reason: expect.stringContaining(assessment.rationale),
+        });
+    } else {
+      const launch = vi.fn(() => "launched");
+      const pending = gate
+        .captureSession(ctx as any)
+        .authorize({ toolCallId: "fixture", toolName: "exec_command", command }, launch);
+      if (assessment.outcome === "allow") {
+        await expect(pending).resolves.toBe("launched");
+        expect(launch).toHaveBeenCalledOnce();
+      } else {
+        await expect(pending).rejects.toThrow(assessment.rationale);
+        expect(launch).not.toHaveBeenCalled();
+      }
+    }
+    expect(complete).toHaveBeenCalledOnce();
+    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
+    expect(branch.at(-1)?.data.status).toBe(
+      assessment.outcome === "allow" ? "reviewer-approved" : "blocked",
+    );
+  });
+
+  test.each([
+    { risk_level: "extreme" },
+    { user_authorization: "explicit" },
+    { rationale: 123 },
+    { risk_level: [] },
+    { user_authorization: false },
+  ])("invalid structured field fails closed at the gate: %j", async (invalid) => {
+    const { ctx, toolCall } = createAuthorizationIntegrationHarness();
+    complete.mockResolvedValue(response(JSON.stringify({ outcome: "allow", ...invalid })));
+    await expect(
+      toolCall(
+        { toolCallId: "invalid", toolName: "bash", input: { command: "rm build.txt" } },
+        ctx,
+      ),
+    ).resolves.toMatchObject({ block: true, reason: expect.stringContaining("failed closed") });
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
   });
 });
