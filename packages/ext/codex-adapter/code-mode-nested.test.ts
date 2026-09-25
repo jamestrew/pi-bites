@@ -1,5 +1,5 @@
 import { parseAutoModeDecision, type AutoModeDecision } from "../automode/index.js";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -118,21 +118,6 @@ function values(response: RuntimeResponse): unknown[] {
     .filter((item) => item.type === "input_text")
     .map((item) => JSON.parse(item.text));
 }
-
-test("nested skill reads notify through the UI snapshot after context expiry", async () => {
-  const { runtime, gate, cwd, expire } = setup();
-  mkdirSync(join(cwd, "example"));
-  writeFileSync(join(cwd, "example/SKILL.md"), "skill text");
-  expire();
-  const response = await runtime.execute(
-    'text(await tools.exec_command({cmd:"cat example/SKILL.md; printf other",login:false}));',
-  );
-  expect(values(response)).toEqual([
-    expect.objectContaining({ exit_code: 0, output: "skill textother" }),
-  ]);
-  await vi.waitFor(() => expect(gate.ui.notify).toHaveBeenCalledWith("[skill] example", "info"));
-  expect(gate.ui.notify).toHaveBeenCalledTimes(1);
-});
 
 test("denial and cancelled approval never launch processes", async () => {
   const { runtime, sessions, gate, cwd } = setup();

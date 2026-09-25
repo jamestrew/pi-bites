@@ -6,7 +6,7 @@ import type { Static, TSchema } from "typebox";
  */
 export type ToolExecutionContext = Pick<
   ExtensionContext,
-  "cwd" | "model" | "modelRegistry" | "isProjectTrusted" | "hasUI" | "ui"
+  "cwd" | "model" | "modelRegistry" | "isProjectTrusted"
 >;
 
 export type OwnedToolDefinition<P extends TSchema, D = unknown, S = unknown> = Omit<

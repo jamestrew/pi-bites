@@ -14,7 +14,7 @@ const retainedGroups = [
   /^(?:activation|index|native-binary-error|tool-execution)\.ts$/,
   /^(?:LICENSE|UPSTREAM\.md)$/,
   /^apply-patch\/(?:binary|executor|rendering|render-state|tool)\.ts$/,
-  /^exec\/(?:binary|bridge-client|bridge-session|command-tool|format|output|results|session-manager|shell|skill-notification|wait|write-stdin-tool)\.ts$/,
+  /^exec\/(?:binary|bridge-client|bridge-session|command-tool|format|output|results|session-manager|shell|wait|write-stdin-tool)\.ts$/,
   /^native\/runner\.ts$/,
   /^web-run\/(?:binary|summary|tool)\.ts$/,
   /^view-image\/(?:binary|tool)\.ts$/,
