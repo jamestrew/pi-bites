@@ -566,7 +566,12 @@ native(
     const launch = vi.fn();
     const requests = ["rm first.txt", "rm second.txt"].map((command, i) =>
       authorization.authorize(
-        { toolCallId: `child-command-${i}`, toolName: "exec_command", command },
+        {
+          execution: { cwd: "/repo" },
+          toolCallId: `child-command-${i}`,
+          toolName: "exec_command",
+          command,
+        },
         launch,
       ),
     );

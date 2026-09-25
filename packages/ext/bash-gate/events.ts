@@ -1,3 +1,4 @@
+import type { CommandExecutionContext } from "./index.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { ShellAuthorizationStatus } from "./authorization.js";
 
@@ -8,6 +9,7 @@ export type BashGateApprovalResult =
   | { outcome: "failure"; message: string };
 
 export interface ApprovalRequest {
+  execution: CommandExecutionContext;
   requestId: string;
   toolCallId?: string;
   signal?: AbortSignal;

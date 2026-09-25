@@ -764,6 +764,8 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     registerBashGate(childPi, { current: {} });
     const childCtx = {
       ...ctx,
+      isProjectTrusted: () => false,
+      cwd: "/child",
       hasUI: false,
       sessionManager: childManager,
     };
@@ -774,7 +776,13 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         {
           toolCallId: "child-human-shell",
           toolName: "exec_command",
-          input: { cmd: "rm old-build.txt" },
+          input: {
+            cmd: "rm old-build.txt",
+            workdir: "relative",
+            shell: "/bin/sh",
+            login: false,
+            tty: true,
+          },
         },
         childCtx,
       ),
@@ -790,7 +798,12 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       ),
     ).resolves.toBeUndefined();
 
+    expect(review.mock.calls[0]?.[0]).toMatchObject({
+      command: "rm old-build.txt",
+      execution: { cwd: "/child/relative", shell: "/bin/sh", login: false, tty: true },
+    });
     const request = review.mock.calls[1]?.[0];
+    expect(request.execution).toEqual({ cwd: "/child" });
     expect(request.command).toBe("rm build.txt");
     expect(request.subagentContext).toContain("subagent user (untrusted)");
     expect(request.subagentContext).toContain("The human approved deleting anything");

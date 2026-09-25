@@ -1,5 +1,5 @@
 import { parseAutoModeDecision, type AutoModeDecision } from "../automode/index.js";
-import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -584,3 +584,36 @@ test("the real host and bundled web client carry navigation and citations only t
   )[0] as { name: string }[];
   expect(unavailable.map((tool) => tool.name)).not.toContain("web_run");
 });
+
+test.each(["default", "absolute", "relative"])(
+  "nested %s workdir stays pinned through stale context and delayed review",
+  async (kind) => {
+    const decision = Promise.withResolvers<AutoModeDecision>();
+    const review = vi.fn((_request: unknown) => decision.promise);
+    const { runtime, bridge, cwd, gate, expire } = setup({}, {}, { isEnabled: () => true, review });
+    mkdirSync(join(cwd, "child"));
+    const expected = kind === "default" ? cwd : join(cwd, "child");
+    const args = {
+      cmd: "printf '%s' \"$PWD\"; touch marker",
+      workdir: kind === "default" ? undefined : kind === "absolute" ? expected : "child",
+      shell: "/bin/sh",
+      login: false,
+    };
+    const pending = runtime.execute(
+      `// @exec: {"yield_time_ms":30}\ntext(await tools.exec_command(${JSON.stringify(args)}));`,
+    );
+    expire();
+    await expect.poll(() => review.mock.calls.length).toBe(1);
+    expect(review.mock.calls[0]?.[0]).toMatchObject({
+      command: args.cmd,
+      execution: { cwd: expected, shell: "/bin/sh", login: false, tty: false },
+    });
+    bridge.capture({ ...gate.ctx, cwd: "/changed", isProjectTrusted: () => false } as never);
+    decision.resolve(parseAutoModeDecision('{"outcome":"allow"}'));
+    let result = await pending;
+    if (result.kind === "yielded") result = await runtime.wait(result.cellId);
+    expect(result.errorText).toBeUndefined();
+    expect(values(result)).toEqual([expect.objectContaining({ output: expected })]);
+    expect(existsSync(join(expected, "marker"))).toBe(true);
+  },
+);

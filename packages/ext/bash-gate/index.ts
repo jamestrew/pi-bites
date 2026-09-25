@@ -1,5 +1,6 @@
 import { waitForAuthorization, withApprovalDialog } from "./pending.js";
 import type { ShellAuthorizationDecision } from "./authorization.js";
+import { pinExecLaunch } from "../codex-adapter/exec/launch-context.js";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BashGateRule, BitesConfig } from "../config.js";
@@ -22,7 +23,16 @@ export {
 export type { BashGateMatch } from "./policy.js";
 export type { ApprovalRequest } from "./events.js";
 
+export interface CommandExecutionContext {
+  cwd: string;
+  shell?: string;
+  login?: boolean;
+  tty?: boolean;
+  requestedTimeoutSeconds?: number;
+}
+
 export interface CommandAuthorizationRequest {
+  execution: CommandExecutionContext;
   toolCallId: string;
   toolName: "bash" | "exec_command";
   command: string;
@@ -190,6 +200,7 @@ export default function registerBashGate(
     return {
       async authorize(request, launch) {
         const { command, toolName, toolCallId } = request;
+        const execution = { ...request.execution };
         ownerSignal.throwIfAborted();
         if (!toolCallId || usedCallIds.has(toolCallId))
           throw new Error("Bash gate: command requires a unique toolCallId.");
@@ -254,6 +265,7 @@ export default function registerBashGate(
                     agentSessionId: metadata.agentSessionId,
                     title: metadata.title,
                     command,
+                    execution,
                     toolName,
                     labels: matchedPatternLabels,
                     reasons,
@@ -319,6 +331,7 @@ export default function registerBashGate(
                   autoMode.review(
                     {
                       command,
+                      execution,
                       toolName,
                       toolCallId,
                       labels: matchedPatternLabels,
@@ -459,12 +472,22 @@ export default function registerBashGate(
   }
 
   pi.on("tool_call", async (event, ctx) => {
-    const command = commandPolicyRequest(event.toolName, event.input);
+    const input = event.input as Record<string, unknown>;
+    const command = commandPolicyRequest(event.toolName, input);
     if (!command) return undefined;
     const gateStartMs = Date.now();
     try {
+      const execution =
+        command.toolName === "exec_command"
+          ? pinExecLaunch(input, ctx)
+          : {
+              cwd: ctx.cwd,
+              ...(typeof input.timeout === "number"
+                ? { requestedTimeoutSeconds: input.timeout }
+                : {}),
+            };
       await captureSession(ctx).authorize(
-        { ...command, toolCallId: event.toolCallId || randomUUID() },
+        { ...command, execution, toolCallId: event.toolCallId || randomUUID() },
         () => undefined,
       );
       compensateTimeout(event.input, gateStartMs);

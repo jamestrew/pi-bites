@@ -9,7 +9,12 @@ describe("shared command authorization", () => {
     const launch = vi.fn(() => "launched");
     await expect(
       session.authorize(
-        { toolCallId: "cell-1/call-1", toolName: "exec_command", command: "rm first" },
+        {
+          execution: { cwd: "/repo" },
+          toolCallId: "cell-1/call-1",
+          toolName: "exec_command",
+          command: "rm first",
+        },
         launch,
       ),
     ).resolves.toBe("launched");
@@ -41,6 +46,7 @@ test("cancelled nested review settles promptly and a late allow never launches",
   const launch = vi.fn();
   const pending = gate.captureSession(ctx as any).authorize(
     {
+      execution: { cwd: "/repo" },
       toolCallId: "cell/cancelled",
       toolName: "exec_command",
       command: "rm first",
@@ -67,16 +73,26 @@ test("parallel nested requests queue human dialogs and recheck session allowance
   const session = gate.captureSession(ctx as any);
   const launch = vi.fn();
   const first = session.authorize(
-    { toolCallId: "cell/1", toolName: "exec_command", command: "rm first" },
+    {
+      execution: { cwd: "/repo" },
+      toolCallId: "cell/1",
+      toolName: "exec_command",
+      command: "rm first",
+    },
     launch,
   );
   await vi.waitFor(() => expect(ui.select).toHaveBeenCalledOnce());
   const second = session.authorize(
-    { toolCallId: "cell/2", toolName: "exec_command", command: "rm second" },
+    {
+      execution: { cwd: "/repo" },
+      toolCallId: "cell/2",
+      toolName: "exec_command",
+      command: "rm second",
+    },
     launch,
   );
   const safe = session.authorize(
-    { toolCallId: "cell/3", toolName: "exec_command", command: "ls" },
+    { execution: { cwd: "/repo" }, toolCallId: "cell/3", toolName: "exec_command", command: "ls" },
     launch,
   );
   await safe;
@@ -88,7 +104,13 @@ test("parallel nested requests queue human dialogs and recheck session allowance
 });
 
 function nestedRequest(toolCallId: string, signal?: AbortSignal) {
-  return { toolCallId, toolName: "exec_command" as const, command: `rm ${toolCallId}`, signal };
+  return {
+    execution: { cwd: "/repo" },
+    toolCallId,
+    toolName: "exec_command" as const,
+    command: `rm ${toolCallId}`,
+    signal,
+  };
 }
 
 test.each(["queued", "displayed"])(
@@ -273,3 +295,37 @@ test.each(["completed", "cancelled"])(
     ]);
   },
 );
+
+test("direct exec review pins relative execution context before delayed approval", async () => {
+  const decision = Promise.withResolvers<AutoModeDecision>();
+  const review = vi.fn((_request: unknown) => decision.promise);
+  const harness = createBashGateHarness([], false, { isEnabled: () => true, review });
+  let stale = false;
+  const ctx = new Proxy(
+    { ...harness.ctx, isProjectTrusted: () => false },
+    {
+      get(target, key) {
+        if (stale) throw new Error(`stale ctx.${String(key)}`);
+        return Reflect.get(target, key);
+      },
+    },
+  );
+  const input = {
+    cmd: "rm './exact target'\n",
+    workdir: "child",
+    shell: "/bin/sh",
+    login: false,
+    tty: true,
+  };
+  const pending = harness.toolCall({ toolName: "exec_command", input }, ctx);
+  stale = true;
+  await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+  expect(review.mock.calls[0]?.[0]).toMatchObject({
+    command: "rm './exact target'\n",
+    execution: { cwd: "/repo/child", shell: "/bin/sh", login: false, tty: true },
+  });
+  harness.ctx.cwd = "/other";
+  decision.resolve(parseAutoModeDecision('{"outcome":"allow"}'));
+  await expect(pending).resolves.toBeUndefined();
+  expect(input.workdir).toBe("/repo/child");
+});

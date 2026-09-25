@@ -91,6 +91,7 @@ it.each([false, true])(
       expect(oldIncarnation).toEqual(expect.any(String));
       const approve = (agentSessionId: string | undefined) =>
         requestSubagentApproval(pi, {
+          execution: { cwd: "/repo" },
           agentId: id,
           agentSessionId,
           title: "worker",

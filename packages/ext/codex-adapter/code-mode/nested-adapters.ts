@@ -1,3 +1,4 @@
+import { pinExecLaunch } from "../exec/launch-context.js";
 import type { SubagentController, SubagentOperation } from "../../subagents/operations.js";
 import { CODEX_V1_NESTED_TOOLS } from "../../subagents/codex-v1-contract.js";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
@@ -172,10 +173,17 @@ export function createNestedAdapters(
         )
       : []),
     bind(owned.exec_command, {
-      execute: async (params, { authorization, call, signal, status }, run) => {
+      execute: async (params, { authorization, call, signal, status, context }, run) => {
+        const execution = pinExecLaunch(params, context);
         status("approval");
         return await authorization.authorize(
-          { toolCallId: call.callId, toolName: "exec_command", command: params.cmd, signal },
+          {
+            toolCallId: call.callId,
+            toolName: "exec_command",
+            command: params.cmd,
+            execution,
+            signal,
+          },
           () => shellResult(run),
         );
       },
