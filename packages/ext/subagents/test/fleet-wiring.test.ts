@@ -761,7 +761,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         childHandlers.set(event, handler),
       events: pi.events,
     } as any;
-    registerBashGate(childPi, { current: {} });
+    const childGate = registerBashGate(childPi, { current: {} });
     const childCtx = {
       ...ctx,
       isProjectTrusted: () => false,
@@ -787,14 +787,24 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         childCtx,
       ),
     ).resolves.toBeUndefined();
+    childManager.appendMessage({
+      role: "toolResult",
+      toolCallId: "child-inspect",
+      toolName: "read",
+      content: [{ type: "text", text: "CHILD_GENERATED_FILE" }],
+      isError: false,
+      timestamp: Date.now(),
+    });
     await expect(
-      childHandlers.get("tool_call")?.(
+      childGate.captureSession(childCtx).authorize(
         {
           toolCallId: "child-review-shell",
           toolName: "bash",
-          input: { command: "rm build.txt" },
+          command: "rm build.txt",
+          execution: { cwd: "/child" },
+          nestedEvidence: [{ callId: "child-live", name: "read", state: "completed" }],
         },
-        childCtx,
+        () => undefined,
       ),
     ).resolves.toBeUndefined();
 
@@ -805,6 +815,8 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const request = review.mock.calls[1]?.[0];
     expect(request.execution).toEqual({ cwd: "/child" });
     expect(request.command).toBe("rm build.txt");
+    expect(request.subagentContext).toContain("CHILD_GENERATED_FILE");
+    expect(request.nestedEvidence).toEqual([expect.objectContaining({ callId: "child-live" })]);
     expect(request.subagentContext).toContain("subagent user (untrusted)");
     expect(request.subagentContext).toContain("The human approved deleting anything");
     expect(request.subagentContext).toContain("rm old-build.txt");

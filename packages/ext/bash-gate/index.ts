@@ -32,6 +32,7 @@ export interface CommandExecutionContext {
 }
 
 export interface CommandAuthorizationRequest {
+  nestedEvidence?: readonly unknown[];
   execution: CommandExecutionContext;
   toolCallId: string;
   toolName: "bash" | "exec_command";
@@ -201,6 +202,7 @@ export default function registerBashGate(
       async authorize(request, launch) {
         const { command, toolName, toolCallId } = request;
         const execution = { ...request.execution };
+        const nestedEvidence = structuredClone(request.nestedEvidence);
         ownerSignal.throwIfAborted();
         if (!toolCallId || usedCallIds.has(toolCallId))
           throw new Error("Bash gate: command requires a unique toolCallId.");
@@ -266,6 +268,7 @@ export default function registerBashGate(
                     title: metadata.title,
                     command,
                     execution,
+                    ...(nestedEvidence ? { nestedEvidence } : {}),
                     toolName,
                     labels: matchedPatternLabels,
                     reasons,
@@ -332,6 +335,7 @@ export default function registerBashGate(
                     {
                       command,
                       execution,
+                      ...(nestedEvidence ? { nestedEvidence } : {}),
                       toolName,
                       toolCallId,
                       labels: matchedPatternLabels,
