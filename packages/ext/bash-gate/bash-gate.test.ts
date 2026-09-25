@@ -1,3 +1,4 @@
+import { parseAutoModeDecision, type AutoModeDecision } from "../automode/index.js";
 import { createBashGateHarness, subagentEntry } from "./test/harness.js";
 import { readFile, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -166,9 +167,9 @@ describe("bash gate tool_call", () => {
   });
 
   test("fails closed instead of persisting to a replacement session", async () => {
-    let resolveReview!: (decision: { outcome: "allow" }) => void;
+    let resolveReview!: (decision: AutoModeDecision) => void;
     const review = vi.fn(
-      () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
+      () => new Promise<AutoModeDecision>((resolve) => (resolveReview = resolve)),
     );
     const { toolCall, ctx, pi, sessionShutdown } = createBashGateHarness([], false, {
       isEnabled: () => true,
@@ -178,7 +179,7 @@ describe("bash gate tool_call", () => {
     const pending = toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx);
     await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
     sessionShutdown();
-    resolveReview({ outcome: "allow" });
+    resolveReview(parseAutoModeDecision('{"outcome":"allow"}'));
 
     await expect(pending).resolves.toEqual({
       block: true,

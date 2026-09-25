@@ -1,3 +1,4 @@
+import { parseAutoModeDecision, type AutoModeDecision } from "../../automode/index.js";
 import { registerChildSendInput } from "./helpers/child-send-input.js";
 /**
  * fleet-wiring.test.ts — end-to-end wiring of the FleetView through the REAL
@@ -363,7 +364,13 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("routes subagent bash approvals through automode without UI", async () => {
     const { pi, lifecycle } = makePi();
-    const review = vi.fn().mockResolvedValue({ outcome: "allow" });
+    const review = vi
+      .fn()
+      .mockResolvedValue(
+        parseAutoModeDecision(
+          '{"risk_level":"medium","user_authorization":"low","outcome":"allow","rationale":"Bounded local change"}',
+        ),
+      );
     subagentsExtension(pi, { isEnabled: () => true, review });
     const ctx = { ...ctxWith(uiCtx()), hasUI: false };
     await lifecycle.get("session_start")?.({}, ctx);
@@ -399,9 +406,9 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("fails a pending subagent approval when the parent session changes", async () => {
     const { pi, lifecycle } = makePi();
-    let resolveReview!: (decision: { outcome: "allow" }) => void;
+    let resolveReview!: (decision: AutoModeDecision) => void;
     const review = vi.fn(
-      () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
+      () => new Promise<AutoModeDecision>((resolve) => (resolveReview = resolve)),
     );
     subagentsExtension(pi, { isEnabled: () => true, review });
     const ctx = { ...ctxWith(uiCtx()), hasUI: false };
@@ -419,7 +426,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
     await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
     await lifecycle.get("session_before_switch")?.({}, ctx);
-    resolveReview({ outcome: "allow" });
+    resolveReview(parseAutoModeDecision('{"outcome":"allow"}'));
     await flush();
 
     expect(reply).toHaveBeenCalledWith({
@@ -430,9 +437,9 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   it("keeps the FleetView row stable while Automode reviews a subagent command", async () => {
     mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
-    let resolveReview!: (decision: { outcome: "allow" }) => void;
+    let resolveReview!: (decision: AutoModeDecision) => void;
     const review = vi.fn(
-      () => new Promise<{ outcome: "allow" }>((resolve) => (resolveReview = resolve)),
+      () => new Promise<AutoModeDecision>((resolve) => (resolveReview = resolve)),
     );
     subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
@@ -466,7 +473,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expectStableFleetRow(ui, "stable Automode row", "rm build.txt");
     expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
 
-    resolveReview({ outcome: "allow" });
+    resolveReview(parseAutoModeDecision('{"outcome":"allow"}'));
     pi.events.emit("bites:bash_gate_resolved", { requiresHuman: false });
     await flush();
     await lifecycle.get("session_shutdown")?.({}, ctx);
@@ -505,7 +512,13 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("keeps a no-UI subagent Automode denial fail-closed", async () => {
     const { pi, lifecycle } = makePi();
-    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    const review = vi
+      .fn()
+      .mockResolvedValue(
+        parseAutoModeDecision(
+          '{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}',
+        ),
+      );
     subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
     const ctx = { ...ctxWith(ui), hasUI: false };
@@ -560,7 +573,9 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     let stale = false;
     const review = vi.fn().mockImplementation(async () => {
       stale = true;
-      return { outcome: "deny", rationale: "not authorized" };
+      return parseAutoModeDecision(
+        '{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}',
+      );
     });
     subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
@@ -623,7 +638,13 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("keeps the original subagent denial when interactive escalation fails", async () => {
     const { pi, lifecycle } = makePi();
-    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
+    const review = vi
+      .fn()
+      .mockResolvedValue(
+        parseAutoModeDecision(
+          '{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}',
+        ),
+      );
     subagentsExtension(pi, { isEnabled: () => true, review });
     const ui = uiCtx();
     ui.select.mockRejectedValue(new Error("UI unavailable"));

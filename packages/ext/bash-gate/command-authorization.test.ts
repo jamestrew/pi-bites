@@ -1,3 +1,4 @@
+import { parseAutoModeDecision, type AutoModeDecision } from "../automode/index.js";
 import { describe, expect, test, vi } from "vitest";
 import { createBashGateHarness, subagentEntry } from "./test/harness.js";
 describe("shared command authorization", () => {
@@ -33,7 +34,7 @@ describe("shared command authorization", () => {
 });
 
 test("cancelled nested review settles promptly and a late allow never launches", async () => {
-  const reviewResult = Promise.withResolvers<{ outcome: "allow" }>();
+  const reviewResult = Promise.withResolvers<AutoModeDecision>();
   const review = vi.fn(() => reviewResult.promise);
   const { gate, ctx, pi } = createBashGateHarness([], false, { isEnabled: () => true, review });
   const controller = new AbortController();
@@ -51,7 +52,7 @@ test("cancelled nested review settles promptly and a late allow never launches",
   await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
   controller.abort();
   await settled;
-  reviewResult.resolve({ outcome: "allow" });
+  reviewResult.resolve(parseAutoModeDecision('{"outcome":"allow"}'));
   await Promise.resolve();
   expect(launch).not.toHaveBeenCalled();
   expect(pi.appendEntry.mock.calls.map(([, entry]) => entry)).toEqual([
@@ -158,7 +159,7 @@ test("session replacement invalidates captured ownership without touching stale 
 
 test("parallel reviewers keep unique command identities and denial only blocks its own launch", async () => {
   const firstReview = Promise.withResolvers<{ outcome: "deny" }>();
-  const secondReview = Promise.withResolvers<{ outcome: "allow" }>();
+  const secondReview = Promise.withResolvers<AutoModeDecision>();
   const review = vi
     .fn()
     .mockImplementationOnce(() => firstReview.promise)
@@ -178,7 +179,7 @@ test("parallel reviewers keep unique command identities and denial only blocks i
   await vi.waitFor(() => expect(review).toHaveBeenCalledTimes(2));
   firstReview.resolve({ outcome: "deny" });
   await denied;
-  secondReview.resolve({ outcome: "allow" });
+  secondReview.resolve(parseAutoModeDecision('{"outcome":"allow"}'));
   await expect(second).resolves.toBe("running");
   expect(blockedLaunch).not.toHaveBeenCalled();
   expect(allowedLaunch).toHaveBeenCalledOnce();

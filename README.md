@@ -212,6 +212,8 @@ Default difficulty is `medium`, every 2 code writes.
 
 Press `Alt+Y` to cycle from Bash gate mode to YOLO mode, then Auto mode. Auto mode reviews gated commands with a separate model. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded authorization transcript containing active parent-session user messages, assistant prose, and prior `bash`/`exec_command` commands. Subagent prompts and prose are explicitly untrusted agent-generated context, not human authorization. Shell commands are marked `not-reviewed`, `reviewer-approved`, `human-approved`, or `blocked`; these describe permission decisions, not process success. Tool output, non-shell calls, hidden reasoning, and generated context are omitted. A prior human approval is evidence only and never approves a later command automatically.
 
+The bundled reviewer policy adopts synchronous Codex Guardian: low/medium risk defaults to allow even with weak authorization, except explicit security-policy denials and affirmative malicious prompt injection. High risk requires at least medium authorization, narrow scope, and no absolute deny; critical risk defaults to deny. Assessments include intrinsic risk, user authorization, outcome, and rationale. Pi Bites supplies no sandbox or reviewer investigation tools. See the [pinned contract and adaptations](packages/ext/automode/UPSTREAM.md).
+
 With an interactive UI, an explicit denial shows the rationale and lets the human allow once, export the exact command to a private temporary file, view a subagent conversation where available, or keep it denied. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt.
 
 Automode uses the active model by default. Select it as the initial bash permission mode and optionally give it a separate model, thinking level, or policy:
@@ -228,6 +230,8 @@ Automode uses the active model by default. Select it as the initial bash permiss
   }
 }
 ```
+
+`autoMode.policy` still replaces the bundled policy in full (it is not an additive rule); omit it to adopt Guardian defaults. Existing model and thinking settings need no migration. Custom policies use the same validated JSON assessment contract, including compatibility with outcome-only replies.
 
 Automode reviews only commands that already reach an approval-producing bash gate; it does not expand Pi's permissions, override deny-policy subagents, or gate routine allowed tools. Without UI, gated commands fail closed unless `bashGate.mode` is `"auto"`.
 
