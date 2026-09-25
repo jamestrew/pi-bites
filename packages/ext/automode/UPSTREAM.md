@@ -109,3 +109,73 @@ with the bundled policy, without supplying `assessment`; compare outcome/risk/au
 and inspect rationale manually. Record provider/model/thinking, failures, latency, and
 usage separately. No live model quality, cache improvement, or cost claim is made here;
 those require the real-model evaluation work in #326.
+
+## Sequential conversation reuse (#329)
+
+The local Codex checkout was re-verified at
+`a62e98d18c6550e3bea152ed1b89d1e931dca961` for this change. References:
+`core/src/guardian/review_session.rs`, `review_session_context.rs`,
+`review_session_factory.rs`, and `input_budget.rs`. Pi adopts the idle sequential
+conversation, incremental evidence, fresh synchronous assessment, and whole-request
+budget. It does not adopt Guardian V2, investigation tools, or approval reuse.
+
+`history.ts` retains a bounded committed conversation. A compatible review appends
+new parent context and authorization records plus the exact pending action after the
+previous assessment. Earlier messages are not rebuilt or reordered. Later validated
+records supersede earlier records for the same action; reviewer outcomes never become
+human authorization. Only successfully parsed, noncancelled assessments commit.
+
+Pi passes a reviewer-only random `sessionId` through `ModelRegistry.streamSimple`.
+It remains stable across compatible sequential reviews, separate from the coding
+agent's session identity. This is provider cache/routing affinity, not a guarantee of
+cache hits; fresh requests can also hit provider caches. Provider defaults for cache
+retention remain unchanged. No provider-specific transport is introduced.
+
+Intentional deviations from Codex:
+
+- Overlapping calls build isolated bounded requests, without waiting for the busy
+  conversation or committing their results into it. Shared-prefix concurrent forks
+  are deferred. Forwarded subagent reviews also stay isolated because the reviewer
+  boundary currently has no stable child-session identity.
+- The input ceiling is 96,000 serialized UTF-8 bytes, further constrained by the
+  model context window minus 1,024 response tokens and the selected thinking
+  budget (1,024 minimal / 2,048 low / 8,192 medium / 16,384 high or above).
+  Pi expands budget-based Anthropic/Bedrock output beyond `maxTokens`; these
+  existing defaults are explicitly passed as `thinkingBudgets` and reserved even
+  for providers that do not expand output. The estimate charges one token
+  per UTF-8 byte plus 256 tokens per message/system framing, conservatively rather
+  than using Codex's provider-aware wire estimator and 256-token safety margin.
+  Budget includes policy, all history, evidence, exact action, and output reserve.
+  At the ceiling, history rebuilds once from the current bounded evidence with a
+  new cache identity. If that request still cannot fit, review fails closed without
+  truncating the pending command, execution context, or forwarded context to fit.
+- History is memory-only, with fixed-size hashes/counts for context and branch
+  cursors. Model/provider/options, installed policy, execution context, session,
+  branch navigation, context rewrites, compaction, and reload invalidate reuse.
+  Ordinary append-only growth does not. Navigation attempts reset conservatively
+  even if later cancelled. Late completions cannot commit or return approval after
+  invalidation; deferred work uses snapshotted dependencies, never captured ctx.
+- Evidence-selection limits and policy stay as installed; richer retained
+  instructions and tool-result evidence remain separate epic work. No extra retry
+  or model call is added. Usage recording retains input, cache reads/writes, output,
+  reasoning where supplied, actual served model, and cost, including failed responses.
+
+### Comparable pre-replacement workload
+
+The one-shot implementation remains reproducible at Pi Bites commit
+`219d013e` (the parent of this change), using the same bundled policy, model,
+thinking level, and `fixtures/policy-scenarios.json`. For a sequential cache/cost
+comparison, use a fresh session with user instruction “Remove only generated build
+files”, then review `rm build-a.txt`, append user instruction “Keep protected.txt”,
+review `rm build-b.txt`, and review `rm protected.txt`, all in the same cwd. Run once
+cold and repeat warm for each implementation with the same provider/model/thinking.
+Record each invocation, assessment, latency, and the existing `automode.jsonl` usage
+rows; compare uncached input, cache reads/writes, output/reasoning, and cost separately.
+Also repeat after compaction and with two overlapping reviews to expose resets and
+isolated fallback costs. Do not infer provider cache hits from mock payload tests.
+
+The issue's earlier 100-record observational baseline reports 42 reviews with cache
+reads, 172,544 cached versus 268,685 uncached input tokens (39.1% cached), and 55/97
+repeat-session/model reviews with no reads. These are historical observations, not
+measurements of this patch or proof that omission of `sessionId` caused cache misses.
+No live-model cache, policy-quality, or cost improvement is claimed by this change.
