@@ -21,6 +21,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export const AUTO_MODE_PROVIDER = "Auto Mode";
+export const GUARDIAN_PROVIDER = "Auto Mode (Guardian)";
 
 export interface DashboardAuxiliaryUsageEntry {
   sessionId: string;
@@ -53,7 +54,7 @@ export function decodeAuxiliaryUsageEntry(
     return {
       sessionId: autoModeEntry.parentSessionId,
       message: {
-        provider: AUTO_MODE_PROVIDER,
+        provider: autoModeEntry.reviewer === "guardian" ? GUARDIAN_PROVIDER : AUTO_MODE_PROVIDER,
         model: JSON.stringify([autoModeEntry.provider, autoModeEntry.model]),
         cost: usage.cost.total,
         input: usage.input,

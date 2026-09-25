@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 export interface AutoModeUsageRecord {
   type: "automode_usage";
   version: 1;
+  reviewer?: "guardian";
   parentSessionId: string;
   timestamp: number;
   provider: string;
@@ -43,6 +44,7 @@ export function decodeAutoModeUsageRecord(value: unknown): AutoModeUsageRecord |
   return {
     type: "automode_usage",
     version: 1,
+    ...(value.reviewer === "guardian" ? { reviewer: "guardian" as const } : {}),
     parentSessionId: value.parentSessionId,
     timestamp: nonNegativeNumberOrZero(value.timestamp),
     provider: value.provider,

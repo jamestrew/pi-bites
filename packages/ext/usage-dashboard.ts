@@ -47,6 +47,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import {
   AUTO_MODE_PROVIDER,
+  GUARDIAN_PROVIDER,
   decodeAuxiliaryUsageEntry,
   decodeSessionUsageEntry,
   formatAutoModeModelLabel,
@@ -1154,13 +1155,13 @@ export class UsageComponent {
           (a, b) => b[1].cost - a[1].cost,
         );
 
+        const isAutoMode =
+          providerName === AUTO_MODE_PROVIDER || providerName === GUARDIAN_PROVIDER;
         for (const [modelName, modelStats] of models) {
-          const label =
-            providerName === AUTO_MODE_PROVIDER ? formatAutoModeModelLabel(modelName) : modelName;
-          const names =
-            providerName === AUTO_MODE_PROVIDER
-              ? wrapTextWithAnsi(label, Math.max(layout.nameWidth - 4, 1))
-              : [label];
+          const label = isAutoMode ? formatAutoModeModelLabel(modelName) : modelName;
+          const names = isAutoMode
+            ? wrapTextWithAnsi(label, Math.max(layout.nameWidth - 4, 1))
+            : [label];
           for (const [index, name] of names.entries()) {
             lines.push(
               this.renderDataRow(name, modelStats, layout, {

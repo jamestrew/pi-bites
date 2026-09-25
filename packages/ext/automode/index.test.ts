@@ -265,6 +265,7 @@ describe("automode reviewer model and completion", () => {
       expect(appendAutoModeUsageRecord).toHaveBeenCalledWith({
         type: "automode_usage",
         version: 1,
+        reviewer: "guardian",
         parentSessionId: "parent-session",
         timestamp: reviewerResponse.timestamp,
         provider: "response-provider",

@@ -503,6 +503,7 @@ ${safeJson(approvalRequest)}
         await appendAutoModeUsageRecord({
           type: "automode_usage",
           version: 1,
+          reviewer: "guardian",
           parentSessionId,
           timestamp: response.timestamp,
           provider: response.provider,
