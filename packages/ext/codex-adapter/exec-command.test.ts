@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -7,6 +7,7 @@ import { stripVTControlCharacters } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getShellConfig } from "@earendil-works/pi-coding-agent";
 
+import * as bashFacts from "../bash-gate/bash-command-facts.js";
 import { getBundledExecBridgePath } from "./exec/binary.js";
 import { createExecCommandTool } from "./exec/command-tool.js";
 import { createPipeOutputNormalizer } from "./exec/output.js";
@@ -348,6 +349,158 @@ describe("exec_command and write_stdin", () => {
       text: expect.stringMatching(/Process exited with code 0[\s\S]*Output:/),
     });
   });
+
+  test("notifies about a skill read without changing mixed-command output after ctx expires", async () => {
+    const cwd = tempDir();
+    mkdirSync(join(cwd, "diagnosing-bugs"));
+    writeFileSync(join(cwd, "diagnosing-bugs/SKILL.md"), "skill contents\n");
+    const notify = vi.fn();
+    let stale = false;
+    const dependencies = { cwd, hasUI: true, ui: { notify }, isProjectTrusted: () => true };
+    const ctx = Object.defineProperties(
+      {},
+      Object.fromEntries(
+        Object.entries(dependencies).map(([key, value]) => [
+          key,
+          {
+            get() {
+              if (stale) throw new Error(`stale ctx.${key}`);
+              return value;
+            },
+          },
+        ]),
+      ),
+    );
+    const pending = createExecCommandTool(manager()).execute(
+      "skill",
+      { cmd: `cat "${join(cwd, "diagnosing-bugs/SKILL.md")}"; printf other`, login: false },
+      undefined,
+      undefined,
+      ctx as never,
+    );
+    stale = true;
+    const result = await pending;
+    expect(result.details).toMatchObject({ exit_code: 0, output: "skill contents\nother" });
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("[skill] diagnosing-bugs", "info"));
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain("[skill]");
+  });
+
+  test.each([
+    ["sed -n '1,2p' a/SKILL.md", "[skill] a"],
+    ["sed -n -e '1p' -e '2p' a/SKILL.md", "[skill] a"],
+    ["cat 'space name/SKILL.md' b/SKILL.md a/SKILL.md b/SKILL.md", "[skill] space name, b, a"],
+    [
+      "cat b/SKILL.md; sed -n '1p' a/SKILL.md && cat b/SKILL.md\ncat 'space name/SKILL.md' || cat a/SKILL.md",
+      "[skill] b, a, space name",
+    ],
+    ["sed -n --expression='1p' b/SKILL.md; sed -n -e1p a/SKILL.md", "[skill] b, a"],
+  ])("recognizes literal skill operands: %s", async (cmd, message) => {
+    const cwd = tempDir();
+    for (const name of ["a", "b", "space name"]) {
+      mkdirSync(join(cwd, name));
+      writeFileSync(join(cwd, name, "SKILL.md"), "one\ntwo\n");
+    }
+    const notify = vi.fn();
+    const result = await createExecCommandTool(manager()).execute(
+      "skills",
+      { cmd, login: false },
+      undefined,
+      undefined,
+      { cwd, hasUI: true, ui: { notify }, isProjectTrusted: () => true } as never,
+    );
+    expect(result.details.exit_code).toBe(0);
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith(message, "info"));
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  test("ignores mentions, scripts, unsupported readers and dynamic paths", async () => {
+    const cwd = tempDir();
+    for (const name of ["a", "b"]) {
+      mkdirSync(join(cwd, name));
+      writeFileSync(join(cwd, name, "SKILL.md"), "one\n");
+    }
+    const notify = vi.fn();
+    const cmd = [
+      "printf '%s' b/SKILL.md",
+      "head b/SKILL.md",
+      'p=b; cat "$p/SKILL.md"',
+      "cat */SKILL.md",
+      "cat $(printf b)/SKILL.md",
+      "cat --help b/SKILL.md",
+      "sed -n 'b/SKILL.md' /dev/null",
+      "sed -n -e 'b/SKILL.md' /dev/null",
+      "cat a/SKILL.md",
+    ].join("; ");
+    await createExecCommandTool(manager()).execute(
+      "mentions",
+      { cmd, login: false },
+      undefined,
+      undefined,
+      { cwd, hasUI: true, ui: { notify }, isProjectTrusted: () => true } as never,
+    );
+    await vi.waitFor(() => expect(notify).toHaveBeenCalledWith("[skill] a", "info"));
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not read UI or initialize the parser without UI", async () => {
+    const parse = vi.spyOn(bashFacts, "extractBashFacts");
+    try {
+      const result = await createExecCommandTool(manager()).execute(
+        "print",
+        { cmd: "cat missing/SKILL.md; printf unchanged", login: false },
+        undefined,
+        undefined,
+        {
+          cwd: tempDir(),
+          hasUI: false,
+          get ui() {
+            throw new Error("no UI");
+          },
+          isProjectTrusted: () => true,
+        } as never,
+      );
+      expect(result.details.output).toContain("unchanged");
+      expect(parse).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  test.each(["reject", "malformed", "deferred"] as const)(
+    "parser %s cannot delay or fail command execution",
+    async (failure) => {
+      const deferred =
+        Promise.withResolvers<Awaited<ReturnType<typeof bashFacts.extractBashFacts>>>();
+      const parse = vi
+        .spyOn(bashFacts, "extractBashFacts")
+        .mockImplementation(() =>
+          failure === "reject"
+            ? Promise.reject(new Error("parser unavailable"))
+            : failure === "malformed"
+              ? Promise.resolve(null as never)
+              : deferred.promise,
+        );
+      const notify = vi.fn();
+      try {
+        const result = await createExecCommandTool(manager()).execute(
+          "parser-failure",
+          { cmd: "cat missing/SKILL.md; printf unchanged", login: false },
+          undefined,
+          undefined,
+          { cwd: tempDir(), hasUI: true, ui: { notify }, isProjectTrusted: () => true } as never,
+        );
+        expect(result.details).toMatchObject({
+          exit_code: 0,
+          output: expect.stringContaining("unchanged"),
+        });
+        expect(notify).not.toHaveBeenCalled();
+      } finally {
+        if (failure === "deferred") deferred.reject(new Error("late parser failure"));
+        parse.mockRestore();
+      }
+    },
+  );
 
   test("rejects nonzero exits so Pi renders the error background", async () => {
     const tool = createExecCommandTool(manager());
