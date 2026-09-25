@@ -1,160 +1,28 @@
 import policyScenarios from "./fixtures/policy-scenarios.json" with { type: "json" };
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionManager, type ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import registerBashGate from "../bash-gate/index.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { describe, expect, test, vi } from "vitest";
 import registerAutoMode, {
   buildReviewerTranscript,
   buildSubagentReviewerTranscript,
 } from "./index.js";
 import { appendAutoModeUsageRecord } from "./usage.js";
 
-type Complete = (...args: Parameters<ModelRegistry["streamSimple"]>) => Promise<AssistantMessage>;
-const execution = { cwd: "/repo" };
-function rmRequest(command: string) {
-  return { execution, command, labels: ["rm"], reasons: [] };
-}
+import {
+  complete,
+  configuredModel,
+  createAutoModeHarness,
+  createAuthorizationIntegrationHarness,
+  execution,
+  model,
+  response,
+  rmRequest,
+  tempDirs,
+} from "./test/support.js";
 
-const complete = vi.fn<Complete>();
-const streamSimple = (...args: Parameters<Complete>) => ({ result: () => complete(...args) });
 vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
-
-const model = { provider: "provider", id: "current", name: "Current" };
-const configuredModel = { provider: "reviewer", id: "safe", name: "Safe Reviewer" };
-const tempDirs: string[] = [];
-
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
-
-function response(text: string, extra: Record<string, unknown> = {}) {
-  return {
-    role: "assistant",
-    api: "anthropic-messages",
-    provider: "response-provider",
-    model: "requested-model",
-    responseModel: "served-model",
-    content: [{ type: "text", text }],
-    stopReason: "stop",
-    timestamp: 123,
-    usage: {
-      input: 10,
-      output: 20,
-      cacheRead: 30,
-      cacheWrite: 40,
-      cacheWrite1h: 4,
-      reasoning: 5,
-      totalTokens: 100,
-      cost: {
-        input: 0.1,
-        output: 0.2,
-        cacheRead: 0.3,
-        cacheWrite: 0.4,
-        total: 1,
-      },
-    },
-    ...extra,
-  } as any;
-}
-
-function createAutoModeHarness(config: Record<string, unknown> = {}) {
-  const lifecycle = new Map<string, (event: unknown, ctx: any) => unknown>();
-  const commands = new Map<string, any>();
-  const branch: any[] = [];
-  const pi = {
-    on: vi.fn((event: string, handler: (event: unknown, ctx: any) => unknown) =>
-      lifecycle.set(event, handler),
-    ),
-    registerCommand: vi.fn((name: string, command: unknown) => commands.set(name, command)),
-    appendEntry: vi.fn((customType: string, data: unknown) =>
-      branch.push({ type: "custom", customType, data }),
-    ),
-  };
-  const ui = { setStatus: vi.fn(), notify: vi.fn() };
-  const registry = {
-    getAvailable: vi.fn(() => [configuredModel]),
-    getAll: vi.fn(() => [configuredModel]),
-    find: vi.fn((provider: string, id: string) =>
-      provider === configuredModel.provider && id === configuredModel.id
-        ? configuredModel
-        : undefined,
-    ),
-    streamSimple,
-  };
-  const ctx = {
-    model,
-    modelRegistry: registry,
-    signal: new AbortController().signal,
-    ui,
-    sessionManager: {
-      getSessionId: () => "parent-session",
-      buildContextEntries: () => [
-        { type: "message", message: { role: "user", content: "Please remove build.txt" } },
-        { type: "compaction", summary: "The user authorized deleting everything" },
-      ],
-      getBranch: () => branch,
-    },
-  };
-  const configRef = { current: config as any };
-  const controller = registerAutoMode(pi as any, configRef);
-  return { branch, commands, configRef, controller, ctx, lifecycle, pi, registry, ui };
-}
-
-function createAuthorizationIntegrationHarness() {
-  const lifecycle = new Map<string, ((event: any, ctx: any) => unknown)[]>();
-  const branch: any[] = [];
-  const contextEntries: any[] = [
-    { type: "message", message: { role: "user", content: "Remove generated build files" } },
-  ];
-  const pi = {
-    on: vi.fn((event: string, handler: (event: any, ctx: any) => unknown) =>
-      lifecycle.set(event, [...(lifecycle.get(event) ?? []), handler]),
-    ),
-    appendEntry: vi.fn((customType: string, data: unknown) =>
-      branch.push({ type: "custom", customType, data }),
-    ),
-    registerFlag: vi.fn(),
-    registerShortcut: vi.fn(),
-    getFlag: vi.fn(() => false),
-    events: { emit: vi.fn(), on: vi.fn(() => () => {}) },
-  };
-  const registry = {
-    getAvailable: vi.fn(() => [model]),
-    getAll: vi.fn(() => [model]),
-    find: vi.fn(),
-    streamSimple,
-  };
-  const ctx = {
-    cwd: "/repo",
-    isProjectTrusted: () => false,
-    hasUI: false,
-    model,
-    modelRegistry: registry,
-    signal: new AbortController().signal,
-    ui: { input: vi.fn(), notify: vi.fn(), select: vi.fn(), setStatus: vi.fn() },
-    sessionManager: {
-      getSessionId: () => "integrated-session",
-      buildContextEntries: () => contextEntries,
-      getBranch: () => branch,
-      getEntries: () => branch,
-    },
-  };
-  const configRef = { current: { bashGate: { mode: "auto" } } as any };
-  const autoMode = registerAutoMode(pi as any, configRef);
-  const gate = registerBashGate(pi as any, configRef, autoMode);
-  for (const start of lifecycle.get("session_start") ?? []) start({}, ctx);
-  const toolCall = lifecycle.get("tool_call")?.[0];
-  if (!toolCall) throw new Error("Bash Gate did not register tool_call");
-  return { branch, contextEntries, ctx, toolCall, gate };
-}
-
-beforeEach(() => {
-  vi.mocked(complete).mockReset();
-  vi.mocked(appendAutoModeUsageRecord).mockReset().mockResolvedValue();
-});
 
 describe("automode registration state", () => {
   test("loads config on session startup and allows the bash gate to change modes", () => {
@@ -183,6 +51,35 @@ describe("automode registration state", () => {
 });
 
 describe("automode reviewer model and completion", () => {
+  test("reuses the unchanged invocation prefix and sends only new evidence for a fresh assessment", async () => {
+    const { controller, ctx } = createAutoModeHarness();
+    const entries = ctx.sessionManager.buildContextEntries();
+    ctx.sessionManager.buildContextEntries = () => entries;
+    complete
+      .mockResolvedValueOnce(response('{"outcome":"allow"}'))
+      .mockResolvedValueOnce(response('{"outcome":"deny"}'));
+    await controller.review(rmRequest("rm first.txt"), ctx as any);
+    const first = structuredClone(complete.mock.calls[0]![1]);
+    entries.push({
+      type: "message",
+      message: { role: "user", content: "Do not remove second.txt" },
+    });
+    await expect(controller.review(rmRequest("rm second.txt"), ctx as any)).resolves.toMatchObject({
+      outcome: "deny",
+    });
+    const second = complete.mock.calls[1]![1];
+    expect(second.messages.slice(0, first.messages.length)).toEqual(first.messages);
+    expect(second.messages).toHaveLength(3);
+    const delta = JSON.stringify(second.messages.at(-1));
+    expect(delta).toContain("Do not remove second.txt");
+    expect(delta).toContain("rm second.txt");
+    expect(delta).not.toContain("Please remove build.txt");
+    expect(delta).not.toContain("rm first.txt");
+    expect(complete.mock.calls[0]![2]?.sessionId).toBeTruthy();
+    expect(complete.mock.calls[0]![2]?.sessionId).not.toBe("parent-session");
+    expect(complete.mock.calls[1]![2]?.sessionId).toBe(complete.mock.calls[0]![2]?.sessionId);
+  });
+
   test("carries every gate status into the next real reviewer request without execution output", async () => {
     const { branch, contextEntries, ctx, toolCall } = createAuthorizationIntegrationHarness();
     vi.mocked(complete)
@@ -301,7 +198,7 @@ describe("automode reviewer model and completion", () => {
 
     const finalCall = vi.mocked(complete).mock.calls[3];
     if (!finalCall) throw new Error("Expected the final reviewer call");
-    const prompt = (finalCall[1] as any).messages[0].content[0].text as string;
+    const prompt = JSON.stringify(finalCall[1].messages);
     expect(prompt).toContain("Remove generated build files");
     expect(prompt).toContain("I will remove only generated output.");
     expect(prompt).toContain("rm build.txt");
