@@ -617,3 +617,28 @@ test.each(["default", "absolute", "relative"])(
     expect(existsSync(join(expected, "marker"))).toBe(true);
   },
 );
+
+test("nested authorization snapshots earlier same-cell tool results with stale ctx", async () => {
+  const review = vi.fn(async (_request: unknown) => parseAutoModeDecision('{"outcome":"allow"}'));
+  const { runtime, cwd, expire } = setup({}, {}, { isEnabled: () => true, review });
+  expire();
+  await runtime.execute(`
+    await tools.exec_command({cmd:"printf generated-evidence",login:false});
+    await tools.exec_command({cmd:"touch reviewed-evidence",login:false});
+  `);
+  expect(review).toHaveBeenCalledTimes(1);
+  const request = review.mock.calls[0]![0] as any;
+  expect(request.nestedEvidence).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        name: "exec_command",
+        state: "completed",
+        cwd,
+        result: expect.objectContaining({
+          details: expect.objectContaining({ output: "generated-evidence", exit_code: 0 }),
+        }),
+      }),
+    ]),
+  );
+  expect(existsSync(join(cwd, "reviewed-evidence"))).toBe(true);
+});

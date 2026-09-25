@@ -163,11 +163,17 @@ export class NestedToolBridge {
             };
             signal.addEventListener("abort", release, { once: true });
             try {
-              return await snapshot.authorization.authorize(request, () => {
-                // Gate time blocks model responses; command execution must still yield.
-                release();
-                return launch();
-              });
+              return await snapshot.authorization.authorize(
+                {
+                  ...request,
+                  nestedEvidence: this.traces.forCell(call.cellId),
+                },
+                () => {
+                  // Gate time blocks model responses; command execution must still yield.
+                  release();
+                  return launch();
+                },
+              );
             } finally {
               signal.removeEventListener("abort", release);
               release();

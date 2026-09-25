@@ -279,6 +279,7 @@ export function createSubagents(
                 command: request.command,
                 toolName: request.toolName,
                 execution: request.execution,
+                ...(request.nestedEvidence ? { nestedEvidence: request.nestedEvidence } : {}),
                 labels: request.labels,
                 reasons: request.reasons,
                 subagentContext: session

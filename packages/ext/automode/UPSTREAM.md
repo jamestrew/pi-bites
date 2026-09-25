@@ -46,7 +46,7 @@ to a file or ticket is still recognized when evidenced in the packet. Validated
 human-approved shell records describe prior approval, not blanket authorization.
 Reviewer decisions are history, never human approval. The existing compacted Goal is
 explicitly a generated summary: task-level context, not direct authorization for risky
-specifics. Tool-result evidence remains separate epic work.
+specifics. Tool-result evidence is described below for #332.
 
 Informed post-denial human approval can meet the high-risk authorization threshold;
 it cannot make the reviewer approve an action that remains critical or absolutely denied.
@@ -153,7 +153,7 @@ Intentional deviations from Codex:
   Ordinary append-only growth does not. Navigation attempts reset conservatively
   even if later cancelled. Late completions cannot commit or return approval after
   invalidation; deferred work uses snapshotted dependencies, never captured ctx.
-- Tool-result evidence remains separate epic work; #331 below updates retained
+- Tool-result evidence is described below for #332; #331 updates retained
   instruction selection and provenance. No extra retry
   or model call is added. Usage recording retains input, cache reads/writes, output,
   reasoning where supplied, actual served model, and cost, including failed responses.
@@ -290,3 +290,65 @@ latest changes, whole oversized omissions, reviewer-budget rebuilds, malicious s
 context edits, unavailable history, branch/session isolation, persisted reload, and
 forwarded subagent provenance. These fixtures prove evidence transport, not live-model
 authorization quality or measured provider cache savings.
+
+## Bounded tool evidence (#332)
+
+The local `/home/jt/projects/codex` checkout is re-verified at
+`a62e98d18c6550e3bea152ed1b89d1e931dca961`. References:
+`guardian-context/src/transcript.rs`, `profile.rs`, and
+`core/src/guardian/prompt.rs` and `request_budget.rs`. Synchronous Guardian keeps
+calls/results with call identity, separate tool retention limits, no reasoning or
+images by default, and an assembled-request budget. Pi adapts this to its persisted
+`toolResult` messages and Code Mode `details.traces`; it adds no investigation tools.
+
+The shared parent/child transcript builder supplies calls (including file mutation
+arguments), text results, and a small allowlist of file-change/exit/session/truncation
+metadata. Calls and authorization records never prove execution. Tool return is not
+process success: exit codes, running session IDs, and errors must be considered;
+errors can precede execution or leave partial effects. Missing calls, directories,
+outputs, and prior observations remain unknown, not inferred successful operations.
+Nested traces retain their outer-call identity and state, never a parent-human role.
+For nested exec, pinned `input.workdir` is the effective directory; other traces
+carry their captured directory. Direct calls preserve supplied arguments and results,
+but do not invent a historical cwd when none was recorded. The exact current action
+continues to carry its separately pinned execution context.
+
+Deterministic Pi limits (intentional adaptations from upstream token estimates):
+
+- Each transcript's tool packet selects the newest 12 records, walking backwards
+  until its 12,000-character allowance is exhausted, then emits chronological order.
+  It reserves 400 characters for labels/omissions. Original instructions still take
+  priority under the shared 40,000-character transcript ceiling.
+- Each input, combined text-content field, and selected details object is retained
+  whole up to 1,200 serialized characters. Larger fields are omitted whole with their
+  original length, not spliced into a misleading script or diff. A record exceeding
+  4,000 serialized characters becomes an explicit whole-record omission marker.
+  Images/non-text blocks are omitted with a marker. Reasoning is never collected.
+- Count/size selection leaves an explicit omitted-record count. Code Mode traces
+  are already lossy presentation snapshots (128 calls, structural limits, 8,192-char
+  strings); upstream display truncation markers remain evidence of missing data.
+  Trace eviction before a packet cannot be reconstructed and absence is not success.
+- Live same-cell traces travel as snapshotted request-local evidence through the
+  nested authorization session and, for children, the parent approval broker. This
+  includes prior results before the outer `exec`/`wait` observation is persisted.
+  Live evidence gets its own identically bounded packet. Persisted snapshots use
+  ordinary incremental parent history; forwarded child evidence never commits there.
+- All tool fields are JSON data with angle brackets/ampersands escaped, labeled
+  untrusted factual evidence, never human authorization. Embedded role labels,
+  approval claims, or closing tags cannot create a transcript record or close its
+  framing. The reviewer has no tools, sandbox, or permission-decision cache.
+
+The existing **whole-request** budget charges policy, retained instructions, all
+reusable history, both parent and child tool packets, live traces, exact current
+action, provider framing, and output/thinking allowance together. Packet limits do
+not substitute for that check. Compatible additions append without rewriting the
+committed prefix; immutable provider payloads cannot change with later traces.
+History overflow rebuilds cold once; a still-oversized request fails explicitly,
+without trimming the exact action or the selected evidence to force approval.
+
+`tool-evidence.test.ts` exercises generated-file cleanup, failed commands, bounded
+bulk output, injection-shaped text, nested persisted/live traces, forwarded child
+packets, incremental immutable history, and whole-request failure at the actual
+provider payload seam. Code Mode and fleet wiring tests exercise live nested and
+forwarded transport with stale ctx. These are transport fixtures, not evidence of
+live-model quality or measured provider cache savings.

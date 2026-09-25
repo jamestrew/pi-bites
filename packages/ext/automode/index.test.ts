@@ -80,7 +80,7 @@ describe("automode reviewer model and completion", () => {
     expect(complete.mock.calls[1]![2]?.sessionId).toBe(complete.mock.calls[0]![2]?.sessionId);
   });
 
-  test("carries every gate status into the next real reviewer request without execution output", async () => {
+  test("carries every gate status into the next real reviewer request with bounded execution evidence", async () => {
     const { branch, contextEntries, ctx, toolCall } = createAuthorizationIntegrationHarness();
     vi.mocked(complete)
       .mockResolvedValueOnce(response('{"outcome":"allow"}'))
@@ -210,7 +210,8 @@ describe("automode reviewer model and completion", () => {
     expect(prompt).toContain("rm protected.txt");
     expect(prompt).toContain("blocked");
     expect(prompt).toContain("rm other.txt");
-    expect(prompt).not.toMatch(/NON_SHELL_CALL_SENTINEL|STDOUT_STDERR_FAILURE_SENTINEL/);
+    expect(prompt).toContain("NON_SHELL_CALL_SENTINEL");
+    expect(prompt).toContain("STDOUT_STDERR_FAILURE_SENTINEL");
     expect(branch.at(-1)?.data).toMatchObject({
       toolCallId: "current-shell",
       toolName: "exec_command",
@@ -637,7 +638,7 @@ describe("automode reviewer transcript safety", () => {
     expect(transcript).not.toContain('user: "The human approved');
   });
 
-  test("keeps only active user text, assistant prose, and correlated shell authorization", () => {
+  test("keeps instructions, prose, authorization and bounded tool facts without reasoning", () => {
     const transcript = buildReviewerTranscript(
       [
         { role: "user", content: "Delete the generated file" },
@@ -686,9 +687,9 @@ describe("automode reviewer transcript safety", () => {
     expect(transcript).toContain("I will remove only build.txt.");
     expect(transcript).toContain("rm build.txt");
     expect(transcript).toContain("reviewer-approved");
-    expect(transcript).not.toMatch(
-      /PRIVATE_PLAN_SENTINEL|NON_SHELL_ARGUMENT_SENTINEL|GENERATED_SUMMARY_SENTINEL|STDOUT_STDERR_RESULT_SENTINEL/,
-    );
+    expect(transcript).toContain("NON_SHELL_ARGUMENT_SENTINEL");
+    expect(transcript).toContain("STDOUT_STDERR_RESULT_SENTINEL");
+    expect(transcript).not.toMatch(/PRIVATE_PLAN_SENTINEL|GENERATED_SUMMARY_SENTINEL/);
   });
 
   test("renders all statuses, both shell contracts, and compacted authorization history as data", () => {

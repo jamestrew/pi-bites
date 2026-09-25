@@ -9,6 +9,7 @@ export type BashGateApprovalResult =
   | { outcome: "failure"; message: string };
 
 export interface ApprovalRequest {
+  nestedEvidence?: readonly unknown[];
   execution: CommandExecutionContext;
   requestId: string;
   toolCallId?: string;
