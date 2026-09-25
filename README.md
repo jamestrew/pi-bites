@@ -231,6 +231,8 @@ Automode uses the active model by default. Select it as the initial bash permiss
 }
 ```
 
+The reviewer reuses bounded conversation history and incremental evidence, with isolated concurrent forks and resets on incompatible session, model, policy, or context changes. Provider cache hits are not guaranteed. See [repeatable live evaluation and results](docs/automode-evaluation.md); ordinary tests never make paid review calls.
+
 `autoMode.policy` still replaces the bundled policy in full (it is not an additive rule); omit it to adopt Guardian defaults. Existing model and thinking settings need no migration. Custom policies use the same validated JSON assessment contract, including compatibility with outcome-only replies.
 
 Automode reviews only commands that already reach an approval-producing bash gate; it does not expand Pi's permissions, override deny-policy subagents, or gate routine allowed tools. Without UI, gated commands fail closed unless `bashGate.mode` is `"auto"`.

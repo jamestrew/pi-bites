@@ -352,3 +352,11 @@ packets, incremental immutable history, and whole-request failure at the actual
 provider payload seam. Code Mode and fleet wiring tests exercise live nested and
 forwarded transport with stale ctx. These are transport fixtures, not evidence of
 live-model quality or measured provider cache savings.
+
+## Replacement validation (#333)
+
+The integrated reviewer is the only production path. The explicit real-model runner,
+archived one-shot comparison, measured limitations, and removal audit are documented
+in [automode evaluation](../../../docs/automode-evaluation.md). The local Codex checkout
+remains at `a62e98d18c6550e3bea152ed1b89d1e931dca961`. Earlier per-increment
+statements above describe what was measured at those increments, not the later pilot.
