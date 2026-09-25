@@ -38,15 +38,15 @@ investigation/environment sections are replaced, and imperative inspection instr
 are adapted to supplied evidence. No command is executed by the reviewer. References
 to checks in risk examples are evidence conditions, not claims of available tools.
 
-Only serialized active parent user fields are direct human instructions in the current
-packet. Parent-generated subagent prompts, assistant prose, pending commands, and gate
+Serialized active parent user fields retain user-role provenance, not verified human
+authorship (see #331 below). Parent-generated subagent prompts, assistant prose, pending commands, and gate
 hints are untrusted. Unlike upstream, Pi's current transcript does not independently
 supply developer messages, AGENTS files, or request_user_input responses. User delegation
 to a file or ticket is still recognized when evidenced in the packet. Validated
 human-approved shell records describe prior approval, not blanket authorization.
 Reviewer decisions are history, never human approval. The existing compacted Goal is
 explicitly a generated summary: task-level context, not direct authorization for risky
-specifics. Full retained instructions and tool-result evidence remain separate epic work.
+specifics. Tool-result evidence remains separate epic work.
 
 Informed post-denial human approval can meet the high-risk authorization threshold;
 it cannot make the reviewer approve an action that remains critical or absolutely denied.
@@ -153,8 +153,8 @@ Intentional deviations from Codex:
   Ordinary append-only growth does not. Navigation attempts reset conservatively
   even if later cancelled. Late completions cannot commit or return approval after
   invalidation; deferred work uses snapshotted dependencies, never captured ctx.
-- Evidence-selection limits and policy stay as installed; richer retained
-  instructions and tool-result evidence remain separate epic work. No extra retry
+- Tool-result evidence remains separate epic work; #331 below updates retained
+  instruction selection and provenance. No extra retry
   or model call is added. Usage recording retains input, cache reads/writes, output,
   reasoning where supplied, actual served model, and cost, including failed responses.
 
@@ -225,3 +225,68 @@ incompatible forks, budget rebuilds, allow/deny/error/cancellation, independent
 command launch and usage, and lifecycle invalidation with throwing stale-ctx
 getters. These mocked integrations demonstrate request isolation and launch safety,
 not live-model decision quality or measured cache savings.
+
+## Retained instruction evidence (#331)
+
+The local Codex checkout at `/home/jt/projects/codex` is verified at
+`a62e98d18c6550e3bea152ed1b89d1e931dca961`. Sources:
+`guardian-context/src/retained_instructions.rs`, `retention.rs`, and
+`authorization.rs`. Synchronous Guardian retains whole genuine-user records with
+ordered provenance and explicit incompleteness; its per-item approximate budget is
+900 tokens and its selector anchors the first user, then considers newest users.
+
+Pi reconstructs available original user-role messages from **only the active branch**
+on every review, including messages hidden by compaction. It reuses Pi's exported
+`buildSessionProjection` over branch copies without compaction cutoffs, reconnecting
+parent links so removed compaction entries cannot break traversal. Context edits still
+replace or omit their targets, even when those targets are compacted away. Replacements
+are labeled generated context, never original wording; removals leave an omission
+marker. Rebuilding reviewer history, reopening the persisted session, and extension
+reload use this same source, not a second permission ledger or model-produced summary.
+Branch/session replacement cannot recover entries from an abandoned branch/session.
+
+### Pi provenance constraint
+
+Pi 0.87.1 persists user messages without their `input.source`. Both human prompts and
+`sendUserMessage()` extension prompts become user-role messages. Pi also has no public
+correlation ID between `input` events and accepted/persisted messages: transforms,
+handled inputs, queue cancellation, and steering/follow-up order prevent reliable
+pairing. Appending a trusted input marker before acceptance is unsafe: tree navigation
+to a user message selects its parent, which would leave that marker active after the
+user message is abandoned. This change deliberately does not add such markers.
+
+Each retained record therefore includes its source entry ID, branch-relative order,
+and whether it was context-edited. The packet explicitly identifies original user-role
+wording as **origin unknown**, not authenticated direct-human permission. This is an
+intentional conservative adaptation from Codex's genuine-root-user assumption, including
+on reload. Unknown-origin text cannot independently establish human authorization;
+validated historical human shell approvals retain their existing separate meaning.
+Generated Goal summaries remain labeled task context, never direct authorization.
+Child prompts remain parent-assistant-generated evidence in a separate request-local
+section. Full direct-human authorship requires an upstream persisted input-origin and
+correlation contract; text matching or generated summaries cannot supply it.
+
+### Bounds and omissions
+
+The evidence transcript keeps its 40,000-character ceiling and 8,000-character serialized
+entry ceiling. Unlike upstream's first-user anchor, Pi selects the latest original
+user-role instruction first, then earlier instructions newest-first, then shell history,
+then assistant/edited context. Selected records are emitted in original order. Shell
+history never displaces a fitting intermediate original instruction. Whole original
+instructions are retained or omitted: oversized text becomes a source/order/length
+marker, not a head/tail splice that could hide a restriction while retaining a grant.
+Budget omissions explicitly warn that missing instructions may restrict older grants.
+Missing branch ancestry, missing compaction boundaries, and branch summaries indicate
+unavailable original history, never a license to reconstruct trusted instructions.
+
+The existing whole-request UTF-8 budget still includes policy, history, evidence, and
+output reserve. If a rebuilt request cannot fit, it fails explicitly; the exact action
+and execution context are never truncated. No extra low/medium-risk scope veto, live
+model call, adaptive approval, sandbox, or investigation tool is introduced.
+
+`instructions.test.ts` exercises provider-visible packets with real SessionManagers:
+pre/post-compaction ordering, intermediate restrictions under shell-history pressure,
+latest changes, whole oversized omissions, reviewer-budget rebuilds, malicious summaries,
+context edits, unavailable history, branch/session isolation, persisted reload, and
+forwarded subagent provenance. These fixtures prove evidence transport, not live-model
+authorization quality or measured provider cache savings.

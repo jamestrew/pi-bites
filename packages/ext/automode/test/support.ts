@@ -101,7 +101,13 @@ function createAutoModeHarness(config: Record<string, unknown> = {}) {
           })),
         };
       },
-      getBranch: () => branch,
+      getBranch() {
+        return [...this.buildContextEntries(), ...branch].map((entry, index) => ({
+          id: `entry-${index}`,
+          parentId: index ? `entry-${index - 1}` : null,
+          ...entry,
+        }));
+      },
     },
   };
   const configRef = { current: config as any };
@@ -152,7 +158,13 @@ function createAuthorizationIntegrationHarness() {
           })),
         };
       },
-      getBranch: () => branch,
+      getBranch() {
+        return [...this.buildContextEntries(), ...branch].map((entry, index) => ({
+          id: `entry-${index}`,
+          parentId: index ? `entry-${index - 1}` : null,
+          ...entry,
+        }));
+      },
       getEntries: () => branch,
     },
   };

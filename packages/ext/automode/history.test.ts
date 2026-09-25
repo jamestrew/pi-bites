@@ -191,14 +191,14 @@ describe("bounded reviewer conversation lifecycle", () => {
       const { controller, ctx, configRef, branch } = createAutoModeHarness();
       const entries = ctx.sessionManager.buildContextEntries();
       ctx.sessionManager.buildContextEntries = () => entries;
-      branch.push({ type: "message", id: "old" });
+      branch.push({ type: "custom", id: "old", customType: "test" });
       complete.mockResolvedValue(response('{"outcome":"allow"}'));
       await controller.review(rmRequest("rm first"), ctx as any);
       let request = rmRequest("rm next");
       if (change === "policy") configRef.current.autoMode = { policy: "new policy" };
       if (change === "model") ctx.model = { ...model, id: "new" };
       if (change === "session") ctx.sessionManager.getSessionId = () => "new-session";
-      if (change === "branch") branch[0] = { type: "message", id: "other" };
+      if (change === "branch") branch[0] = { type: "custom", id: "other", customType: "test" };
       if (change === "rewrite")
         entries[0] = {
           type: "message",
