@@ -278,6 +278,7 @@ export function createSubagents(
                 toolCallId: request.toolCallId,
                 command: request.command,
                 toolName: request.toolName,
+                execution: request.execution,
                 labels: request.labels,
                 reasons: request.reasons,
                 subagentContext: session

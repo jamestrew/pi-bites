@@ -55,6 +55,7 @@ export function createBashGateHarness(
   };
   const ctx = {
     cwd: "/repo",
+    isProjectTrusted: () => false,
     hasUI,
     ui,
     sessionManager: { getEntries: () => entries },

@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createBashGateHarness } from "../bash-gate/test/harness.js";
+import { mkdirSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -696,3 +697,39 @@ describe("exec_command and write_stdin", () => {
     expect(getBundledExecBridgePath("darwin", "x64")).toBeUndefined();
   });
 });
+
+test.each(["default", "absolute", "relative"])(
+  "direct %s workdir reaches review and actual launch",
+  async (kind) => {
+    const cwd = tempDir();
+    const child = join(cwd, "child");
+    mkdirSync(child);
+    const expected = kind === "default" ? cwd : child;
+    const decision = Promise.withResolvers<{ outcome: "allow" }>();
+    const review = vi.fn((_request: unknown) => decision.promise);
+    const harness = createBashGateHarness([], false, {
+      isEnabled: () => true,
+      review: review as never,
+    });
+    const tool = createExecCommandTool(manager());
+    const params = tool.prepareArguments!({
+      command: "printf '%s' \"$PWD\"; touch marker",
+      cwd: kind === "default" ? undefined : kind === "absolute" ? child : "child",
+      shell: " /bin/sh ",
+      login: false,
+    });
+    const ctx = { ...harness.ctx, cwd };
+    const pending = harness.toolCall({ toolName: "exec_command", input: params }, ctx);
+    await vi.waitFor(() => expect(review).toHaveBeenCalledOnce());
+    expect(review.mock.calls[0]?.[0]).toMatchObject({
+      command: params.cmd,
+      execution: { cwd: expected, shell: "/bin/sh", login: false, tty: false },
+    });
+    ctx.cwd = tempDir();
+    decision.resolve({ outcome: "allow" });
+    await expect(pending).resolves.toBeUndefined();
+    const result = await tool.execute("direct", params, undefined, undefined, ctx as never);
+    expect(result.details.output).toBe(expected);
+    expect(existsSync(join(expected, "marker"))).toBe(true);
+  },
+);

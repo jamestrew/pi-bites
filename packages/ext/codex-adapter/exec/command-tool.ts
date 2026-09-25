@@ -1,12 +1,6 @@
+import { pinExecLaunch } from "./launch-context.js";
 import { Text, truncateToWidth } from "@earendil-works/pi-tui";
-import {
-  getAgentDir,
-  getShellConfig,
-  keyHint,
-  SettingsManager,
-  type AgentToolResult,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import { keyHint, type AgentToolResult, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OwnedToolDefinition, ToolExecutionContext } from "../tool-execution.js";
 import { Type, type Static } from "typebox";
 
@@ -219,10 +213,16 @@ export function createExecCommandTool(
       // Pi extension contexts are session-bound. Snapshot everything before the
       // first await so continuations cannot dereference a replaced session.
       const cwd = ctx.cwd;
-      const projectTrusted = ctx.isProjectTrusted();
-      const settings = SettingsManager.create(cwd, getAgentDir(), { projectTrusted });
-      const defaultShell = getShellConfig(settings.getShellPath()).shell;
-      const input = { ...params, defaultShell };
+      const execution = pinExecLaunch(params, ctx);
+      const input = {
+        cmd: params.cmd,
+        workdir: execution.cwd,
+        shell: execution.shell,
+        login: execution.login,
+        tty: execution.tty,
+        yield_time_ms: params.yield_time_ms,
+        max_output_tokens: params.max_output_tokens,
+      };
       const result = await sessions.exec(input, cwd, signal, (update) =>
         onUpdate?.(toolResult(update, params.cmd)),
       );

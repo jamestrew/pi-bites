@@ -1,3 +1,4 @@
+import type { CommandExecutionContext } from "../bash-gate/index.js";
 import { readFileSync } from "node:fs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -16,6 +17,7 @@ For anything else return {"risk_level":"low"|"medium"|"high"|"critical","user_au
 const MAX_ENTRY_CHARS = 8_000;
 const MAX_TRANSCRIPT_CHARS = 40_000;
 export interface AutoModeReviewRequest {
+  execution: CommandExecutionContext;
   toolCallId?: string;
   command: string;
   toolName?: "bash" | "exec_command";
