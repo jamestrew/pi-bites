@@ -34,6 +34,7 @@ Options:
   --jobs N                     Issues to run in parallel (default: 1)
   --issues N,N,...             Process explicit issue numbers
   --work-base-ref REV          Revision to use as the issue workspace base (default: <default-branch>@origin)
+                               Use codex-subagents-v2@origin to integrate issue branches there
   --extension-runtime PATH     Stable extension snapshot directory
   --extension-ref REV          jj revision to snapshot (default: master@origin)
   --no-extension-snapshot      Use pi's normal extension loading`;
@@ -350,6 +351,7 @@ async function main() {
   const repo = repository.nameWithOwner;
   const base = repository.defaultBranchRef.name;
   const workBaseRef = options.workBaseRef ?? `${base}@origin`;
+  const workBaseBookmark = workBaseRef.replace(/@origin$/, "");
   await $`jj git fetch --remote origin`.quiet();
   const piArgs = await prepareExtensionRuntime(options);
   const repoRoot = (await $`jj workspace root`.text()).trim();
@@ -431,10 +433,10 @@ async function main() {
           let workspaceCommitIds = new Set<string>();
           if (linkedPullRequests.length === 0) {
             const commitIds =
-              await $`jj -R ${workspacePath} log -r ${`${base}@origin..@`} --no-graph -T ${'commit_id ++ "\\n"'}`.text();
+              await $`jj -R ${workspacePath} log -r ${`${workBaseRef}..@`} --no-graph -T ${'commit_id ++ "\\n"'}`.text();
             workspaceCommitIds = new Set(commitIds.trim().split("\n").filter(Boolean));
             repositoryPullRequests = JSON.parse(
-              await $`gh pr list -R ${repo} --base ${base} --state all --limit 1000 --json number,headRefOid`.text(),
+              await $`gh pr list -R ${repo} --base ${workBaseBookmark} --state all --limit 1000 --json number,headRefOid`.text(),
             ) as ReadonlyArray<{ number: number; headRefOid: string }>;
           }
           const reference = pullRequestReference(
