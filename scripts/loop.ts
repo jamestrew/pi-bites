@@ -470,6 +470,7 @@ async function main() {
 
           console.log(`Pull request #${pullRequest.number}: ${pullRequest.url}`);
           console.log(reviewReport(pullRequest.state, piOutput));
+          let merged = pullRequest.state === "MERGED";
           if (shouldMergePullRequest(pullRequest.state, piOutput)) {
             await $`gh pr merge ${pullRequest.number} -R ${repo} --rebase --match-head-commit ${pullRequest.headRefOid}`.quiet();
             const mergedState = (
@@ -481,8 +482,17 @@ async function main() {
               );
             }
             console.log(`Merged pull request #${pullRequest.number}.`);
-            await deleteMergedBranch(workspacePath, repo, pullRequest.number);
-          } else if (pullRequest.state === "MERGED") {
+            merged = true;
+          }
+          if (merged) {
+            // GitHub only auto-closes issues from merges into the default branch.
+            const issueState = (
+              await $`gh issue view ${issue.number} -R ${repo} --json state --jq .state`.text()
+            ).trim();
+            if (issueState === "OPEN") {
+              await $`gh issue close ${issue.number} -R ${repo} --reason completed`.quiet();
+              console.log(`Closed issue #${issue.number}.`);
+            }
             await deleteMergedBranch(workspacePath, repo, pullRequest.number);
           }
           finished = true;
