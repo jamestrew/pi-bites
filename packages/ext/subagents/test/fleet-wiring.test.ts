@@ -1,5 +1,4 @@
 import { parseAutoModeDecision, type AutoModeDecision } from "../../automode/index.js";
-import { registerChildSendInput } from "./helpers/child-send-input.js";
 /**
  * fleet-wiring.test.ts — end-to-end wiring of the FleetView through the REAL
  * extension (src/index.ts), not the FleetList class in isolation.
@@ -34,7 +33,13 @@ function makePi() {
     registerMessageRenderer: vi.fn(),
     registerTool: vi.fn((t: any) => tools.set(t.name, t)),
     registerCommand: vi.fn(),
-    on: vi.fn((event: string, handler: any) => lifecycle.set(event, handler)),
+    on: vi.fn((event: string, handler: any) => {
+      const previous = lifecycle.get(event);
+      lifecycle.set(event, async (...args: any[]) => {
+        await previous?.(...args);
+        return handler(...args);
+      });
+    }),
     events: {
       emit: vi.fn((event: string, data: unknown) => {
         for (const handler of eventHandlers.get(event) ?? []) void handler(data);
@@ -55,10 +60,10 @@ function makePi() {
     getThinkingLevel: vi.fn(() => "off"),
     getActiveTools: vi.fn(() => [
       "spawn_agent",
-      "send_input",
+      "send_message",
       "wait_agent",
-      "close_agent",
-      "resume_agent",
+      "interrupt_agent",
+      "followup_task",
     ]),
   } as any;
   return { pi, tools, lifecycle };
@@ -123,7 +128,6 @@ function ctxWith(ui: ReturnType<typeof uiCtx>) {
   } as any;
 }
 
-const textOf = (r: any): string => r.content[0].text;
 const flush = async () => {
   await new Promise((r) => setImmediate(r));
   await new Promise((r) => setImmediate(r));
@@ -149,7 +153,7 @@ function mockRunningAgent(): void {
 
 function expectStableFleetRow(ui: ReturnType<typeof uiCtx>, description: string, command: string) {
   const lines = ui.renderFleet();
-  const agentLine = lines.find((line) => line.includes(description));
+  const agentLine = lines.find((line) => line.includes("probe"));
   expect(agentLine).toContain("↓ 0 tokens");
   expect(agentLine).toMatch(/\d+s · ↓/);
   expect(lines.join("\n")).not.toContain(command);
@@ -330,16 +334,19 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
-    const spawn = await tools
-      .get("spawn_agent")
-      .execute(
-        "tc",
-        { message: "stable manual row", agent_type: "worker" },
-        undefined,
-        undefined,
-        ctx,
-      );
-    const agentId = JSON.parse(textOf(spawn)).agent_id;
+    const spawn = await tools.get("spawn_agent").execute(
+      "tc",
+      {
+        message: "stable manual row",
+        agent_type: "worker",
+        task_name: "probe",
+        fork_turns: "none",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const agentId = spawn.details.agentId;
 
     pi.events.emit("bites:bash_gate", { requiresHuman: false });
     pi.events.emit("subagents:bash_gate:approval", {
@@ -446,16 +453,19 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
-    const spawn = await tools
-      .get("spawn_agent")
-      .execute(
-        "tc",
-        { message: "stable Automode row", agent_type: "worker" },
-        undefined,
-        undefined,
-        ctx,
-      );
-    const agentId = JSON.parse(textOf(spawn)).agent_id;
+    const spawn = await tools.get("spawn_agent").execute(
+      "tc",
+      {
+        message: "stable Automode row",
+        agent_type: "worker",
+        task_name: "probe",
+        fork_turns: "none",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const agentId = spawn.details.agentId;
 
     pi.events.emit("bites:bash_gate", { requiresHuman: false });
     pi.events.emit("subagents:bash_gate:approval", {
@@ -488,7 +498,13 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await lifecycle.get("tool_execution_start")?.({}, ctx);
     await tools
       .get("spawn_agent")
-      .execute("tc", { message: "viewed agent", agent_type: "worker" }, undefined, undefined, ctx);
+      .execute(
+        "tc",
+        { message: "viewed agent", agent_type: "worker", task_name: "probe", fork_turns: "none" },
+        undefined,
+        undefined,
+        ctx,
+      );
 
     expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
     expect(ui.press("\r")).toEqual({ consume: true });
@@ -717,16 +733,15 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         stopReason: "stop",
         timestamp: Date.now(),
       });
-      return {
-        responseText: "done",
-        session: {
-          get messages() {
-            return childManager.buildSessionContext().messages;
-          },
-          sessionManager: childManager,
-          dispose: vi.fn(),
-        } as any,
-      };
+      const session = {
+        get messages() {
+          return childManager.buildSessionContext().messages;
+        },
+        sessionManager: childManager,
+        dispose: vi.fn(),
+      } as any;
+      options.onSessionCreated?.(session);
+      return { responseText: "done", session };
     });
     const { pi, tools, lifecycle } = makePi();
     const review = vi
@@ -742,6 +757,8 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       {
         message: "review context",
         agent_type: "worker",
+        task_name: "probe",
+        fork_turns: "none",
       },
       undefined,
       undefined,
@@ -849,6 +866,8 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       {
         message: "live one",
         agent_type: "worker",
+        task_name: "probe",
+        fork_turns: "none",
       },
       undefined,
       undefined,
@@ -881,7 +900,13 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await lifecycle.get("tool_execution_start")?.({}, ctx);
     await tools
       .get("spawn_agent")
-      .execute("tc", { message: "live one", agent_type: "worker" }, undefined, undefined, ctx);
+      .execute(
+        "tc",
+        { message: "live one", agent_type: "worker", task_name: "probe", fork_turns: "none" },
+        undefined,
+        undefined,
+        ctx,
+      );
     const humanGate = (waitId: string) => ({
       cwd: process.cwd(),
       command: "rm build.txt",
@@ -907,9 +932,10 @@ describe("FleetView wiring (real extension lifecycle)", () => {
   });
 
   it("registers the aboveEditor widget once a spawned agent has a session, then clears it on shutdown", async () => {
-    vi.mocked(runAgent).mockResolvedValue({
-      responseText: "done",
-      session: { dispose: vi.fn() } as any,
+    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      const session = { dispose: vi.fn() } as any;
+      options.onSessionCreated?.(session);
+      return { responseText: "done", session };
     });
 
     const { pi, tools, lifecycle } = makePi();
@@ -923,12 +949,14 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       {
         message: "live one",
         agent_type: "worker",
+        task_name: "probe",
+        fork_turns: "none",
       },
       undefined,
       undefined,
       ctxWith(uiCtx()),
     );
-    expect(JSON.parse(textOf(spawn)).agent_id).toBeTruthy();
+    expect(spawn.details.agentId).toBeTruthy();
     await flush(); // completion → fleet.onAgentFinished → update → widget registers
 
     const fleetRegs = ui.setWidget.mock.calls.filter(
@@ -941,56 +969,5 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
     await lifecycle.get("session_shutdown")?.({}, ctxWith(uiCtx()));
     expect(ui.setWidget).toHaveBeenCalledWith("fleet", undefined); // dispose cleared it
-  });
-
-  it("keeps a finished agent visible until its deferred final is delivered", async () => {
-    vi.useFakeTimers();
-    let sendInput!: ReturnType<typeof registerChildSendInput>;
-    let finish!: (value: any) => void;
-    const { pi, tools, lifecycle } = makePi();
-    const ui = uiCtx();
-    const ctx = ctxWith(ui);
-
-    try {
-      vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
-        sendInput = registerChildSendInput(options, ctx);
-        return new Promise((resolve) => {
-          finish = resolve;
-        });
-      });
-      subagentsExtension(pi);
-      await lifecycle.get("session_start")?.({}, ctx);
-      await lifecycle.get("tool_execution_start")?.({}, ctx);
-      lifecycle.get("agent_start")?.({}, ctx);
-
-      await tools.get("spawn_agent").execute(
-        "tc",
-        {
-          message: "still delivering",
-          agent_type: "worker",
-        },
-        undefined,
-        undefined,
-        ctx,
-      );
-      await expect(sendInput("progress")).resolves.toMatchObject({ details: { status: "queued" } });
-      finish({ responseText: "done", session: { dispose: vi.fn() } as any });
-      await vi.advanceTimersByTimeAsync(1_000);
-
-      expect(pi.sendMessage).not.toHaveBeenCalled();
-      expect(ui.renderFleet().join("\n")).toContain("still delivering");
-
-      lifecycle.get("turn_end")?.({}, ctx);
-      expect(pi.sendMessage.mock.calls.map(([message]: any[]) => message.customType)).toEqual([
-        "subagent-message",
-        "subagent-notification",
-      ]);
-
-      await vi.advanceTimersByTimeAsync(500);
-      expect(ui.renderFleet()).toEqual([]);
-    } finally {
-      await lifecycle.get("session_shutdown")?.({}, ctx);
-      vi.useRealTimers();
-    }
   });
 });

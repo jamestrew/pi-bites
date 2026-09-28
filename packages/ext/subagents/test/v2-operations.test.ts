@@ -328,21 +328,23 @@ it("reports the loaded root's terminal state to child list callers", async () =>
   ]);
 });
 
-it("rejects unnamed registry agents from both named messaging tools before delivery", async () => {
+it("gives programmatic spawns task paths and the current capability ceiling", async () => {
   readyChild();
   const h = harness();
-  h.pi.getActiveTools = () => ["send_message", "followup_task"];
+  h.pi.getActiveTools = () => ["list_agents", "send_message"];
   const registry = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));
-  const id = registry.spawn(h.pi, h.ctx, "worker", "registry task", { description: "unnamed" });
+  const id = await registry.spawn(h.pi, h.ctx, "worker", "registry task", {
+    description: "internal",
+    allowedTools: ["list_agents", "spawn_agent"],
+  });
   const record = registry.getRecord(id);
   expect(record.session).toBeDefined();
-  for (const name of ["send_message", "followup_task"])
-    await expect(h.call(name, { target: id, message: "must not arrive" })).rejects.toThrow(
-      "no task path",
-    );
-  expect(record.prompt).toBe("registry task");
-  expect(record.session.steer).not.toHaveBeenCalled();
-  expect(h.pi.sendMessage).not.toHaveBeenCalled();
+  expect(record.taskName).toMatch(/^\/root\/task_[a-f0-9]+$/);
+  expect(record.allowedTools).toEqual(["list_agents"]);
+  expect((await h.call("list_agents", {})).value.agents).toContainEqual({
+    agent_name: record.taskName,
+    agent_status: "running",
+  });
 });
 
 it("does not deliver a stopped turn's final, and still updates completion UI events", async () => {
@@ -429,4 +431,33 @@ it("transfers admission to a published runtime before reentrant spawning", async
   await h.call("spawn_agent", { task_name: "a", message: "A", fork_turns: "none" });
   await expect(second).resolves.toMatchObject({ value: { task_name: "/root/b" } });
   expect((await h.call("list_agents", {})).value.agents).toHaveLength(3);
+});
+
+it("reads saved selected-target waits without restoring a V1 executor", () => {
+  const h = harness();
+  const tool = h.direct.get("wait_agent");
+  const theme = { bold: (s: string) => s, fg: (_color: string, s: string) => s };
+  const context = { state: {}, expanded: true, isError: false };
+  tool.renderResult(
+    {
+      content: [
+        {
+          type: "text",
+          text: '{"status":{"saved-id":{"completed":"saved finding"}},"timed_out":false}',
+        },
+      ],
+      details: { agents: [], outcome: "terminal" },
+    },
+    {},
+    theme,
+    context,
+  );
+  const row = tool.renderCall({ targets: ["saved-id"] }, theme, context);
+  expect(row.render(100).join("\n")).toContain("wait_agent 1 agents");
+  expect(row.render(100).join("\n")).toContain("saved finding");
+  for (const line of row.render(16)) expect(visibleWidth(line)).toBeLessThanOrEqual(16);
+  h.pi.getActiveTools = () => ["wait_agent"];
+  return expect(h.call("wait_agent", { targets: ["saved-id"] })).rejects.toThrow(
+    "Invalid arguments",
+  );
 });

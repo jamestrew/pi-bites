@@ -349,3 +349,39 @@ it("retires unloaded identities on root replacement instead of routing into the 
   ).rejects.toThrow("owner");
   expect(h.manager.getRecord(id)).toBeUndefined();
 });
+
+it.each(["registry", "rpc"])("bounds loaded runtimes for sequential %s spawns", async (route) => {
+  const h = await setup();
+  saveSettings({ maxConcurrent: 1 }, h.ctx.cwd);
+  await h.emit("session_start");
+  h.faux.setResponses(["first", "second", "third"].map((text) => fauxAssistantMessage(text)));
+  const ids: string[] = [];
+  for (let index = 0; index < 3; index++) {
+    const id =
+      route === "registry"
+        ? await h.manager.spawn(h.pi, h.ctx, "worker", "complete this task", {
+            description: "internal",
+          })
+        : await new Promise<string>((resolve, reject) => {
+            const requestId = crypto.randomUUID();
+            const off = h.pi.events.on(`subagents:rpc:spawn:reply:${requestId}`, (reply: any) => {
+              off();
+              if (reply.success) resolve(reply.data.id);
+              else reject(new Error(reply.error));
+            });
+            h.pi.events.emit("subagents:rpc:spawn", {
+              requestId,
+              type: "worker",
+              prompt: "complete this task",
+              options: { description: "internal" },
+            });
+          });
+    ids.push(id);
+    await h.manager.waitForAll();
+    const listed = (await h.call("list_agents", {})).value.agents;
+    expect(listed).toHaveLength(2); // Root plus one loaded child, regardless of completed count.
+    expect(listed[1].agent_name).toBe(h.manager.getRecord(id).taskName);
+    for (const previous of ids.slice(0, -1))
+      expect(h.manager.getRecord(previous).session).toBeUndefined();
+  }
+});

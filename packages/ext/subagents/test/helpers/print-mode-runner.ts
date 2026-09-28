@@ -184,7 +184,11 @@ export function agentCall(
   },
   opts?: { id?: string },
 ): ToolCall {
-  return fauxToolCall("spawn_agent", { agent_type: "worker", ...args }, opts);
+  return fauxToolCall(
+    "spawn_agent",
+    { agent_type: "worker", task_name: "work", fork_turns: "none", ...args },
+    opts,
+  );
 }
 
 function resolveReply(reply: FauxReply | ((ctx: Context) => FauxReply), ctx: Context): FauxReply {

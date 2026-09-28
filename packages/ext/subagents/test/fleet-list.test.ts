@@ -474,7 +474,7 @@ describe("FleetList overlay lifecycle", () => {
       status: "completed",
       completedAt: Date.now() - 60_000,
     });
-    h.fleet.onAgentFinished("live");
+    h.fleet.onAgentFinished();
     expect(h.overlayClosed()).toBe(false); // viewer stays open
     expect(h.render().some((l) => l.includes("the one"))).toBe(true); // and stays listed while viewed
   });

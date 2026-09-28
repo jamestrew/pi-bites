@@ -1,9 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { WaitAgentSender } from "./types.js";
 
 export type SubagentSender = WaitAgentSender;
@@ -16,13 +12,6 @@ export interface SubagentMessageDetails {
   task?: boolean;
   completion?: "completed" | "failed";
 }
-
-type AppendCustomMessage = (
-  customType: string,
-  content: string,
-  display: boolean,
-  details: SubagentMessageDetails,
-) => unknown;
 
 function escapeXml(text: string): string {
   return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -43,12 +32,8 @@ export function createSubagentMessenger(
   pi: Pick<ExtensionAPI, "sendMessage">,
   onActivity?: (pending: number) => void,
 ) {
-  let active = false;
-  let flushing = false;
   let disposed = false;
   let sessionId: string | undefined;
-  let appendCustomMessage: AppendCustomMessage | undefined;
-  let afterTerminalOutput = false;
   const activity = new Map<string, boolean>();
   const waiters = new Set<(event: "mail" | "input" | "cancelled") => void>();
   const wake = (event: "mail" | "input" | "cancelled") => {
@@ -85,11 +70,7 @@ export function createSubagentMessenger(
       /* UI failure does not revoke accepted input. */
     }
   };
-  const pending: SubagentMessageDetails[] = [];
-  const pendingNextTurn: SubagentMessageDetails[] = [];
-  const pendingFinals: Array<{ deliver: () => void; cancel?: () => void }> = [];
-
-  const persist = (details: SubagentMessageDetails, deliverAs?: "steer"): boolean => {
+  const persist = (details: SubagentMessageDetails): boolean => {
     try {
       pi.sendMessage<SubagentMessageDetails>(
         {
@@ -98,7 +79,7 @@ export function createSubagentMessenger(
           display: true,
           details,
         },
-        deliverAs ? { deliverAs } : { triggerTurn: false },
+        { triggerTurn: false },
       );
       return true;
     } catch {
@@ -106,68 +87,8 @@ export function createSubagentMessenger(
     }
   };
 
-  const persistForShutdown = (details: SubagentMessageDetails): boolean => {
-    if (!appendCustomMessage) return false;
-    try {
-      appendCustomMessage("subagent-message", modelContent(details), true, details);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const deliverFinals = (): void => {
-    for (const { deliver } of pendingFinals.splice(0)) {
-      try {
-        deliver();
-      } catch {
-        /* one failed delivery must not suppress later finals */
-      }
-    }
-  };
-
-  const cancelFinals = (): void => {
-    for (const { cancel } of pendingFinals.splice(0)) {
-      try {
-        cancel?.();
-      } catch {
-        /* one failed cancellation must not suppress later cancellations */
-      }
-    }
-  };
-
-  const drainCurrentTurn = (): void => {
-    if (disposed || flushing) return;
-    flushing = true;
-    try {
-      while (pending.length > 0) {
-        for (const details of pending.splice(0)) persist(details, "steer");
-      }
-      if (pendingNextTurn.length === 0) deliverFinals();
-    } finally {
-      flushing = false;
-    }
-  };
-
-  const drainAll = (deliverIntermediate: (details: SubagentMessageDetails) => boolean): void => {
-    if (disposed || flushing) return;
-    flushing = true;
-    try {
-      while (pending.length > 0 || pendingNextTurn.length > 0) {
-        for (const details of pending.splice(0)) deliverIntermediate(details);
-        for (const details of pendingNextTurn.splice(0)) deliverIntermediate(details);
-      }
-      deliverFinals();
-    } finally {
-      flushing = false;
-    }
-  };
-
-  const flush = (): void => drainAll(persist);
-  const flushForShutdown = (): void => drainAll(persistForShutdown);
-
   return {
-    sessionStarted(id: string, append?: AppendCustomMessage): void {
+    sessionStarted(id: string): void {
       if (sessionId !== id) {
         wake("cancelled");
         inputPending = undefined;
@@ -175,40 +96,10 @@ export function createSubagentMessenger(
         activity.clear();
         publishActivity();
         revision = 0;
-        pending.length = 0;
-        pendingNextTurn.length = 0;
-        cancelFinals();
       }
       sessionId = id;
-      appendCustomMessage = append;
-      active = false;
-      afterTerminalOutput = false;
       disposed = false;
     },
-    agentStarted(): void {
-      if (!disposed && sessionId) {
-        active = true;
-        afterTerminalOutput = false;
-      }
-    },
-    turnStarted(): void {
-      afterTerminalOutput = false;
-    },
-    assistantMessageEnded(terminal: boolean, cancelled = false): void {
-      if (!active) return;
-      if (cancelled) pendingNextTurn.push(...pending.splice(0));
-      if (terminal) afterTerminalOutput = true;
-    },
-    turnEnded(): void {
-      drainCurrentTurn();
-    },
-    agentSettled(): void {
-      active = false;
-      afterTerminalOutput = false;
-      flush();
-    },
-    flush,
-    flushForShutdown,
     dispose(): void {
       disposed = true;
       wake("cancelled");
@@ -217,12 +108,6 @@ export function createSubagentMessenger(
       activity.clear();
       publishActivity();
       sessionId = undefined;
-      appendCustomMessage = undefined;
-      active = false;
-      afterTerminalOutput = false;
-      pending.length = 0;
-      pendingNextTurn.length = 0;
-      cancelFinals();
     },
     /** Native queue-only delivery owns persistence; this map tracks only unseen activity. */
     queueOnly(
@@ -294,30 +179,6 @@ export function createSubagentMessenger(
           publishActivity();
       }
     },
-    scheduleFinal(parentSessionId: string, deliver: () => void, cancel?: () => void): boolean {
-      if (disposed || parentSessionId !== sessionId) return false;
-      if (flushing || pending.length > 0 || pendingNextTurn.length > 0) {
-        pendingFinals.push({ deliver, cancel });
-        return true;
-      }
-      try {
-        deliver();
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    send(parentSessionId: string, sender: SubagentSender, message: string): boolean {
-      if (disposed || parentSessionId !== sessionId) return false;
-      const details = { sender, message };
-      if (active || flushing) {
-        (afterTerminalOutput || pendingNextTurn.length > 0 ? pendingNextTurn : pending).push(
-          details,
-        );
-        return true;
-      }
-      return persist(details);
-    },
   };
 }
 
@@ -328,11 +189,8 @@ export function bindSubagentMessenger(
   started?: (id: string) => void,
 ) {
   const start = (ctx: ExtensionContext) => {
-    const manager = ctx.sessionManager as SessionManager;
-    const id = manager.getSessionId();
-    messenger.sessionStarted(id, (type, content, display, details) =>
-      manager.appendCustomMessageEntry(type, content, display, details),
-    );
+    const id = ctx.sessionManager.getSessionId();
+    messenger.sessionStarted(id);
     started?.(id);
   };
   pi.on("input", (event, ctx) => {
@@ -342,19 +200,6 @@ export function bindSubagentMessenger(
   pi.on("context", (event) => messenger.contextPrepared(event.messages));
   pi.on("agent_before_settle", () => {
     if (messenger.observe().pendingTasks > 0) return { continue: true };
-  });
-  pi.on("agent_start", () => messenger.agentStarted());
-  pi.on("turn_start", () => messenger.turnStarted());
-  pi.on("message_end", (event) => {
-    if (event.message.role === "assistant")
-      messenger.assistantMessageEnded(
-        !event.message.content.some((part) => part.type === "toolCall"),
-        event.message.stopReason === "aborted",
-      );
-  });
-  pi.on("turn_end", () => messenger.turnEnded());
-  pi.on("agent_settled", (_event, ctx) => {
-    if (ctx.isIdle()) messenger.agentSettled();
   });
   return start;
 }

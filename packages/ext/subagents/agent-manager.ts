@@ -17,7 +17,6 @@ import {
 } from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import { assertValidSpawnCwd } from "./spawn-cwd.js";
-import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
 import type { AgentRecord, SubagentType, SpawnOptions } from "./types.js";
@@ -26,11 +25,6 @@ import { recordAssistantUsage, type AssistantUsage } from "./usage.js";
 export type OnAgentComplete = (record: AgentRecord, generation: number) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
 export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
-export type MessageParent = (
-  parentSessionId: string,
-  sender: SubagentSender,
-  message: string,
-) => boolean;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
 const DEFAULT_MAX_CONCURRENT = 6;
@@ -70,7 +64,7 @@ export class AgentManager {
   private maxConcurrent: number;
   /** Queue of agents waiting to start. */
   private queue: QueuedTurn[] = [];
-  /** Execution reservations; unnamed V1 agents retain theirs until close. */
+  /** Execution reservations; unnamed internal agents retain theirs until close. */
   private reservedCount = 0;
   private reservations = new WeakSet<AgentRecord>();
   private closer: AgentCloser;
@@ -100,7 +94,6 @@ export class AgentManager {
     maxConcurrent = DEFAULT_MAX_CONCURRENT,
     private onStart?: OnAgentStart,
     private onCompact?: OnAgentCompact,
-    private messageParent?: MessageParent,
     private getAutoCompactionThreshold?: () => number | undefined,
     private onAgentInvalidated?: (record: AgentRecord) => void,
     private registerCollaboration?: (record: AgentRecord) => RegisterCollaboration,
@@ -244,7 +237,9 @@ export class AgentManager {
     // can fix and retry; the RPC layer converts throws into error envelopes.
     assertValidSpawnCwd(options.cwd);
     if (!options.queueIfBusy && this.reservedCount >= this.maxConcurrent) {
-      throw new Error("No concurrency slot is available. Close an agent before spawning another.");
+      throw new Error(
+        "No concurrency slot is available. Wait for running work to finish or interrupt a task.",
+      );
     }
 
     const taskName =
@@ -807,22 +802,6 @@ export class AgentManager {
     if (!interrupted) return false;
     await promise;
     return true;
-  }
-
-  sendParent(record: AgentRecord, message: string): boolean {
-    return (
-      this.messageParent?.(
-        record.parentSessionId,
-        {
-          id: record.id,
-          type: record.type,
-          title: record.description,
-          ...(record.invocation?.modelName ? { model_name: record.invocation.modelName } : {}),
-          ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
-        },
-        message,
-      ) ?? false
-    );
   }
 
   isClosing(id: string): boolean {

@@ -20,7 +20,7 @@ Keep runtime execution, Pi-side validated/authorized dispatch, and presentation 
 
 Nested discovery (#304) uses the existing pinned host metadata global. Discovery has no lifecycle state and requires no host upgrade; see the [exposure policy](../code-mode-contract/README.md#nested-discovery-policy-304-2026-09-12).
 
-## Agent ownership amendment (#305)
+## Historical agent ownership amendment (#305; superseded for agents by #352)
 
 The cell/shell cleanup policy above does not make subagents cell-owned. A committed
 agent outlives normal cell completion and cancellation; cancelling `wait_agent`
@@ -39,3 +39,15 @@ The #278 parity audit confirms that interruption is not a final V1 wait status.
 Selected waits continue across an interrupted turn and release on a later final
 status or explicit close. Settled open conversations accept subsequent input with
 or without `interrupt: true`; neither completion nor interruption releases capacity.
+
+## Direct V2 task ownership (#352)
+
+Agent ownership is independent of Code Mode and provider selection. Direct controls
+remain available across model switches without replacing the controller. Completed
+turns release execution capacity; eligible idle runtimes can unload while task paths,
+history and root-tree ownership remain recoverable in the live manager. Queue-only
+messages and follow-up reload known identities under current permissions. Mailbox
+wait cancellation removes only the waiter. Interrupt stops one turn, not descendants.
+Navigation/replacement/reload/shutdown still retire conversation-owned work. Historical
+saved display data never restores runtime ownership. See the
+[V2 commit points](../../packages/ext/subagents/CODEX_V2.md).

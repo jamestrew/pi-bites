@@ -95,7 +95,13 @@ export const PROTOCOL_VERSION = 6;
 
 /** Minimal AgentManager interface needed by the lifecycle RPCs. */
 export interface SpawnCapable {
-  spawn(pi: unknown, ctx: unknown, type: string, prompt: string, options: SpawnOptions): string;
+  spawn(
+    pi: unknown,
+    ctx: unknown,
+    type: string,
+    prompt: string,
+    options: SpawnOptions,
+  ): string | Promise<string>;
   abort(id: string): boolean;
   close: AgentManager["close"];
 }
@@ -152,7 +158,7 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     return { version: PROTOCOL_VERSION };
   });
 
-  const unsubSpawn = handleRpc(events, "subagents:rpc:spawn", (params) => {
+  const unsubSpawn = handleRpc(events, "subagents:rpc:spawn", async (params) => {
     const { type, prompt, options } = params;
     if (typeof type !== "string" || typeof prompt !== "string") {
       throw new Error("Spawn RPC requires string type and prompt");
@@ -162,7 +168,9 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
 
     const registry =
       isRecord(ctx) && isModelRegistry(ctx.modelRegistry) ? ctx.modelRegistry : undefined;
-    return { id: manager.spawn(pi, ctx, type, prompt, decodeSpawnOptions(options, registry)) };
+    return {
+      id: await manager.spawn(pi, ctx, type, prompt, decodeSpawnOptions(options, registry)),
+    };
   });
 
   const unsubStop = handleRpc(events, "subagents:rpc:stop", ({ agentId }) => {

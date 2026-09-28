@@ -4,12 +4,12 @@ import { join } from "node:path";
 import { getApiProvider, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { vi } from "vitest";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
-import { createV2IntegrationHarness } from "../../v2-integration-harness.js";
+import registerSubagents from "../../index.js";
 import { mockCtx } from "./agent-manager-mocks.js";
 
 export function harness(
   cleanup: (() => Promise<unknown>)[],
-  autoMode?: Parameters<typeof createV2IntegrationHarness>[1],
+  autoMode?: Parameters<typeof registerSubagents>[1],
 ) {
   const handlers = new Map<string, Function[]>();
   const direct = new Map<string, any>();
@@ -33,7 +33,7 @@ export function harness(
     hasUI: false,
     ui: { notify: vi.fn(), setWidget: vi.fn(), setStatus: vi.fn() },
   } as any;
-  const controller = createV2IntegrationHarness(pi, autoMode);
+  const controller = registerSubagents(pi, autoMode);
   const emit = async (event: string, payload: unknown = {}) => {
     for (const fn of handlers.get(event) ?? []) await fn(payload, ctx);
   };

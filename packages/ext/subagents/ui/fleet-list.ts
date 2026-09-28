@@ -96,7 +96,6 @@ export class FleetList {
   private viewerClose: (() => void) | undefined;
   private viewingAgentId: string | undefined;
   /** Terminal agents whose final notification is still queued behind child messages. */
-  private pendingResults = new Set<string>();
   private pendingMail = new Map<string, number>();
 
   constructor(
@@ -145,11 +144,6 @@ export class FleetList {
    * Called when an agent finishes. The viewer (if open on it) stays open so the
    * final output remains readable, and the row lingers in the list — just refresh.
    */
-  onAgentResultPending(id: string): void {
-    this.pendingResults.add(id);
-    this.update();
-  }
-
   setPendingMail(id: string, count: number): void {
     if (count > 0) {
       this.pendingMail.set(id, count);
@@ -158,8 +152,7 @@ export class FleetList {
     this.update();
   }
 
-  onAgentFinished(id: string): void {
-    this.pendingResults.delete(id);
+  onAgentFinished(): void {
     this.update();
   }
 
@@ -180,7 +173,6 @@ export class FleetList {
     this.tui = undefined;
     this.active = false;
     this.pendingBashGates.clear();
-    this.pendingResults.clear();
     this.pendingMail.clear();
     // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
@@ -246,7 +238,6 @@ export class FleetList {
     return records
       .filter(
         (a) =>
-          this.pendingResults.has(a.id) ||
           this.pendingMail.has(a.id) ||
           a.status === "idle" ||
           a.status === "running" ||

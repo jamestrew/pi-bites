@@ -8,21 +8,12 @@ export function textResult<const TDetails = AgentDetails>(msg: string, details?:
   return { content: [{ type: "text" as const, text: msg }], details };
 }
 
-/** Model payload and display details travel separately across direct/nested transports. */
 export type SubagentPayload =
   | ""
   | { message: string; timed_out: boolean }
   | { task_name: string }
   | { agents: Array<{ agent_name: string; agent_status: WaitAgentStatus }> }
-  | { agent_id: string; nickname: string | null }
-  | { submission_id: string }
-  | { status: Record<string, WaitAgentStatus>; timed_out: boolean }
-  | { previous_status: WaitAgentStatus }
-  | { status: WaitAgentStatus };
-
-export function v1Result<D>(value: SubagentPayload, details: D) {
-  return { ...textResult(JSON.stringify(value), details), value };
-}
+  | { previous_status: WaitAgentStatus };
 
 export class SubagentOperationError extends Error {
   constructor(

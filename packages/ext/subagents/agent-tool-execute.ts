@@ -3,10 +3,10 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createActivityTracker } from "./activity-tracker.js";
 import type { AgentManager } from "./agent-manager.js";
-import { resolveSpawnAgent, type ResolvedAgent } from "./agent-types.js";
+import { type ResolvedAgent } from "./agent-types.js";
 import { resolveAgentInvocationConfig } from "./invocation-config.js";
 import { modelKey, resolveModel } from "./model-resolver.js";
-import { v1Result, SubagentOperationError } from "./tool-result.js";
+import { SubagentOperationError } from "./tool-result.js";
 import {
   isThinkingLevel,
   type AgentInvocation,
@@ -22,15 +22,6 @@ import {
 } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
 import { sanitizeText } from "./ui/text-lines.js";
-import { getActiveSubagent } from "./subagent-context.js";
-
-type AgentToolParams = {
-  message: string;
-  agent_type?: string;
-  fork_context?: boolean;
-  model?: string;
-  reasoning_effort?: string;
-};
 
 type AgentToolUpdate = (update: {
   content: Array<{ type: "text"; text: string }>;
@@ -44,45 +35,6 @@ type AgentToolExecuteDeps = {
   fleet: FleetList;
   isScopeModelsEnabled: () => boolean;
 };
-
-export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
-  const parentAgentType = getActiveSubagent();
-  const execute = createSpawnExecution(deps, (ctx, type, prompt, options) =>
-    deps.manager.spawn(deps.pi, ctx, type, prompt, options),
-  );
-  return async (
-    callId: string,
-    params: AgentToolParams,
-    signal: AbortSignal | undefined,
-    onUpdate: AgentToolUpdate | undefined,
-    ctx: SubagentContext,
-  ) => {
-    if (!params.message.trim()) return failedResult("Empty message can't be sent to an agent.");
-    const role = resolveSpawnAgent(
-      params.agent_type,
-      params.fork_context,
-      ctx.parentRole ?? parentAgentType,
-    );
-    if ("error" in role) return failedResult(role.error);
-    const result = await execute(
-      callId,
-      {
-        message: params.message,
-        model: params.model,
-        reasoning_effort: params.reasoning_effort,
-        agent: role.agent,
-        forkContext: params.fork_context === true,
-      },
-      signal,
-      onUpdate,
-      ctx,
-    );
-    return v1Result(
-      { agent_id: result.agentId, nickname: result.details.displayName || null },
-      result.details,
-    );
-  };
-}
 
 /** Already-normalized spawn policy; model authorization and activity remain shared. */
 export function createSpawnExecution(

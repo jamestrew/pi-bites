@@ -31,7 +31,6 @@ import {
   conversationText,
   invokedToolNames,
   type PrintModeRun,
-  routeBySession,
   runPrintMode,
 } from "./helpers/print-mode-runner.js";
 
@@ -79,51 +78,7 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     expect(run.responseText).toBe("PRINT_TOOL_LOOP_COMPLETE");
   });
 
-  it("spawns immediately and automatically routes real output back to the parent", async () => {
-    run = await runPrintMode({
-      prompt: "Delegate the greeting to a subagent.",
-      respond: routeBySession({
-        parentInitial: agentCall({
-          agent_type: "explorer",
-          message: "Say hello.",
-        }),
-        // NON-circular: the parent's final answer reflects whether automatic
-        // completion content actually reached its model-visible context.
-        parentFinal: (ctx: Context) => {
-          const text = ctx.messages
-            .flatMap((message) =>
-              Array.isArray(message.content)
-                ? (message.content as Array<{ text?: string }>).map((block) => block.text ?? "")
-                : [],
-            )
-            .join("\n");
-          return `Parent relays: ${text.includes("CHILD_GREETING_OK") ? "CHILD_GREETING_OK" : "CHILD_MISSING"}`;
-        },
-        subagent: "CHILD_GREETING_OK",
-      }),
-    });
-
-    // Agent returned its identity immediately; the child output arrived later
-    // through automatic completion and drove the parent's final answer.
-    const toolResults = agentToolResults(run.parentSession);
-    expect(toolResults).toHaveLength(1);
-    expect(JSON.parse(toolResults[0]!).agent_id).toBeTruthy();
-    expect(toolResults[0]).not.toContain("CHILD_GREETING_OK");
-    expect(conversationText(run.parentSession)).toContain("CHILD_GREETING_OK");
-    expect(run.responseText).toContain("CHILD_GREETING_OK");
-    expect(run.responseText).not.toContain("CHILD_MISSING");
-    // Parent t1 (Agent call) + child t1 (reply) + parent t2 (final) = 3 calls.
-    expect(run.modelCalls).toBeGreaterThanOrEqual(3);
-  });
-
-  it("the test host can await an asynchronous child and its automatic completion turn", async () => {
-    // The child takes a beat to "think" (a real delay in its faux turn). That
-    // delay is what makes the contrast causal and deterministic:
-    //   - WITHOUT the hold, the parent's turn ends and the runner tears down
-    //     before the child ever streams → the child is abandoned (2 model calls:
-    //     parent's tool-call turn + its summary turn; the child never runs).
-    //   - WITH the hold, the parent loop blocks in waitForAll() until the child
-    //     finishes → the child's own model turn actually runs (≥3 calls).
+  it("the test host can await an asynchronous child and its queue-only completion", async () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const respond = async (ctx: Context) => {
       const isParent = !getCurrentSystemPrompt(ctx.messages).includes("<active_agent ");
@@ -141,23 +96,11 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
           });
     };
 
-    // Control: no hold → the child hasn't run by the time the parent turn ends.
-    // `modelCalls` is snapshotted at that moment (it's a plain number on the
-    // result), so draining afterwards to tear down cleanly doesn't change it.
-    const noHold = await runPrintMode({ prompt: "go", hold: false, respond });
-    const abandonedCalls = noHold.modelCalls;
-    await noHold.manager?.waitForAll(); // let the orphan finish before dispose (avoids stale-ctx)
-    await noHold.dispose();
-
-    // Subject: hold on → child runs to completion before the parent finishes.
     run = await runPrintMode({ prompt: "go", hold: true, respond });
-
-    // Agent returns its identity synchronously either way.
-    expect(JSON.parse(agentToolResults(run.parentSession)[0]!).agent_id).toBeTruthy();
-    // Awaiting is load-bearing only in this test host: production remains non-blocking.
-    expect(abandonedCalls).toBe(2); // parent tool-call + summary; child never streamed
-    expect(run.modelCalls).toBeGreaterThan(abandonedCalls);
-    expect(run.modelCalls).toBeGreaterThanOrEqual(3);
+    expect(JSON.parse(agentToolResults(run.parentSession)[0]!).task_name).toBe("/root/work");
+    expect(conversationText(run.parentSession)).toContain("CHILD_BG_RAN");
+    // Two parent requests and one child request: idle completion never starts another turn.
+    expect(run.modelCalls).toBe(3);
   });
 
   it("keeps a subagent invocation alive across turn-boundary compaction", async () => {
@@ -206,7 +149,9 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       },
     });
 
-    const agentId = JSON.parse(agentToolResults(run.parentSession)[0]!).agent_id;
+    const agentId = run.parentSession.messages
+      .filter((m) => m.role === "toolResult" && m.toolName === "spawn_agent")
+      .map((m) => (m as any).details?.agentId)[0];
     const record = run.manager?.getRecord(agentId ?? "") as
       | {
           status: string;
@@ -233,8 +178,8 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       ),
     ).toBe(false);
     // Parent tool turn + immediate parent follow-up + child tool turn + one
-    // summary + one resumed child turn + completion-triggered parent turn.
-    expect(run.modelCalls).toBe(6);
+    // summary + one resumed child turn; completion does not start a parent turn.
+    expect(run.modelCalls).toBe(5);
   });
 
   it("errors clearly when faux mode is given no script", async () => {
@@ -297,7 +242,7 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
         expect.arrayContaining([expect.objectContaining({ agent_type: "worker" })]),
       );
       expect(calls.every((call) => !("run_in_background" in call))).toBe(true);
-      expect(JSON.parse(agentToolResults(run.parentSession)[0]!).agent_id).toBeTruthy();
+      expect(JSON.parse(agentToolResults(run.parentSession)[0]!).task_name).toBe("/root/work");
       expect(run.responseText).toMatch(/BGPONG/i);
     },
     LIVE_TIMEOUT,

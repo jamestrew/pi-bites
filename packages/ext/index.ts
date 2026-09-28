@@ -67,7 +67,7 @@ export default async function (pi: ExtensionAPI) {
   subagents?.registerTools();
   codexAdapter = disabled.has("codexAdapter")
     ? undefined
-    : registerCodexAdapter(pi, configRef, bashGate, subagents);
+    : registerCodexAdapter(pi, configRef, bashGate);
   const previewCodexPrompt = codexAdapter?.previewPrompt;
 
   if (isSubagent) return;
