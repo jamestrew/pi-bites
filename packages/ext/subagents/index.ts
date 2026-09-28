@@ -25,7 +25,11 @@ import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { getModelLabelFromConfig } from "./model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
-import { createSubagentMessenger, bindSubagentMessenger } from "./subagent-messages.js";
+import {
+  createSubagentMessenger,
+  bindSubagentMessenger,
+  type SubagentMessageDetails,
+} from "./subagent-messages.js";
 import { createAgentTool } from "./register-agent-tool.js";
 import { createResumeAgent } from "./register-resume-agent.js";
 import { createCloseAgent } from "./register-close-agent.js";
@@ -91,6 +95,30 @@ export function createSubagents(
   let operations: SubagentController;
   let currentSessionToken: object | undefined;
   const retiredConversations = new WeakSet<AgentRecord>();
+  // Only unloaded identities need a payload queue; loaded mail belongs to Pi.
+  const unloadedMail = new WeakMap<AgentRecord, SubagentMessageDetails[]>();
+  const queueMail = (sessionId: string, details: SubagentMessageDetails): boolean => {
+    const target = manager.listAgents().find((r) => getAgentSessionId(r) === sessionId);
+    if (target && (manager.isClosing(target.id) || retiredConversations.has(target))) return false;
+    if (target && (!target.session || manager.isRuntimeDisposing(target.id))) {
+      const pending = unloadedMail.get(target) ?? [];
+      pending.push(details);
+      unloadedMail.set(target, pending);
+      fleet.setPendingMail(target.id, pending.length);
+      return true;
+    }
+    return (
+      deliveries
+        .get(sessionId)
+        ?.messenger.queueOnly(
+          sessionId,
+          details.sender,
+          details.message,
+          details.task,
+          details.completion,
+        ) ?? false
+    );
+  };
   const completion = createAgentCompletionHandler({
     pi,
     getRecord: (id) => manager.getRecord(id),
@@ -104,15 +132,13 @@ export function createSubagents(
     queueCompletion: integrationTools
       ? (record) => {
           if (!record.taskName || record.status === "stopped") return;
-          deliveries
-            .get(record.parentSessionId)
-            ?.messenger.queueOnly(
-              record.parentSessionId,
-              { id: record.taskName, type: record.type, title: record.taskName },
-              record.error ? `Agent failed: ${record.error}` : (record.result ?? "No output."),
-              false,
-              record.status === "error" ? "failed" : "completed",
-            );
+          queueMail(record.parentSessionId, {
+            sender: { id: record.taskName, type: record.type, title: record.taskName },
+            message: record.error
+              ? `Agent failed: ${record.error}`
+              : (record.result ?? "No output."),
+            completion: record.status === "error" ? "failed" : "completed",
+          });
         }
       : undefined,
     scheduleAutomatic: (parentSessionId, deliver, cancel) =>
@@ -148,13 +174,18 @@ export function createSubagents(
       return (
         !!record &&
         !retiredConversations.has(record) &&
-        (deliveries.get(parentSessionId)?.messenger.send(parentSessionId, sender, message) ?? false)
+        (integrationTools
+          ? queueMail(parentSessionId, { sender, message })
+          : (deliveries.get(parentSessionId)?.messenger.send(parentSessionId, sender, message) ??
+            false))
       );
     },
     getAutoCompactionThreshold,
     (record) => {
       completion.onAgentStatusChanged(record);
       parentAllowances.delete(record.id);
+      const activity = agentActivity.get(record.id);
+      if (activity) activity.session = undefined;
       childControllers.get(record.id)?.invalidate();
       const id = getAgentSessionId(record);
       if (id) {
@@ -195,7 +226,8 @@ export function createSubagents(
           if (sessionId && deliveries.get(sessionId)?.messenger === messenger)
             deliveries.delete(sessionId);
           if (childControllers.get(record.id) === child) childControllers.delete(record.id);
-          if (!manager.isRuntimeDisposing(record.id)) await retireDescendants();
+          if (!manager.isRuntimeDisposing(record.id) && !manager.isRuntimeReopening(record.id))
+            await retireDescendants();
         });
         childPi.on("session_before_switch", () => child.invalidate());
         childPi.on("session_tree", async (_event, ctx) => {
@@ -207,6 +239,29 @@ export function createSubagents(
         return child;
       },
   );
+
+  manager.onRuntimeLoaded = (record) => {
+    const id = getAgentSessionId(record);
+    const messenger = id && deliveries.get(id)?.messenger;
+    if (!messenger) return;
+    const pending = unloadedMail.get(record);
+    while (pending?.length) {
+      const mail = pending[0];
+      if (!mail) break;
+      if (!messenger.queueOnly(id, mail.sender, mail.message, mail.task, mail.completion)) break;
+      pending.shift();
+    }
+    if (!pending?.length) unloadedMail.delete(record);
+    const activity = agentActivity.get(record.id);
+    if (activity) activity.session = record.session;
+  };
+  manager.runtimes.hasPendingMail = (record) => {
+    const id = getAgentSessionId(record);
+    return (
+      !!unloadedMail.get(record)?.length ||
+      (!!id && (deliveries.get(id)?.messenger.observe().pending ?? 0) > 0)
+    );
+  };
 
   // Expose manager via Symbol.for() global registry for cross-package access.
   // Standard Node.js pattern for cross-package singletons (used by OpenTelemetry, etc.).
@@ -251,7 +306,7 @@ export function createSubagents(
     startParentMessenger(ctx);
   });
 
-  pi.on("session_before_switch", () => {
+  pi.on("session_before_switch", async () => {
     operations.invalidate();
     parentMessenger.flushForShutdown();
     parentMessenger.dispose();
@@ -260,6 +315,8 @@ export function createSubagents(
     parentAllowances.clear();
     currentCtx = undefined;
     currentSessionToken = undefined;
+    for (const record of manager.listAgents()) retiredConversations.add(record);
+    await Promise.allSettled(manager.listAgents().map((record) => manager.close(record.id)));
   });
 
   const unsubBashGateApproval = onSubagentApprovalRequest(pi, async (request) => {
@@ -295,7 +352,10 @@ export function createSubagents(
       parentAllowances.set(request.agentId, { incarnation: request.agentSessionId, keys });
     };
     const sessionChanged = (): BashGateApprovalResult | undefined =>
-      !signal.aborted && ownerSessionToken && ownerSessionToken === currentSessionToken
+      !signal.aborted &&
+      hasLiveIncarnation() &&
+      ownerSessionToken &&
+      ownerSessionToken === currentSessionToken
         ? undefined
         : { outcome: "failure", message: "parent approval session changed" };
     const ui = ctx.ui;

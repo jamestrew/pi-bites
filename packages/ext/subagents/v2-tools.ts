@@ -156,51 +156,59 @@ export function createV2Tools(
         if (root && name === "followup_task")
           throw new Error("Cannot send a follow-up task to root");
         const record = root ? undefined : deps.manager.taskPaths.lookup(sessionId, args.target);
-        if (
-          record &&
-          (!record.session ||
-            deps.manager.isClosing(record.id) ||
-            deps.manager.isRuntimeDisposing(record.id))
-        )
-          throw new Error("Target agent is not loaded");
-        const targetSessionId = record?.session?.sessionManager.getSessionId() ?? caller.rootId;
-        const messenger = deps.getMessenger(targetSessionId);
-        if (!messenger) throw new Error("Target agent is not loaded");
-        const sender = {
-          id: caller.path,
-          type: resolveAgent(ctx.parentRole ?? "default").type,
-          title: caller.path,
-        };
-        const deliver = () =>
-          messenger.queueOnly(targetSessionId, sender, args.message, name === "followup_task");
-        // An interrupt acknowledges submission before Pi finishes unwinding tools.
-        // Wait for that turn before committing fresh work to the retained session.
-        if (
-          name === "followup_task" &&
-          record?.status === "stopped" &&
-          record.abort?.source === "interrupt"
-        ) {
-          if (record.promise)
-            await (signal ? waitForOperation(record.promise, signal) : record.promise);
-          signal?.throwIfAborted();
+        const release = record ? deps.manager.runtimes.protect(record.id) : undefined;
+        try {
+          if (record && (!record.session || deps.manager.isRuntimeDisposing(record.id))) {
+            await deps.manager.reload(pi, ctx, record.id, signal);
+            signal?.throwIfAborted();
+          }
+          if (record && deps.manager.isClosing(record.id))
+            throw new Error("Target agent is closing");
+          const targetSessionId = record?.session?.sessionManager.getSessionId() ?? caller.rootId;
+          const messenger = deps.getMessenger(targetSessionId);
+          if (!messenger) throw new Error("Target agent is not loaded");
+          const sender = {
+            id: caller.path,
+            type: resolveAgent(ctx.parentRole ?? "default").type,
+            title: caller.path,
+          };
+          const deliver = () =>
+            messenger.queueOnly(targetSessionId, sender, args.message, name === "followup_task");
+          // An interrupt acknowledges submission before Pi finishes unwinding tools.
+          // Wait for that turn before committing fresh work to the retained session.
+          if (
+            name === "followup_task" &&
+            record?.status === "stopped" &&
+            record.abort?.source === "interrupt"
+          ) {
+            if (record.promise)
+              await (signal ? waitForOperation(record.promise, signal) : record.promise);
+            signal?.throwIfAborted();
+          }
+          const accepted =
+            name === "followup_task" && record
+              ? deps.manager.followup(
+                  record.id,
+                  deliver,
+                  () => messenger.observe().pendingTasks > 0,
+                )
+              : deliver();
+          if (!accepted) throw new Error("Input was not submitted to target agent");
+          if (record) {
+            deps.fleet.ensureTimer();
+            deps.fleet.update();
+            pi.events.emit("subagents:steered", { id: record.id, message: args.message });
+          }
+          return {
+            ...textResult("", {
+              target: record?.taskName ?? "/root",
+              status: name === "send_message" ? "queued" : "submitted",
+            }),
+            value: "" as const,
+          };
+        } finally {
+          release?.();
         }
-        const accepted =
-          name === "followup_task" && record
-            ? deps.manager.followup(record.id, deliver, () => messenger.observe().pendingTasks > 0)
-            : deliver();
-        if (!accepted) throw new Error("Input was not submitted to target agent");
-        if (record) {
-          deps.fleet.ensureTimer();
-          deps.fleet.update();
-          pi.events.emit("subagents:steered", { id: record.id, message: args.message });
-        }
-        return {
-          ...textResult("", {
-            target: record?.taskName ?? "/root",
-            status: name === "send_message" ? "queued" : "submitted",
-          }),
-          value: "" as const,
-        };
       },
     });
   const interrupt_agent = defineSubagentTool({

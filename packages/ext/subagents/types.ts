@@ -57,6 +57,8 @@ export interface AgentRecord {
   id: string;
   /** Canonical named-task identity, retained across runtime replacement. */
   taskName?: string;
+  /** Original delegation ceiling; reload may narrow but never widen it. */
+  allowedTools?: string[];
   /** Conversation identity survives unloading its Pi runtime. */
   sessionId?: string;
   /** Manager-owned active branch, without extension state or approval allowances. */

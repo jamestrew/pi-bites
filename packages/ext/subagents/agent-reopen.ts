@@ -28,8 +28,10 @@ export class AgentReopener {
     private closer: AgentCloser,
     private hooks: {
       assertOwnerAvailable: (parentSessionId: string, rootSessionId: string) => void;
+      admitRuntime: (signal?: AbortSignal) => Promise<() => void>;
       reserve: (record: AgentRecord) => boolean;
       release: (record: AgentRecord) => void;
+      invalidate: (record: AgentRecord) => void;
       commit: (record: AgentRecord) => void;
       registerCollaboration?: (record: AgentRecord) => RegisterCollaboration;
       autoCompactionThreshold?: () => number | undefined;
@@ -38,6 +40,10 @@ export class AgentReopener {
 
   pending(id: string): Promise<WaitAgentStatus> | undefined {
     return this.reopening.get(id);
+  }
+
+  cancel(id: string): void {
+    this.owners.get(id)?.abort.abort(new Error("Subagent owner closed"));
   }
 
   cancelChildren(sessionId: string | undefined): Promise<unknown> {
@@ -73,7 +79,7 @@ export class AgentReopener {
     if (!id.trim()) throw new Error(`invalid agent id ${id}`);
     const parent = snapshotParent(ctx);
     const active = this.agents.get(id);
-    const closed = this.closer.get(id);
+    const closed = active ? this.closer.retain(active) : this.closer.get(id);
     const owner =
       active?.rootSessionId ??
       active?.parentSessionId ??
@@ -83,7 +89,7 @@ export class AgentReopener {
     if (this.closer.isClosing(id)) throw new Error(`agent with id ${id} is closing`);
     const pending = this.reopening.get(id);
     if (pending) return waitForOperation(pending, signal);
-    if (active) return getAgentStatus(active);
+    if (active?.session) return getAgentStatus(active);
     if (!closed) throw new Error(`agent with id ${id} not found`);
     if (!closed.recoverable || !("conversation" in closed))
       throw new Error(`agent with id ${id} has no recoverable conversation`);
@@ -120,7 +126,9 @@ export class AgentReopener {
     )
       throw new Error(`agent with id ${id} has a corrupt compaction boundary`);
     assertValidSpawnCwd(conversation.cwd);
-    const model = parent.model;
+    const model = active?.invocation?.modelName
+      ? parent.availableModels.find((m) => `${m.provider}/${m.id}` === active.invocation?.modelName)
+      : parent.model;
     if (
       !model ||
       !parent.availableModels.some((m) => m.provider === model.provider && m.id === model.id)
@@ -132,10 +140,16 @@ export class AgentReopener {
       !ctx.scopedModels.some(({ model: m }) => m.provider === model.provider && m.id === model.id)
     )
       throw new Error("Model not in scope for resume.");
-    const allowedTools = ctx.allowedTools ?? pi.getActiveTools();
+    const currentTools = ctx.allowedTools ?? pi.getActiveTools();
+    const ceiling = active?.allowedTools;
+    const allowedTools = ceiling
+      ? currentTools.filter((tool) => ceiling.includes(tool))
+      : currentTools;
     const thinkingLevel =
-      model.reasoning === false ? "off" : (ctx.thinking ?? pi.getThinkingLevel());
-    const record: AgentRecord = {
+      model.reasoning === false
+        ? "off"
+        : (active?.invocation?.thinking ?? ctx.thinking ?? pi.getThinkingLevel());
+    const record: AgentRecord = active ?? {
       id,
       sessionId: conversation.sessionId,
       incarnation: randomUUID(),
@@ -155,11 +169,16 @@ export class AgentReopener {
       failureHistory: [],
       invocation: { modelName: `${model.provider}/${model.id}`, thinking: thinkingLevel },
     };
-    if (!this.hooks.reserve(record))
+    if (!active && !this.hooks.reserve(record))
       throw new Error("No concurrency slot is available. Close an agent before resuming another.");
     const reopen = async () => {
       let session: AgentSession | undefined;
+      let releaseRuntime: (() => void) | undefined;
       try {
+        if (active) releaseRuntime = await this.hooks.admitRuntime(signal);
+        signal.throwIfAborted();
+        this.hooks.invalidate(record);
+        record.incarnation = randomUUID();
         session = await openAgentSession(parent, record.type, {
           pi,
           registerCollaboration: this.hooks.registerCollaboration?.(record),
@@ -177,6 +196,9 @@ export class AgentReopener {
         signal.throwIfAborted();
         this.hooks.assertOwnerAvailable(record.parentSessionId, rootSessionId);
         record.session = session;
+        releaseRuntime?.();
+        record.retainedConversation = undefined;
+        record.allowedTools = allowedTools;
         this.hooks.commit(record);
         this.agents.set(id, record);
         this.closer.forget(id);
@@ -185,10 +207,12 @@ export class AgentReopener {
         try {
           if (session) await shutdownAgentSession(session);
         } finally {
-          this.hooks.release(record);
+          if (active) record.incarnation = undefined;
+          else this.hooks.release(record);
         }
         throw error;
       } finally {
+        releaseRuntime?.();
         this.reopening.delete(id);
         this.owners.delete(id);
       }
