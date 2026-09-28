@@ -941,9 +941,9 @@ describe("embedded agent runner configuration", () => {
       "/ext/bites.ts": [
         "spawn_agent",
         "wait_agent",
-        "send_input",
-        "close_agent",
-        "resume_agent",
+        "send_message",
+        "interrupt_agent",
+        "followup_task",
         "ok_ext",
       ],
     });
@@ -957,9 +957,9 @@ describe("embedded agent runner configuration", () => {
       "read",
       "spawn_agent",
       "wait_agent",
-      "send_input",
-      "close_agent",
-      "resume_agent",
+      "send_message",
+      "interrupt_agent",
+      "followup_task",
       "ok_ext",
     ]);
     expect(options.customTools).toBeUndefined();

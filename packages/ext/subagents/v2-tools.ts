@@ -18,7 +18,7 @@ import { defineSubagentTool } from "./operation-context.js";
 import { textResult } from "./tool-result.js";
 import type { AgentActivity } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
-import { fitLine, sanitizeSingleLine } from "./ui/text-lines.js";
+import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./ui/text-lines.js";
 
 export function createV2Tools(
   pi: ExtensionAPI,
@@ -54,6 +54,10 @@ export function createV2Tools(
     name: "spawn_agent",
     label: "spawn_agent",
     description: CODEX_V2_CONTRACT.tools.spawn_agent.description,
+    promptGuidelines: [
+      "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work. Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn. Role guidance never authorizes spawning. When authorized, delegate bounded independent work with a concrete benefit; keep the immediate critical-path task local. Give agents bounded, self-contained assignments and avoid duplicating delegated work. Verify delegated changes before reporting completion.",
+      "Subagent tools are direct, including with Code Mode active. send_message queues information without starting idle work; followup_task assigns work. wait_agent observes your mailbox, does not consume messages or cancel children, and is distinct from Code Mode wait. Completed tasks release execution capacity; retained task paths remain addressable for later messages or follow-up.",
+    ],
     parameters: Type.Unsafe<{
       task_name: string;
       message: string;
@@ -275,7 +279,7 @@ const listResultSchema = Type.Unsafe<{
   agents: Array<{ agent_name: string; agent_status: WaitAgentStatus }>;
 }>(CODEX_V2_CONTRACT.tools.list_agents.output_schema);
 
-type RenderState = { error?: string; agents?: string[]; status?: string };
+type RenderState = { error?: string; agents?: string[]; status?: string; savedWait?: string };
 
 /** The call row owns status/errors; results never duplicate it. */
 function renderers(name: string) {
@@ -287,6 +291,9 @@ function renderers(name: string) {
         path_prefix?: string;
         target?: string;
         timeout_ms?: number;
+        // Read-only saved V1 calls; these arguments are not accepted by executors.
+        targets?: unknown[];
+        agent_type?: string;
       },
       theme: { bold(s: string): string; fg(color: "accent" | "dim", s: string): string },
       context: { state: RenderState; expanded: boolean },
@@ -295,8 +302,10 @@ function renderers(name: string) {
         render(width: number) {
           const summary = sanitizeSingleLine(
             name === "wait_agent"
-              ? `${Math.max(10_000, args.timeout_ms ?? 30_000)}ms`
-              : (args.task_name ?? args.target ?? args.path_prefix ?? "/root"),
+              ? Array.isArray(args.targets)
+                ? `${args.targets.length} agents`
+                : `${Math.max(10_000, args.timeout_ms ?? 30_000)}ms`
+              : (args.task_name ?? args.agent_type ?? args.target ?? args.path_prefix ?? "/root"),
           );
           let fork = "";
           if (name === "spawn_agent") {
@@ -316,7 +325,9 @@ function renderers(name: string) {
               width,
             ),
           ];
-          const agents = context.state.agents;
+          const agents = context.state.savedWait
+            ? wrapDisplayLines(context.state.savedWait, Math.max(1, width))
+            : context.state.agents;
           if (agents?.length) {
             lines.push("");
             for (const line of context.expanded ? agents : agents.slice(0, 8))
@@ -347,7 +358,18 @@ function renderers(name: string) {
       _theme: unknown,
       context: { state: RenderState; isError: boolean },
     ) {
-      const details = result.details as { status?: string } | undefined;
+      const details = result.details as
+        | { status?: string; agents?: unknown[]; outcome?: string }
+        | undefined;
+      if (
+        name === "wait_agent" &&
+        Array.isArray(details?.agents) &&
+        typeof details.outcome === "string"
+      )
+        context.state.savedWait = result.content
+          .filter((b) => b.type === "text")
+          .map((b) => b.text)
+          .join("\n");
       if (typeof details?.status === "string")
         context.state.status = sanitizeSingleLine(details.status);
       if (context.isError)

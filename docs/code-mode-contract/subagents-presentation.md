@@ -1,5 +1,10 @@
 # Nested collaboration presentation and lifecycle
 
+> Historical V1 record, superseded by #352's direct V2 cutover. V1 executors,
+> nested declarations and their generator are removed; commands and paths below
+> describe the original revision, not current activation. See `CODEX_V2.md` and
+> `docs/code-mode-contract/subagents-v2-cutover.md` for current behavior/evidence.
+
 Issue #309 builds on #308's shared V1 controller and owned renderers. All five
 collaboration operations render as child traces inside `exec`/`wait`; their native
 structured values remain separate from display details. Raw JavaScript stays hidden.

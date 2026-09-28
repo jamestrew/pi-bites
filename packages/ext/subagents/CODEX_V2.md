@@ -127,15 +127,24 @@ Codex execution test or live provider compatibility claim. Runtime behavior and
 provider payloads require the implementation's behavioral tests and smoke routes;
 unavailable routes must remain explicitly unverified. No host pin change is needed.
 
-## Staged integration (#346)
+## Direct activation (#352)
 
-`v2-integration-harness.ts` is an explicit test entrypoint, not imported by ordinary
-extension activation and not enabled by configuration. It registers executable
-`spawn_agent`, `list_agents`, `send_message`, `followup_task`, `wait_agent`, and
-`interrupt_agent`. The existing controller, manager, Fleet/navigation, approvals, runner,
-provider registry and selected-tool intersection remain authoritative. The V1 Code
-Mode bridge declines this direct-only controller, including in child sessions.
-Ordinary sessions retain their existing surface until the coherent six-tool cutover.
+Ordinary extension activation registers all six V2 tools through the shared controller.
+There is no staging entrypoint, V1 executor, dual-mode option, nested collaboration,
+or discovery prerequisite. The manager, Fleet/navigation, approvals, runner, provider
+registry and selected-tool intersection remain authoritative. Tools are direct on GPT,
+Anthropic and other Pi tool-calling routes, with or without Code Mode. Children inherit
+permitted tools and get canonical self/parent task paths plus V2 message/task guidance.
+Project/skill policies stay additive; spawn prompt guidelines retain explicit delegation
+permission requirements separately from the pinned descriptions.
+
+Internal programmatic spawns receive generated task segments when not supplied, so
+their children use the same task tree. Registry spawn returns a promise resolving at
+the initialized-session handoff; RPC replies still carry an ID after awaiting it.
+Both use shared residency admission and snapshot dependencies before awaiting; owner
+replacement cancels uncommitted admission. Internal close/recovery operations remain for
+lifecycle management, not as model-callable V1 tools. Old notification messages and
+generic saved-tool/Code Mode result displays remain readable without restoring agents.
 
 Full history is the default; `none` is fresh. Empty/whitespace fork selection means
 `all`, and the two keywords are case-insensitive. Positive integer strings select
@@ -156,9 +165,8 @@ reload follow the policy below.
 
 The tests exercise direct tools, shared operations and real Pi sessions with a canned
 provider, including full/fresh imports, additive policy, selected tools, Code Mode
-coexistence and Pi's shared Anthropic/OpenAI history transformer. Live provider
-requests are not performed; provider-authentication and live timing smoke routes
-remain for the final cutover. Existing source-audit reports describe the inspected
+coexistence and Pi's shared Anthropic/OpenAI history transformer. See [cutover verification](../../../docs/code-mode-contract/subagents-v2-cutover.md)
+for the offline payload matrix and live-route limitations. Existing source-audit reports describe the inspected
 baseline, not a claim that later mailbox/residency slices are already implemented.
 
 ## Loaded-agent messaging (#347)
@@ -193,18 +201,18 @@ Native acceptance is the commit point: later caller cancellation does not retrac
 accepted input. Invalidated captures cannot deliver or start work; disposed messenger
 endpoints do not touch invalidated extension APIs. Fleet retains idle rows with
 pending messages, and direct result metadata updates the call row without adding
-model-visible acknowledgments. The staged tests use real Pi and a canned provider;
+model-visible acknowledgments. The integration tests use real Pi and a canned provider;
 live GPT/Anthropic timing and residency/recovery remain unverified here.
 
 ## Completion mail and mailbox waits (#348)
 
-The staged V2 completion path queues attributed final answers through the same
+The V2 completion path queues attributed final answers through the same
 native queue-only messenger as information messages. Each completed generation
 delivers once, including later follow-up turns; stopped/interrupted turns do not
 send finals. Failures queue attributed failure text. Fleet/status/usage events
 remain separate from model content; completion metadata styles the single incoming
 message instead of adding a second result notification. Idle completion never
-requests a parent model turn. Ordinary V1 activation remains unchanged.
+requests a parent model turn. No V1 completion executor remains.
 
 Direct `wait_agent` accepts only the supported integer `timeout_ms`, with the
 default, limits, notice and generic summaries documented above. It subscribes to
@@ -248,7 +256,7 @@ is partial, not a completed final; completion mail is suppressed and Fleet shows
 A follow-up submitted during interruption waits cancellably for the old turn to
 settle before committing input. Parent replacement or cancellation before that commit
 prevents delivery. Already accepted input is not rolled back, and interruption does
-not promise that pending mailbox work can never resume. These regressions use the staged direct harness and real Pi sessions with canned
+not promise that pending mailbox work can never resume. These regressions use the production direct registration and real Pi sessions with canned
 providers, not live-provider timing.
 
 ## Recent instruction/task forks (#350)

@@ -19,7 +19,7 @@ import { createSubagents } from "../packages/ext/subagents/index.js";
 import type { SubagentController } from "../packages/ext/subagents/operations.js";
 import { EXTENSION_NAMES, type BitesConfig } from "../packages/ext/config.js";
 
-const marker = "V1_RETAINED_278";
+const marker = "V2_RETAINED_352";
 const command = "printf subagent-approved";
 type Json = Record<string, unknown>;
 export interface Operation {
@@ -47,75 +47,65 @@ export function checkLifecycle(operations: Operation[], route: string) {
   const parent = operations.filter((o) => o.owner === "parent" && !o.error);
   const spawnIndex = parent.findIndex((o) => o.name === "spawn_agent");
   const spawn = parent[spawnIndex];
-  const id = spawn && wire(spawn).agent_id;
-  const firstWait = parent.findIndex(
+  const task = spawn && wire(spawn).task_name;
+  const listedCompletion = (o: Operation, markerText?: string) => {
+    const agents = wire(o).agents;
+    return (
+      o.name === "list_agents" &&
+      Array.isArray(agents) &&
+      agents.some((value) => {
+        const agent = object(value);
+        const completed = object(agent.agent_status).completed;
+        return (
+          agent.agent_name === task &&
+          typeof completed === "string" &&
+          (!markerText || completed.includes(markerText))
+        );
+      })
+    );
+  };
+  const first = parent.findIndex((o, i) => i > spawnIndex && listedCompletion(o));
+  const interrupt = parent.findIndex(
     (o, i) =>
-      i > spawnIndex &&
-      o.name === "wait_agent" &&
-      Array.isArray(o.args.targets) &&
-      o.args.targets.includes(id) &&
-      object(wire(o).status)[String(id)] !== undefined &&
-      wire(o).timed_out === false &&
-      "completed" in object(object(wire(o).status)[String(id)]),
+      i > first &&
+      o.name === "interrupt_agent" &&
+      o.args.target === task &&
+      "completed" in object(wire(o).previous_status),
   );
-  const close = parent.findIndex(
+  const followup = parent.findIndex(
     (o, i) =>
-      i > firstWait &&
-      o.name === "close_agent" &&
-      o.args.target === id &&
-      object(o.result?.details).status === "closed",
-  );
-  const resume = parent.findIndex(
-    (o, i) =>
-      i > close &&
-      o.name === "resume_agent" &&
-      o.args.id === id &&
-      object(o.result?.details).status === "resumed",
-  );
-  const send = parent.findIndex(
-    (o, i) =>
-      i > resume &&
-      o.name === "send_input" &&
-      o.args.target === id &&
+      i > interrupt &&
+      o.name === "followup_task" &&
+      o.args.target === task &&
       typeof o.args.message === "string" &&
       !o.args.message.includes(marker) &&
-      typeof wire(o).submission_id === "string",
+      o.result?.content[0]?.text === "",
   );
-  const recall = parent.findIndex(
-    (o, i) =>
-      i > send &&
-      o.name === "wait_agent" &&
-      Array.isArray(o.args.targets) &&
-      o.args.targets.includes(id) &&
-      wire(o).timed_out === false &&
-      typeof object(object(wire(o).status)[String(id)]).completed === "string" &&
-      String(object(object(wire(o).status)[String(id)]).completed).includes(marker),
-  );
+  const recall = parent.findIndex((o, i) => i > followup && listedCompletion(o, marker));
   return {
     sameModelDefaultChild:
-      typeof id === "string" &&
+      typeof task === "string" &&
       spawn?.args.model === route &&
       spawn.args.agent_type === "default" &&
       String(spawn.args.message).includes(marker) &&
       String(spawn.args.message).includes(command),
-    firstCompletion: firstWait > spawnIndex && firstWait >= 0,
-    closeResumeSameId: close > firstWait && resume > close && close >= 0,
-    recallWithoutReminder: send > resume && recall > send && send >= 0,
-    finalClose: parent.some(
-      (o, i) =>
-        i > recall &&
-        recall >= 0 &&
-        o.name === "close_agent" &&
-        o.args.target === id &&
-        object(o.result?.details).status === "closed",
+    firstCompletion: first > spawnIndex && first >= 0,
+    interruptRetainsTask: interrupt > first && first >= 0,
+    recallWithoutReminder: followup > interrupt && interrupt >= 0 && recall > followup,
+    mailboxWait: parent.some(
+      (o) =>
+        o.name === "wait_agent" &&
+        typeof wire(o).message === "string" &&
+        wire(o).timed_out === false &&
+        !Object.hasOwn(o.args, "targets"),
     ),
     parentProgress: operations.some(
       (o) =>
-        o.owner === id &&
-        o.name === "send_input" &&
+        o.owner === task &&
+        o.name === "send_message" &&
         !o.error &&
-        typeof wire(o).submission_id === "string" &&
-        o.args.target !== id,
+        o.args.target === "/root" &&
+        o.result?.content[0]?.text === "",
     ),
     noOperationErrors: operations.every((o) => !o.error),
   };
@@ -301,13 +291,13 @@ async function main() {
           // Observe real child hooks/operations without replacing sessions, transport, or executors.
           const forChild = controller.forChild.bind(controller);
           controller.forChild = (childPi, child, allowed) => {
-            observe(childPi, child.id);
+            observe(childPi, child.taskName ?? child.id);
             const childController = forChild(childPi, child, allowed);
-            observeController(childController, child.id);
+            observeController(childController, child.taskName ?? child.id);
             return childController;
           };
           controller.registerTools();
-          if (!scenario) adapter = registerAdapter(pi, config, gate, controller);
+          if (!scenario) adapter = registerAdapter(pi, config, gate);
           observe(pi, "parent");
           pi.events.on("bites:bash_gate", (event) => {
             pendingCommand = object(event).command as string | undefined;
@@ -351,9 +341,9 @@ async function main() {
     const nested = session.getActiveToolNames().includes("exec");
     record.nested = nested;
     await session.prompt(`I explicitly authorize delegation for this smoke test. Use tools, not a simulated transcript.
-If Code Mode exec/wait is available, first discover and print COMPLETE help for ALL five nested multi_agent_v1__ tools from ALL_TOOLS before invoking them. Use their actual nested names. Exercise an exec cell with await yield_control() and consume it using the OUTER wait tool; never confuse outer wait with nested wait_agent. Otherwise use the flat lifecycle tools.
-Spawn exactly one agent with agent_type "default", model ${JSON.stringify(route)}, and no fork_context. Its task: retain the marker ${marker}; execute EXACTLY ${JSON.stringify(command)} once (exec_command with login:false in Code Mode or bash otherwise), the UI approves only that exact command; send_input a progress message to its parent id from its system prompt; then return a final response. Explicitly tell it to discover complete send_input help first if using Code Mode. Do not run any other commands or use web, filesystem tools, or spawn grandchildren.
-Wait for this child's actual completion with wait_agent (repeat on timeout). Then close_agent that id, resume_agent the SAME id, and send_input to that id asking "Recall the retained marker from your previous task and return it, without executing commands." Do NOT repeat the marker in this recall request. Wait for actual completion, inspect its returned marker, and finally close_agent the same id. In Code Mode print every nested result. Finish briefly and report any failure honestly.`);
+Use the six DIRECT subagent tools, including when Code Mode is active. Do not discover collaboration via ALL_TOOLS or call nested collaboration functions.
+Spawn exactly one agent with task_name "probe", agent_type "default", model ${JSON.stringify(route)}, and fork_turns "none". Its task: retain marker ${marker}; execute EXACTLY ${JSON.stringify(command)} once (exec_command with login:false in Code Mode or bash otherwise), the UI approves only that exact command; send_message a progress message to /root; then return a final response WITHOUT spelling out the marker yet. Do not run other commands, web/filesystem tools, or spawn grandchildren.
+Use wait_agent to observe mailbox activity and list_agents to verify actual completion (repeat waits on timeout or progress-only updates). Then interrupt_agent the settled task to verify its previous completed status. Use followup_task on the SAME task asking "Recall the retained marker from your previous task and return it, without executing commands." Do NOT repeat the marker in this recall request. Wait for completion mail, then use list_agents to verify the completed answer contains the retained marker. Finish briefly and report failures honestly.`);
     record.contextUsage = session.getContextUsage();
     const lifecycle = checkLifecycle(operations, route);
     const childShell = observations.filter((o) => o.owner !== "parent");
@@ -381,41 +371,31 @@ Wait for this child's actual completion with wait_agent (repeat on timeout). The
         ),
       independentFinals:
         messages.filter(
-          (o) => o.owner === "parent" && object(o.message).customType === "subagent-notification",
+          (o) =>
+            o.owner === "parent" &&
+            object(o.message).customType === "subagent-message" &&
+            object(object(o.message).details).completion === "completed",
         ).length >= 2,
       independentProgress: messages.some(
         (o) => o.owner === "parent" && object(o.message).customType === "subagent-message",
       ),
       childPayload:
         (record.payloads as Json[] | undefined)?.some((p) => p.owner !== "parent") ?? false,
-      outerWait:
-        !nested ||
-        observations.some(
-          (o) =>
-            o.owner === "parent" &&
-            o.tool === "exec" &&
-            object(o.details).state === "yielded" &&
-            String(object(o.input).code).includes("yield_control") &&
-            observations.some(
-              (w) =>
-                w.owner === "parent" &&
-                w.tool === "wait" &&
-                !w.isError &&
-                object(w.input).cell_id === object(o.details).cellId &&
-                object(w.details).state === "result",
-            ),
-        ),
-      completeHelp:
-        !nested ||
-        observations.some(
-          (o) =>
-            o.owner === "parent" &&
-            o.tool === "exec" &&
-            ["spawn_agent", "send_input", "wait_agent", "close_agent", "resume_agent"].every(
-              (name) => JSON.stringify(o.content).includes(`multi_agent_v1__${name}`),
-            ) &&
-            JSON.stringify(o.content).includes("exec tool declaration:"),
-        ),
+      directPayloads:
+        (record.payloads as Json[] | undefined)?.every((p) => {
+          const names = (p.tools as Json[]).map((t) => t.name);
+          return (
+            [
+              "spawn_agent",
+              "send_message",
+              "followup_task",
+              "wait_agent",
+              "interrupt_agent",
+              "list_agents",
+            ].every((name) => names.includes(name)) &&
+            !names.some((name) => String(name).startsWith("multi_agent_v1__"))
+          );
+        }) ?? false,
       noToolErrors: observations.every((o) => !o.isError),
     };
     record.checks = checks;

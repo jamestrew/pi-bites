@@ -31,7 +31,7 @@ type CloseHooks = {
   releaseReservation: (record: AgentRecord) => void;
 };
 
-/** Owns subtree claims, teardown, and the minimal tombstones used by resume_agent. */
+/** Owns subtree claims, teardown, and the minimal tombstones used by internal recovery. */
 export class AgentCloser {
   private closed = new Map<string, ClosedAgentRecord>();
   private closing = new Map<string, Promise<void>>();

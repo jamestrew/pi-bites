@@ -511,3 +511,29 @@ test("Pi renders one View row after streaming and completing an image call", () 
     expect(text.match(/View picture.png/g)).toHaveLength(1);
   }
 });
+
+test("saved V1 collaboration traces remain readable without collaboration registration", () => {
+  const h = setup();
+  const trace: NestedTrace = {
+    cellId: "cell",
+    callId: "saved-v1",
+    name: "multi_agent_v1__wait_agent",
+    input: { targets: ["old-child"] },
+    state: "completed",
+    result: {
+      content: [
+        {
+          type: "text",
+          text: '{"status":{"old-child":{"completed":"retained finding"}},"timed_out":false}',
+        },
+      ],
+      details: {},
+    },
+  };
+  for (const expanded of [false, true]) {
+    const row = h.row("exec", `saved-${expanded}`, expanded, styled);
+    row.update(snapshot([trace]));
+    expect(row.text(200)).toContain("<bold>multi_agent_v1__wait_agent</bold>");
+    expect(row.text(200)).toContain("retained finding");
+  }
+});

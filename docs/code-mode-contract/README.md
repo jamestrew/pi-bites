@@ -241,47 +241,19 @@ The pinned generator calls `augment_tool_definition` once per supported definiti
 
 This is an intentional local exposure policy: standalone native Codex web is eager at both inspected revisions. It is separate from top-level BM25 tool search and Pi additive dynamic loading. Discovery output preserves the preceding prompt prefix but does not guarantee cache hits, and consumes context once retrieved. Compaction may remove help; the model must rediscover it before subsequent web use. Restored help is documentation only: cells, processes, stores, and authorization are never restored from it. The host pin, stock transports/authentication, gate, cancellation, and rendering remain unchanged.
 
-## V1 subagent contract amendment (#305)
+## Direct V2 subagent amendment (#352)
 
-The [subagent contract](../../packages/ext/subagents/CODEX_V1.md) extends this same
-`rust-v0.145.0` / `25af12f7e61572b0bc18ddb1008be543b91519b0` model-facing baseline to
-five V1 operations. [Revision evidence and reproduction](subagents-revisions.md)
-record the prior baseline and supported projections. The host and existing five-tool
-Code Mode runtime remain unchanged; this contract work does not expose incomplete
-nested subagents.
+Collaboration uses the [V2 six-tool contract](../../packages/ext/subagents/CODEX_V2.md)
+on every eligible Pi tool-calling route, independently of the adapter's model scope.
+All six tools remain direct; no nested collaboration or subagent `ALL_TOOLS` metadata
+is generated. The Code Mode host pin, five unrelated nested capabilities, web discovery,
+stock provider transport and grammar detection are unchanged. Parent selections and
+permissions restrict children across providers. Session-owned tasks outlive model
+switches; mailbox waits do not own tasks or consume mail.
 
-#264 adds one session-owned engine behind flat direct Pi tools outside Code Mode and
-native `tools.multi_agent_v1__<name>` functions within eligible GPT-5.6/GPT-6 sessions,
-never both. Child exposure follows the child's own model and capabilities. Shared
-operations, validation, authorization, and recoverable data stay in `subagents/`;
-the composition root injects that owned capability into the adapter, not a generic
-third-party executor. Existing explicit tool selections and unrelated direct tools
-remain authoritative. Native nested output types remain declaration metadata and
-success returns objects; direct Pi transport may omit output schemas on the wire.
-
-The supported omissions are Responses-only `items` and the pin's `service_tier`
-override, which Pi cannot honor. Retain plain-text `message`, stock provider/auth and
-grammar fallback, bash-gate, and additive Pi/project/skill prompts. Tool definitions
-are not broader Codex model templates. Explorer inherits actual parent permissions;
-its old read-only allowlist is a migration gap, not a platform exception.
-
-V1's full argument/return declarations are discoverable through native `ALL_TOOLS`
-without Responses tool search. Initial instructions retain capability and policy
-needed before deciding to delegate. Deferring detailed V1 help on every eligible
-Pi route differs from upstream eager V1 exposure on routes without search. Discovery
-neither grants authority nor changes tool availability; rediscover after compaction.
-The historical 2,902 character-based estimate is neither a tokenizer measurement nor
-a hard ceiling. Track eager instructions, full discoverable declarations, discovery
-history cost, and actual provider payloads separately.
-
-Agents outlive cells; cancelled agent waits do not close children. Exposure switches
-preserve agent identity, while navigation/reload/shutdown invalidate old owners and
-prevent stale approvals or cross-conversation delivery. Useful ordinary close/resume,
-capacity reservation during reopening, cancellation/commit races, and scenario-based
-checks for both entry points are specified in the V1 contract, with remaining work
-assigned to #276–#278 and #306–#309. Existing shell/cell cleanup must not be reused as
-implicit child-agent shutdown.
-
-The #308 [exposure validation](subagents-exposure.md) records the activated shared V1
-entry points, native namespace dispatch, discovery, fallback, and remaining live-route
-validation limits.
+This supersedes #305/#308's V1 nesting/deferral policy. Those source audits remain
+historical records; obsolete V1 executors, behavioral suites and generators are removed.
+Saved Code Mode traces use the generic read-only result fallback and old notification
+renderers remain available. Neither restores agents as live runtime state.
+See [activation](activation.md#direct-v2-collaboration-cutover-352) and
+[cutover verification](subagents-v2-cutover.md).

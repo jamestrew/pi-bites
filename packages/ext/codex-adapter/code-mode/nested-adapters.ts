@@ -1,6 +1,4 @@
 import { pinExecLaunch } from "../exec/launch-context.js";
-import type { SubagentController, SubagentOperation } from "../../subagents/operations.js";
-import { CODEX_V1_NESTED_TOOLS } from "../../subagents/codex-v1-contract.js";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import type { Static, TSchema, TObject } from "typebox";
@@ -22,7 +20,6 @@ import type { DelegateCall, RuntimeTool } from "./types.js";
 
 /** These definitions are shared with direct registration; no replacement executors. */
 export interface OwnedNestedTools {
-  subagents?: SubagentController;
   exec_command: ReturnType<typeof createExecCommandTool>;
   write_stdin: ReturnType<typeof createWriteStdinTool>;
   apply_patch: ReturnType<typeof createApplyPatchTool>;
@@ -30,7 +27,6 @@ export interface OwnedNestedTools {
   view_image: ReturnType<typeof createViewImageTool>;
 }
 interface Invocation {
-  subagents?: ReturnType<SubagentController["capture"]>;
   call: DelegateCall;
   signal: AbortSignal;
   context: ToolExecutionContext;
@@ -144,34 +140,8 @@ const shellFailed = (result: AgentToolResult<UnifiedExecResult>) =>
 export function createNestedAdapters(
   owned: OwnedNestedTools,
   getConfig: () => CodexAdapterConfig,
-  subagentsAvailable: (name: string) => boolean = () => true,
 ): NestedAdapter[] {
   return [
-    ...(owned.subagents
-      ? CODEX_V1_NESTED_TOOLS.map(
-          (definition): NestedAdapter => ({
-            name: definition.name,
-            description: definition.runtime_description,
-            kind: "function",
-            inputSchema: definition.input_schema,
-            available: () => subagentsAvailable(definition.tool_name.name),
-            async invoke(input, { subagents, call, signal, update }) {
-              if (!subagents) throw new Error("Subagent session is unavailable");
-              const result = await subagents.execute(
-                definition.tool_name.name as SubagentOperation,
-                input,
-                {
-                  callerId: subagents.callerId,
-                  callId: call.callId,
-                  signal,
-                  onUpdate: update,
-                },
-              );
-              return { value: result.value, result, isError: false, reject: false };
-            },
-          }),
-        )
-      : []),
     bind(owned.exec_command, {
       execute: async (params, { authorization, call, signal, status, context }, run) => {
         const execution = pinExecLaunch(params, context);

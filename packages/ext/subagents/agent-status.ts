@@ -1,6 +1,6 @@
 import type { AgentRecord, WaitAgentStatus } from "./types.js";
 
-/** Convert manager state to the pinned Codex V1 status vocabulary. */
+/** Convert manager state to the shared agent status vocabulary. */
 export function getAgentStatus(record: AgentRecord, includeOutput = true): WaitAgentStatus {
   switch (record.status) {
     case "idle":

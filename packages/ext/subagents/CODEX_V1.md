@@ -1,5 +1,10 @@
 # Codex V1 subagent contract
 
+> Historical V1 record, superseded by #352's direct V2 cutover. V1 executors,
+> nested declarations and their generator are removed; commands and paths below
+> describe the original revision, not current activation. See `CODEX_V2.md` and
+> `docs/code-mode-contract/subagents-v2-cutover.md` for current behavior/evidence.
+
 ## Baseline and delivery boundary
 
 The common model-facing baseline is Codex **rust-v0.145.0** /

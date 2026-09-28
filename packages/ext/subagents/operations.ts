@@ -8,25 +8,10 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Check } from "typebox/value";
 import type { AgentManager } from "./agent-manager.js";
-import { CODEX_V1_CONTRACT } from "./codex-v1-contract.js";
 import { captureSubagentContext } from "./operation-context.js";
-import type { createAgentTool } from "./register-agent-tool.js";
-import type { createSendInput } from "./register-send-input.js";
-import type { createWaitAgent } from "./register-wait-agent.js";
-import type { createCloseAgent } from "./register-close-agent.js";
-import type { createResumeAgent } from "./register-resume-agent.js";
-
-export interface V1SubagentTools {
-  spawn_agent: ReturnType<typeof createAgentTool>;
-  send_input: ReturnType<typeof createSendInput>;
-  wait_agent: ReturnType<typeof createWaitAgent>;
-  close_agent: ReturnType<typeof createCloseAgent>;
-  resume_agent: ReturnType<typeof createResumeAgent>;
-}
-type V2SubagentTools = ReturnType<typeof createV2Tools>;
-export type SubagentTools = V1SubagentTools | V2SubagentTools;
-export type SubagentOperation = keyof V1SubagentTools | keyof V2SubagentTools;
-type OwnedTool = V1SubagentTools[keyof V1SubagentTools] | V2SubagentTools[keyof V2SubagentTools];
+export type SubagentTools = ReturnType<typeof createV2Tools>;
+export type SubagentOperation = keyof SubagentTools;
+type OwnedTool = SubagentTools[SubagentOperation];
 type Result = Awaited<ReturnType<OwnedTool["execute"]>>;
 export interface SubagentCall {
   /** Parent conversation identity, not a cell or shell id. */
@@ -36,20 +21,7 @@ export interface SubagentCall {
   onUpdate?: (result: { content: Result["content"]; details: unknown }) => void;
 }
 
-export interface SubagentRegistration {
-  directOnly: boolean;
-  childPrompt?: (record: AgentRecord) => string;
-}
-
-const V1_REGISTRATION: SubagentRegistration = {
-  directOnly: false,
-  childPrompt: (record) =>
-    "\nYour parent agent id is " +
-    record.parentSessionId +
-    ". Use send_input (tools.multi_agent_v1__send_input inside Code Mode) with this target for substantive parent messages, when available. Delivery waits for the next model boundary; still return a final response.",
-};
-
-/** Session-owned execution, independent of direct/nested exposure and Pi tool events. */
+/** Session-owned direct execution, independent of provider and model selection. */
 export class SubagentController {
   private owner = new AbortController();
   private activeCalls = new Set<string>();
@@ -61,13 +33,7 @@ export class SubagentController {
     private isScopeModelsEnabled: () => boolean,
     private getAllowedTools: () => string[],
     private child?: AgentRecord,
-    private registration: SubagentRegistration = V1_REGISTRATION,
   ) {}
-
-  /** The staged named-task tools stay direct, including inside Code Mode. */
-  get directOnly(): boolean {
-    return this.registration.directOnly;
-  }
 
   private tool(name: SubagentOperation): OwnedTool {
     const tool = (this.tools as Partial<Record<SubagentOperation, OwnedTool>>)[name];
@@ -115,25 +81,8 @@ export class SubagentController {
         throw new Error(`Subagent operation ${name} is unavailable`);
       const tool = this.tool(name);
       if (!Check(tool.parameters, args)) throw new Error(`Invalid arguments for ${name}`);
-      const params = args as Record<string, unknown>;
-      if (this.tool(name).captureHistory?.(args) && !forkContext)
+      if (tool.captureHistory?.(args) && !forkContext)
         throw new Error("Fork history was not captured for this call");
-      const targets =
-        name === "wait_agent" && !this.registration.directOnly
-          ? (params.targets as string[])
-          : [params.target ?? params.id].filter((id): id is string => typeof id === "string");
-      for (const id of targets) {
-        if (this.child && name === "close_agent" && this.manager.tree.containsSession(id, callerId))
-          throw new Error("Cannot close the calling agent or its ancestors from its own tool call");
-        const record = this.manager.getRecord(id) ?? this.manager.getClosedRecord(id);
-        if (
-          record &&
-          "parentSessionId" in record &&
-          (record.rootSessionId ?? record.parentSessionId) !==
-            (this.child?.rootSessionId ?? this.child?.parentSessionId ?? callerId)
-        )
-          throw new Error(`agent with id ${id} is not owned by this session`);
-      }
       activeCalls.add(call.callId);
       try {
         // Validation narrows this heterogeneous owned-tool union. No metadata discovery or host events.
@@ -175,15 +124,18 @@ export class SubagentController {
       this.isScopeModelsEnabled,
       getAllowedTools,
       record,
-      this.registration,
     );
   }
 
   registerTools(): void {
-    const childPrompt = this.child && this.registration.childPrompt?.(this.child);
-    if (childPrompt) {
+    if (this.child) {
+      const path = this.child.taskName;
+      if (!path) throw new Error("Named agent has no task path");
+      const parentPath = path.slice(0, path.lastIndexOf("/"));
       this.pi.on("before_agent_start", (event) => ({
-        systemPrompt: event.systemPrompt + childPrompt,
+        systemPrompt:
+          event.systemPrompt +
+          `\nYour canonical task_name is ${path}. Relative task paths resolve beneath your path; /root is the root agent. Your parent task_name is ${parentPath}. Use send_message with that target for substantive parent messages, when permitted. Messages queue without starting idle work; followup_task assigns work to an existing non-root agent. Delivery occurs at Pi model boundaries; still return a final response.`,
       }));
     }
     for (const name of Object.keys(this.tools) as SubagentOperation[]) {
@@ -204,12 +156,4 @@ export class SubagentController {
       });
     }
   }
-
-  renderers(name: SubagentOperation) {
-    const { renderCall, renderResult } = this.tool(name);
-    return { renderCall, renderResult };
-  }
-
-  /** Pinned declaration metadata is not executor discovery. */
-  readonly definitions = CODEX_V1_CONTRACT.tools;
 }

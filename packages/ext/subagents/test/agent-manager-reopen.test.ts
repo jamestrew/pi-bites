@@ -60,6 +60,8 @@ it("reopens the owned identity without a task, retains capacity and completes se
     pi,
     getRecord: (id) => manager.getRecord(id),
     onAgentFinishedUI: () => {},
+    shouldNotify: () => true,
+    queueCompletion: () => {},
   });
   await manager.dispose();
   manager = new AgentManager(completion.onAgentComplete, 1);
@@ -89,12 +91,10 @@ it("reopens the owned identity without a task, retains capacity and completes se
   );
   expect(await manager.reopen(pi, ctx, id)).toBe("pending_init");
   expect(openAgentSession).toHaveBeenCalledOnce();
-  const waiting = completion.waitFor([id], 10_000);
   vi.mocked(resumeAgent).mockResolvedValueOnce("blue door remembered");
   expect(await manager.sendInput(id, "what door?")).toBe(true);
   await record.promise;
-  const waited = await waiting;
-  expect(waited).toMatchObject({ status: { [id]: { completed: "blue door remembered" } } });
+  expect(record.result).toBe("blue door remembered");
   await manager.close(id);
   expect(manager.getRecord(id)).toBeUndefined();
   expect(await manager.reopen(pi, ctx, id)).toBe("pending_init");
@@ -260,26 +260,6 @@ it("lets a concurrent caller cancel only its own wait and closes a committing re
   expect(await closing).toBe("pending_init");
   expect(session.dispose).toHaveBeenCalledOnce();
   expect(manager.getRecord(id)).toBeUndefined();
-});
-
-it("selected waits observe closing an idle reopen without a synthetic turn", async () => {
-  const completion = createAgentCompletionHandler({
-    pi,
-    getRecord: (id) => manager.getRecord(id),
-    onAgentFinishedUI: () => {},
-  });
-  await manager.dispose();
-  manager = new AgentManager(completion.onAgentComplete, 1);
-  const id = await closedAgent();
-  vi.mocked(openAgentSession).mockResolvedValueOnce(mockSession());
-  await manager.reopen(pi, ctx, id);
-  expect(manager.getRecord(id)?.status).toBe("idle");
-  expect(manager.hasRunning()).toBe(false);
-  const waiting = completion.waitFor([id], 10_000);
-  expect(await manager.close(id)).toBe("pending_init");
-  expect(await waiting).toMatchObject({ timed_out: false, status: { [id]: "shutdown" } });
-  expect(resumeAgent).not.toHaveBeenCalled();
-  completion.dispose();
 });
 
 it.each(["interrupt", "redirect"])(

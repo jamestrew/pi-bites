@@ -1,20 +1,7 @@
 import { getAgentSessionId } from "./agent-tree.js";
 import { applyAndEmitLoaded } from "./settings.js";
 import type { AgentRecord } from "./types.js";
-import { SubagentController, type SubagentTools, type SubagentRegistration } from "./operations.js";
-/**
- * pi-agents — A pi extension providing Claude Code-style autonomous sub-agents.
- *
- * Tools:
- *   spawn_agent   — LLM-callable: spawn a sub-agent
- *   wait_agent    — LLM-callable: wait for selected sub-agents
- *   send_input    — LLM-callable: send input to a running sub-agent
- *   close_agent   — LLM-callable: close a retained sub-agent
- *
- * Commands:
- *   /agents                 — Interactive agent management menu
- */
-
+import { SubagentController } from "./operations.js";
 import { withApprovalDialog, waitForAuthorization } from "../bash-gate/pending.js";
 import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -30,11 +17,9 @@ import {
   bindSubagentMessenger,
   type SubagentMessageDetails,
 } from "./subagent-messages.js";
-import { createAgentTool } from "./register-agent-tool.js";
-import { createResumeAgent } from "./register-resume-agent.js";
-import { createCloseAgent } from "./register-close-agent.js";
-import { createSendInput } from "./register-send-input.js";
-import { createWaitAgent } from "./register-wait-agent.js";
+import { createV2Tools } from "./v2-tools.js";
+import { spawnNamed } from "./task-paths.js";
+import { captureSubagentContext } from "./operation-context.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
@@ -59,17 +44,6 @@ export function createSubagents(
   bashGate?: Pick<BashGateController, "isYolo">,
   getAutoCompactionThreshold?: () => number | undefined,
   getAllowedTools: () => string[] = () => pi.getActiveTools(),
-  // Internal integration seam; ordinary extension activation never supplies a partial tool set.
-  integrationTools?: (
-    pi: ExtensionAPI,
-    deps: {
-      manager: AgentManager;
-      agentActivity: Map<string, AgentActivity>;
-      fleet: FleetList;
-      isScopeModelsEnabled: () => boolean;
-      getMessenger: (sessionId: string) => ReturnType<typeof createSubagentMessenger> | undefined;
-    },
-  ) => { tools: SubagentTools; registration: SubagentRegistration },
 ) {
   // ---- Register custom notification renderers ----
   registerNotificationRenderer(pi);
@@ -124,26 +98,17 @@ export function createSubagents(
     getRecord: (id) => manager.getRecord(id),
     onAgentFinishedUI: (id) => {
       if (!manager.getRecord(id)?.taskName) agentActivity.delete(id);
-      fleet.onAgentFinished(id);
+      fleet.onAgentFinished();
     },
-    onAgentResultPendingUI: (id) => fleet.onAgentResultPending(id),
     shouldNotify: (record) => !retiredConversations.has(record),
-    deliveryPi: (id) => deliveries.get(id)?.pi,
-    queueCompletion: integrationTools
-      ? (record) => {
-          if (!record.taskName || record.status === "stopped") return;
-          queueMail(record.parentSessionId, {
-            sender: { id: record.taskName, type: record.type, title: record.taskName },
-            message: record.error
-              ? `Agent failed: ${record.error}`
-              : (record.result ?? "No output."),
-            completion: record.status === "error" ? "failed" : "completed",
-          });
-        }
-      : undefined,
-    scheduleAutomatic: (parentSessionId, deliver, cancel) =>
-      deliveries.get(parentSessionId)?.messenger.scheduleFinal(parentSessionId, deliver, cancel) ??
-      false,
+    queueCompletion: (record) => {
+      if (!record.taskName || record.status === "stopped") return;
+      queueMail(record.parentSessionId, {
+        sender: { id: record.taskName, type: record.type, title: record.taskName },
+        message: record.error ? `Agent failed: ${record.error}` : (record.result ?? "No output."),
+        completion: record.status === "error" ? "failed" : "completed",
+      });
+    },
   });
 
   manager = new AgentManager(
@@ -169,27 +134,14 @@ export function createSubagents(
         compactionCount: record.compactionCount,
       });
     },
-    (parentSessionId, sender, message) => {
-      const record = manager.getRecord(sender.id);
-      return (
-        !!record &&
-        !retiredConversations.has(record) &&
-        (integrationTools
-          ? queueMail(parentSessionId, { sender, message })
-          : (deliveries.get(parentSessionId)?.messenger.send(parentSessionId, sender, message) ??
-            false))
-      );
-    },
     getAutoCompactionThreshold,
     (record) => {
-      completion.onAgentStatusChanged(record);
       parentAllowances.delete(record.id);
       const activity = agentActivity.get(record.id);
       if (activity) activity.session = undefined;
       childControllers.get(record.id)?.invalidate();
       const id = getAgentSessionId(record);
       if (id) {
-        deliveries.get(id)?.messenger.flushForShutdown();
         deliveries.get(id)?.messenger.dispose();
         deliveries.delete(id);
       }
@@ -221,7 +173,6 @@ export function createSubagents(
         };
         childPi.on("session_shutdown", async () => {
           child.invalidate();
-          messenger.flushForShutdown();
           messenger.dispose();
           if (sessionId && deliveries.get(sessionId)?.messenger === messenger)
             deliveries.delete(sessionId);
@@ -265,17 +216,41 @@ export function createSubagents(
 
   // Expose manager via Symbol.for() global registry for cross-package access.
   // Standard Node.js pattern for cross-package singletons (used by OpenTelemetry, etc.).
+  // Programmatic spawns have no caller-supplied V2 name; give them a stable path too.
+  const spawnInternal = (
+    piRef: ExtensionAPI,
+    ctx: ExtensionContext,
+    type: string,
+    prompt: string,
+    options: Parameters<AgentManager["spawn"]>[4],
+  ) => {
+    const allowedTools = getAllowedTools().filter(
+      (name) => !options.allowedTools || options.allowedTools.includes(name),
+    );
+    const snapshot = captureSubagentContext(piRef, ctx, options.forkContext, allowedTools);
+    const signal = AbortSignal.any([
+      approvalOwner.signal,
+      ...(snapshot.signal ? [snapshot.signal] : []),
+    ]);
+    return spawnNamed(
+      manager,
+      piRef,
+      snapshot,
+      type,
+      prompt,
+      {
+        ...options,
+        taskName: options.taskName ?? `task_${randomUUID().replaceAll("-", "")}`,
+        allowedTools,
+      },
+      signal,
+    );
+  };
   const MANAGER_KEY = Symbol.for("pi-subagents:manager");
   Reflect.set(globalThis, MANAGER_KEY, {
     waitForAll: () => manager.waitForAll(),
     hasRunning: () => manager.hasRunning(),
-    spawn: (
-      piRef: ExtensionAPI,
-      ctx: ExtensionContext,
-      type: string,
-      prompt: string,
-      options: Parameters<AgentManager["spawn"]>[4],
-    ) => manager.spawn(piRef, ctx, type, prompt, options),
+    spawn: spawnInternal,
     getRecord: (id: string) => manager.getRecord(id),
     close: (id: string) => manager.close(id),
     disposeRuntime: (id: string) => manager.disposeRuntime(id),
@@ -308,7 +283,6 @@ export function createSubagents(
 
   pi.on("session_before_switch", async () => {
     operations.invalidate();
-    parentMessenger.flushForShutdown();
     parentMessenger.dispose();
     deliveries.clear();
     approvalOwner.abort();
@@ -546,7 +520,14 @@ export function createSubagents(
     events: pi.events,
     pi,
     getCtx: () => currentCtx,
-    manager,
+    manager: {
+      spawn: (_pi, _ctx, type, prompt, options) => {
+        if (!currentCtx) throw new Error("No active session");
+        return spawnInternal(pi, currentCtx, type, prompt, options);
+      },
+      abort: (id) => manager.abort(id),
+      close: (id) => manager.close(id),
+    },
   });
 
   // Broadcast readiness so extensions loaded after us can discover us
@@ -582,7 +563,6 @@ export function createSubagents(
     unsubBashGateStarted();
     unsubBashGateResolved();
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
-    parentMessenger.flushForShutdown();
     manager.abortAll();
     parentMessenger.dispose();
     completion.dispose();
@@ -612,48 +592,18 @@ export function createSubagents(
     fleet.setUICtx(ctx.ui);
   });
 
-  // ---- spawn_agent tool ----
-  const spawn_agent = createAgentTool(pi, {
-    manager,
-    agentActivity,
-    fleet,
-    isScopeModelsEnabled,
-  });
-
-  // ---- Agent lifecycle tools ----
-  const wait_agent = createWaitAgent({
-    waitFor: completion.waitFor,
-    getRecord: (id) => manager.getRecord(id),
-  });
-  const send_input = createSendInput(pi, manager);
-  const close_agent = createCloseAgent(manager);
-  const resume_agent = createResumeAgent(
-    pi,
-    manager,
-    isScopeModelsEnabled,
-    () => approvalOwner.signal,
-  );
-  const integration = integrationTools?.(pi, {
-    manager,
-    agentActivity,
-    fleet,
-    isScopeModelsEnabled,
-    getMessenger: (id) => deliveries.get(id)?.messenger,
-  });
   operations = new SubagentController(
     pi,
-    integration?.tools ?? {
-      spawn_agent,
-      send_input,
-      wait_agent,
-      close_agent,
-      resume_agent,
-    },
+    createV2Tools(pi, {
+      manager,
+      agentActivity,
+      fleet,
+      isScopeModelsEnabled,
+      getMessenger: (id) => deliveries.get(id)?.messenger,
+    }),
     manager,
     isScopeModelsEnabled,
     getAllowedTools,
-    undefined,
-    integration?.registration,
   );
   pi.on("session_tree", async (_event, ctx) => {
     operations.invalidate();
@@ -665,7 +615,7 @@ export function createSubagents(
     parentMessenger.dispose();
     startParentMessenger(ctx);
     for (const record of manager.listAgents()) retiredConversations.add(record);
-    // Navigation retires live conversations; explicit resume can recover their owned history.
+    // Navigation retires live conversations without restoring saved agents as live work.
     await Promise.allSettled(manager.listAgents().map((record) => manager.close(record.id)));
   });
 

@@ -197,27 +197,22 @@ test("delegation snapshots recover permitted capabilities without changing paren
   expect(getDelegationTools(outside, state)).toEqual(expect.arrayContaining(allowed));
 });
 
-test("selected collaboration has one surface and restores direct controls when either outer control disappears", () => {
-  const state = createAdapterToolState(["spawn_agent", "wait_agent", "send_input"]);
+test("selected collaboration remains direct across projection changes", () => {
+  const state = createAdapterToolState();
   const selected = ["custom", "spawn_agent", "wait_agent", "exec", "wait"];
-  const nested = reconcileTools(selected, true, state);
-  expect(nested).toEqual(["custom", "exec", "wait"]);
-  expect([...getNestedTools(state)]).toEqual([
-    "multi_agent_v1__spawn_agent",
-    "multi_agent_v1__wait_agent",
-  ]);
-  expect(getDelegationTools(nested, state)).toContain("spawn_agent");
-  expect(getDelegationTools(nested, state)).not.toContain("send_input");
-  expect(reconcileTools(nested, false, state)).toEqual(["custom", "spawn_agent", "wait_agent"]);
-  const again = reconcileTools(["custom", "spawn_agent", "wait_agent"], true, state);
-  const fallback = reconcileTools(
-    again.filter((name) => name !== "wait"),
-    true,
-    state,
-  );
-  expect(fallback).toEqual(["custom", "spawn_agent", "wait_agent", "exec"]);
+  const active = reconcileTools(selected, true, state);
+  expect(active).toEqual(selected);
   expect([...getNestedTools(state)]).toEqual([]);
-  const disabled = fallback.filter((name) => name !== "spawn_agent");
-  reconcileTools([...disabled, "wait"], true, state);
-  expect([...getNestedTools(state)]).toEqual(["multi_agent_v1__wait_agent"]);
+  expect(getDelegationTools(active, state)).toContain("spawn_agent");
+  expect(getDelegationTools(active, state)).not.toContain("send_message");
+  expect(reconcileTools(active, false, state)).toEqual(["custom", "spawn_agent", "wait_agent"]);
+  const again = reconcileTools(["custom", "spawn_agent", "wait_agent"], true, state);
+  expect(again).toEqual(selected);
+  expect(
+    reconcileTools(
+      again.filter((name) => name !== "spawn_agent" && name !== "wait"),
+      true,
+      state,
+    ),
+  ).toEqual(["custom", "wait_agent", "exec"]);
 });

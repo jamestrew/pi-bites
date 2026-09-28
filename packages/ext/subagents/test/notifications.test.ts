@@ -1,11 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildNotificationDetails,
-  formatTaskNotification,
-  registerNotificationRenderer,
-} from "../notifications.js";
-import type { AgentRecord, NotificationDetails } from "../types.js";
+import { registerNotificationRenderer } from "../notifications.js";
+import type { NotificationDetails } from "../types.js";
 
 const theme = {
   fg: (_color: string, text: string) => text,
@@ -92,55 +88,10 @@ describe("asynchronous completion notification rendering", () => {
     }
   });
 
-  it("strips terminal controls from the persisted notification payload", () => {
-    const payload = formatTaskNotification({
-      id: "agent-1",
-      generation: 1,
-      type: "worker",
-      parentSessionId: "parent",
-      prompt: "prompt",
-      description: "unsafe\u001b]52;c;Y29weQ==\u0007 agent",
-      status: "completed",
-      result: "safe\u001b[31m result",
-      toolUses: 0,
-      toolCalls: [],
-      omittedToolCalls: 0,
-      startedAt: 0,
-      completedAt: 1,
-      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
-      compactionCount: 0,
-      failureHistory: [],
-    });
-
-    expect(payload).not.toContain("\u001b");
-    expect(payload).toContain("unsafe agent");
-    expect(payload).toContain("safe result");
-  });
-
-  it("exposes a missing final response as the same model and UI error", () => {
-    const record: AgentRecord = {
-      id: "agent-1",
-      generation: 1,
-      type: "worker",
-      parentSessionId: "parent",
-      prompt: "prompt",
-      description: "tool-only child",
-      status: "error" as const,
-      error: "Agent completed without a final response.",
-      toolUses: 0,
-      toolCalls: [],
-      omittedToolCalls: 0,
-      startedAt: 0,
-      completedAt: 1,
-      lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
-      compactionCount: 0,
-      failureHistory: [],
-    };
-
-    const payload = formatTaskNotification(record);
-    const notificationDetails = buildNotificationDetails(record);
+  it("exposes a missing final response as a saved UI error", () => {
     const legacyMissingFinal = {
-      ...notificationDetails,
+      ...details(),
+      description: "tool-only child",
       status: "completed",
       error: undefined,
       result: " \n",
@@ -152,12 +103,6 @@ describe("asynchronous completion notification rendering", () => {
       .render(120)
       .join("\n");
 
-    expect(payload).toContain("Agent completed without a final response.");
-    expect(notificationDetails).toMatchObject({
-      status: "error",
-      error: "Agent completed without a final response.",
-      result: "Agent completed without a final response.",
-    });
     expect(collapsed).toContain("Agent completed without a final response.");
     expect(expanded).toContain("Agent completed without a final response.");
     expect(collapsed.split("\n")[0]).toBe("✗ tool-only child error");

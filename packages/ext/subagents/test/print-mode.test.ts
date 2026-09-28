@@ -24,7 +24,11 @@ function makePi() {
       }),
       registerCommand: vi.fn(),
       on: vi.fn((event: string, handler: any) => {
-        handlers.set(event, handler);
+        const previous = handlers.get(event);
+        handlers.set(event, async (...args: any[]) => {
+          await previous?.(...args);
+          return handler(...args);
+        });
       }),
       events: {
         emit: vi.fn(),
@@ -37,10 +41,10 @@ function makePi() {
       getThinkingLevel: vi.fn(() => "off"),
       getActiveTools: vi.fn(() => [
         "spawn_agent",
-        "send_input",
+        "send_message",
         "wait_agent",
-        "close_agent",
-        "resume_agent",
+        "interrupt_agent",
+        "followup_task",
       ]),
       sendMessage: vi.fn(() => {
         throw new Error("stale extension context");
@@ -83,14 +87,15 @@ describe("print mode completion notifications", () => {
   });
 
   it("delivers completion without capturing the tool context", async () => {
-    vi.mocked(runAgent).mockResolvedValue({
-      responseText: "done",
-      session: { dispose: vi.fn() } as any,
+    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      const session = { dispose: vi.fn() } as any;
+      options.onSessionCreated?.(session);
+      return { responseText: "done", session };
     });
 
     const { pi, tools, handlers } = makePi();
     subagentsExtension(pi);
-    handlers.get("session_start")?.({}, makeHeadlessCtx());
+    await handlers.get("session_start")?.({}, makeHeadlessCtx());
 
     const agentTool = tools.get("spawn_agent");
     await agentTool.execute(
@@ -98,6 +103,8 @@ describe("print mode completion notifications", () => {
       {
         message: "tiny child",
         agent_type: "worker",
+        task_name: "probe",
+        fork_turns: "none",
       },
       undefined,
       undefined,
