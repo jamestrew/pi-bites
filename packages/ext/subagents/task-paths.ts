@@ -41,6 +41,7 @@ export class TaskPaths {
       byId ?? this.records().find((r) => r.rootSessionId === rootId && r.taskName === path);
     if (!record || record.rootSessionId !== rootId)
       throw new Error("Agent is not owned by this root tree");
+    if (!record.taskName) throw new Error("Target agent has no task path");
     return record;
   }
 

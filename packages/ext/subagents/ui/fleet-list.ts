@@ -95,6 +95,7 @@ export class FleetList {
   private viewingAgentId: string | undefined;
   /** Terminal agents whose final notification is still queued behind child messages. */
   private pendingResults = new Set<string>();
+  private pendingMail = new Map<string, number>();
 
   constructor(
     private manager: AgentManager,
@@ -147,6 +148,14 @@ export class FleetList {
     this.update();
   }
 
+  setPendingMail(id: string, count: number): void {
+    if (count > 0) {
+      this.pendingMail.set(id, count);
+      this.ensureTimer();
+    } else this.pendingMail.delete(id);
+    this.update();
+  }
+
   onAgentFinished(id: string): void {
     this.pendingResults.delete(id);
     this.update();
@@ -170,6 +179,7 @@ export class FleetList {
     this.active = false;
     this.pendingBashGates.clear();
     this.pendingResults.clear();
+    this.pendingMail.clear();
     // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
   }
@@ -235,6 +245,7 @@ export class FleetList {
       .filter(
         (a) =>
           this.pendingResults.has(a.id) ||
+          this.pendingMail.has(a.id) ||
           a.status === "idle" ||
           a.status === "running" ||
           a.status === "queued" ||
@@ -433,7 +444,9 @@ export class FleetList {
     width: number,
     theme: Theme,
   ): string {
-    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}`;
+    const pending = this.pendingMail.get(record.id);
+    const interaction = pending ? ` · ${pending} pending message${pending === 1 ? "" : "s"}` : "";
+    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}${theme.fg("dim", interaction)}`;
     const tokens = getLifetimeTotal(
       this.agentActivity.get(record.id)?.lifetimeUsage ?? record.lifetimeUsage,
     );

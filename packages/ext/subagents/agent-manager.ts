@@ -11,7 +11,11 @@ import { AgentInterrupter } from "./agent-interruption.js";
 import { resumeAgent, runAgent, steerAgent, type ToolActivity } from "./agent-runner.js";
 import { AgentRuntimes } from "./agent-runtimes.js";
 import { resolveAgent } from "./agent-types.js";
-import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
+import {
+  appendSubagentDiagnostic,
+  agentDiagnostic,
+  serializeDiagnosticError,
+} from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import { assertValidSpawnCwd } from "./spawn-cwd.js";
 import type { SubagentSender } from "./subagent-messages.js";
@@ -65,12 +69,6 @@ export class AgentManager {
   private agents = new Map<string, AgentRecord>();
   readonly taskPaths = new TaskPaths(() => this.listAgents());
   readonly tree = new AgentTree(this.agents, (id) => this.isClosing(id));
-  private onComplete?: OnAgentComplete;
-  private onStart?: OnAgentStart;
-  private onCompact?: OnAgentCompact;
-  private onAgentInvalidated?: (record: AgentRecord) => void;
-  private messageParent?: MessageParent;
-  private getAutoCompactionThreshold?: () => number | undefined;
   private maxConcurrent: number;
   /** Queue of agents waiting to start. */
   private queue: QueuedTurn[] = [];
@@ -83,6 +81,7 @@ export class AgentManager {
   private interruptions: AgentInterrupter;
   private options = new WeakMap<AgentRecord, SpawnOptions>();
   private turnCounts = new WeakMap<AgentRecord, number>();
+  private followupPending = new WeakMap<AgentRecord, () => boolean>();
   private pendingAgents = new Set<Promise<string>>();
   private runtimes = new AgentRuntimes({
     getRecord: (id) => this.agents.get(id),
@@ -97,21 +96,15 @@ export class AgentManager {
   private shutdownPromise?: Promise<void>;
 
   constructor(
-    onComplete?: OnAgentComplete,
+    private onComplete?: OnAgentComplete,
     maxConcurrent = DEFAULT_MAX_CONCURRENT,
-    onStart?: OnAgentStart,
-    onCompact?: OnAgentCompact,
-    messageParent?: MessageParent,
-    getAutoCompactionThreshold?: () => number | undefined,
-    onAgentInvalidated?: (record: AgentRecord) => void,
+    private onStart?: OnAgentStart,
+    private onCompact?: OnAgentCompact,
+    private messageParent?: MessageParent,
+    private getAutoCompactionThreshold?: () => number | undefined,
+    private onAgentInvalidated?: (record: AgentRecord) => void,
     private registerCollaboration?: (record: AgentRecord) => RegisterCollaboration,
   ) {
-    this.onComplete = onComplete;
-    this.onStart = onStart;
-    this.onCompact = onCompact;
-    this.messageParent = messageParent;
-    this.getAutoCompactionThreshold = getAutoCompactionThreshold;
-    this.onAgentInvalidated = onAgentInvalidated;
     this.maxConcurrent = maxConcurrent;
     this.interruptions = new AgentInterrupter({
       isSettled: (record, generation) => (this.settledGeneration.get(record) ?? 0) >= generation,
@@ -158,13 +151,9 @@ export class AgentManager {
     });
   }
 
-  /** Derived diagnostic count; reservations are the only concurrency accounting. */
+  /** Reservations, not this diagnostic count, own capacity. */
   private get runningCount(): number {
-    let count = 0;
-    for (const record of this.agents.values()) {
-      if (record.status === "running") count++;
-    }
-    return count;
+    return [...this.agents.values()].filter((record) => record.status === "running").length;
   }
 
   private notifyComplete(record: AgentRecord, generation = record.generation): void {
@@ -234,26 +223,7 @@ export class AgentManager {
     event: string,
     details?: Record<string, unknown>,
   ): void {
-    appendSubagentDiagnostic({
-      type: "subagent_diagnostic",
-      version: 1,
-      timestamp: Date.now(),
-      event,
-      agentId: record.id,
-      parentSessionId: record.parentSessionId,
-      subagent: record.type,
-      pid: process.pid,
-      ...(record.invocation?.modelName
-        ? {
-            provider: record.invocation.modelName.split("/", 1)[0],
-            model: record.invocation.modelName.includes("/")
-              ? record.invocation.modelName.slice(record.invocation.modelName.indexOf("/") + 1)
-              : record.invocation.modelName,
-          }
-        : {}),
-      ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
-      details: { generation: record.generation, ...details },
-    }).catch(() => undefined);
+    appendSubagentDiagnostic(agentDiagnostic(record, event, details)).catch(() => undefined);
   }
 
   private recordFailure(record: AgentRecord, failure: AgentRecord["failureHistory"][number]): void {
@@ -537,6 +507,19 @@ export class AgentManager {
           resumeHooks,
           responseText,
         );
+        // Pi may have settled just before input arrived, while manager status is still running.
+        // Keep ownership here rather than letting sendCustomMessage launch an untracked turn.
+        while (
+          record.generation === generation &&
+          record.status === "running" &&
+          !this.isClosing(record.id) &&
+          this.followupPending.get(record)?.()
+        ) {
+          responseText = await resumeAgent(session, "Continue with the queued follow-up task.", {
+            signal: abortController.signal,
+            ...resumeHooks,
+          });
+        }
         if (record.generation === generation)
           this.finishGeneration(record, generation, responseText, session);
         return responseText;
@@ -664,14 +647,7 @@ export class AgentManager {
     }
   }
 
-  /**
-   * Queue input for an agent at its next safe message boundary.
-   * A live session queues it for the boundary after the current assistant
-   * response's tool-call batch, where it appears as a user message. If the
-   * session isn't ready yet, the message is queued on `pendingSteers` and
-   * flushed when the session is created. Returns false if the agent can't
-   * accept steering (unknown id, or no longer running/queued).
-   */
+  /** Queue user input at Pi's next tool-batch boundary, buffering until initialization. */
   steer(id: string, message: string): boolean {
     const record = this.agents.get(id);
     if (
@@ -710,6 +686,26 @@ export class AgentManager {
       return true;
     }
     return this.steer(id, message);
+  }
+
+  /** Commit native input and turn ownership together, with no await/admission race. */
+  followup(id: string, deliver: () => boolean, pending: () => boolean): boolean {
+    const record = this.agents.get(id);
+    if (!record?.session || this.isClosing(id) || this.isRuntimeDisposing(id)) return false;
+    if (record.status !== "running" && record.status !== "queued") {
+      if (
+        (this.settledGeneration.get(record) ?? 0) < record.generation ||
+        !this.options.has(record)
+      )
+        return false;
+      if (this.reservedCount >= this.maxConcurrent)
+        throw new Error("No concurrency slot is available.");
+    }
+    if (!deliver()) return false;
+    this.followupPending.set(record, pending);
+    if (record.status !== "running" && record.status !== "queued")
+      return this.startTurn(id, "Continue with the queued follow-up task.");
+    return true;
   }
 
   /** Start another turn on a retained, settled session. */
@@ -777,7 +773,7 @@ export class AgentManager {
         manager_max_concurrent: this.maxConcurrent,
       });
       const hooks = this.createTurnHooks(record, options, generation, "increment");
-      this.clearSessionQueue(session);
+      if (!record.taskName) this.clearSessionQueue(session);
       if (record.pendingSteers?.length) {
         for (const message of record.pendingSteers) session.steer(message).catch(() => {});
         record.pendingSteers = undefined;

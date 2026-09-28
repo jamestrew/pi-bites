@@ -130,9 +130,9 @@ unavailable routes must remain explicitly unverified. No host pin change is need
 ## Staged integration (#346)
 
 `v2-integration-harness.ts` is an explicit test entrypoint, not imported by ordinary
-extension activation and not enabled by configuration. It registers only executable
-`spawn_agent` and `list_agents`; the other four definitions are provenance, not stub
-executors. The existing controller, manager, Fleet/navigation, approvals, runner,
+extension activation and not enabled by configuration. It registers executable
+`spawn_agent`, `list_agents`, `send_message`, and `followup_task`; wait and interrupt
+definitions remain provenance, not stub executors. The existing controller, manager, Fleet/navigation, approvals, runner,
 provider registry and selected-tool intersection remain authoritative. The V1 Code
 Mode bridge declines this direct-only controller, including in child sessions.
 Ordinary sessions retain their existing surface until the coherent six-tool cutover.
@@ -160,3 +160,38 @@ coexistence and Pi's shared Anthropic/OpenAI history transformer. Live provider
 requests are not performed; provider-authentication and live timing smoke routes
 remain for the final cutover. Existing source-audit reports describe the inspected
 baseline, not a claim that later mailbox/residency slices are already implemented.
+
+## Loaded-agent messaging (#347)
+
+Direct messaging validates text and root-tree membership before native delivery.
+Relative paths resolve beneath the caller; canonical paths permit parent and sibling
+communication. Sender task paths and message text are attributed in model content;
+activity IDs and interaction status remain display/bookkeeping metadata. Both tools
+return empty text, without V1 submission receipts. Unloaded agents fail explicitly;
+rehydration belongs to the residency slice.
+
+`send_message` uses Pi's explicit `{triggerTurn: false}` custom-message path. Pi
+persists idle mail immediately and appends running mail after the complete tool
+batch. It does not request a model turn. The messenger tracks only activity IDs and
+whether an unseen message requests work, not a second payload queue. Observation
+returns pending counts and an arrival revision without consuming mail. IDs leave
+pending state when Pi prepares a request context containing them, not when history
+is appended; this is request preparation, not proof of provider receipt. Later
+context filters or provider failures can still prevent inference.
+
+`followup_task` rejects root. Running tasks request Pi `agent_before_settle`
+continuation when follow-up activity remains unseen, without abort/restart. Idle
+work starts through the existing manager/runner, preserving usage and session events.
+Because Pi has no public session-level context-only idle continuation, this adds a
+neutral user instruction, `Continue with the queued follow-up task.`, while the
+attributed task content appears once. The manager also drains work accepted in the
+gap between native settlement and manager completion. Admission and delivery have
+no intervening await; concurrent calls cannot double-start. Idle follow-up at full
+execution capacity fails before delivery rather than creating an invisible queue.
+
+Native acceptance is the commit point: later caller cancellation does not retract
+accepted input. Invalidated captures cannot deliver or start work; disposed messenger
+endpoints do not touch invalidated extension APIs. Fleet retains idle rows with
+pending messages, and direct result metadata updates the call row without adding
+model-visible acknowledgments. The staged tests use real Pi and a canned provider;
+live GPT/Anthropic timing and residency/recovery remain unverified here.
