@@ -11,6 +11,7 @@ export function assertAgentNotCancelled(signal?: AbortSignal): void {
 export function shutdownAgentSession(
   session: AgentSession,
   reason: SessionShutdownEvent["reason"] = "quit",
+  beforeDispose?: () => void,
 ): Promise<void> {
   const existing = shutdowns.get(session);
   if (existing) return existing;
@@ -23,7 +24,11 @@ export function shutdownAgentSession(
     } catch {
       // Extension cleanup is best-effort; session disposal is not.
     } finally {
-      session.dispose();
+      try {
+        beforeDispose?.();
+      } finally {
+        session.dispose();
+      }
     }
   });
   shutdowns.set(session, shutdown);

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,7 +13,8 @@ import {
   SessionManager,
   type AgentSession,
 } from "@earendil-works/pi-coding-agent";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { getConversationSource } from "../ui/conversation-viewer.js";
 import { AgentManager } from "../agent-manager.js";
 import { runAgent } from "../agent-runner.js";
 import registerSubagents from "../index.js";
@@ -66,6 +67,7 @@ async function rootController(cwd: string, model: any, provider: any) {
   const manager = Reflect.get(globalThis, Symbol.for("pi-subagents:manager")) as {
     spawn: AgentManager["spawn"];
     getRecord: AgentManager["getRecord"];
+    disposeRuntime: AgentManager["disposeRuntime"];
   };
   let callId = 0;
   const execute = (
@@ -410,6 +412,109 @@ it("ordinary spawn-close-resume-send-wait preserves conversation with fresh perm
     expect(root.messages.filter((m) => m.customType === "subagent-message")).toMatchObject([
       { details: { message: "retained finding", sender: { id } } },
     ]);
+  } finally {
+    await root.emit("session_shutdown");
+    rmSync(cwd, { recursive: true, force: true });
+  }
+}, 30_000);
+
+it("runtime disposal preserves a parent's identity, history and descendant until retirement", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "subagent-runtime-disposal-"));
+  mkdirSync(join(cwd, ".pi"));
+  writeFileSync(join(cwd, ".pi/subagents.json"), JSON.stringify({ maxDepth: 2, maxConcurrent: 2 }));
+  const runtime = await ModelRuntime.create({
+    allowModelNetwork: false,
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+  });
+  const provider = {
+    api: "openai-completions" as const,
+    apiKey: "test",
+    baseUrl: "http://localhost",
+    models: [
+      {
+        id: "model",
+        name: "Disposal Test",
+        reasoning: false,
+        input: ["text" as const],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 10_000,
+        maxTokens: 100,
+      },
+    ],
+  };
+  runtime.registerProvider("disposal-test", provider);
+  const model = runtime.getModel("disposal-test", "model")!;
+  const root = await rootController(cwd, model, provider);
+  const { pi, ctx, manager } = root;
+  const options = {
+    description: "remembered task",
+    model,
+    onSessionCreated(session: AgentSession) {
+      session.agent.streamFunction = (m) =>
+        response(m, [{ type: "text", text: "remembered answer" }]);
+    },
+  };
+  try {
+    const id = manager.spawn(pi, ctx, "worker", "Remember the blue door", options);
+    const record = manager.getRecord(id)!;
+    await record.promise;
+    const session = record.session!;
+    const childCtx = { ...ctx, sessionManager: session.sessionManager };
+    let finishDescendant!: () => void;
+    const pendingDescendant = new Promise<void>((resolve) => {
+      finishDescendant = resolve;
+    });
+    const descendantId = manager.spawn(pi, childCtx, "worker", "descendant", {
+      ...options,
+      onSessionCreated(session) {
+        session.agent.streamFunction = async (m, _context, request) => {
+          request?.signal?.addEventListener("abort", finishDescendant, { once: true });
+          await pendingDescendant;
+          return response(m, [{ type: "text", text: "descendant answer" }]);
+        };
+      },
+    });
+    const descendant = manager.getRecord(descendantId)!;
+    await vi.waitFor(() => expect(descendant.session).toBeDefined());
+    const shutdown = vi.spyOn(session.extensionRunner, "emit");
+    const disposed = vi.spyOn(session, "dispose");
+    const usage = { ...record.lifetimeUsage };
+    const notifications = root.messages.length;
+    for (const key of Object.keys(childCtx))
+      Object.defineProperty(childCtx, key, {
+        get() {
+          throw new Error("stale ctx");
+        },
+      });
+
+    await Promise.all([manager.disposeRuntime(id), manager.disposeRuntime(id)]);
+    expect(manager.getRecord(id)).toBe(record);
+    expect(record.session).toBeUndefined();
+    expect(record.incarnation).toBeUndefined();
+    expect(record.lifetimeUsage).toEqual(usage);
+    expect(record.result).toBe("remembered answer");
+    expect(manager.getRecord(descendantId)).toBe(descendant);
+    expect(descendant.session).toBeDefined();
+    expect(descendant.status).toBe("running");
+    finishDescendant();
+    await descendant.promise;
+    expect(descendant.result).toBe("descendant answer");
+    expect(descendant.parentSessionId).toBe(record.sessionId);
+    expect(descendant.rootSessionId).toBe(ctx.sessionManager.getSessionId());
+    expect(shutdown.mock.calls.filter(([event]) => event.type === "session_shutdown")).toHaveLength(
+      1,
+    );
+    expect(disposed).toHaveBeenCalledOnce();
+    expect(root.messages).toHaveLength(notifications);
+    expect(JSON.stringify(getConversationSource(record)!.messages)).toContain("blue door");
+    expect(() => manager.spawn(pi, ctx, "worker", "over capacity", options)).toThrow("concurrency");
+
+    await root.execute("close_agent", { target: id });
+    expect(manager.getRecord(id)).toBeUndefined();
+    expect(manager.getRecord(descendantId)).toBeUndefined();
+    await root.execute("resume_agent", { id });
+    expect(JSON.stringify(manager.getRecord(id)!.session!.messages)).toContain("blue door");
   } finally {
     await root.emit("session_shutdown");
     rmSync(cwd, { recursive: true, force: true });

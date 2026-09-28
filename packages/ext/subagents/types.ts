@@ -7,7 +7,7 @@ import type { AssistantUsage } from "./usage.js";
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, FileEntry } from "@earendil-works/pi-coding-agent";
 import type { DiagnosticErrorInfo } from "./diagnostics.js";
 import type { LifetimeUsage } from "./usage.js";
 
@@ -55,6 +55,10 @@ export interface AgentConfig {
 
 export interface AgentRecord {
   id: string;
+  /** Conversation identity survives unloading its Pi runtime. */
+  sessionId?: string;
+  /** Manager-owned active branch, without extension state or approval allowances. */
+  retainedConversation?: { sessionId: string; cwd: string; entries: FileEntry[] };
   /** Random token for this live session; a reopened conversation gets a new one. */
   incarnation?: string;
   /** Turn generation within this live session. An idle reopen reserves generation 1 for its first input. */

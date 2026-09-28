@@ -23,7 +23,7 @@ vi.mock("@earendil-works/pi-tui", async (importOriginal) => {
 // Must import AFTER vi.mock declaration (vitest hoists vi.mock but the
 // dynamic import of the test subject must happen after)
 const { visibleWidth } = await import("@earendil-works/pi-tui");
-const { ConversationViewer } = await import("../ui/conversation-viewer.js");
+const { ConversationViewer, getConversationSource } = await import("../ui/conversation-viewer.js");
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -864,4 +864,41 @@ describe("ConversationViewer", () => {
       }
     });
   });
+});
+
+it("renders retained conversation history without a loaded session", () => {
+  const record = mockRecord({
+    status: "completed",
+    lifetimeUsage: { input: 1, output: 1, cacheWrite: 0 },
+    retainedConversation: {
+      sessionId: "retained",
+      cwd: "/tmp",
+      entries: [
+        {
+          type: "session",
+          version: 3,
+          id: "retained",
+          cwd: "/tmp",
+          timestamp: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          type: "message",
+          id: "m1",
+          parentId: null,
+          timestamp: "2026-01-01T00:00:00.000Z",
+          message: { role: "user", content: "Remember the blue door", timestamp: 1 },
+        },
+      ],
+    },
+  });
+  const viewer = new ConversationViewer(
+    mockTui(),
+    getConversationSource(record)!,
+    record,
+    undefined,
+    ansiTheme(),
+    vi.fn(),
+  );
+  expect(viewer.render(80).join("\n")).toContain("Remember the blue door");
+  viewer.dispose();
 });

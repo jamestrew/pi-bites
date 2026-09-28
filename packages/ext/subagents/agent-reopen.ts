@@ -137,6 +137,7 @@ export class AgentReopener {
       model.reasoning === false ? "off" : (ctx.thinking ?? pi.getThinkingLevel());
     const record: AgentRecord = {
       id,
+      sessionId: conversation.sessionId,
       incarnation: randomUUID(),
       type: closed.type,
       parentSessionId: closed.parentSessionId,

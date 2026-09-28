@@ -161,7 +161,7 @@ export function createSubagents(
           if (sessionId && deliveries.get(sessionId)?.messenger === messenger)
             deliveries.delete(sessionId);
           if (childControllers.get(record.id) === child) childControllers.delete(record.id);
-          await retireDescendants();
+          if (!manager.isRuntimeDisposing(record.id)) await retireDescendants();
         });
         childPi.on("session_before_switch", () => child.invalidate());
         childPi.on("session_tree", async (_event, ctx) => {
@@ -189,6 +189,7 @@ export function createSubagents(
     ) => manager.spawn(piRef, ctx, type, prompt, options),
     getRecord: (id: string) => manager.getRecord(id),
     close: (id: string) => manager.close(id),
+    disposeRuntime: (id: string) => manager.disposeRuntime(id),
   });
 
   // --- Cross-extension RPC via pi.events ---
