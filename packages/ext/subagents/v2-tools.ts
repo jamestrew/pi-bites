@@ -1,3 +1,5 @@
+import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
+import { lifecycleStatusLabel } from "./ui/agent-lifecycle-render.js";
 import type { createSubagentMessenger } from "./subagent-messages.js";
 import { resolveAgent, resolveSpawnAgent } from "./agent-types.js";
 import { spawnNamed } from "./task-paths.js";
@@ -163,6 +165,17 @@ export function createV2Tools(
         };
         const deliver = () =>
           messenger.queueOnly(targetSessionId, sender, args.message, name === "followup_task");
+        // An interrupt acknowledges submission before Pi finishes unwinding tools.
+        // Wait for that turn before committing fresh work to the retained session.
+        if (
+          name === "followup_task" &&
+          record?.status === "stopped" &&
+          record.abort?.source === "interrupt"
+        ) {
+          if (record.promise)
+            await (signal ? waitForOperation(record.promise, signal) : record.promise);
+          signal?.throwIfAborted();
+        }
         const accepted =
           name === "followup_task" && record
             ? deps.manager.followup(record.id, deliver, () => messenger.observe().pendingTasks > 0)
@@ -182,6 +195,29 @@ export function createV2Tools(
         };
       },
     });
+  const interrupt_agent = defineSubagentTool({
+    name: "interrupt_agent",
+    label: "interrupt_agent",
+    description: CODEX_V2_CONTRACT.tools.interrupt_agent.description,
+    parameters: Type.Unsafe<{ target: string }>(CODEX_V2_CONTRACT.tools.interrupt_agent.parameters),
+    ...renderers("interrupt_agent"),
+    async execute(_id, args, signal, _update, ctx) {
+      signal?.throwIfAborted();
+      if (!args.target.trim()) throw new Error("Target must not be empty");
+      const sessionId = ctx.sessionManager.getSessionId();
+      if (args.target === "/root") throw new Error("Cannot interrupt root");
+      const record = deps.manager.taskPaths.lookup(sessionId, args.target);
+      if (deps.manager.taskPaths.caller(sessionId).path === record.taskName)
+        throw new Error("Cannot interrupt self");
+      const previous_status = record.session ? getAgentStatus(record) : ("not_found" as const);
+      // Submission, not settlement, is the commit point. Later caller cancellation
+      // cannot retract an accepted interrupt or retire its conversation.
+      void deps.manager.interruptTurn(record.id).catch(() => {});
+      const status = lifecycleStatusLabel(previous_status, "pending_init");
+      const value = { previous_status };
+      return { ...textResult(JSON.stringify(value), { status: `previous: ${status}` }), value };
+    },
+  });
   const wait_agent = defineSubagentTool({
     name: "wait_agent",
     label: "wait_agent",
@@ -210,6 +246,7 @@ export function createV2Tools(
     },
   });
   return {
+    interrupt_agent,
     wait_agent,
     spawn_agent,
     list_agents,

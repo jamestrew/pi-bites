@@ -3,7 +3,10 @@ import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent"
 import { createV2IntegrationHarness } from "../../v2-integration-harness.js";
 import { mockCtx } from "./agent-manager-mocks.js";
 
-export function harness(cleanup: (() => Promise<unknown>)[]) {
+export function harness(
+  cleanup: (() => Promise<unknown>)[],
+  autoMode?: Parameters<typeof createV2IntegrationHarness>[1],
+) {
   const handlers = new Map<string, Function[]>();
   const direct = new Map<string, any>();
   const pi = {
@@ -26,7 +29,7 @@ export function harness(cleanup: (() => Promise<unknown>)[]) {
     hasUI: false,
     ui: { notify: vi.fn(), setWidget: vi.fn(), setStatus: vi.fn() },
   } as any;
-  const controller = createV2IntegrationHarness(pi);
+  const controller = createV2IntegrationHarness(pi, autoMode);
   const emit = async (event: string, payload: unknown = {}) => {
     for (const fn of handlers.get(event) ?? []) await fn(payload, ctx);
   };

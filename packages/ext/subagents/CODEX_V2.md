@@ -131,8 +131,8 @@ unavailable routes must remain explicitly unverified. No host pin change is need
 
 `v2-integration-harness.ts` is an explicit test entrypoint, not imported by ordinary
 extension activation and not enabled by configuration. It registers executable
-`spawn_agent`, `list_agents`, `send_message`, `followup_task`, and `wait_agent`; interrupt
-remains provenance, not a stub executor. The existing controller, manager, Fleet/navigation, approvals, runner,
+`spawn_agent`, `list_agents`, `send_message`, `followup_task`, `wait_agent`, and
+`interrupt_agent`. The existing controller, manager, Fleet/navigation, approvals, runner,
 provider registry and selected-tool intersection remain authoritative. The V1 Code
 Mode bridge declines this direct-only controller, including in child sessions.
 Ordinary sessions retain their existing surface until the coherent six-tool cutover.
@@ -229,3 +229,25 @@ exercise handled input, and verify the next request receives input once. Canned
 child-provider tests cover repeated completion delivery; real idle parent sessions
 verify zero unsolicited requests. Focused tests cover timeout/clamping, ownership,
 throwing getters, UI outcomes and cleanup. Live provider timing remains unverified.
+
+## Turn interruption (#349)
+
+`interrupt_agent` uses root-tree lookup, rejects root/self, and permits siblings and
+non-root ancestors. Unknown targets fail lookup; known unloaded identities report
+`not_found` without reloading. Settled targets return their existing status unchanged.
+The result snapshots status before submitting a stop, not after native settlement.
+Repeated requests do not close the conversation or traverse descendants.
+
+The shared turn interrupter clears Pi steering/follow-up queues and aborts only the
+selected session run. Native cancellation propagates through bash-gate authorization,
+Auto Mode review and human dialogs; late approvals cannot launch commands. Identity,
+incarnation, transcript, mailbox and descendants remain intact. Interrupted output
+is partial, not a completed final; completion mail is suppressed and Fleet shows
+`interrupted` rather than `shutdown`. Usage and lifecycle events retain abort metadata.
+
+A follow-up submitted during interruption waits cancellably for the old turn to
+settle before committing input. Parent replacement or cancellation before that commit
+prevents delivery. Already accepted input is not rolled back, and interruption does
+not promise that pending mailbox work can never resume. Residency reload remains a
+later integration slice; these regressions use the staged direct harness and real Pi
+sessions with canned providers, not live-provider timing.

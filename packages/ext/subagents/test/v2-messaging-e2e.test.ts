@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -16,14 +16,14 @@ afterEach(async () => {
   for (const fn of cleanup.splice(0)) await fn();
 });
 
-async function setup() {
+async function setup(autoMode?: Parameters<typeof harness>[1]) {
   const cwd = mkdtempSync(join(tmpdir(), "v2-mail-"));
   const faux = registerFauxProvider({
     provider: "v2-mail",
     models: [{ id: "test-model", contextWindow: 200_000 }],
   });
   const model = faux.getModel();
-  const h = harness(cleanup);
+  const h = harness(cleanup, autoMode);
   cleanup.push(async () => {
     faux.unregister();
     rmSync(cwd, { recursive: true, force: true });
@@ -312,3 +312,99 @@ it("queues each completed turn's attributed final without waking the parent", as
     { sender: "/root/a", text: "SECOND FINAL", options: { triggerTurn: false } },
   ]);
 });
+
+it("interrupts only the selected turn, then follows up with retained history and no fabricated final", async () => {
+  const h = await setup();
+  h.pi.getActiveTools = () => [
+    "spawn_agent",
+    "list_agents",
+    "interrupt_agent",
+    "followup_task",
+    "wait_agent",
+  ];
+  const requests: TranscriptContext[] = [];
+  h.faux.setResponses([
+    () => ({
+      ...fauxAssistantMessage("partial"),
+      stopReason: "toolUse" as const,
+      content: [
+        {
+          type: "toolCall" as const,
+          id: "wait",
+          name: "wait_agent",
+          arguments: { timeout_ms: 3_600_000 },
+        },
+      ],
+    }),
+    (ctx) => {
+      requests.push(structuredClone(ctx));
+      return fauxAssistantMessage("resumed final");
+    },
+  ]);
+  let id = "";
+  h.pi.events.on("subagents:created", (e: any) => {
+    id = e.id;
+  });
+  await h.call("spawn_agent", { task_name: "a", message: "ORIGINAL TASK", fork_turns: "none" });
+  const record = h.manager.getRecord(id);
+  await vi.waitFor(() => expect(record.toolCalls.length).toBe(1));
+  const incarnation = record.incarnation;
+  const session = record.session;
+  expect(JSON.parse((await h.call("interrupt_agent", { target: "a" })).content[0].text)).toEqual({
+    previous_status: "running",
+  });
+  await h.call("followup_task", { target: "a", message: "AFTER INTERRUPT" });
+  await h.manager.waitForAll();
+  expect(record.session).toBe(session);
+  expect(record.incarnation).toBe(incarnation);
+  expect(requests).toHaveLength(1);
+  expect(JSON.stringify(requests[0])).toContain("ORIGINAL TASK");
+  expect(JSON.stringify(requests[0])).toContain("AFTER INTERRUPT");
+  expect(h.pi.sendMessage.mock.calls.map(([m]: any[]) => m.details.message)).toEqual([
+    "resumed final",
+  ]);
+});
+
+it.each(["human", "automode"])(
+  "interrupt invalidates pending %s approval without launching a late command",
+  async (mode) => {
+    const approval = Promise.withResolvers<any>();
+    const review = vi.fn(() => approval.promise);
+    const h = await setup(mode === "automode" ? { isEnabled: () => true, review } : undefined);
+    const select = vi.fn(() => approval.promise);
+    h.ctx.hasUI = true;
+    h.ctx.ui.select = select;
+    h.pi.getActiveTools = () => ["spawn_agent", "interrupt_agent", "followup_task", "bash"];
+    const marker = join(h.ctx.cwd, "must-not-launch");
+    h.faux.setResponses([
+      () => ({
+        ...fauxAssistantMessage(""),
+        stopReason: "toolUse" as const,
+        content: [
+          {
+            type: "toolCall" as const,
+            id: "pending-command",
+            name: "bash",
+            arguments: { command: `touch '${marker}'` },
+          },
+        ],
+      }),
+      fauxAssistantMessage("followed up safely"),
+    ]);
+    await h.emit("agent_start");
+    await h.call("spawn_agent", { task_name: "a", message: "command", fork_turns: "none" });
+    await vi.waitFor(() => expect(mode === "human" ? select : review).toHaveBeenCalled(), {
+      timeout: 10_000,
+    });
+    const result = await h.call("interrupt_agent", { target: "a" });
+    expect(result.value).toEqual({ previous_status: "running" });
+    await h.manager.waitForAll();
+    approval.resolve(mode === "human" ? 'Allow for session ("touch")' : { outcome: "allow" });
+    await h.call("followup_task", { target: "a", message: "continue without command" });
+    await h.manager.waitForAll();
+    expect(existsSync(marker)).toBe(false);
+    expect(h.pi.sendMessage.mock.calls.map(([m]: any[]) => m.details.message)).toEqual([
+      "followed up safely",
+    ]);
+  },
+);
