@@ -42,6 +42,16 @@ function wire(operation: Operation): Json {
   }
 }
 
+/** Queue-only mail is persisted without emitting a streaming message_end event. */
+export function checkMailbox(history: readonly unknown[]) {
+  const mail = history.map(object).filter((message) => message.customType === "subagent-message");
+  return {
+    independentFinals:
+      mail.filter((message) => object(message.details).completion === "completed").length === 2,
+    independentProgress: mail.some((message) => !object(message.details).completion),
+  };
+}
+
 /** Check controller results, never the parent's claimed success or echoed input. */
 export function checkLifecycle(operations: Operation[], route: string) {
   const parent = operations.filter((o) => o.owner === "parent" && !o.error);
@@ -204,7 +214,7 @@ async function main() {
     let requests = 0;
     const observe = (pi: ExtensionAPI, owner: string) => {
       pi.on("before_provider_request", (event) => {
-        const file = `payload-${++requests}-${owner}.json`;
+        const file = `payload-${++requests}.json`;
         writeFileSync(join(directory, file), JSON.stringify(event.payload, null, 2) + "\n", {
           mode: 0o600,
         });
@@ -345,6 +355,7 @@ Use the six DIRECT subagent tools, including when Code Mode is active. Do not di
 Spawn exactly one agent with task_name "probe", agent_type "default", model ${JSON.stringify(route)}, and fork_turns "none". Its task: retain marker ${marker}; execute EXACTLY ${JSON.stringify(command)} once (exec_command with login:false in Code Mode or bash otherwise), the UI approves only that exact command; send_message a progress message to /root; then return a final response WITHOUT spelling out the marker yet. Do not run other commands, web/filesystem tools, or spawn grandchildren.
 Use wait_agent to observe mailbox activity and list_agents to verify actual completion (repeat waits on timeout or progress-only updates). Then interrupt_agent the settled task to verify its previous completed status. Use followup_task on the SAME task asking "Recall the retained marker from your previous task and return it, without executing commands." Do NOT repeat the marker in this recall request. Wait for completion mail, then use list_agents to verify the completed answer contains the retained marker. Finish briefly and report failures honestly.`);
     record.contextUsage = session.getContextUsage();
+    record.parentHistory = session.messages;
     const lifecycle = checkLifecycle(operations, route);
     const childShell = observations.filter((o) => o.owner !== "parent");
     const checks = {
@@ -369,16 +380,7 @@ Use wait_agent to observe mailbox activity and list_agents to verify actual comp
                   );
                 }))),
         ),
-      independentFinals:
-        messages.filter(
-          (o) =>
-            o.owner === "parent" &&
-            object(o.message).customType === "subagent-message" &&
-            object(object(o.message).details).completion === "completed",
-        ).length >= 2,
-      independentProgress: messages.some(
-        (o) => o.owner === "parent" && object(o.message).customType === "subagent-message",
-      ),
+      ...checkMailbox(session.messages),
       childPayload:
         (record.payloads as Json[] | undefined)?.some((p) => p.owner !== "parent") ?? false,
       directPayloads:

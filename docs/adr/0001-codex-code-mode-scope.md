@@ -69,3 +69,9 @@ historical V1 paragraphs above for task/message behavior. Completion is queue-on
 waits observe mailbox activity, and retained task identity is separate from execution
 capacity and runtime residency. [Verification](../code-mode-contract/subagents-v2-cutover.md)
 separates offline payload evidence from release smoke limitations.
+
+The [#353 release validation record](../code-mode-contract/subagents-v2-validation.md)
+adds live GPT Code Mode/adapter-disabled evidence and eager-surface measurements.
+Anthropic and the remaining adversarial live scenarios require explicit maintainer
+disposition before the integration is called validated; review or merge of the
+evidence does not waive that gate. This does not authorize integration into `master`.

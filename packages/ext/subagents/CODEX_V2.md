@@ -121,6 +121,10 @@ belong to the runtime, not this metadata generator.
 
 ## Verification boundary
 
+The [release validation record](../../../docs/code-mode-contract/subagents-v2-validation.md)
+separates live GPT results, offline checks and pending maintainer disposition of
+unverified routes/scenarios. It does not certify a completed release.
+
 Generation followed by `--check` verifies reproducibility against all pinned source
 hashes and generated declarations. This is source/contract evidence, **not** a native
 Codex execution test or live provider compatibility claim. Runtime behavior and
