@@ -7,9 +7,10 @@ vi.mock("../agent-runner.js", () => ({
   resumeAgent: vi.fn(),
 }));
 
-vi.mock("../usage.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../usage.js")>()),
-  appendSubagentUsageRecord: vi.fn(() => Promise.resolve()),
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs/promises")>()),
+  mkdir: vi.fn(() => Promise.resolve()),
+  appendFile: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../diagnostics.js", async (importOriginal) => ({

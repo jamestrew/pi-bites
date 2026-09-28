@@ -1,3 +1,4 @@
+import { saveSettings } from "../settings.js";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -408,3 +409,48 @@ it.each(["human", "automode"])(
     ]);
   },
 );
+
+it("forks the latest attributed task without counting the idle continuation or queue-only mail", async () => {
+  const h = await setup();
+  saveSettings({ maxDepth: 2 }, h.ctx.cwd);
+  await h.emit("session_start");
+  const requests: TranscriptContext[] = [];
+  h.faux.setResponses([
+    fauxAssistantMessage("first done"),
+    () => ({
+      ...fauxAssistantMessage(""),
+      stopReason: "toolUse" as const,
+      content: [
+        {
+          type: "toolCall" as const,
+          id: "recent-spawn",
+          name: "spawn_agent",
+          arguments: { task_name: "recent", message: "inspect inherited task", fork_turns: "1" },
+        },
+      ],
+    }),
+    ...Array.from({ length: 2 }, () => (ctx: TranscriptContext) => {
+      requests.push(structuredClone(ctx));
+      return fauxAssistantMessage("finished");
+    }),
+  ]);
+  await h.call("spawn_agent", {
+    task_name: "a",
+    message: "OLDER INITIAL TASK",
+    fork_turns: "none",
+  });
+  await h.manager.waitForAll();
+  await h.call("send_message", { target: "a", message: "OLDER QUEUE ONLY INFO" });
+  await h.call("followup_task", { target: "a", message: "RECENT FOLLOWUP TASK" });
+  await h.manager.waitForAll();
+  await h.manager.waitForAll();
+  const child = requests.find((request) =>
+    JSON.stringify(request).includes("Your canonical task_name is /root/a/recent."),
+  );
+  expect(child).toBeDefined();
+  const text = JSON.stringify(child);
+  expect(text).toContain("RECENT FOLLOWUP TASK");
+  expect(text).toContain("<sender_id>/root</sender_id>");
+  expect(text).not.toContain("OLDER INITIAL TASK");
+  expect(text).not.toContain("OLDER QUEUE ONLY INFO");
+});

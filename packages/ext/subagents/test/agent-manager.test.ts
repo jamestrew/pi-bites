@@ -7,9 +7,10 @@ vi.mock("../agent-runner.js", () => ({
   resumeAgent: vi.fn(),
 }));
 
-vi.mock("../usage.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../usage.js")>()),
-  appendSubagentUsageRecord: vi.fn(() => Promise.resolve()),
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs/promises")>()),
+  mkdir: vi.fn(() => Promise.resolve()),
+  appendFile: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../diagnostics.js", async (importOriginal) => ({
@@ -18,7 +19,7 @@ vi.mock("../diagnostics.js", async (importOriginal) => ({
 }));
 
 import { runAgent } from "../agent-runner.js";
-import { appendSubagentUsageRecord } from "../usage.js";
+import { appendFile } from "node:fs/promises";
 import {
   mockCtx,
   mockPendingRun,
@@ -133,6 +134,27 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     });
   });
 
+  it("updates usage before notifying the caller even when persistence fails", async () => {
+    manager = new AgentManager();
+    vi.mocked(appendFile).mockRejectedValueOnce(new Error("disk full"));
+    const usage = { input: 12, output: 3, cacheWrite: 1 };
+    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      await Promise.resolve();
+      options.onAssistantUsage?.(usage);
+      return { responseText: "done", session: mockSession() };
+    });
+    const seen = vi.fn(() => {
+      expect(manager.getRecord(id)!.lifetimeUsage).toEqual(usage);
+    });
+    const id = manager.spawn(mockPi, mockCtx, "worker", "test", {
+      description: "test",
+      onAssistantUsage: seen,
+    });
+    await expect(manager.getRecord(id)!.promise).resolves.toBe("done");
+    expect(seen).toHaveBeenCalledWith(usage);
+    expect(manager.getRecord(id)!.status).toBe("completed");
+  });
+
   it("onCompaction from runAgent increments record.compactionCount", async () => {
     manager = new AgentManager();
     const compactSeen: any[] = [];
@@ -195,12 +217,17 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
       description: "test",
     });
     await expect(manager.cancelAndSteer(id, "change course")).resolves.toBe(true);
-    vi.mocked(appendSubagentUsageRecord).mockClear();
+    vi.mocked(appendFile).mockClear();
     finishInitialRun();
     await manager.getRecord(id)!.promise;
 
-    expect(appendSubagentUsageRecord).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: id, parentSessionId: "parent-session" }),
+    const written = vi.mocked(appendFile).mock.calls.map(([, data]) => JSON.parse(data as string));
+    expect(written).toContainEqual(
+      expect.objectContaining({
+        type: "subagent_usage",
+        sessionId: id,
+        parentSessionId: "parent-session",
+      }),
     );
     expect(manager.getRecord(id)!.toolCalls).toHaveLength(MAX_RETAINED_TOOL_CALLS);
     expect(manager.getRecord(id)!.toolCalls[0]).toBe("Bash(echo initial-3)");
