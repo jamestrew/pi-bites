@@ -68,6 +68,8 @@ export function captureSubagentContext(
 /** Preserve Pi's definition/rendering types while narrowing the execution dependency. */
 export function defineSubagentTool<P extends TSchema, D>(
   tool: Omit<ToolDefinition<P, D>, "execute"> & {
+    /** Interpret raw arguments while ctx is active, before taking the history snapshot. */
+    captureHistory?: (args: unknown) => boolean;
     execute: (
       callId: string,
       params: Static<P>,

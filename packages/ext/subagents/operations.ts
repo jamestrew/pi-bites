@@ -1,3 +1,4 @@
+import type { createV2Tools } from "./v2-tools.js";
 import type { AgentRecord } from "./types.js";
 import type { TSchema } from "typebox";
 import type {
@@ -15,15 +16,18 @@ import type { createWaitAgent } from "./register-wait-agent.js";
 import type { createCloseAgent } from "./register-close-agent.js";
 import type { createResumeAgent } from "./register-resume-agent.js";
 
-export interface SubagentTools {
+export interface V1SubagentTools {
   spawn_agent: ReturnType<typeof createAgentTool>;
   send_input: ReturnType<typeof createSendInput>;
   wait_agent: ReturnType<typeof createWaitAgent>;
   close_agent: ReturnType<typeof createCloseAgent>;
   resume_agent: ReturnType<typeof createResumeAgent>;
 }
-export type SubagentOperation = keyof SubagentTools;
-type Result = Awaited<ReturnType<SubagentTools[SubagentOperation]["execute"]>>;
+type V2SubagentTools = ReturnType<typeof createV2Tools>;
+export type SubagentTools = V1SubagentTools | V2SubagentTools;
+export type SubagentOperation = keyof V1SubagentTools | keyof V2SubagentTools;
+type OwnedTool = V1SubagentTools[keyof V1SubagentTools] | V2SubagentTools[keyof V2SubagentTools];
+type Result = Awaited<ReturnType<OwnedTool["execute"]>>;
 export interface SubagentCall {
   /** Parent conversation identity, not a cell or shell id. */
   callerId: string;
@@ -31,6 +35,19 @@ export interface SubagentCall {
   signal?: AbortSignal;
   onUpdate?: (result: { content: Result["content"]; details: unknown }) => void;
 }
+
+export interface SubagentRegistration {
+  directOnly: boolean;
+  childPrompt?: (record: AgentRecord) => string;
+}
+
+const V1_REGISTRATION: SubagentRegistration = {
+  directOnly: false,
+  childPrompt: (record) =>
+    "\nYour parent agent id is " +
+    record.parentSessionId +
+    ". Use send_input (tools.multi_agent_v1__send_input inside Code Mode) with this target for substantive parent messages, when available. Delivery waits for the next model boundary; still return a final response.",
+};
 
 /** Session-owned execution, independent of direct/nested exposure and Pi tool events. */
 export class SubagentController {
@@ -44,7 +61,19 @@ export class SubagentController {
     private isScopeModelsEnabled: () => boolean,
     private getAllowedTools: () => string[],
     private child?: AgentRecord,
+    private registration: SubagentRegistration = V1_REGISTRATION,
   ) {}
+
+  /** The staged named-task tools stay direct, including inside Code Mode. */
+  get directOnly(): boolean {
+    return this.registration.directOnly;
+  }
+
+  private tool(name: SubagentOperation): OwnedTool {
+    const tool = (this.tools as Partial<Record<SubagentOperation, OwnedTool>>)[name];
+    if (!tool) throw new Error(`Subagent operation ${name} is unavailable`);
+    return tool;
+  }
 
   invalidate(): void {
     this.owner.abort(new Error("Subagent owner changed"));
@@ -56,7 +85,7 @@ export class SubagentController {
   capture(ctx: ExtensionContext, options: { forkContext?: boolean } = {}) {
     const owner = this.owner.signal;
     owner.throwIfAborted();
-    const forkContext = options.forkContext === true;
+    const forkContext = options.forkContext ?? this.tools.spawn_agent.captureHistory?.({}) ?? false;
     const snapshot = captureSubagentContext(this.pi, ctx, forkContext, this.getAllowedTools());
     snapshot.callerAgentId = this.child?.id;
     snapshot.parentRole = this.child?.type ?? snapshot.parentRole;
@@ -84,10 +113,10 @@ export class SubagentController {
         throw new Error("Subagent call id must be unique and nonempty");
       if (!Object.hasOwn(this.tools, name) || !snapshot.allowedTools?.includes(name))
         throw new Error(`Subagent operation ${name} is unavailable`);
-      const tool = this.tools[name];
+      const tool = this.tool(name);
       if (!Check(tool.parameters, args)) throw new Error(`Invalid arguments for ${name}`);
       const params = args as Record<string, unknown>;
-      if (params.fork_context && !forkContext)
+      if (this.tool(name).captureHistory?.(args) && !forkContext)
         throw new Error("Fork history was not captured for this call");
       const targets =
         name === "wait_agent"
@@ -146,31 +175,24 @@ export class SubagentController {
       this.isScopeModelsEnabled,
       getAllowedTools,
       record,
+      this.registration,
     );
   }
 
   registerTools(): void {
-    if (this.child) {
-      const parentId = this.child.parentSessionId;
+    const childPrompt = this.child && this.registration.childPrompt?.(this.child);
+    if (childPrompt) {
       this.pi.on("before_agent_start", (event) => ({
-        systemPrompt:
-          event.systemPrompt +
-          "\nYour parent agent id is " +
-          parentId +
-          ". Use send_input (tools.multi_agent_v1__send_input inside Code Mode) with this target for substantive parent messages, when available. Delivery waits for the next model boundary; still return a final response.",
+        systemPrompt: event.systemPrompt + childPrompt,
       }));
     }
     for (const name of Object.keys(this.tools) as SubagentOperation[]) {
-      const tool = this.tools[name] as ToolDefinition<TSchema, unknown>;
+      const tool = this.tool(name) as ToolDefinition<TSchema, unknown>;
       this.pi.registerTool<TSchema, unknown>({
         ...tool,
-        execute: (callId, args, signal, onUpdate, ctx) => {
+        execute: async (callId, args, signal, onUpdate, ctx) => {
           const operation = this.capture(ctx, {
-            forkContext:
-              typeof args === "object" &&
-              args !== null &&
-              "fork_context" in args &&
-              args.fork_context === true,
+            forkContext: this.tool(name).captureHistory?.(args),
           });
           return operation.execute(name, args, {
             callerId: operation.callerId,
@@ -184,7 +206,7 @@ export class SubagentController {
   }
 
   renderers(name: SubagentOperation) {
-    const { renderCall, renderResult } = this.tools[name];
+    const { renderCall, renderResult } = this.tool(name);
     return { renderCall, renderResult };
   }
 
