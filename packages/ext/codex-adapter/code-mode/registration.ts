@@ -32,6 +32,8 @@ export default function registerCodeMode(
   gate?: BashGateController,
   subagents?: SubagentController,
 ): CodexAdapterController {
+  // Harness-only V2 operations must not enter the V1 nested transport.
+  if (subagents?.directOnly) subagents = undefined;
   const state = createAdapterToolState(Object.keys(subagents?.definitions ?? {}));
   const sessions = createExecSessionManager();
   const owned = {

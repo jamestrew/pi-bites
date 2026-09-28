@@ -2,6 +2,11 @@
 
 ## Decision and scope
 
+#346 follow-through: the reproducible six-tool declaration/provenance layer is now
+recorded in [CODEX_V2.md](../../packages/ext/subagents/CODEX_V2.md), including the
+explicit wait-description correction. The original audit below remains historical
+source evidence, not proof of runtime or live-provider compatibility.
+
 User-selected direction, not yet implemented:
 
 - Replace the V1 model-facing implementation with V2; do not maintain two versions.

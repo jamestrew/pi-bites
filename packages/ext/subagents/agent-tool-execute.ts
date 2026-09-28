@@ -3,11 +3,17 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createActivityTracker } from "./activity-tracker.js";
 import type { AgentManager } from "./agent-manager.js";
-import { resolveSpawnAgent } from "./agent-types.js";
+import { resolveSpawnAgent, type ResolvedAgent } from "./agent-types.js";
 import { resolveAgentInvocationConfig } from "./invocation-config.js";
 import { modelKey, resolveModel } from "./model-resolver.js";
 import { v1Result, SubagentOperationError } from "./tool-result.js";
-import { isThinkingLevel, type AgentInvocation, type ThinkingLevel } from "./types.js";
+import {
+  isThinkingLevel,
+  type AgentInvocation,
+  type ThinkingLevel,
+  type SpawnOptions,
+  type SubagentType,
+} from "./types.js";
 import {
   type AgentActivity,
   type AgentDetails,
@@ -40,17 +46,17 @@ type AgentToolExecuteDeps = {
 };
 
 export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
-  const { pi, manager, agentActivity, fleet, isScopeModelsEnabled } = deps;
   const parentAgentType = getActiveSubagent();
+  const execute = createSpawnExecution(deps, (ctx, type, prompt, options) =>
+    deps.manager.spawn(deps.pi, ctx, type, prompt, options),
+  );
   return async (
-    toolCallId: string,
+    callId: string,
     params: AgentToolParams,
     signal: AbortSignal | undefined,
-    _onUpdate: AgentToolUpdate | undefined,
+    onUpdate: AgentToolUpdate | undefined,
     ctx: SubagentContext,
   ) => {
-    signal?.throwIfAborted();
-    ctx.signal?.throwIfAborted();
     if (!params.message.trim()) return failedResult("Empty message can't be sent to an agent.");
     const role = resolveSpawnAgent(
       params.agent_type,
@@ -58,11 +64,58 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
       ctx.parentRole ?? parentAgentType,
     );
     if ("error" in role) return failedResult(role.error);
-    const resolved = role.agent;
-    const subagentType = resolved.type;
-    const description = deriveDisplayDescription(params.message);
+    const result = await execute(
+      callId,
+      {
+        message: params.message,
+        model: params.model,
+        reasoning_effort: params.reasoning_effort,
+        agent: role.agent,
+        forkContext: params.fork_context === true,
+      },
+      signal,
+      onUpdate,
+      ctx,
+    );
+    return v1Result(
+      { agent_id: result.agentId, nickname: result.details.displayName || null },
+      result.details,
+    );
+  };
+}
+
+/** Already-normalized spawn policy; model authorization and activity remain shared. */
+export function createSpawnExecution(
+  deps: AgentToolExecuteDeps,
+  start: (
+    ctx: SubagentContext,
+    type: SubagentType,
+    prompt: string,
+    options: SpawnOptions,
+    signal?: AbortSignal,
+  ) => string | Promise<string>,
+) {
+  const { pi, manager, agentActivity, fleet, isScopeModelsEnabled } = deps;
+  return async (
+    toolCallId: string,
+    params: {
+      message: string;
+      agent: ResolvedAgent;
+      forkContext: boolean;
+      taskName?: string;
+      model?: string;
+      reasoning_effort?: string;
+    },
+    signal: AbortSignal | undefined,
+    _onUpdate: AgentToolUpdate | undefined,
+    ctx: SubagentContext,
+  ): Promise<{ agentId: string; details: AgentDetails }> => {
+    signal?.throwIfAborted();
+    ctx.signal?.throwIfAborted();
+    if (!params.message.trim()) return failedResult("Empty message can't be sent to an agent.");
+    const { type: subagentType, config: agentConfig } = params.agent;
+    const description = params.taskName ?? deriveDisplayDescription(params.message);
     const displayName = description || getDisplayName(subagentType);
-    const agentConfig = resolved.config;
     if (params.reasoning_effort !== undefined && !isThinkingLevel(params.reasoning_effort)) {
       return failedResult(
         `Unsupported reasoning_effort '${params.reasoning_effort}'.`,
@@ -115,15 +168,17 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
 
     signal?.throwIfAborted();
     ctx.signal?.throwIfAborted();
-    const id = manager.spawn(pi, ctx, subagentType, params.message, {
+    const options = {
+      taskName: params.taskName,
       description: displayName,
       model,
       thinkingLevel: thinking,
-      forkContext: params.fork_context,
+      forkContext: params.forkContext,
       invocation: agentInvocation,
       allowedTools: ctx.allowedTools,
       ...callbacks,
-    });
+    };
+    const id = await start(ctx, subagentType, params.message, options, signal);
 
     const record = manager.getRecord(id);
     if (record) record.toolCallId = toolCallId;
@@ -132,9 +187,9 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
     fleet.update();
 
     const status = record?.status === "queued" ? "queued" : "running";
-    return v1Result<AgentDetails>(
-      { agent_id: id, nickname: displayName || null },
-      {
+    return {
+      agentId: id,
+      details: {
         displayName,
         description: displayName,
         subagentType,
@@ -147,7 +202,7 @@ export function createAgentToolExecute(deps: AgentToolExecuteDeps) {
         status,
         agentId: id,
       },
-    );
+    };
   };
 }
 

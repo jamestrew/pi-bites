@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/openai/codex",
+  "revision": "1a89aec960cd92e2c59ce49b7f3c3347a915e4a9",
+  "sha256": {
+    "codex-rs/core/src/tools/handlers/multi_agents_spec.rs": "2562812621dfdef6e3b0efe2dcd69d90a31cba017dfdfc8b29adc16c94f622bd",
+    "codex-rs/core/src/tools/handlers/multi_agents_common.rs": "f6089ec9e4333531604d58795cf1ee3ab596e9610541592de5266bdde6de7948",
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/spawn.rs": "a1fcab59a6f6f7abea77a823e2f6fd60a5042659c57d2adea8d7a321dce8bcdb",
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/message_tool.rs": "99eccf8315869c65e96b570c6d6c061623195a100cbb4c8e9d1e5b08eb36b7dd",
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/send_message.rs": "4c45adff32a96519dfaa3ff36c02ddc9ce300bfe0f9039b449f2ac9dd30f3e86",
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/followup_task.rs": "d6b3542f063401a614fcda05fd598be22477dfabee6a26e7fac6e09b4976b8c2",
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/wait.rs": "6b4c6cc9d86c915e5a591ad5103a65a28b62874c66d8aa81302e4e584f504dcb",
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/interrupt_agent.rs": "063e1676319de93df17bdaa86f4834a95147817cbfcc6cbbf69952a85aff123c",
+    "codex-rs/core/src/tools/handlers/multi_agents_v2/list_agents.rs": "a6439f9ac710171542ca6ef3cb8271d1cdd766ff36cd686cd85288728823fdae",
+    "codex-rs/core/src/tools/spec_plan.rs": "849ef21d4e5c83febdc31eacd7609911d43e3f69a35168fe02ae899273b5ef3e",
+    "codex-rs/core/src/config/mod.rs": "9dbba31f23b8c3faf4317200f00f615bf5b8730db4c9d92bc312e54fa3cf4a85",
+    "codex-rs/core/src/agent/role.rs": "0311e6438eda278ac5800327beb035c70d8e531bc69b397f85117907aa2bb31a",
+    "codex-rs/core/src/agent/child_config.rs": "33d4dd6f70e6640af1059398272c48b88e16e0005105fbd1ef13e30456d39a39",
+    "codex-rs/core/src/agent/control/api.rs": "f6efa3b339cdf7765c2dfd4939b45213bddeacae9ce6d724b9af155a9bd05e8f",
+    "codex-rs/core/src/agent/control/interrupt.rs": "5974b73824956e8ffa86c9183715d7db3ce4f3227e9b67df225056c731ed4ea1",
+    "codex-rs/core/src/agent/control.rs": "64ce4eceebfdbda21d29ce507a111a5fa853b2d28b4f0059febf389840b67c24",
+    "codex-rs/core/src/agent/control/target.rs": "e267e7a7150f279ab70f0f71ee351039cd6e6ae5200c4310bcfde12fcf10d8b7",
+    "codex-rs/core/src/agent/agent_resolver.rs": "937b7e27ea39a5970ee0ad9696aad8db8d118a118313d83fb4ea0bc8b632946a",
+    "codex-rs/core/src/session/input_queue.rs": "2b4076d6d894295d3ce2daec34f8a90d404e5088ddf89adb9c8072fb8a4e53ab",
+    "codex-rs/core/src/thread_rollout_truncation.rs": "c0b347850a863fe349a7ba47af0076236a862df1f90201050bacf2f599e15bf7",
+    "codex-rs/core/assets/agent/builtins/explorer.toml": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "codex-rs/protocol/src/agent_path.rs": "18ddefda817a89b299cfbec14ea8e95ff4248e9fe5aca616656f39f7d5cfb045",
+    "codex-rs/tools/src/json_schema/types.rs": "17b11a7cf8530b9df722d382cad8066aca6c2a5d27d593e937ffdd3304f64d4a",
+    "LICENSE": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+    "NOTICE": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+  }
+}

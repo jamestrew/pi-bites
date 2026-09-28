@@ -33,6 +33,11 @@ export function createAgentTool(pi: ExtensionAPI, deps: RegisterAgentToolDeps) {
     label: "spawn_agent",
     description: CODEX_V1_CONTRACT.tools.spawn_agent.description,
     parameters: getAgentToolParameters(),
+    captureHistory: (args) =>
+      typeof args === "object" &&
+      args !== null &&
+      "fork_context" in args &&
+      args.fork_context === true,
 
     renderCall(args, theme, context) {
       const state = context.state as { metadata?: SpawnRenderState };

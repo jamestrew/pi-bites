@@ -1,6 +1,6 @@
 import { applyAndEmitLoaded } from "./settings.js";
 import type { AgentRecord } from "./types.js";
-import { SubagentController } from "./operations.js";
+import { SubagentController, type SubagentTools, type SubagentRegistration } from "./operations.js";
 /**
  * pi-agents — A pi extension providing Claude Code-style autonomous sub-agents.
  *
@@ -54,6 +54,16 @@ export function createSubagents(
   bashGate?: Pick<BashGateController, "isYolo">,
   getAutoCompactionThreshold?: () => number | undefined,
   getAllowedTools: () => string[] = () => pi.getActiveTools(),
+  // Internal integration seam; ordinary extension activation never supplies a partial tool set.
+  integrationTools?: (
+    pi: ExtensionAPI,
+    deps: {
+      manager: AgentManager;
+      agentActivity: Map<string, AgentActivity>;
+      fleet: FleetList;
+      isScopeModelsEnabled: () => boolean;
+    },
+  ) => { tools: SubagentTools; registration: SubagentRegistration },
 ) {
   // ---- Register custom notification renderers ----
   registerNotificationRenderer(pi);
@@ -536,12 +546,26 @@ export function createSubagents(
     isScopeModelsEnabled,
     () => approvalOwner.signal,
   );
+  const integration = integrationTools?.(pi, {
+    manager,
+    agentActivity,
+    fleet,
+    isScopeModelsEnabled,
+  });
   operations = new SubagentController(
     pi,
-    { spawn_agent, send_input, wait_agent, close_agent, resume_agent },
+    integration?.tools ?? {
+      spawn_agent,
+      send_input,
+      wait_agent,
+      close_agent,
+      resume_agent,
+    },
     manager,
     isScopeModelsEnabled,
     getAllowedTools,
+    undefined,
+    integration?.registration,
   );
   pi.on("session_tree", async (_event, ctx) => {
     operations.invalidate();

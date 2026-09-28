@@ -1,3 +1,4 @@
+import { TaskPaths } from "./task-paths.js";
 import { AgentTree, getAgentSessionId } from "./agent-tree.js";
 import type { RegisterCollaboration } from "./subagent-context.js";
 import type { SubagentContext } from "./operation-context.js";
@@ -62,6 +63,7 @@ export type { SpawnOptions } from "./types.js";
 
 export class AgentManager {
   private agents = new Map<string, AgentRecord>();
+  readonly taskPaths = new TaskPaths(() => this.listAgents());
   readonly tree = new AgentTree(this.agents, (id) => this.isClosing(id));
   private onComplete?: OnAgentComplete;
   private onStart?: OnAgentStart;
@@ -295,6 +297,10 @@ export class AgentManager {
       throw new Error("No concurrency slot is available. Close an agent before spawning another.");
     }
 
+    const taskName =
+      options.taskName === undefined
+        ? undefined
+        : this.taskPaths.available(ctx.sessionManager.getSessionId(), options.taskName);
     const id = randomUUID().slice(0, 17);
     const parent = snapshotParent(ctx);
     const parentEntries = options.forkContext
@@ -303,6 +309,7 @@ export class AgentManager {
     const abortController = new AbortController();
     const record: AgentRecord = {
       id,
+      taskName,
       incarnation: randomUUID(),
       generation: 1,
       type,
@@ -508,6 +515,7 @@ export class AgentManager {
       failure_count: record.failureHistory.length,
       abort: record.abort,
     });
+    if (record.taskName) this.releaseReservation(record);
     this.notifyComplete(record, generation);
   }
 

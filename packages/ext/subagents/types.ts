@@ -55,6 +55,8 @@ export interface AgentConfig {
 
 export interface AgentRecord {
   id: string;
+  /** Canonical named-task identity, retained across runtime replacement. */
+  taskName?: string;
   /** Conversation identity survives unloading its Pi runtime. */
   sessionId?: string;
   /** Manager-owned active branch, without extension state or approval allowances. */
@@ -236,6 +238,8 @@ export interface EnvInfo {
 }
 
 export interface SpawnOptions {
+  /** Harness-only named task segment; validated and reserved by the manager. */
+  taskName?: string;
   description: string;
   allowedTools?: string[];
   /** Explicitly wait for another agent to close when capacity is exhausted. */
