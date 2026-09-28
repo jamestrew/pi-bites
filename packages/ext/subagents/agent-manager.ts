@@ -8,7 +8,7 @@ import { AgentCloser, type ClosedAgentRecord } from "./agent-close.js";
 import { AgentReopener, type ReopenOptions } from "./agent-reopen.js";
 import { AgentInterrupter } from "./agent-interruption.js";
 import { resumeAgent, runAgent, steerAgent, type ToolActivity } from "./agent-runner.js";
-import { shutdownAgentSession } from "./agent-session-shutdown.js";
+import { AgentRuntimes } from "./agent-runtimes.js";
 import { resolveAgent } from "./agent-types.js";
 import { appendSubagentDiagnostic, serializeDiagnosticError } from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
@@ -82,7 +82,13 @@ export class AgentManager {
   private options = new WeakMap<AgentRecord, SpawnOptions>();
   private turnCounts = new WeakMap<AgentRecord, number>();
   private pendingAgents = new Set<Promise<string>>();
-  private teardowns = new Set<Promise<void>>();
+  private runtimes = new AgentRuntimes({
+    getRecord: (id) => this.agents.get(id),
+    isClosing: (id) => this.isClosing(id),
+    isSettled: (record) => (this.settledGeneration.get(record) ?? 0) >= record.generation,
+    retain: (record) => this.closer.retain(record),
+    invalidate: (record) => this.onAgentInvalidated?.(record),
+  });
   private reopener: AgentReopener;
   private closing = false;
   private disposed = false;
@@ -128,7 +134,8 @@ export class AgentManager {
       abort: (id) => void this.abort(id),
       teardown: async (record) => {
         await this.reopener.cancelChildren(getAgentSessionId(record));
-        if (record.session) await this.teardownSession(record.session);
+        await this.runtimes.pending(record.id);
+        if (record.session) await this.runtimes.teardown(record.session);
       },
       releaseReservation: (record) => this.releaseReservation(record),
     });
@@ -192,24 +199,6 @@ export class AgentManager {
     if (!this.reservations.delete(record)) return;
     this.reservedCount--;
     this.drainQueue();
-  }
-
-  private teardownSession(session: AgentSession): Promise<void> {
-    const teardown = shutdownAgentSession(session);
-    if (!this.teardowns.has(teardown)) {
-      this.teardowns.add(teardown);
-      void teardown.then(
-        () => this.teardowns.delete(teardown),
-        () => this.teardowns.delete(teardown),
-      );
-    }
-    return teardown;
-  }
-
-  private async waitForTeardowns(): Promise<void> {
-    while (this.teardowns.size > 0) {
-      await Promise.allSettled(this.teardowns);
-    }
   }
 
   private recordAssistantUsage(
@@ -477,6 +466,7 @@ export class AgentManager {
       record.result = responseText;
     }
     record.session = session;
+    getAgentSessionId(record);
     record.completedAt ??= Date.now();
     this.settleGeneration(record, generation);
   }
@@ -604,8 +594,9 @@ export class AgentManager {
       ...initialHooks,
       onSessionCreated: (session) => {
         record.session = session;
+        getAgentSessionId(record);
         if (abortController.signal.aborted) {
-          void this.teardownSession(session);
+          void this.runtimes.teardown(session);
           return;
         }
         // Flush any steers that arrived before the session was ready
@@ -720,6 +711,7 @@ export class AgentManager {
     if (
       !record?.session ||
       this.closer.isClosing(id) ||
+      this.isRuntimeDisposing(id) ||
       record.status === "running" ||
       record.status === "queued" ||
       (record.status !== "idle" && (this.settledGeneration.get(record) ?? 0) < record.generation)
@@ -852,6 +844,14 @@ export class AgentManager {
     });
   }
 
+  isRuntimeDisposing(id: string): boolean {
+    return this.runtimes.isDisposing(id);
+  }
+
+  disposeRuntime(id: string): Promise<void> {
+    return this.runtimes.dispose(id);
+  }
+
   /** Close a retained agent and every descendant represented by this manager. */
   close(id: string) {
     const pending = this.reopener.pending(id);
@@ -963,13 +963,14 @@ export class AgentManager {
     this.abortAll();
     await this.reopener.shutdown();
     await this.waitForAll();
+    await this.runtimes.waitForAll();
     for (const record of this.agents.values()) {
-      if (record.session) void this.teardownSession(record.session);
+      if (record.session) void this.runtimes.teardown(record.session);
       this.releaseReservation(record);
     }
-    await this.waitForTeardowns();
+    await this.runtimes.waitForAll();
     this.finalizeDispose();
-    await this.waitForTeardowns();
+    await this.runtimes.waitForAll();
   }
 
   dispose(): Promise<void> {
@@ -982,7 +983,7 @@ export class AgentManager {
     this.disposed = true;
     this.abortAll();
     for (const record of this.agents.values()) {
-      if (record.session) void this.teardownSession(record.session);
+      if (record.session) void this.runtimes.teardown(record.session);
       this.releaseReservation(record);
     }
     this.agents.clear();

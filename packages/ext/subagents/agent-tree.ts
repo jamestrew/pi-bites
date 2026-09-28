@@ -3,7 +3,7 @@ import type { AgentRecord } from "./types.js";
 /** Stable graph queries shared by delegation, targeting and subtree invalidation. */
 export function getAgentSessionId(record: AgentRecord): string | undefined {
   try {
-    return record.session?.sessionManager.getSessionId();
+    return (record.sessionId ??= record.session?.sessionManager.getSessionId());
   } catch {
     return undefined;
   }

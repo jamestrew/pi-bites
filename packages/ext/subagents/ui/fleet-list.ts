@@ -24,7 +24,11 @@ import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal } from "../usage.js";
 import { type AgentActivity, getDisplayName, type Theme } from "./agent-format.js";
-import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./conversation-viewer.js";
+import {
+  CONVERSATION_OVERLAY_OPTIONS,
+  ConversationViewer,
+  getConversationSource,
+} from "./conversation-viewer.js";
 
 /** Widget key for the FleetView list. */
 const FLEET_KEY = "fleet";
@@ -235,7 +239,11 @@ export class FleetList {
           a.status === "running" ||
           a.status === "queued" ||
           a.id === this.viewingAgentId ||
-          Boolean(a.session && a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS),
+          Boolean(
+            (a.session || a.retainedConversation) &&
+            a.completedAt != null &&
+            now - a.completedAt < FINISHED_LINGER_MS,
+          ),
       )
       .sort((a, b) => a.startedAt - b.startedAt);
   }
@@ -327,11 +335,11 @@ export class FleetList {
     }
     const record = entry.record;
     if (!this.ui) return;
-    if (!record.session) {
+    const session = getConversationSource(record);
+    if (!session) {
       this.ui.notify(`Agent is ${record.status} — no session available.`, "info");
       return;
     }
-    const session = record.session;
     const activity = this.agentActivity.get(record.id);
     this.viewingAgentId = record.id;
 

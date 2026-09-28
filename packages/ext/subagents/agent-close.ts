@@ -116,13 +116,16 @@ export class AgentCloser {
     let tombstone: ClosedAgentRecord = { id: record.id, recoverable: false };
     try {
       try {
-        tombstone = this.buildClosedRecord(record);
+        tombstone = this.retain(record);
       } finally {
         if (record.session) await this.hooks.teardown(record);
       }
       const failure = results.find((result) => result.status === "rejected");
       if (failure) throw failure.reason;
     } finally {
+      // An overlapping runtime disposal may have flushed more delivery while
+      // teardown waited. Prefer its final snapshot over the pre-shutdown branch.
+      if (record.retainedConversation) tombstone = this.retain(record);
       record.session = undefined;
       this.agents.delete(record.id);
       this.closed.set(record.id, tombstone);
@@ -130,7 +133,7 @@ export class AgentCloser {
     }
   }
 
-  private buildClosedRecord(record: AgentRecord): ClosedAgentRecord {
+  retain(record: AgentRecord): ClosedAgentRecord {
     let sessionFile: string | undefined;
     try {
       sessionFile = record.session?.sessionFile;
@@ -143,6 +146,8 @@ export class AgentCloser {
       ...(record.rootSessionId ? { rootSessionId: record.rootSessionId } : {}),
       description: record.description,
     };
+    if (record.retainedConversation)
+      return { ...metadata, conversation: structuredClone(record.retainedConversation) };
     const manager = record.session?.sessionManager;
     const header = manager && "getHeader" in manager ? manager.getHeader() : undefined;
     if (manager && header) {

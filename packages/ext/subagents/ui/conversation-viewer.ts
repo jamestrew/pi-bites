@@ -5,7 +5,7 @@
  * Subscribes to session events for real-time streaming updates.
  */
 
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, type AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   Input,
@@ -44,6 +44,20 @@ export const CONVERSATION_OVERLAY_OPTIONS = {
 
 const MIN_VIEWPORT = 3;
 
+/** Read-only history needs no loaded runtime or live extension context. */
+export function getConversationSource(
+  record: AgentRecord,
+): Pick<AgentSession, "messages" | "subscribe"> | undefined {
+  if (record.session) return record.session;
+  const conversation = record.retainedConversation;
+  if (!conversation) return undefined;
+  return {
+    messages: buildSessionContext(conversation.entries.filter((entry) => entry.type !== "session"))
+      .messages,
+    subscribe: () => () => {},
+  };
+}
+
 export class ConversationViewer implements Component {
   private scrollOffset = 0;
   private autoScroll = true;
@@ -59,7 +73,7 @@ export class ConversationViewer implements Component {
 
   constructor(
     private tui: TUI,
-    private session: AgentSession,
+    private session: Pick<AgentSession, "messages" | "subscribe">,
     private record: AgentRecord,
     private activity: AgentActivity | undefined,
     private theme: Theme,

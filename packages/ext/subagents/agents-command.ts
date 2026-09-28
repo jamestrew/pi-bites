@@ -91,7 +91,10 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
 
   async function viewAgentConversation(ctx: ExtensionCommandContext, record: AgentRecord) {
     const ui = ctx.ui;
-    if (!record.session) {
+    const { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer, getConversationSource } =
+      await import("./ui/conversation-viewer.js");
+    const session = getConversationSource(record);
+    if (!session) {
       ui.notify(
         `Agent is ${record.status === "queued" ? "queued" : "expired"} — no session available.`,
         "info",
@@ -99,9 +102,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
       return;
     }
 
-    const { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } =
-      await import("./ui/conversation-viewer.js");
-    const session = record.session;
     await ui.custom<undefined>(
       (tui, theme, keybindings, done) =>
         new ConversationViewer(
