@@ -182,7 +182,35 @@ export function createV2Tools(
         };
       },
     });
+  const wait_agent = defineSubagentTool({
+    name: "wait_agent",
+    label: "wait_agent",
+    description: CODEX_V2_CONTRACT.tools.wait_agent.description,
+    parameters: Type.Unsafe<{ timeout_ms?: number }>(CODEX_V2_CONTRACT.tools.wait_agent.parameters),
+    ...renderers("wait_agent"),
+    async execute(_id, args, signal, _update, ctx) {
+      const requested = args.timeout_ms ?? 30_000;
+      if (requested > 3_600_000) throw new Error("timeout_ms must not exceed 3600000");
+      const timeout = Math.max(10_000, requested);
+      const messenger = deps.getMessenger(ctx.sessionManager.getSessionId());
+      if (!messenger) throw new Error("Mailbox is unavailable");
+      const outcome = await messenger.wait(timeout, signal);
+      const summary =
+        outcome === "mail"
+          ? "Wait completed."
+          : outcome === "input"
+            ? "Wait interrupted by new input."
+            : "Wait timed out.";
+      const notice =
+        requested < timeout
+          ? `\n\nRequested timeout of ${requested}ms was clamped to the minimum of ${timeout}ms.`
+          : "";
+      const value = { message: summary + notice, timed_out: outcome === "timeout" };
+      return { ...textResult(JSON.stringify(value), { status: summary }), value };
+    },
+  });
   return {
+    wait_agent,
     spawn_agent,
     list_agents,
     send_message: messaging("send_message"),
@@ -200,14 +228,16 @@ type RenderState = { error?: string; agents?: string[]; status?: string };
 function renderers(name: string) {
   return {
     renderCall(
-      args: { task_name?: string; path_prefix?: string; target?: string },
+      args: { task_name?: string; path_prefix?: string; target?: string; timeout_ms?: number },
       theme: { bold(s: string): string; fg(color: "accent" | "dim", s: string): string },
       context: { state: RenderState; expanded: boolean },
     ) {
       return {
         render(width: number) {
           const summary = sanitizeSingleLine(
-            args.task_name ?? args.target ?? args.path_prefix ?? "/root",
+            name === "wait_agent"
+              ? `${Math.max(10_000, args.timeout_ms ?? 30_000)}ms`
+              : (args.task_name ?? args.target ?? args.path_prefix ?? "/root"),
           );
           const lines = [
             fitLine(

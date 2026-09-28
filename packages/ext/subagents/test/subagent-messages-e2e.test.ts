@@ -22,6 +22,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
+import { createV2IntegrationHarness } from "../v2-integration-harness.js";
 import { createAgentCompletionHandler } from "../agent-completion.js";
 import { createWaitAgent } from "../register-wait-agent.js";
 import { createSubagentMessenger, type SubagentSender } from "../subagent-messages.js";
@@ -514,3 +515,100 @@ it.each([
     }
   },
 );
+
+it.each(["continue", "handled"] as const)(
+  "V2 wait respects asynchronous input hooks returning %s",
+  async (action) => {
+    const entered = deferred();
+    const release = deferred();
+    const waiting = deferred();
+    const { session, model } = await makeSession(
+      [],
+      [
+        (pi) => {
+          createV2IntegrationHarness(pi);
+        },
+        (pi) => {
+          pi.on("input", async (event) => {
+            if (event.text === "USER INTERRUPTION") {
+              entered.resolve();
+              await release.promise;
+              return { action };
+            }
+            return { action: "continue" };
+          });
+        },
+      ],
+      ["wait_agent"],
+    );
+    const requests: Context["messages"][] = [];
+    session.agent.streamFunction = (_model, context) => {
+      requests.push(structuredClone(context.messages));
+      return requests.length === 1
+        ? response(
+            model,
+            [{ type: "toolCall", id: "mail-wait", name: "wait_agent", arguments: {} }],
+            "toolUse",
+          )
+        : response(model, [{ type: "text", text: "done" }]);
+    };
+    const unsub = session.subscribe((event) => {
+      if (event.type === "tool_execution_start") waiting.resolve();
+    });
+    try {
+      const running = session.prompt("go");
+      await waiting.promise;
+      const input = session.prompt("USER INTERRUPTION", { streamingBehavior: "steer" });
+      await entered.promise;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(requests).toHaveLength(1);
+      release.resolve();
+      await input;
+      if (action === "handled") {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(requests).toHaveLength(1);
+        await session.abort();
+        await running;
+        return;
+      }
+      await running;
+      expect(requests).toHaveLength(2);
+      const payload = requestText(requests[1]!);
+      expect(payload.match(/USER INTERRUPTION/g)).toHaveLength(1);
+      expect(payload).toContain("Wait interrupted by new input.");
+      expect(payload).not.toContain("Wait timed out.");
+    } finally {
+      release.resolve();
+      unsub();
+      await session.abort();
+      session.dispose();
+    }
+  },
+);
+
+it("real Pi queues completion mail while idle with zero unsolicited requests", async () => {
+  const { model, session, sessionManager } = await makeSession();
+  const { messenger, unsubscribe } = wireMessenger(session, sessionManager);
+  const requests: Context["messages"][] = [];
+  session.agent.streamFunction = (_model, context) => {
+    requests.push(structuredClone(context.messages));
+    return response(model, [{ type: "text", text: "ack" }]);
+  };
+  try {
+    for (const final of ["FIRST FINAL", "SECOND FINAL"])
+      expect(
+        messenger.queueOnly(sessionManager.getSessionId(), sender, final, false, "completed"),
+      ).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(requests).toHaveLength(0);
+    expect(await messenger.wait(30_000)).toBe("mail");
+    await session.prompt("read the mail");
+    expect(requests).toHaveLength(1);
+    for (const final of ["FIRST FINAL", "SECOND FINAL"])
+      expect(requestText(requests[0]!).match(new RegExp(final, "g"))).toHaveLength(1);
+  } finally {
+    unsubscribe();
+    messenger.dispose();
+    session.dispose();
+  }
+});

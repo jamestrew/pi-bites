@@ -101,6 +101,20 @@ export function createSubagents(
     onAgentResultPendingUI: (id) => fleet.onAgentResultPending(id),
     shouldNotify: (record) => !retiredConversations.has(record),
     deliveryPi: (id) => deliveries.get(id)?.pi,
+    queueCompletion: integrationTools
+      ? (record) => {
+          if (!record.taskName || record.status === "stopped") return;
+          deliveries
+            .get(record.parentSessionId)
+            ?.messenger.queueOnly(
+              record.parentSessionId,
+              { id: record.taskName, type: record.type, title: record.taskName },
+              record.error ? `Agent failed: ${record.error}` : (record.result ?? "No output."),
+              false,
+              record.status === "error" ? "failed" : "completed",
+            );
+        }
+      : undefined,
     scheduleAutomatic: (parentSessionId, deliver, cancel) =>
       deliveries.get(parentSessionId)?.messenger.scheduleFinal(parentSessionId, deliver, cancel) ??
       false,

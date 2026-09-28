@@ -12,6 +12,7 @@ export interface SubagentMessageDetails {
   sender: SubagentSender;
   message: string;
   activityId?: string;
+  completion?: "completed" | "failed";
 }
 
 type AppendCustomMessage = (
@@ -47,6 +48,33 @@ export function createSubagentMessenger(
   let appendCustomMessage: AppendCustomMessage | undefined;
   let afterTerminalOutput = false;
   const activity = new Map<string, boolean>();
+  const waiters = new Set<(event: "mail" | "input" | "cancelled") => void>();
+  const wake = (event: "mail" | "input" | "cancelled") => {
+    for (const waiter of waiters) waiter(event);
+  };
+  let inputPending: (() => boolean) | undefined;
+  let inputTimer: ReturnType<typeof setTimeout> | undefined;
+  const stopInputCheck = () => {
+    clearTimeout(inputTimer);
+    inputTimer = undefined;
+  };
+  const checkInput = () => {
+    stopInputCheck();
+    if (!waiters.size || !inputPending) return;
+    try {
+      if (inputPending()) {
+        wake("input");
+        return;
+      }
+    } catch {
+      // Pi guards even extracted methods after replacement. Never leak that failure.
+      inputPending = undefined;
+      wake("cancelled");
+      return;
+    }
+    // Pi has no extension post-enqueue event; input hooks can await later handlers.
+    inputTimer = setTimeout(checkInput, 25);
+  };
   let revision = 0;
   const publishActivity = () => {
     try {
@@ -139,6 +167,9 @@ export function createSubagentMessenger(
   return {
     sessionStarted(id: string, append?: AppendCustomMessage): void {
       if (sessionId !== id) {
+        wake("cancelled");
+        inputPending = undefined;
+        stopInputCheck();
         activity.clear();
         publishActivity();
         revision = 0;
@@ -178,6 +209,9 @@ export function createSubagentMessenger(
     flushForShutdown,
     dispose(): void {
       disposed = true;
+      wake("cancelled");
+      inputPending = undefined;
+      stopInputCheck();
       activity.clear();
       publishActivity();
       sessionId = undefined;
@@ -194,10 +228,11 @@ export function createSubagentMessenger(
       sender: SubagentSender,
       message: string,
       task = false,
+      completion?: SubagentMessageDetails["completion"],
     ): boolean {
       if (disposed || targetSessionId !== sessionId) return false;
       const activityId = randomUUID();
-      const details = { sender, message, activityId };
+      const details = { sender, message, activityId, ...(completion ? { completion } : {}) };
       activity.set(activityId, task);
       if (!persist(details)) {
         activity.delete(activityId);
@@ -205,7 +240,36 @@ export function createSubagentMessenger(
       }
       revision++;
       publishActivity();
+      wake("mail");
       return true;
+    },
+    wait(timeoutMs: number, signal?: AbortSignal): Promise<"mail" | "input" | "timeout"> {
+      signal?.throwIfAborted();
+      if (disposed || !sessionId) return Promise.reject(new Error("Mailbox is unavailable"));
+      if (activity.size > 0) return Promise.resolve("mail");
+      return new Promise((resolve, reject) => {
+        const finish = (event: "mail" | "input" | "timeout" | "cancelled") => {
+          clearTimeout(timer);
+          waiters.delete(finish);
+          if (!waiters.size) stopInputCheck();
+          signal?.removeEventListener("abort", abort);
+          if (event === "cancelled") reject(new Error("Wait cancelled."));
+          else resolve(event);
+        };
+        const abort = () => finish("cancelled");
+        const timer = setTimeout(() => finish("timeout"), timeoutMs);
+        waiters.add(finish);
+        signal?.addEventListener("abort", abort, { once: true });
+        // Subscribe before rechecking: a pending arrival is never consumed by a wait.
+        if (signal?.aborted) abort();
+        else if (activity.size > 0) finish("mail");
+        else checkInput();
+      });
+    },
+    userInput(hasPendingMessages: () => boolean): void {
+      if (disposed) return;
+      inputPending = hasPendingMessages;
+      checkInput();
     },
     observe() {
       return {
@@ -263,6 +327,10 @@ export function bindSubagentMessenger(
     );
     started?.(id);
   };
+  pi.on("input", (event, ctx) => {
+    if (event.source !== "extension") messenger.userInput(ctx.hasPendingMessages.bind(ctx));
+    return { action: "continue" };
+  });
   pi.on("context", (event) => messenger.contextPrepared(event.messages));
   pi.on("agent_before_settle", () => {
     if (messenger.observe().pendingTasks > 0) return { continue: true };

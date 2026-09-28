@@ -24,6 +24,7 @@ it("spawns and lists named agents through direct tools and the shared manager", 
   });
   const h = harness();
   expect([...h.direct.keys()]).toEqual([
+    "wait_agent",
     "spawn_agent",
     "list_agents",
     "send_message",
@@ -316,4 +317,18 @@ it("rejects unnamed registry agents from both named messaging tools before deliv
   expect(record.prompt).toBe("registry task");
   expect(record.session.steer).not.toHaveBeenCalled();
   expect(h.pi.sendMessage).not.toHaveBeenCalled();
+});
+
+it("does not deliver a stopped turn's final, and still updates completion UI events", async () => {
+  readyChild();
+  const h = harness();
+  await h.emit("session_start");
+  await h.call("spawn_agent", { task_name: "a", message: "x" });
+  const id = vi.mocked(runAgent).mock.calls[0]![3].agentId;
+  const failed = vi.fn();
+  h.pi.events.on("subagents:failed", failed);
+  h.pi.events.emit("subagents:rpc:stop", { requestId: "stop", agentId: id });
+  await Reflect.get(globalThis, Symbol.for("pi-subagents:manager")).waitForAll();
+  expect(h.pi.sendMessage).not.toHaveBeenCalled();
+  expect(failed).toHaveBeenCalledTimes(1);
 });
