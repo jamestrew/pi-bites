@@ -1,3 +1,4 @@
+import { getAgentSessionId } from "./agent-tree.js";
 import { applyAndEmitLoaded } from "./settings.js";
 import type { AgentRecord } from "./types.js";
 import { SubagentController, type SubagentTools, type SubagentRegistration } from "./operations.js";
@@ -62,6 +63,7 @@ export function createSubagents(
       agentActivity: Map<string, AgentActivity>;
       fleet: FleetList;
       isScopeModelsEnabled: () => boolean;
+      getMessenger: (sessionId: string) => ReturnType<typeof createSubagentMessenger> | undefined;
     },
   ) => { tools: SubagentTools; registration: SubagentRegistration },
 ) {
@@ -93,7 +95,7 @@ export function createSubagents(
     pi,
     getRecord: (id) => manager.getRecord(id),
     onAgentFinishedUI: (id) => {
-      agentActivity.delete(id);
+      if (!manager.getRecord(id)?.taskName) agentActivity.delete(id);
       fleet.onAgentFinished(id);
     },
     onAgentResultPendingUI: (id) => fleet.onAgentResultPending(id),
@@ -140,12 +142,20 @@ export function createSubagents(
       completion.onAgentStatusChanged(record);
       parentAllowances.delete(record.id);
       childControllers.get(record.id)?.invalidate();
+      const id = getAgentSessionId(record);
+      if (id) {
+        deliveries.get(id)?.messenger.flushForShutdown();
+        deliveries.get(id)?.messenger.dispose();
+        deliveries.delete(id);
+      }
     },
     (record) =>
       (childPi, getChildTools = () => childPi.getActiveTools()) => {
         const child = operations.forChild(childPi, record, getChildTools);
         childControllers.set(record.id, child);
-        const messenger = createSubagentMessenger(childPi);
+        const messenger = createSubagentMessenger(childPi, (pending) =>
+          fleet.setPendingMail(record.id, pending),
+        );
         let sessionId: string | undefined;
         const start = bindSubagentMessenger(childPi, messenger, (id) => {
           sessionId = id;
@@ -229,6 +239,9 @@ export function createSubagents(
 
   pi.on("session_before_switch", () => {
     operations.invalidate();
+    parentMessenger.flushForShutdown();
+    parentMessenger.dispose();
+    deliveries.clear();
     approvalOwner.abort();
     parentAllowances.clear();
     currentCtx = undefined;
@@ -551,6 +564,7 @@ export function createSubagents(
     agentActivity,
     fleet,
     isScopeModelsEnabled,
+    getMessenger: (id) => deliveries.get(id)?.messenger,
   });
   operations = new SubagentController(
     pi,

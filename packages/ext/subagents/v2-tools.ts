@@ -1,4 +1,5 @@
-import { resolveSpawnAgent } from "./agent-types.js";
+import type { createSubagentMessenger } from "./subagent-messages.js";
+import { resolveAgent, resolveSpawnAgent } from "./agent-types.js";
 import { spawnNamed } from "./task-paths.js";
 import { keyHint, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container } from "@earendil-works/pi-tui";
@@ -23,6 +24,7 @@ export function createV2Tools(
     agentActivity: Map<string, AgentActivity>;
     fleet: FleetList;
     isScopeModelsEnabled: () => boolean;
+    getMessenger: (sessionId: string) => ReturnType<typeof createSubagentMessenger> | undefined;
   },
 ) {
   const roots = new Map<string, WaitAgentStatus>();
@@ -125,27 +127,98 @@ export function createV2Tools(
       return { ...textResult(JSON.stringify(value), undefined), value };
     },
   });
-  return { spawn_agent, list_agents };
+  const messaging = (name: "send_message" | "followup_task") =>
+    defineSubagentTool({
+      name,
+      label: name,
+      description: CODEX_V2_CONTRACT.tools[name].description,
+      parameters: Type.Unsafe<{ target: string; message: string }>(
+        CODEX_V2_CONTRACT.tools[name].parameters,
+      ),
+      ...renderers(name),
+      async execute(_id, args, signal, _update, ctx) {
+        signal?.throwIfAborted();
+        if (!args.message.trim()) throw new Error("Empty message can't be sent to an agent");
+        if (!args.target.trim()) throw new Error("Target must not be empty");
+        const sessionId = ctx.sessionManager.getSessionId();
+        const caller = deps.manager.taskPaths.caller(sessionId);
+        const root = args.target === "/root";
+        if (root && name === "followup_task")
+          throw new Error("Cannot send a follow-up task to root");
+        const record = root ? undefined : deps.manager.taskPaths.lookup(sessionId, args.target);
+        if (
+          record &&
+          (!record.session ||
+            deps.manager.isClosing(record.id) ||
+            deps.manager.isRuntimeDisposing(record.id))
+        )
+          throw new Error("Target agent is not loaded");
+        const targetSessionId = record?.session?.sessionManager.getSessionId() ?? caller.rootId;
+        const messenger = deps.getMessenger(targetSessionId);
+        if (!messenger) throw new Error("Target agent is not loaded");
+        const sender = {
+          id: caller.path,
+          type: resolveAgent(ctx.parentRole ?? "default").type,
+          title: caller.path,
+        };
+        const deliver = () =>
+          messenger.queueOnly(targetSessionId, sender, args.message, name === "followup_task");
+        const accepted =
+          name === "followup_task" && record
+            ? deps.manager.followup(record.id, deliver, () => messenger.observe().pendingTasks > 0)
+            : deliver();
+        if (!accepted) throw new Error("Input was not submitted to target agent");
+        if (record) {
+          deps.fleet.ensureTimer();
+          deps.fleet.update();
+          pi.events.emit("subagents:steered", { id: record.id, message: args.message });
+        }
+        return {
+          ...textResult("", {
+            target: record?.taskName ?? "/root",
+            status: name === "send_message" ? "queued" : "submitted",
+          }),
+          value: "" as const,
+        };
+      },
+    });
+  return {
+    spawn_agent,
+    list_agents,
+    send_message: messaging("send_message"),
+    followup_task: messaging("followup_task"),
+  };
 }
 
 const listResultSchema = Type.Unsafe<{
   agents: Array<{ agent_name: string; agent_status: WaitAgentStatus }>;
 }>(CODEX_V2_CONTRACT.tools.list_agents.output_schema);
 
-type RenderState = { error?: string; agents?: string[] };
+type RenderState = { error?: string; agents?: string[]; status?: string };
 
 /** The call row owns status/errors; results never duplicate it. */
 function renderers(name: string) {
   return {
     renderCall(
-      args: { task_name?: string; path_prefix?: string },
+      args: { task_name?: string; path_prefix?: string; target?: string },
       theme: { bold(s: string): string; fg(color: "accent" | "dim", s: string): string },
       context: { state: RenderState; expanded: boolean },
     ) {
       return {
         render(width: number) {
-          const summary = sanitizeSingleLine(args.task_name ?? args.path_prefix ?? "/root");
-          const lines = [fitLine(theme.bold(name) + theme.fg("accent", ` ${summary}`), width)];
+          const summary = sanitizeSingleLine(
+            args.task_name ?? args.target ?? args.path_prefix ?? "/root",
+          );
+          const lines = [
+            fitLine(
+              theme.bold(name) +
+                theme.fg(
+                  "accent",
+                  ` ${summary}${context.state.status ? ` ${context.state.status}` : ""}`,
+                ),
+              width,
+            ),
+          ];
           const agents = context.state.agents;
           if (agents?.length) {
             lines.push("");
@@ -172,11 +245,14 @@ function renderers(name: string) {
       };
     },
     renderResult(
-      result: { content: Array<{ type: string; text?: string }> },
+      result: { content: Array<{ type: string; text?: string }>; details?: unknown },
       _options: unknown,
       _theme: unknown,
       context: { state: RenderState; isError: boolean },
     ) {
+      const details = result.details as { status?: string } | undefined;
+      if (typeof details?.status === "string")
+        context.state.status = sanitizeSingleLine(details.status);
       if (context.isError)
         context.state.error = result.content
           .filter((b) => b.type === "text")

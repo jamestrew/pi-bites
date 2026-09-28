@@ -502,3 +502,13 @@ describe("FleetList overlay lifecycle", () => {
     ).toBe(false);
   });
 });
+
+it("keeps idle agents with pending mail visible until their next request", () => {
+  const record = makeRecord({ status: "completed", completedAt: 1 });
+  const h = harness([record]);
+  h.fleet.setPendingMail(record.id, 2);
+  expect(h.render(150).join("\n")).toContain("2 pending messages");
+  h.fleet.setPendingMail(record.id, 0);
+  expect(h.render(150)).toEqual([]);
+  h.fleet.dispose();
+});

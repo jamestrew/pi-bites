@@ -23,7 +23,12 @@ it("spawns and lists named agents through direct tools and the shared manager", 
     return waitForCancellation(options.signal);
   });
   const h = harness();
-  expect([...h.direct.keys()]).toEqual(["spawn_agent", "list_agents"]);
+  expect([...h.direct.keys()]).toEqual([
+    "spawn_agent",
+    "list_agents",
+    "send_message",
+    "followup_task",
+  ]);
   const spawned = await h.call("spawn_agent", { task_name: "research", message: "inspect" });
   expect(JSON.parse(spawned.content[0].text)).toEqual({ task_name: "/root/research" });
   const listed = await h.call("list_agents", {});
@@ -200,7 +205,7 @@ it("renders safe direct scanlines without duplicate result rows", () => {
     bold: (s: string) => `<b>${s}</b>`,
     fg: (c: string, s: string) => `<${c}>${s}</${c}>`,
   };
-  for (const name of ["spawn_agent", "list_agents"]) {
+  for (const name of ["spawn_agent", "list_agents", "send_message", "followup_task"]) {
     const tool = h.direct.get(name);
     const context = { state: {}, isError: true, expanded: false };
     const row = tool.renderCall({ task_name: "a\nunsafe", path_prefix: "/root" }, theme, context);
@@ -294,4 +299,21 @@ it("reports the loaded root's terminal state to child list callers", async () =>
   expect((await h.call("list_agents", {})).value.agents).toEqual([
     { agent_name: "/root", agent_status: "running" },
   ]);
+});
+
+it("rejects unnamed registry agents from both named messaging tools before delivery", async () => {
+  readyChild();
+  const h = harness();
+  h.pi.getActiveTools = () => ["send_message", "followup_task"];
+  const registry = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));
+  const id = registry.spawn(h.pi, h.ctx, "worker", "registry task", { description: "unnamed" });
+  const record = registry.getRecord(id);
+  expect(record.session).toBeDefined();
+  for (const name of ["send_message", "followup_task"])
+    await expect(h.call(name, { target: id, message: "must not arrive" })).rejects.toThrow(
+      "no task path",
+    );
+  expect(record.prompt).toBe("registry task");
+  expect(record.session.steer).not.toHaveBeenCalled();
+  expect(h.pi.sendMessage).not.toHaveBeenCalled();
 });

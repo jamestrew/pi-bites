@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -10,6 +11,7 @@ export type SubagentSender = WaitAgentSender;
 export interface SubagentMessageDetails {
   sender: SubagentSender;
   message: string;
+  activityId?: string;
 }
 
 type AppendCustomMessage = (
@@ -34,13 +36,25 @@ function modelContent({ sender, message }: SubagentMessageDetails): string {
   ].join("\n");
 }
 
-export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
+export function createSubagentMessenger(
+  pi: Pick<ExtensionAPI, "sendMessage">,
+  onActivity?: (pending: number) => void,
+) {
   let active = false;
   let flushing = false;
   let disposed = false;
   let sessionId: string | undefined;
   let appendCustomMessage: AppendCustomMessage | undefined;
   let afterTerminalOutput = false;
+  const activity = new Map<string, boolean>();
+  let revision = 0;
+  const publishActivity = () => {
+    try {
+      onActivity?.(activity.size);
+    } catch {
+      /* UI failure does not revoke accepted input. */
+    }
+  };
   const pending: SubagentMessageDetails[] = [];
   const pendingNextTurn: SubagentMessageDetails[] = [];
   const pendingFinals: Array<{ deliver: () => void; cancel?: () => void }> = [];
@@ -125,6 +139,9 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
   return {
     sessionStarted(id: string, append?: AppendCustomMessage): void {
       if (sessionId !== id) {
+        activity.clear();
+        publishActivity();
+        revision = 0;
         pending.length = 0;
         pendingNextTurn.length = 0;
         cancelFinals();
@@ -161,6 +178,8 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
     flushForShutdown,
     dispose(): void {
       disposed = true;
+      activity.clear();
+      publishActivity();
       sessionId = undefined;
       appendCustomMessage = undefined;
       active = false;
@@ -168,6 +187,40 @@ export function createSubagentMessenger(pi: Pick<ExtensionAPI, "sendMessage">) {
       pending.length = 0;
       pendingNextTurn.length = 0;
       cancelFinals();
+    },
+    /** Native queue-only delivery owns persistence; this map tracks only unseen activity. */
+    queueOnly(
+      targetSessionId: string,
+      sender: SubagentSender,
+      message: string,
+      task = false,
+    ): boolean {
+      if (disposed || targetSessionId !== sessionId) return false;
+      const activityId = randomUUID();
+      const details = { sender, message, activityId };
+      activity.set(activityId, task);
+      if (!persist(details)) {
+        activity.delete(activityId);
+        return false;
+      }
+      revision++;
+      publishActivity();
+      return true;
+    },
+    observe() {
+      return {
+        revision,
+        pending: activity.size,
+        pendingTasks: [...activity.values()].filter(Boolean).length,
+      };
+    },
+    contextPrepared(messages: readonly { role: string; details?: unknown }[]): void {
+      for (const message of messages) {
+        if (message.role !== "custom") continue;
+        const details = message.details as Partial<SubagentMessageDetails> | undefined;
+        if (typeof details?.activityId === "string" && activity.delete(details.activityId))
+          publishActivity();
+      }
     },
     scheduleFinal(parentSessionId: string, deliver: () => void, cancel?: () => void): boolean {
       if (disposed || parentSessionId !== sessionId) return false;
@@ -210,6 +263,10 @@ export function bindSubagentMessenger(
     );
     started?.(id);
   };
+  pi.on("context", (event) => messenger.contextPrepared(event.messages));
+  pi.on("agent_before_settle", () => {
+    if (messenger.observe().pendingTasks > 0) return { continue: true };
+  });
   pi.on("agent_start", () => messenger.agentStarted());
   pi.on("turn_start", () => messenger.turnStarted());
   pi.on("message_end", (event) => {
