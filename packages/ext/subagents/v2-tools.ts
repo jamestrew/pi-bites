@@ -1,3 +1,4 @@
+import { recentTurnEntries } from "./fork-history.js";
 import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
 import { lifecycleStatusLabel } from "./ui/agent-lifecycle-render.js";
 import type { createSubagentMessenger } from "./subagent-messages.js";
@@ -61,10 +62,17 @@ export function createV2Tools(
       model?: string;
       reasoning_effort?: string;
     }>(CODEX_V2_CONTRACT.tools.spawn_agent.parameters),
-    captureHistory: (args) => forkMode(args) === "all",
+    captureHistory: (args) => forkMode(args) !== "none",
     ...renderers("spawn_agent"),
     async execute(callId, args, signal, onUpdate, ctx) {
       const fork = forkMode(args);
+      if (typeof fork === "bigint") {
+        const entries = recentTurnEntries(ctx.sessionManager.buildContextEntries(), fork);
+        ctx = {
+          ...ctx,
+          sessionManager: { ...ctx.sessionManager, buildContextEntries: () => entries },
+        };
+      }
       const role = resolveSpawnAgent(
         args.agent_type,
         fork === "all" && args.agent_type === undefined,
@@ -80,7 +88,7 @@ export function createV2Tools(
           model: args.model,
           reasoning_effort: args.reasoning_effort,
           taskName: args.task_name,
-          forkContext: fork === "all",
+          forkContext: fork !== "none",
           agent: inherited
             ? { ...agent, config: { ...agent.config, model: undefined, thinking: undefined } }
             : agent,
@@ -265,7 +273,13 @@ type RenderState = { error?: string; agents?: string[]; status?: string };
 function renderers(name: string) {
   return {
     renderCall(
-      args: { task_name?: string; path_prefix?: string; target?: string; timeout_ms?: number },
+      args: {
+        task_name?: string;
+        fork_turns?: string;
+        path_prefix?: string;
+        target?: string;
+        timeout_ms?: number;
+      },
       theme: { bold(s: string): string; fg(color: "accent" | "dim", s: string): string },
       context: { state: RenderState; expanded: boolean },
     ) {
@@ -276,12 +290,20 @@ function renderers(name: string) {
               ? `${Math.max(10_000, args.timeout_ms ?? 30_000)}ms`
               : (args.task_name ?? args.target ?? args.path_prefix ?? "/root"),
           );
+          let fork = "";
+          if (name === "spawn_agent") {
+            try {
+              fork = ` fork=${forkMode(args)}`;
+            } catch {
+              fork = " fork=invalid";
+            }
+          }
           const lines = [
             fitLine(
               theme.bold(name) +
                 theme.fg(
                   "accent",
-                  ` ${summary}${context.state.status ? ` ${context.state.status}` : ""}`,
+                  ` ${summary}${fork}${context.state.status ? ` ${context.state.status}` : ""}`,
                 ),
               width,
             ),
@@ -352,12 +374,15 @@ function renderers(name: string) {
   };
 }
 
-function forkMode(args: unknown): "all" | "none" {
+function forkMode(args: unknown): "all" | "none" | bigint {
   const value =
     typeof args === "object" && args !== null && "fork_turns" in args ? args.fork_turns : undefined;
   const fork = typeof value === "string" ? value.trim().toLowerCase() || "all" : "all";
   if (fork === "all" || fork === "none") return fork;
-  throw new Error(
-    "This integration slice supports fork_turns all or none; recent-turn forks are not implemented.",
-  );
+  // Match the pinned 64-bit usize parser, including leading + and zeroes.
+  if (/^\+?[0-9]+$/.test(fork)) {
+    const count = BigInt(fork);
+    if (count > 0n && count <= 18446744073709551615n) return count;
+  }
+  throw new Error("fork_turns must be `none`, `all`, or a positive integer string");
 }

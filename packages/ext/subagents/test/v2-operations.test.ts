@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { saveSettings } from "../settings.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -56,13 +60,18 @@ it.each(["", "root", ".", "..", "Upper", "a/b", "é", "a-b"])(
   },
 );
 
-it("rejects missing/blank messages, unknown fields and unsupported recent-turn forks", async () => {
+it("rejects missing/blank messages, legacy fields and invalid fork selections", async () => {
   const h = harness();
   for (const args of [
     { message: "work" },
     { task_name: "a", message: " " },
     { task_name: "a", message: "x", fork_context: true },
-    { task_name: "a", message: "x", fork_turns: "2" },
+    { task_name: "a", message: "x", fork_context: false },
+    ...["0", "-1", "1.5", "1e2", "nope", "18446744073709551616", 2, null].map((fork_turns) => ({
+      task_name: "a",
+      message: "x",
+      fork_turns,
+    })),
   ])
     await expect(h.call("spawn_agent", args)).rejects.toThrow();
   expect(runAgent).not.toHaveBeenCalled();
@@ -103,6 +112,16 @@ it.each(["none", " NONE "])(
   },
 );
 
+it.each([undefined, "", "  ", " ALL ", "2", " +0002 ", "18446744073709551615"])(
+  "accepts fork selection %j and caps recent turns at available history",
+  async (fork_turns) => {
+    readyChild();
+    const h = harness();
+    await h.call("spawn_agent", { task_name: "work", message: "x", fork_turns });
+    expect(vi.mocked(runAgent).mock.calls[0]?.[3].parentEntries).toHaveLength(1);
+  },
+);
+
 it("releases initialization failures and cancelled reservations for retry", async () => {
   const h = harness();
   vi.mocked(runAgent).mockRejectedValueOnce(new Error("loader failed"));
@@ -133,30 +152,33 @@ it("keeps committed agents discoverable after caller cancellation loses a result
   expect((await h.call("list_agents", {})).value.agents).toHaveLength(2);
 });
 
-it("snapshots context and rejects stale owner captures after navigation", async () => {
-  readyChild();
-  const h = harness();
-  const operation = h.controller.capture(h.ctx);
-  for (const key of Object.keys(h.ctx))
-    Object.defineProperty(h.ctx, key, {
-      get() {
-        throw new Error("stale ctx");
-      },
-    });
-  await operation.execute(
-    "spawn_agent",
-    { task_name: "a", message: "x" },
-    { callerId: operation.callerId, callId: "a" },
-  );
-  h.controller.invalidate();
-  await expect(
-    operation.execute(
+it.each(["all", "1"])(
+  "snapshots %s history and rejects stale owner captures after navigation",
+  async (fork_turns) => {
+    readyChild();
+    const h = harness();
+    const operation = h.controller.capture(h.ctx);
+    for (const key of Object.keys(h.ctx))
+      Object.defineProperty(h.ctx, key, {
+        get() {
+          throw new Error("stale ctx");
+        },
+      });
+    await operation.execute(
       "spawn_agent",
-      { task_name: "b", message: "x" },
-      { callerId: operation.callerId, callId: "b" },
-    ),
-  ).rejects.toThrow("owner");
-});
+      { task_name: "a", message: "x", fork_turns },
+      { callerId: operation.callerId, callId: "a" },
+    );
+    h.controller.invalidate();
+    await expect(
+      operation.execute(
+        "spawn_agent",
+        { task_name: "b", message: "x" },
+        { callerId: operation.callerId, callId: "b" },
+      ),
+    ).rejects.toThrow("owner");
+  },
+);
 
 it("shares a root tree with child callers without widening selected tools", async () => {
   readyChild();
@@ -333,3 +355,57 @@ it("does not deliver a stopped turn's final, and still updates completion UI eve
   expect(h.pi.sendMessage).not.toHaveBeenCalled();
   expect(failed).toHaveBeenCalledTimes(1);
 });
+
+it.each([
+  [undefined, "all"],
+  [" NONE ", "none"],
+  [" +002 ", "2"],
+])("renders the normalized fork choice %j throughout the row lifecycle", (fork_turns, choice) => {
+  const h = harness();
+  const tool = h.direct.get("spawn_agent");
+  const theme = {
+    bold: (s: string) => `<b>${s}</b>`,
+    fg: (c: string, s: string) => `<${c}>${s}</${c}>`,
+  };
+  const context = { state: {}, isError: false, expanded: false };
+  const row = tool.renderCall({ task_name: "work", fork_turns }, theme, context);
+  expect(row.render(100)).toEqual([`<b>spawn_agent</b><accent> work fork=${choice}</accent>`]);
+  tool.renderResult({ content: [], details: { status: "running" } }, {}, theme, context);
+  context.expanded = true;
+  expect(row.render(100)).toEqual([
+    `<b>spawn_agent</b><accent> work fork=${choice} running</accent>`,
+  ]);
+});
+
+it.each(["all", "none", "1"])(
+  "keeps role/model/reasoning authorization shared for fork=%s",
+  async (fork_turns) => {
+    readyChild();
+    const h = harness();
+    const cwd = mkdtempSync(join(tmpdir(), "v2-scope-"));
+    cleanup.push(async () => rmSync(cwd, { recursive: true, force: true }));
+    h.ctx.cwd = cwd;
+    saveSettings({ scopeModels: true }, cwd);
+    await h.emit("session_start");
+    const inside = { provider: "test", id: "inside", reasoning: true };
+    const outside = { provider: "other", id: "outside", reasoning: true };
+    h.ctx.model = inside;
+    h.ctx.modelRegistry = { ...h.ctx.modelRegistry, getAvailable: () => [inside, outside] };
+    h.ctx.scopedModels = [{ model: inside }];
+    const args = { task_name: "work", message: "inspect", agent_type: "explorer", fork_turns };
+    await expect(h.call("spawn_agent", { ...args, model: "other/outside" })).rejects.toThrow(
+      "not in scope",
+    );
+    await expect(
+      h.call("spawn_agent", { ...args, reasoning_effort: "impossible" }),
+    ).rejects.toThrow("reasoning_effort");
+    expect(runAgent).not.toHaveBeenCalled();
+    await h.call("spawn_agent", { ...args, model: "test/inside", reasoning_effort: "low" });
+    expect(vi.mocked(runAgent).mock.calls[0]?.[1]).toBe("explorer");
+    expect(vi.mocked(runAgent).mock.calls[0]?.[3]).toMatchObject({
+      model: inside,
+      thinkingLevel: "low",
+      allowedTools: ["spawn_agent", "list_agents", "read"],
+    });
+  },
+);

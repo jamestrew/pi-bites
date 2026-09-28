@@ -124,7 +124,7 @@ export interface RunOptions {
   /** Sanitized manager-owned conversation, never extension state. */
   conversation?: { sessionId: string; cwd: string; entries: FileEntry[] };
   allowedTools?: string[];
-  /** Active parent conversation entries copied when spawn_agent requests a full-history fork. */
+  /** Selected parent conversation entries imported into an independent child. */
   parentEntries?: ReturnType<ExtensionContext["sessionManager"]["buildContextEntries"]>;
   /** Pi-bites threshold policy captured by the owning parent extension. */
   autoCompactionThreshold?: number;
@@ -613,6 +613,8 @@ export async function resumeAgent(
     onDiagnostic?: (event: string, details?: Record<string, unknown>) => void;
     onAssistantFailure?: (failure: AgentFailure) => void;
     signal?: AbortSignal;
+    /** Scheduling instruction, not another user/task boundary in inherited history. */
+    taskContinuation?: boolean;
   } = {},
 ): Promise<string> {
   agentSession.assertAgentNotCancelled(options.signal);
@@ -664,7 +666,18 @@ export async function resumeAgent(
     prompt_bytes: Buffer.byteLength(prompt, "utf8"),
   });
   try {
-    await session.prompt(prompt);
+    if (options.taskContinuation) {
+      await session.sendCustomMessage(
+        {
+          customType: "subagent-task-continuation",
+          content: prompt,
+          display: false,
+        },
+        { triggerTurn: true },
+      );
+    } else {
+      await session.prompt(prompt);
+    }
     emitDiagnostic(options.onDiagnostic, "resume_prompt_resolved", {
       manager_signal_aborted: options.signal?.aborted ?? false,
     });

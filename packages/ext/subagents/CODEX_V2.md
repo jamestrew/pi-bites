@@ -138,8 +138,8 @@ Mode bridge declines this direct-only controller, including in child sessions.
 Ordinary sessions retain their existing surface until the coherent six-tool cutover.
 
 Full history is the default; `none` is fresh. Empty/whitespace fork selection means
-`all`, and the two keywords are case-insensitive. Recent-turn selection explicitly
-fails in this slice rather than silently copying everything. Pi imports the active
+`all`, and the two keywords are case-insensitive. Positive integer strings select
+recent instruction/task turns as described below. Pi imports the active
 context entries and performs ordinary cross-provider history conversion: a pending
 spawn call gets a synthetic missing-result error, while existing results are retained.
 Role overrides add instructions and cannot widen the parent's selected tools.
@@ -182,9 +182,9 @@ context filters or provider failures can still prevent inference.
 `followup_task` rejects root. Running tasks request Pi `agent_before_settle`
 continuation when follow-up activity remains unseen, without abort/restart. Idle
 work starts through the existing manager/runner, preserving usage and session events.
-Because Pi has no public session-level context-only idle continuation, this adds a
-neutral user instruction, `Continue with the queued follow-up task.`, while the
-attributed task content appears once. The manager also drains work accepted in the
+Idle follow-up uses a tagged native custom-message continuation,
+`Continue with the queued follow-up task.`, while the attributed task content
+appears once. This scheduling message is not a new user/task boundary. The manager also drains work accepted in the
 gap between native settlement and manager completion. Admission and delivery have
 no intervening await; concurrent calls cannot double-start. Idle follow-up at full
 execution capacity fails before delivery rather than creating an invisible queue.
@@ -251,3 +251,41 @@ prevents delivery. Already accepted input is not rolled back, and interruption d
 not promise that pending mailbox work can never resume. Residency reload remains a
 later integration slice; these regressions use the staged direct harness and real Pi
 sessions with canned providers, not live-provider timing.
+
+## Recent instruction/task forks (#350)
+
+`fork_turns` accepts trimmed positive integer strings through the pinned 64-bit
+`usize` ceiling (18446744073709551615), including leading `+` and zeroes. Zero,
+negative/fraction/exponent values, overflow, nonstrings, and legacy `fork_context`
+fail before spawn. Missing/blank means `all`; keywords are case-insensitive.
+Counts above available turns retain from the first surviving boundary, not startup
+context. With no surviving boundary, the imported context is empty. Full/fresh
+selection and model/role/reasoning authorization remain on the shared spawn path;
+recent forks apply the selected/default role rather than full-fork role inheritance.
+The direct row shows the normalized fork choice.
+
+Recent forks count projected real user instructions and attributed `followup_task`
+messages. Delivery persists `details.task` only for turn-triggering tasks; queue-only
+information, completion mail, assistant responses and tool iterations do not count.
+Idle continuations use `subagent-task-continuation` custom messages instead of
+synthetic user messages. Native custom-message scheduling avoids replaying input
+hooks for this internal instruction. Older histories without task provenance cannot
+retroactively distinguish task mail from information and are not inferred from text.
+
+Pi's `buildSessionProjection` applies context edits before selection. Selected
+messages are materialized into independent session entries, retaining custom-message
+attribution and edited tool output without dangling edit/compaction references.
+Compaction/branch summaries and historical system deltas are excluded from recent
+forks: they can cover older tasks or depend on omitted state. The runner constructs
+the child's own additive system prompt and permitted tools. Only active context is
+available; a compacted mid-task prefix without an instruction is not another task,
+and summarized-away turns cannot be recovered. Orphan tool results whose calls were
+omitted are discarded. Stock Pi provider conversion supplies missing-result errors
+for unfinished calls, including the currently executing spawn; completed pairs stay
+intact. Runtime replacement fork is not used and parent entries remain unchanged.
+
+Direct real-Pi/canned-provider tests cover recent selection, attributed idle follow-up,
+parent independence, explicit cross-provider child model selection and throwing stale
+context getters. Compaction/edit fixtures pass stock OpenAI Responses conversion and
+Anthropic payload construction intercepted before transport, including tool pairing.
+These checks are offline conversion evidence, not live provider acceptance.

@@ -12,6 +12,8 @@ export interface SubagentMessageDetails {
   sender: SubagentSender;
   message: string;
   activityId?: string;
+  /** True only for followup_task, not queue-only information or completion mail. */
+  task?: boolean;
   completion?: "completed" | "failed";
 }
 
@@ -232,7 +234,13 @@ export function createSubagentMessenger(
     ): boolean {
       if (disposed || targetSessionId !== sessionId) return false;
       const activityId = randomUUID();
-      const details = { sender, message, activityId, ...(completion ? { completion } : {}) };
+      const details = {
+        sender,
+        message,
+        activityId,
+        ...(task ? { task: true } : {}),
+        ...(completion ? { completion } : {}),
+      };
       activity.set(activityId, task);
       if (!persist(details)) {
         activity.delete(activityId);

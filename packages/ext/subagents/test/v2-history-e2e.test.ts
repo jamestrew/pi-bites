@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   fauxAssistantMessage,
   getApiProvider,
+  getModel,
   registerFauxProvider,
   type TranscriptContext,
 } from "@earendil-works/pi-ai/compat";
@@ -22,6 +23,7 @@ afterEach(async () => {
 it.each([
   { fork_turns: "all", codeMode: false },
   { fork_turns: "none", codeMode: false },
+  { fork_turns: "1", codeMode: false },
   { fork_turns: "all", codeMode: true },
 ])(
   "replays $fork_turns history with additive instructions (Code Mode: $codeMode)",
@@ -64,17 +66,26 @@ it.each([
       ];
     h.pi.exec = async () => ({ code: 1, stdout: "", stderr: "" });
     h.ctx.cwd = cwd;
-    h.ctx.model = model;
+    const parentModel = fork_turns === "1" ? getModel("anthropic", "claude-sonnet-4-5") : model;
+    h.ctx.model = parentModel;
     h.ctx.getSystemPrompt = () =>
       "PROJECT POLICY: never widen permission. SKILL POLICY: stay bounded.";
     h.ctx.modelRegistry = {
       ...h.ctx.modelRegistry,
-      getAvailable: () => [model],
+      getAvailable: () => [model, parentModel],
       getRegisteredProviderIds: () => [model.provider],
       getRegisteredProviderConfig: () => provider,
     };
     h.ctx.sessionManager.appendMessage({
+      role: "user",
+      content: "recent instruction",
+      timestamp: 2,
+    });
+    h.ctx.sessionManager.appendMessage({
       ...fauxAssistantMessage(""),
+      provider: parentModel.provider,
+      api: parentModel.api,
+      model: parentModel.id,
       content: [{ type: "toolCall", id: "read-call", name: "read", arguments: { path: "x" } }],
     });
     h.ctx.sessionManager.appendMessage({
@@ -88,6 +99,9 @@ it.each([
     // A spawn snapshot includes its own assistant call before the tool result exists.
     h.ctx.sessionManager.appendMessage({
       ...fauxAssistantMessage(""),
+      provider: parentModel.provider,
+      api: parentModel.api,
+      model: parentModel.id,
       content: [
         {
           type: "toolCall",
@@ -97,12 +111,16 @@ it.each([
         },
       ],
     });
+    const parentBefore = structuredClone(h.ctx.sessionManager.getEntries());
+    const parentId = h.ctx.sessionManager.getSessionId();
     await h.emit("session_start");
     const result = await h.call("spawn_agent", {
       task_name: "work",
       message: "inspect",
       fork_turns,
       agent_type: "explorer",
+      model: `${model.provider}/${model.id}`,
+      reasoning_effort: "low",
     });
     expect(result.value).toEqual({ task_name: "/root/work" });
     const manager = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));
@@ -111,6 +129,8 @@ it.each([
       agent_name: "/root/work",
       agent_status: { completed: "CANNED ANSWER" },
     });
+    expect(h.ctx.sessionManager.getSessionId()).toBe(parentId);
+    expect(h.ctx.sessionManager.getEntries()).toEqual(parentBefore);
     expect(requests).toHaveLength(1);
     const request = requests[0]!;
     expect(JSON.stringify(request)).toContain("PROJECT POLICY");
@@ -126,6 +146,9 @@ it.each([
     );
     expect(JSON.stringify(request.messages)).not.toContain("multi_agent_v1__");
     expect(JSON.stringify(request.messages).includes("remember")).toBe(fork_turns === "all");
+    expect(JSON.stringify(request.messages).includes("recent instruction")).toBe(
+      fork_turns !== "none",
+    );
     for (const [provider, api] of [
       ["anthropic", "anthropic-messages"],
       ["openai", "openai-responses"],
@@ -138,9 +161,9 @@ it.each([
       });
       const results = replay.filter((m) => m.role === "toolResult");
       expect(results.map((m) => m.toolCallId)).toEqual(
-        fork_turns === "all" ? ["read-call", "spawn-call"] : [],
+        fork_turns !== "none" ? ["read-call", "spawn-call"] : [],
       );
-      if (fork_turns === "all") {
+      if (fork_turns !== "none") {
         expect(results[0]?.content).toEqual([{ type: "text", text: "saved read result" }]);
         expect(results[1]?.isError).toBe(true);
       }

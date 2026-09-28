@@ -3,7 +3,6 @@ import { AgentTree, getAgentSessionId } from "./agent-tree.js";
 import type { RegisterCollaboration } from "./subagent-context.js";
 import type { SubagentContext } from "./operation-context.js";
 import { randomUUID } from "node:crypto";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { AgentCloser, type ClosedAgentRecord } from "./agent-close.js";
 import { AgentReopener, type ReopenOptions } from "./agent-reopen.js";
@@ -22,7 +21,7 @@ import type { SubagentSender } from "./subagent-messages.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
 import type { AgentRecord, SubagentType, SpawnOptions } from "./types.js";
-import { addUsage, appendSubagentUsageRecord, type AssistantUsage } from "./usage.js";
+import { recordAssistantUsage, type AssistantUsage } from "./usage.js";
 
 export type OnAgentComplete = (record: AgentRecord, generation: number) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
@@ -192,32 +191,6 @@ export class AgentManager {
     this.drainQueue();
   }
 
-  private recordAssistantUsage(
-    record: AgentRecord,
-    usage: AssistantUsage,
-    model?: Model<Api>,
-    callback?: (usage: AssistantUsage) => void,
-  ): void {
-    addUsage(record.lifetimeUsage, usage);
-    appendSubagentUsageRecord({
-      type: "subagent_usage",
-      subagent: record.type,
-      sessionId: record.id,
-      parentSessionId: record.parentSessionId,
-      timestamp: usage.timestamp ?? Date.now(),
-      provider: usage.provider ?? model?.provider ?? "unknown",
-      model: usage.model ?? model?.id ?? "unknown",
-      usage: {
-        input: usage.input,
-        output: usage.output,
-        cacheRead: usage.cacheRead ?? 0,
-        cacheWrite: usage.cacheWrite,
-        cost: { total: usage.cost ?? 0 },
-      },
-    }).catch(() => undefined);
-    callback?.(usage);
-  }
-
   private recordDiagnostic(
     record: AgentRecord,
     event: string,
@@ -378,8 +351,9 @@ export class AgentManager {
         if (current()) options.onTextDelta?.(delta, fullText);
       },
       onAssistantUsage: (usage) => {
-        if (current())
-          this.recordAssistantUsage(record, usage, options.model, options.onAssistantUsage);
+        if (!current()) return;
+        recordAssistantUsage(record, usage, options.model);
+        options.onAssistantUsage?.(usage);
       },
       onCompaction: (info) => {
         if (!current()) return;
@@ -516,6 +490,7 @@ export class AgentManager {
           this.followupPending.get(record)?.()
         ) {
           responseText = await resumeAgent(session, "Continue with the queued follow-up task.", {
+            taskContinuation: true,
             signal: abortController.signal,
             ...resumeHooks,
           });
@@ -704,12 +679,12 @@ export class AgentManager {
     if (!deliver()) return false;
     this.followupPending.set(record, pending);
     if (record.status !== "running" && record.status !== "queued")
-      return this.startTurn(id, "Continue with the queued follow-up task.");
+      return this.startTurn(id, "Continue with the queued follow-up task.", true);
     return true;
   }
 
   /** Start another turn on a retained, settled session. */
-  startTurn(id: string, prompt: string): boolean {
+  startTurn(id: string, prompt: string, taskContinuation = false): boolean {
     if (this.closing) return false;
     const record = this.agents.get(id);
     if (
@@ -741,7 +716,15 @@ export class AgentManager {
     const abortController = new AbortController();
     record.abortController = abortController;
     const start = () =>
-      this.startRetainedTurn(record, session, prompt, options, abortController, generation);
+      this.startRetainedTurn(
+        record,
+        session,
+        prompt,
+        options,
+        abortController,
+        generation,
+        taskContinuation,
+      );
     if (!this.reservations.has(record) && this.reservedCount >= this.maxConcurrent) {
       this.queue.push({ id, generation, start });
     } else {
@@ -757,6 +740,7 @@ export class AgentManager {
     options: SpawnOptions,
     abortController: AbortController,
     generation: number,
+    taskContinuation: boolean,
   ): void {
     if (record.generation !== generation || record.status !== "queued") return;
     if (!this.reserve(record)) return;
@@ -779,6 +763,7 @@ export class AgentManager {
         record.pendingSteers = undefined;
       }
       const started = resumeAgent(session, prompt, {
+        taskContinuation,
         signal: abortController.signal,
         ...hooks,
       }).then((responseText) => ({ responseText, session }));
