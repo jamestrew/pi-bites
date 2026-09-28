@@ -1,5 +1,8 @@
 # Direct V2 cutover (#352)
 
+This is the cutover-time record. See [#353 release validation](subagents-v2-validation.md)
+for later successful named GPT routes, current measurements and unresolved live gaps.
+
 The integration branch activates the six direct V2 tools on all Pi tool-calling
 models. The V1 executors, selected-agent waits, automatic turn-triggering completion
 path, nested collaboration bridge/metadata/generator, and staged V2 registration are

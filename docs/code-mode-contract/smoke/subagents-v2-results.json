@@ -1,0 +1,1691 @@
+{
+  "issue": 353,
+  "baseline": "dee4827f",
+  "pi": "0.87.1",
+  "units": "JSON.stringify UTF-16 code units; ceil(characters/4) is an estimate, not tokenization",
+  "live": [
+    {
+      "route": "openai-codex/gpt-5.6",
+      "scenario": "normal",
+      "date": "2026-09-28T03:30:25.711Z",
+      "status": "unavailable",
+      "reason": "Requested route absent or unauthenticated; no substitute was used.",
+      "failures": [],
+      "approvals": [],
+      "notifications": [],
+      "directory": "/tmp/353-smoke-gpt",
+      "resultSha256": "7f015a7b6c31ca95f336aaa5d7f125202ac437371415bb18bb88c028775c05cd",
+      "requestCount": 0,
+      "payloadHashes": {},
+      "allCapturedPayloadsDirectWithoutLegacy": false,
+      "firstPayloadByOwner": {},
+      "usage": {}
+    },
+    {
+      "route": "openai-codex/gpt-5.6",
+      "scenario": "adapter-disabled",
+      "date": "2026-09-28T03:30:26.036Z",
+      "status": "unavailable",
+      "reason": "Requested route absent or unauthenticated; no substitute was used.",
+      "failures": [],
+      "approvals": [],
+      "notifications": [],
+      "directory": "/tmp/353-smoke-gpt-disabled",
+      "resultSha256": "3c29148d4d0ed86b40c99d595c8d6bea361ea4207357a373b5718a0fc9f47995",
+      "requestCount": 0,
+      "payloadHashes": {},
+      "allCapturedPayloadsDirectWithoutLegacy": false,
+      "firstPayloadByOwner": {},
+      "usage": {}
+    },
+    {
+      "route": "anthropic/claude-sonnet-4-5",
+      "scenario": "normal",
+      "date": "2026-09-28T03:30:26.365Z",
+      "status": "unavailable",
+      "reason": "Requested route absent or unauthenticated; no substitute was used.",
+      "failures": [],
+      "approvals": [],
+      "notifications": [],
+      "directory": "/tmp/353-smoke-anthropic",
+      "resultSha256": "db55ffdacec8676629d4d960cffd158657e5c98815f048598b24743ea6b3cfd2",
+      "requestCount": 0,
+      "payloadHashes": {},
+      "allCapturedPayloadsDirectWithoutLegacy": false,
+      "firstPayloadByOwner": {},
+      "usage": {}
+    },
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "scenario": "normal",
+      "date": "2026-09-28T03:32:05.590Z",
+      "status": "failed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "interruptRetainsTask": true,
+        "recallWithoutReminder": true,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": false,
+        "independentProgress": false,
+        "childPayload": false,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "failures": [],
+      "approvals": ["printf subagent-approved"],
+      "notifications": [
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "549cf69d-d5b5-4c3",
+            "generation": 1,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "549cf69d-d5b5-4c3",
+            "generation": 1,
+            "type": "default",
+            "description": "probe",
+            "result": "Command executed successfully; progress sent to `/root`.",
+            "status": "completed",
+            "toolUses": 5,
+            "durationMs": 10554,
+            "tokens": {
+              "input": 5694,
+              "output": 123,
+              "total": 5817
+            }
+          }
+        },
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "549cf69d-d5b5-4c3",
+            "generation": 2,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "549cf69d-d5b5-4c3",
+            "generation": 2,
+            "type": "default",
+            "description": "probe",
+            "result": "V2_RETAINED_352",
+            "status": "completed",
+            "toolUses": 5,
+            "durationMs": 3165,
+            "tokens": {
+              "input": 9984,
+              "output": 134,
+              "total": 10118
+            }
+          }
+        }
+      ],
+      "directory": "/tmp/353-smoke-sol",
+      "resultSha256": "713350c89f6a0812945a7cc6db85c64be7abcdea5ee9f1d02ec3d88e5fbdd731",
+      "requestCount": 9,
+      "payloadHashes": {
+        "payload-1-parent.json": "ce1118b851fdf82c2ce4cd661de36423484adf1c5f7e6a7a3970bd9897eb5787",
+        "payload-3-parent.json": "80c1222034f3381f3ce3ecae8a1f15b0a6c10415514735353d0e8657b4dc5f8c",
+        "payload-6-parent.json": "e3c028ebd939b86bcc34b6bb50c7bed7ed97e98ec7ae701f15c20556bb10ad0d",
+        "payload-7-parent.json": "4432efe70f11a2267811cba93304e6f931fcaecc0d10d2d89a43b1e5adda0fc6",
+        "payload-8-parent.json": "4d675a3c310481ef82cafb4d0e03414db7aaf488a2856fef867f9f323baf196b",
+        "payload-9-parent.json": "fce6011b732b06658f7838776b2951a8dd218b1ccb705913e4f5308dd1ce40e7",
+        "payload-11-parent.json": "76f015020c60e81d277c2096de09c6aebf13692234a378ea11449c8970cc1f71",
+        "payload-12-parent.json": "84b71a5bc4358c16d25c209be0f01bbca2630802dd0a07f130249b797e49285e",
+        "payload-13-parent.json": "0cb419e40a59a815f535d833502c86d9a4aea70b42ee5e6e5e92bee81067278a"
+      },
+      "allCapturedPayloadsDirectWithoutLegacy": true,
+      "firstPayloadByOwner": {
+        "parent": {
+          "owner": "parent",
+          "file": "payload-1-parent.json",
+          "characters": 20384,
+          "toolCharacters": 16022,
+          "instructionCharacters": 2669,
+          "historyCharacters": 1384,
+          "tools": [
+            {
+              "name": "exec",
+              "type": "custom"
+            },
+            {
+              "name": "wait",
+              "type": "function"
+            },
+            {
+              "name": "interrupt_agent",
+              "type": "function"
+            },
+            {
+              "name": "wait_agent",
+              "type": "function"
+            },
+            {
+              "name": "spawn_agent",
+              "type": "function"
+            },
+            {
+              "name": "list_agents",
+              "type": "function"
+            },
+            {
+              "name": "send_message",
+              "type": "function"
+            },
+            {
+              "name": "followup_task",
+              "type": "function"
+            }
+          ],
+          "sha256": "ce1118b851fdf82c2ce4cd661de36423484adf1c5f7e6a7a3970bd9897eb5787",
+          "collaborationCharacters": 6770,
+          "collaborationEstimatedTokens": 1693,
+          "noLegacyOrDiscovery": true
+        }
+      },
+      "usage": {
+        "parent": {
+          "first": {
+            "input": 4065,
+            "output": 145,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 14,
+            "totalTokens": 4210,
+            "cost": {
+              "input": 0.01626,
+              "output": 0.0029000000000000002,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.01916
+            }
+          },
+          "sum": {
+            "input": 10476,
+            "output": 435,
+            "cacheRead": 30208,
+            "cacheWrite": 0,
+            "reasoning": 101,
+            "totalTokens": 41119
+          }
+        },
+        "/root/probe": {
+          "first": {
+            "input": 5229,
+            "output": 71,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 37,
+            "totalTokens": 5300,
+            "cost": {
+              "input": 0.020916,
+              "output": 0.00142,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.022336
+            }
+          },
+          "sum": {
+            "input": 9984,
+            "output": 134,
+            "cacheRead": 10240,
+            "cacheWrite": 0,
+            "reasoning": 37,
+            "totalTokens": 20358
+          }
+        }
+      }
+    },
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "scenario": "adapter-disabled",
+      "date": "2026-09-28T03:32:06.859Z",
+      "status": "failed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "interruptRetainsTask": true,
+        "recallWithoutReminder": true,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": false,
+        "independentProgress": false,
+        "childPayload": false,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "failures": [],
+      "approvals": ["printf subagent-approved"],
+      "notifications": [
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "f6bd4d0c-0a6e-472",
+            "generation": 1,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "f6bd4d0c-0a6e-472",
+            "generation": 1,
+            "type": "default",
+            "description": "probe",
+            "result": "Approved command executed successfully.",
+            "status": "completed",
+            "toolUses": 5,
+            "durationMs": 5905,
+            "tokens": {
+              "input": 4209,
+              "output": 96,
+              "total": 4305
+            }
+          }
+        },
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "f6bd4d0c-0a6e-472",
+            "generation": 2,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "f6bd4d0c-0a6e-472",
+            "generation": 2,
+            "type": "default",
+            "description": "probe",
+            "result": "V2_RETAINED_352",
+            "status": "completed",
+            "toolUses": 5,
+            "durationMs": 969,
+            "tokens": {
+              "input": 4609,
+              "output": 107,
+              "total": 4716
+            }
+          }
+        }
+      ],
+      "directory": "/tmp/353-smoke-sol-disabled",
+      "resultSha256": "2031e02bb762921fce167d01963ff9b983e769bead742371b39d1572ac0fc53d",
+      "requestCount": 9,
+      "payloadHashes": {
+        "payload-1-parent.json": "7124cb45cb457e2513eac56f5cc2ce44830b25101b8a65a28df335b44ff0fafc",
+        "payload-3-parent.json": "f7cfc8f367e0fbb53e0995b692d92fe06b78df0759caa111e84af437499bf6be",
+        "payload-6-parent.json": "905f10f6973997e1b1b32d1860c1d91a581a1125122bcc4cf9b47def3f20a0da",
+        "payload-7-parent.json": "f78a77f843034f717c80e626843a1751217b4163a9c237d41456398c4b2f1308",
+        "payload-8-parent.json": "85fb932962c3923aa20b43e315ec99f314e095d5dd473a72c4abcd78ec37cb67",
+        "payload-9-parent.json": "d1b3e20e601b52a5c634e8df621ff18f1bfb014df35d9a5abeb83b609cad2b26",
+        "payload-11-parent.json": "0c57257e2d25024b72a91f968b2414c244c326e29677a726c6552427af0606ba",
+        "payload-12-parent.json": "f8f787f75f9e57b219115e339dafd9e9ea8e77bc70c36451c8a22fe247d3d9ca",
+        "payload-13-parent.json": "8f56161a94b14a3902904a766e7ad63b1260a637641b22a74325a35214893b8f"
+      },
+      "allCapturedPayloadsDirectWithoutLegacy": true,
+      "firstPayloadByOwner": {
+        "parent": {
+          "owner": "parent",
+          "file": "payload-1-parent.json",
+          "characters": 15200,
+          "toolCharacters": 9870,
+          "instructionCharacters": 3637,
+          "historyCharacters": 1384,
+          "tools": [
+            {
+              "name": "read",
+              "type": "function"
+            },
+            {
+              "name": "bash",
+              "type": "function"
+            },
+            {
+              "name": "edit",
+              "type": "function"
+            },
+            {
+              "name": "write",
+              "type": "function"
+            },
+            {
+              "name": "interrupt_agent",
+              "type": "function"
+            },
+            {
+              "name": "wait_agent",
+              "type": "function"
+            },
+            {
+              "name": "spawn_agent",
+              "type": "function"
+            },
+            {
+              "name": "list_agents",
+              "type": "function"
+            },
+            {
+              "name": "send_message",
+              "type": "function"
+            },
+            {
+              "name": "followup_task",
+              "type": "function"
+            }
+          ],
+          "sha256": "7124cb45cb457e2513eac56f5cc2ce44830b25101b8a65a28df335b44ff0fafc",
+          "collaborationCharacters": 6770,
+          "collaborationEstimatedTokens": 1693,
+          "noLegacyOrDiscovery": true
+        }
+      },
+      "usage": {
+        "parent": {
+          "first": {
+            "input": 2705,
+            "output": 251,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 119,
+            "totalTokens": 2956,
+            "cost": {
+              "input": 0.01082,
+              "output": 0.00502,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.01584
+            }
+          },
+          "sum": {
+            "input": 8123,
+            "output": 612,
+            "cacheRead": 21120,
+            "cacheWrite": 0,
+            "reasoning": 274,
+            "totalTokens": 29855
+          }
+        },
+        "/root/probe": {
+          "first": {
+            "input": 3862,
+            "output": 45,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 18,
+            "totalTokens": 3907,
+            "cost": {
+              "input": 0.015448,
+              "output": 0.0009000000000000001,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.016348
+            }
+          },
+          "sum": {
+            "input": 4609,
+            "output": 107,
+            "cacheRead": 11136,
+            "cacheWrite": 0,
+            "reasoning": 18,
+            "totalTokens": 15852
+          }
+        }
+      }
+    },
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "scenario": "normal",
+      "date": "2026-09-28T03:34:41.994Z",
+      "status": "passed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "interruptRetainsTask": true,
+        "recallWithoutReminder": true,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "failures": [],
+      "approvals": ["printf subagent-approved"],
+      "notifications": [
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "6a3bcc28-2d2e-4a8",
+            "generation": 1,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "6a3bcc28-2d2e-4a8",
+            "generation": 1,
+            "type": "default",
+            "description": "probe",
+            "result": "Command executed successfully; progress sent to `/root`.",
+            "status": "completed",
+            "toolUses": 2,
+            "durationMs": 9050,
+            "tokens": {
+              "input": 5639,
+              "output": 155,
+              "total": 5794
+            }
+          }
+        },
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "6a3bcc28-2d2e-4a8",
+            "generation": 2,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "6a3bcc28-2d2e-4a8",
+            "generation": 2,
+            "type": "default",
+            "description": "probe",
+            "result": "V2_RETAINED_352",
+            "status": "completed",
+            "toolUses": 2,
+            "durationMs": 2151,
+            "tokens": {
+              "input": 9964,
+              "output": 166,
+              "total": 10130
+            }
+          }
+        }
+      ],
+      "directory": "/tmp/353-smoke-sol-fixed",
+      "resultSha256": "5e3ba7e61f71b3e9307adba6cc16954a736f47f4b1b4b1af8736ea2ae0198a86",
+      "requestCount": 13,
+      "payloadHashes": {
+        "payload-1.json": "f0c704986f83dff59c86d2ccc30043555eed4915174b77cb81f2c8cab8702ead",
+        "payload-2.json": "e2a8a1cf21864d4b2179bc8e8b2db865fd3d682439da098551e944d5a73e9255",
+        "payload-3.json": "e378d39fc3a68d1256d72a8b95d242d4d8a18c0c2942b79b02bdf46fc90807d0",
+        "payload-4.json": "f8fd8eda20e363b5960b6629bcd21914f6f6e5760f07991645ab48492010dcf1",
+        "payload-5.json": "2ac8fb35a8663c1134c3b0ba64110e77d9805df3f48dae52fa73d4f896654835",
+        "payload-6.json": "564eb586288a6b091355568ced43d907cc3e1ece9d30dd190348a622e07cb1b0",
+        "payload-7.json": "662f754ce53c6cf58ad11c6870bcbadb19422ec4423e7a4d28e66517339bc0cb",
+        "payload-8.json": "7a95e79bd070b70a79186edf8a05f5be7d3915e055fd067d798987a6efde2072",
+        "payload-9.json": "4d0076389f7a06e02bd3cb7fce3fceb0acf09283441e8b9d1edffd64b6f475f6",
+        "payload-10.json": "9fe7e605464f4d622b2466f77808839f90bf3ec686865cbe6d68e4fd758c7222",
+        "payload-11.json": "ba72168319478999f2f7e0a389071b6a5e7a525422372ae3665cbfbd76ad2b00",
+        "payload-12.json": "81da5951b095aab3124bbab0ef5ea25335ace1d54d1b04b69f0a7a714f4083d1",
+        "payload-13.json": "9a655cb3f76eb2fe0b4ef4eec5c0f3d1402a6fa8559684e6b72a303ca69924fe"
+      },
+      "allCapturedPayloadsDirectWithoutLegacy": true,
+      "firstPayloadByOwner": {
+        "parent": {
+          "owner": "parent",
+          "file": "payload-1.json",
+          "characters": 20384,
+          "toolCharacters": 16022,
+          "instructionCharacters": 2669,
+          "historyCharacters": 1384,
+          "tools": [
+            {
+              "name": "exec",
+              "type": "custom"
+            },
+            {
+              "name": "wait",
+              "type": "function"
+            },
+            {
+              "name": "interrupt_agent",
+              "type": "function"
+            },
+            {
+              "name": "wait_agent",
+              "type": "function"
+            },
+            {
+              "name": "spawn_agent",
+              "type": "function"
+            },
+            {
+              "name": "list_agents",
+              "type": "function"
+            },
+            {
+              "name": "send_message",
+              "type": "function"
+            },
+            {
+              "name": "followup_task",
+              "type": "function"
+            }
+          ],
+          "sha256": "f0c704986f83dff59c86d2ccc30043555eed4915174b77cb81f2c8cab8702ead",
+          "collaborationCharacters": 6770,
+          "collaborationEstimatedTokens": 1693,
+          "noLegacyOrDiscovery": true
+        },
+        "/root/probe": {
+          "owner": "/root/probe",
+          "file": "payload-2.json",
+          "characters": 25339,
+          "toolCharacters": 16021,
+          "instructionCharacters": 8568,
+          "historyCharacters": 441,
+          "tools": [
+            {
+              "name": "exec",
+              "type": "custom"
+            },
+            {
+              "name": "wait",
+              "type": "function"
+            },
+            {
+              "name": "interrupt_agent",
+              "type": "function"
+            },
+            {
+              "name": "wait_agent",
+              "type": "function"
+            },
+            {
+              "name": "spawn_agent",
+              "type": "function"
+            },
+            {
+              "name": "list_agents",
+              "type": "function"
+            },
+            {
+              "name": "send_message",
+              "type": "function"
+            },
+            {
+              "name": "followup_task",
+              "type": "function"
+            }
+          ],
+          "sha256": "e2a8a1cf21864d4b2179bc8e8b2db865fd3d682439da098551e944d5a73e9255",
+          "collaborationCharacters": 6770,
+          "collaborationEstimatedTokens": 1693,
+          "noLegacyOrDiscovery": true
+        }
+      },
+      "usage": {
+        "parent": {
+          "first": {
+            "input": 4066,
+            "output": 147,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 17,
+            "totalTokens": 4213,
+            "cost": {
+              "input": 0.016264,
+              "output": 0.0029400000000000003,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.019204000000000002
+            }
+          },
+          "sum": {
+            "input": 10270,
+            "output": 407,
+            "cacheRead": 30336,
+            "cacheWrite": 0,
+            "reasoning": 86,
+            "totalTokens": 41013
+          }
+        },
+        "/root/probe": {
+          "first": {
+            "input": 5232,
+            "output": 103,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 56,
+            "totalTokens": 5335,
+            "cost": {
+              "input": 0.020928,
+              "output": 0.00206,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.022987999999999998
+            }
+          },
+          "sum": {
+            "input": 9964,
+            "output": 166,
+            "cacheRead": 10368,
+            "cacheWrite": 0,
+            "reasoning": 56,
+            "totalTokens": 20498
+          }
+        }
+      },
+      "operations": [
+        {
+          "owner": "parent",
+          "name": "spawn_agent",
+          "args": {
+            "agent_type": "default",
+            "fork_turns": "none",
+            "message": "Retain marker V2_RETAINED_352. Execute EXACTLY `printf subagent-approved` once, using exec_command with login:false in Code Mode or bash otherwise; the UI approves only that exact command. Send a progress message to /root using send_message. Then return a final response WITHOUT spelling out the marker yet. Do not run other commands, web/filesystem tools, or spawn grandchildren.",
+            "model": "openai-codex/gpt-5.6-sol",
+            "task_name": "probe"
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"task_name\":\"/root/probe\"}"
+              }
+            ],
+            "details": {
+              "displayName": "probe",
+              "description": "probe",
+              "subagentType": "default",
+              "modelName": "openai-codex/gpt-5.6-sol",
+              "thinking": "medium",
+              "tags": ["thinking: medium"],
+              "toolUses": 0,
+              "tokens": "",
+              "durationMs": 0,
+              "status": "running",
+              "agentId": "6a3bcc28-2d2e-4a8"
+            },
+            "value": {
+              "task_name": "/root/probe"
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "wait_agent",
+          "args": {
+            "timeout_ms": 30000
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"message\":\"Wait completed.\",\"timed_out\":false}"
+              }
+            ],
+            "details": {
+              "status": "Wait completed."
+            },
+            "value": {
+              "message": "Wait completed.",
+              "timed_out": false
+            }
+          }
+        },
+        {
+          "owner": "/root/probe",
+          "name": "send_message",
+          "args": {
+            "target": "/root",
+            "message": "Progress: the approved exact command was executed once successfully; retained-marker instruction noted."
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": ""
+              }
+            ],
+            "details": {
+              "target": "/root",
+              "status": "queued"
+            },
+            "value": ""
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "wait_agent",
+          "args": {
+            "timeout_ms": 30000
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"message\":\"Wait completed.\",\"timed_out\":false}"
+              }
+            ],
+            "details": {
+              "status": "Wait completed."
+            },
+            "value": {
+              "message": "Wait completed.",
+              "timed_out": false
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "list_agents",
+          "args": {},
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"agents\":[{\"agent_name\":\"/root\",\"agent_status\":\"running\"},{\"agent_name\":\"/root/probe\",\"agent_status\":{\"completed\":\"Command executed successfully; progress sent to `/root`.\"}}]}"
+              }
+            ],
+            "value": {
+              "agents": [
+                {
+                  "agent_name": "/root",
+                  "agent_status": "running"
+                },
+                {
+                  "agent_name": "/root/probe",
+                  "agent_status": {
+                    "completed": "Command executed successfully; progress sent to `/root`."
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "interrupt_agent",
+          "args": {
+            "target": "/root/probe"
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"previous_status\":{\"completed\":\"Command executed successfully; progress sent to `/root`.\"}}"
+              }
+            ],
+            "details": {
+              "status": "previous: completed"
+            },
+            "value": {
+              "previous_status": {
+                "completed": "Command executed successfully; progress sent to `/root`."
+              }
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "followup_task",
+          "args": {
+            "message": "Recall the retained marker from your previous task and return it, without executing commands.",
+            "target": "/root/probe"
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": ""
+              }
+            ],
+            "details": {
+              "target": "/root/probe",
+              "status": "submitted"
+            },
+            "value": ""
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "wait_agent",
+          "args": {
+            "timeout_ms": 30000
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"message\":\"Wait completed.\",\"timed_out\":false}"
+              }
+            ],
+            "details": {
+              "status": "Wait completed."
+            },
+            "value": {
+              "message": "Wait completed.",
+              "timed_out": false
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "list_agents",
+          "args": {},
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"agents\":[{\"agent_name\":\"/root\",\"agent_status\":\"running\"},{\"agent_name\":\"/root/probe\",\"agent_status\":{\"completed\":\"V2_RETAINED_352\"}}]}"
+              }
+            ],
+            "value": {
+              "agents": [
+                {
+                  "agent_name": "/root",
+                  "agent_status": "running"
+                },
+                {
+                  "agent_name": "/root/probe",
+                  "agent_status": {
+                    "completed": "V2_RETAINED_352"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "mail": [
+        {
+          "role": "custom",
+          "customType": "subagent-message",
+          "content": "<subagent-message>\n<sender_id>/root/probe</sender_id>\n<sender_type>default</sender_type>\n<sender_title>/root/probe</sender_title>\n<message>Progress: the approved exact command was executed once successfully; retained-marker instruction noted.</message>\n</subagent-message>",
+          "display": true,
+          "details": {
+            "sender": {
+              "id": "/root/probe",
+              "type": "default",
+              "title": "/root/probe"
+            },
+            "message": "Progress: the approved exact command was executed once successfully; retained-marker instruction noted.",
+            "activityId": "7244f984-c956-47e3-9957-07b02b1bfc16"
+          },
+          "timestamp": 1790566493627
+        },
+        {
+          "role": "custom",
+          "customType": "subagent-message",
+          "content": "<subagent-message>\n<sender_id>/root/probe</sender_id>\n<sender_type>default</sender_type>\n<sender_title>/root/probe</sender_title>\n<message>Command executed successfully; progress sent to `/root`.</message>\n</subagent-message>",
+          "display": true,
+          "details": {
+            "sender": {
+              "id": "/root/probe",
+              "type": "default",
+              "title": "/root/probe"
+            },
+            "message": "Command executed successfully; progress sent to `/root`.",
+            "activityId": "887409c9-aaed-4c59-a535-21842d94c21e",
+            "completion": "completed"
+          },
+          "timestamp": 1790566496336
+        },
+        {
+          "role": "custom",
+          "customType": "subagent-message",
+          "content": "<subagent-message>\n<sender_id>/root/probe</sender_id>\n<sender_type>default</sender_type>\n<sender_title>/root/probe</sender_title>\n<message>V2_RETAINED_352</message>\n</subagent-message>",
+          "display": true,
+          "details": {
+            "sender": {
+              "id": "/root/probe",
+              "type": "default",
+              "title": "/root/probe"
+            },
+            "message": "V2_RETAINED_352",
+            "activityId": "e26e638e-3b0a-4c7c-ad94-65c2330fe000",
+            "completion": "completed"
+          },
+          "timestamp": 1790566505757
+        }
+      ]
+    },
+    {
+      "route": "openai-codex/gpt-5.6-sol",
+      "scenario": "adapter-disabled",
+      "date": "2026-09-28T03:34:43.015Z",
+      "status": "passed",
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "interruptRetainsTask": true,
+        "recallWithoutReminder": true,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "failures": [],
+      "approvals": ["printf subagent-approved"],
+      "notifications": [
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "e97200d6-90a1-45b",
+            "generation": 1,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "e97200d6-90a1-45b",
+            "generation": 1,
+            "type": "default",
+            "description": "probe",
+            "result": "Approved command executed exactly once; progress sent to `/root`.",
+            "status": "completed",
+            "toolUses": 2,
+            "durationMs": 6521,
+            "tokens": {
+              "input": 7918,
+              "output": 114,
+              "total": 8032
+            }
+          }
+        },
+        {
+          "name": "subagents:started",
+          "data": {
+            "id": "e97200d6-90a1-45b",
+            "generation": 2,
+            "type": "default",
+            "description": "probe"
+          }
+        },
+        {
+          "name": "subagents:completed",
+          "data": {
+            "id": "e97200d6-90a1-45b",
+            "generation": 2,
+            "type": "default",
+            "description": "probe",
+            "result": "V2_RETAINED_352",
+            "status": "completed",
+            "toolUses": 2,
+            "durationMs": 2004,
+            "tokens": {
+              "input": 8330,
+              "output": 125,
+              "total": 8455
+            }
+          }
+        }
+      ],
+      "directory": "/tmp/353-smoke-sol-disabled-fixed",
+      "resultSha256": "03511964115db67cb5b9893a917a80927c3b08816c5614e95780b65cfc21e0ec",
+      "requestCount": 13,
+      "payloadHashes": {
+        "payload-1.json": "d4a57ea03319fb7b1caa6813e47258f10ba20010c6c6ab5d7d7759f97ad39a69",
+        "payload-2.json": "7ea88244a248bf89a84aa922a23585ea24d39a92cc82c46221f53bff80dec1d7",
+        "payload-3.json": "7143be6f5b30d0098452c89521f29a4e5e31c376b2833077e75811c7a889e55c",
+        "payload-4.json": "ac687f97c45b6061991f3971ffeae596693aa84461f18c7d53eff3a9ccdc305d",
+        "payload-5.json": "6256bcdc6baab248e1b423796b46ae09987a5a3105f2d6110853084de1d9bcf0",
+        "payload-6.json": "1eab003e6f7e0fa54d86b796ba330f180366d037489cc49dee2fabbb4f31ced8",
+        "payload-7.json": "60bf2fbfc8b249d3325ff9133a6b3bc0ad28e58aeb3c96a5d8ff14eac9fc4af6",
+        "payload-8.json": "e9e12c3a3d1ea988d6cb0e1daeaf130b9bbae4bc26341e15178747f7ffbe31fa",
+        "payload-9.json": "6a6281340e792093904955899d8ed0a8289e4c826152cff25774597580ed00f0",
+        "payload-10.json": "46df41f3083b0f68283279ca13f5cf100bfbef6488ee4e6a7fb324bd8f0d5f12",
+        "payload-11.json": "7be78783adc18df35561ba66b4ba9bdcee7b4fa81e8495df1a895ccadf3c84be",
+        "payload-12.json": "0b58716629b3ee3d55253720f3bdab721a057aa3d5df235f331760e00bd8ff48",
+        "payload-13.json": "d118230713dc5253e99dc6d08b4d75f02360d9889fd266dca2f4feac9ce7c3af"
+      },
+      "allCapturedPayloadsDirectWithoutLegacy": true,
+      "firstPayloadByOwner": {
+        "parent": {
+          "owner": "parent",
+          "file": "payload-1.json",
+          "characters": 15200,
+          "toolCharacters": 9870,
+          "instructionCharacters": 3637,
+          "historyCharacters": 1384,
+          "tools": [
+            {
+              "name": "read",
+              "type": "function"
+            },
+            {
+              "name": "bash",
+              "type": "function"
+            },
+            {
+              "name": "edit",
+              "type": "function"
+            },
+            {
+              "name": "write",
+              "type": "function"
+            },
+            {
+              "name": "interrupt_agent",
+              "type": "function"
+            },
+            {
+              "name": "wait_agent",
+              "type": "function"
+            },
+            {
+              "name": "spawn_agent",
+              "type": "function"
+            },
+            {
+              "name": "list_agents",
+              "type": "function"
+            },
+            {
+              "name": "send_message",
+              "type": "function"
+            },
+            {
+              "name": "followup_task",
+              "type": "function"
+            }
+          ],
+          "sha256": "d4a57ea03319fb7b1caa6813e47258f10ba20010c6c6ab5d7d7759f97ad39a69",
+          "collaborationCharacters": 6770,
+          "collaborationEstimatedTokens": 1693,
+          "noLegacyOrDiscovery": true
+        },
+        "/root/probe": {
+          "owner": "/root/probe",
+          "file": "payload-2.json",
+          "characters": 20087,
+          "toolCharacters": 9870,
+          "instructionCharacters": 9482,
+          "historyCharacters": 426,
+          "tools": [
+            {
+              "name": "read",
+              "type": "function"
+            },
+            {
+              "name": "bash",
+              "type": "function"
+            },
+            {
+              "name": "edit",
+              "type": "function"
+            },
+            {
+              "name": "write",
+              "type": "function"
+            },
+            {
+              "name": "interrupt_agent",
+              "type": "function"
+            },
+            {
+              "name": "wait_agent",
+              "type": "function"
+            },
+            {
+              "name": "spawn_agent",
+              "type": "function"
+            },
+            {
+              "name": "list_agents",
+              "type": "function"
+            },
+            {
+              "name": "send_message",
+              "type": "function"
+            },
+            {
+              "name": "followup_task",
+              "type": "function"
+            }
+          ],
+          "sha256": "7ea88244a248bf89a84aa922a23585ea24d39a92cc82c46221f53bff80dec1d7",
+          "collaborationCharacters": 6770,
+          "collaborationEstimatedTokens": 1693,
+          "noLegacyOrDiscovery": true
+        }
+      },
+      "usage": {
+        "parent": {
+          "first": {
+            "input": 2704,
+            "output": 165,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 36,
+            "totalTokens": 2869,
+            "cost": {
+              "input": 0.010816,
+              "output": 0.0033000000000000004,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.014116
+            }
+          },
+          "sum": {
+            "input": 8149,
+            "output": 443,
+            "cacheRead": 20480,
+            "cacheWrite": 0,
+            "reasoning": 110,
+            "totalTokens": 29072
+          }
+        },
+        "/root/probe": {
+          "first": {
+            "input": 3856,
+            "output": 49,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 22,
+            "totalTokens": 3905,
+            "cost": {
+              "input": 0.015423999999999998,
+              "output": 0.0009800000000000002,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "total": 0.016404
+            }
+          },
+          "sum": {
+            "input": 8330,
+            "output": 125,
+            "cacheRead": 7424,
+            "cacheWrite": 0,
+            "reasoning": 22,
+            "totalTokens": 15879
+          }
+        }
+      },
+      "operations": [
+        {
+          "owner": "parent",
+          "name": "spawn_agent",
+          "args": {
+            "task_name": "probe",
+            "agent_type": "default",
+            "model": "openai-codex/gpt-5.6-sol",
+            "fork_turns": "none",
+            "message": "Retain marker V2_RETAINED_352. Execute EXACTLY `printf subagent-approved` once, using exec_command with login:false in Code Mode or bash otherwise; the UI approves only that exact command. Send a progress message to /root. Then return a final response WITHOUT spelling out the marker yet. Do not run other commands, use web/filesystem tools, or spawn grandchildren."
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"task_name\":\"/root/probe\"}"
+              }
+            ],
+            "details": {
+              "displayName": "probe",
+              "description": "probe",
+              "subagentType": "default",
+              "modelName": "openai-codex/gpt-5.6-sol",
+              "thinking": "medium",
+              "tags": ["thinking: medium"],
+              "toolUses": 0,
+              "tokens": "",
+              "durationMs": 0,
+              "status": "running",
+              "agentId": "e97200d6-90a1-45b"
+            },
+            "value": {
+              "task_name": "/root/probe"
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "wait_agent",
+          "args": {
+            "timeout_ms": 30000
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"message\":\"Wait completed.\",\"timed_out\":false}"
+              }
+            ],
+            "details": {
+              "status": "Wait completed."
+            },
+            "value": {
+              "message": "Wait completed.",
+              "timed_out": false
+            }
+          }
+        },
+        {
+          "owner": "/root/probe",
+          "name": "send_message",
+          "args": {
+            "target": "/root",
+            "message": "Progress: the approved command was executed exactly once successfully. I retained the requested marker and will not spell it out in my final response."
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": ""
+              }
+            ],
+            "details": {
+              "target": "/root",
+              "status": "queued"
+            },
+            "value": ""
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "wait_agent",
+          "args": {
+            "timeout_ms": 30000
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"message\":\"Wait completed.\",\"timed_out\":false}"
+              }
+            ],
+            "details": {
+              "status": "Wait completed."
+            },
+            "value": {
+              "message": "Wait completed.",
+              "timed_out": false
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "list_agents",
+          "args": {},
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"agents\":[{\"agent_name\":\"/root\",\"agent_status\":\"running\"},{\"agent_name\":\"/root/probe\",\"agent_status\":{\"completed\":\"Approved command executed exactly once; progress sent to `/root`.\"}}]}"
+              }
+            ],
+            "value": {
+              "agents": [
+                {
+                  "agent_name": "/root",
+                  "agent_status": "running"
+                },
+                {
+                  "agent_name": "/root/probe",
+                  "agent_status": {
+                    "completed": "Approved command executed exactly once; progress sent to `/root`."
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "interrupt_agent",
+          "args": {
+            "target": "/root/probe"
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"previous_status\":{\"completed\":\"Approved command executed exactly once; progress sent to `/root`.\"}}"
+              }
+            ],
+            "details": {
+              "status": "previous: completed"
+            },
+            "value": {
+              "previous_status": {
+                "completed": "Approved command executed exactly once; progress sent to `/root`."
+              }
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "followup_task",
+          "args": {
+            "target": "/root/probe",
+            "message": "Recall the retained marker from your previous task and return it, without executing commands."
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": ""
+              }
+            ],
+            "details": {
+              "target": "/root/probe",
+              "status": "submitted"
+            },
+            "value": ""
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "wait_agent",
+          "args": {
+            "timeout_ms": 30000
+          },
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"message\":\"Wait completed.\",\"timed_out\":false}"
+              }
+            ],
+            "details": {
+              "status": "Wait completed."
+            },
+            "value": {
+              "message": "Wait completed.",
+              "timed_out": false
+            }
+          }
+        },
+        {
+          "owner": "parent",
+          "name": "list_agents",
+          "args": {},
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"agents\":[{\"agent_name\":\"/root\",\"agent_status\":\"running\"},{\"agent_name\":\"/root/probe\",\"agent_status\":{\"completed\":\"V2_RETAINED_352\"}}]}"
+              }
+            ],
+            "value": {
+              "agents": [
+                {
+                  "agent_name": "/root",
+                  "agent_status": "running"
+                },
+                {
+                  "agent_name": "/root/probe",
+                  "agent_status": {
+                    "completed": "V2_RETAINED_352"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "mail": [
+        {
+          "role": "custom",
+          "customType": "subagent-message",
+          "content": "<subagent-message>\n<sender_id>/root/probe</sender_id>\n<sender_type>default</sender_type>\n<sender_title>/root/probe</sender_title>\n<message>Progress: the approved command was executed exactly once successfully. I retained the requested marker and will not spell it out in my final response.</message>\n</subagent-message>",
+          "display": true,
+          "details": {
+            "sender": {
+              "id": "/root/probe",
+              "type": "default",
+              "title": "/root/probe"
+            },
+            "message": "Progress: the approved command was executed exactly once successfully. I retained the requested marker and will not spell it out in my final response.",
+            "activityId": "e3203035-a654-4411-a171-07cfbbf05770"
+          },
+          "timestamp": 1790566492088
+        },
+        {
+          "role": "custom",
+          "customType": "subagent-message",
+          "content": "<subagent-message>\n<sender_id>/root/probe</sender_id>\n<sender_type>default</sender_type>\n<sender_title>/root/probe</sender_title>\n<message>Approved command executed exactly once; progress sent to `/root`.</message>\n</subagent-message>",
+          "display": true,
+          "details": {
+            "sender": {
+              "id": "/root/probe",
+              "type": "default",
+              "title": "/root/probe"
+            },
+            "message": "Approved command executed exactly once; progress sent to `/root`.",
+            "activityId": "e50ab335-2df0-47bb-8213-d5ebf64c94bf",
+            "completion": "completed"
+          },
+          "timestamp": 1790566494433
+        },
+        {
+          "role": "custom",
+          "customType": "subagent-message",
+          "content": "<subagent-message>\n<sender_id>/root/probe</sender_id>\n<sender_type>default</sender_type>\n<sender_title>/root/probe</sender_title>\n<message>V2_RETAINED_352</message>\n</subagent-message>",
+          "display": true,
+          "details": {
+            "sender": {
+              "id": "/root/probe",
+              "type": "default",
+              "title": "/root/probe"
+            },
+            "message": "V2_RETAINED_352",
+            "activityId": "d971af35-2eea-4495-9bce-e44b41d1aaea",
+            "completion": "completed"
+          },
+          "timestamp": 1790566502786
+        }
+      ]
+    }
+  ],
+  "offline": [
+    {
+      "file": "anthropic-enabled-all.json",
+      "sha256": "f8dcbcc5dbdb10208f3bcbafae12237401617fae003ec48d28ff3c973fc338dc",
+      "requests": [
+        {
+          "owner": "parent",
+          "characters": {
+            "payload": 13398,
+            "tools": 9495,
+            "collaboration": 6655,
+            "instructions": 3692,
+            "history": 120
+          }
+        },
+        {
+          "owner": "child",
+          "characters": {
+            "payload": 19159,
+            "tools": 9425,
+            "collaboration": 6655,
+            "instructions": 9523,
+            "history": 120
+          }
+        }
+      ]
+    },
+    {
+      "file": "anthropic-enabled-selected.json",
+      "sha256": "109f1f55ad61e35ea342d5dfcc1b66cb5f8146951e8debc1e1b8adfb0f7eac01",
+      "requests": [
+        {
+          "owner": "parent",
+          "characters": {
+            "payload": 8740,
+            "tools": 5733,
+            "collaboration": 5011,
+            "instructions": 2796,
+            "history": 120
+          }
+        },
+        {
+          "owner": "child",
+          "characters": {
+            "payload": 14748,
+            "tools": 5910,
+            "collaboration": 5048,
+            "instructions": 8627,
+            "history": 120
+          }
+        }
+      ]
+    },
+    {
+      "file": "gpt-disabled-all.json",
+      "sha256": "333a9c99257476f319c5d5657152691650c050d9186679fa5b8ae06078e47952",
+      "requests": [
+        {
+          "owner": "parent",
+          "characters": {
+            "payload": 13343,
+            "tools": 9474,
+            "collaboration": 6686,
+            "instructions": 3660,
+            "history": 89
+          }
+        },
+        {
+          "owner": "child",
+          "characters": {
+            "payload": 19104,
+            "tools": 9404,
+            "collaboration": 6686,
+            "instructions": 9491,
+            "history": 89
+          }
+        }
+      ]
+    },
+    {
+      "file": "gpt-disabled-selected.json",
+      "sha256": "48824a9cfb5d62540a04a14d088e689d5b542e062200faac077c7d1942119601",
+      "requests": [
+        {
+          "owner": "parent",
+          "characters": {
+            "payload": 8226,
+            "tools": 5253,
+            "collaboration": 4581,
+            "instructions": 2764,
+            "history": 89
+          }
+        },
+        {
+          "owner": "child",
+          "characters": {
+            "payload": 14234,
+            "tools": 5430,
+            "collaboration": 4581,
+            "instructions": 8595,
+            "history": 89
+          }
+        }
+      ]
+    },
+    {
+      "file": "gpt-enabled-all.json",
+      "sha256": "a5f7b457ecee34c9e4f49edde248e6074f3e95d48b0906fbdc9a318fa31f73b9",
+      "requests": [
+        {
+          "owner": "parent",
+          "characters": {
+            "payload": 17091,
+            "tools": 14190,
+            "collaboration": 6686,
+            "instructions": 2692,
+            "history": 89
+          }
+        },
+        {
+          "owner": "child",
+          "characters": {
+            "payload": 22976,
+            "tools": 14190,
+            "collaboration": 6686,
+            "instructions": 8577,
+            "history": 89
+          }
+        }
+      ]
+    },
+    {
+      "file": "gpt-enabled-selected.json",
+      "sha256": "51201d095c8cf834e1ff97628c7edec9f761705aac22fc42bff66a10cfc3eaff",
+      "requests": [
+        {
+          "owner": "parent",
+          "characters": {
+            "payload": 13299,
+            "tools": 10326,
+            "collaboration": 5045,
+            "instructions": 2764,
+            "history": 89
+          }
+        },
+        {
+          "owner": "child",
+          "characters": {
+            "payload": 19307,
+            "tools": 10503,
+            "collaboration": 5045,
+            "instructions": 8595,
+            "history": 89
+          }
+        }
+      ]
+    },
+    {
+      "file": "older-gpt-enabled-all.json",
+      "sha256": "482fd9665767b2c43fb0b641cacb0d6bc68018f17cc5fbfe8dbbe4024d2c3ef4",
+      "requests": [
+        {
+          "owner": "parent",
+          "characters": {
+            "payload": 13345,
+            "tools": 9474,
+            "collaboration": 6686,
+            "instructions": 3660,
+            "history": 89
+          }
+        },
+        {
+          "owner": "child",
+          "characters": {
+            "payload": 19106,
+            "tools": 9404,
+            "collaboration": 6686,
+            "instructions": 9491,
+            "history": 89
+          }
+        }
+      ]
+    }
+  ]
+}

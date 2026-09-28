@@ -1,6 +1,20 @@
 import { expect, test } from "vitest";
-import { checkLifecycle, type Operation } from "./subagents-route-smoke.js";
+import { checkLifecycle, checkMailbox, type Operation } from "./subagents-route-smoke.js";
 import { findMatchedPatterns } from "../packages/ext/bash-gate/policy.js";
+
+test("smoke validates queue-only history separately from streaming events and rejects duplicate finals", () => {
+  const mail = (completion?: string) => ({
+    role: "custom",
+    customType: "subagent-message",
+    details: { sender: { id: "/root/probe" }, ...(completion ? { completion } : {}) },
+  });
+  const history = [mail(), mail("completed"), mail("completed")];
+  expect(checkMailbox(history)).toEqual({ independentFinals: true, independentProgress: true });
+  expect(checkMailbox(history.slice(1)).independentProgress).toBe(false);
+  expect(checkMailbox([...history, mail("completed")]).independentFinals).toBe(false);
+  expect(checkMailbox([mail(), mail("failed")]).independentFinals).toBe(false);
+  expect(checkMailbox([]).independentFinals).toBe(false);
+});
 
 test("V2 smoke requires ordered completion, retained-task recall and direct mailbox/message results", async () => {
   const result = (value: unknown) => ({

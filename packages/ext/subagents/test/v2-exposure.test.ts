@@ -221,6 +221,35 @@ it.each([
   const childPayload = JSON.stringify(h.payloads.at(-1));
   expect(childPayload).toContain("Your parent task_name is /root.");
   expect(h.fetch).not.toHaveBeenCalled();
+  // Opt-in synthetic evidence for release audits; never sends a provider request.
+  const evidenceDir = process.env.SUBAGENTS_PAYLOAD_DIR;
+  if (evidenceDir) {
+    mkdirSync(evidenceDir, { recursive: true });
+    const size = (value: unknown) => JSON.stringify(value ?? null).length;
+    const evidence = h.payloads.map((payload, index) => ({
+      owner: index === 0 ? "parent" : "child",
+      characters: {
+        payload: size(payload),
+        tools: size(payload.tools),
+        collaboration: size(payload.tools.filter((tool: any) => collaboration.includes(tool.name))),
+        instructions: size(
+          payload.instructions ??
+            payload.system ??
+            (payload.input ?? []).filter((item: any) =>
+              ["system", "developer"].includes(item.role),
+            ),
+        ),
+        history: size(
+          (payload.input ?? payload.messages).filter(
+            (item: any) => !["system", "developer"].includes(item.role),
+          ),
+        ),
+      },
+      payload,
+    }));
+    const name = `${options.route}-${options.disabled ? "disabled" : "enabled"}-${options.selected ? "selected" : "all"}`;
+    writeFileSync(join(evidenceDir, `${name}.json`), JSON.stringify(evidence, null, 2) + "\n");
+  }
 });
 
 it("preserves child ownership, tool restrictions and controls across provider switches", async () => {

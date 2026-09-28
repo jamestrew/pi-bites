@@ -35,7 +35,8 @@ remain addressable even when idle runtimes unload. `/agents` and Fleet show live
 retained conversations. Saved displays do not restore live agents.
 
 See [the V2 contract](packages/ext/subagents/CODEX_V2.md) and
-[cutover verification](docs/code-mode-contract/subagents-v2-cutover.md).
+[cutover verification](docs/code-mode-contract/subagents-v2-cutover.md) and
+[release validation and remaining live gaps](docs/code-mode-contract/subagents-v2-validation.md).
 
 ## Installation
 
