@@ -293,3 +293,22 @@ it("accounts for accepted work after caller cancellation without dereferencing s
   expect(payload).not.toContain("UNCOMMITTED");
   expect(payload).not.toContain("INVALIDATED");
 });
+
+it("queues each completed turn's attributed final without waking the parent", async () => {
+  const h = await setup();
+  h.faux.setResponses([fauxAssistantMessage("FIRST FINAL"), fauxAssistantMessage("SECOND FINAL")]);
+  await h.call("spawn_agent", { task_name: "a", message: "first", fork_turns: "none" });
+  await h.manager.waitForAll();
+  await h.call("followup_task", { target: "a", message: "second" });
+  await h.manager.waitForAll();
+  expect(
+    h.pi.sendMessage.mock.calls.map(([message, options]: any[]) => ({
+      sender: message.details.sender.id,
+      text: message.details.message,
+      options,
+    })),
+  ).toEqual([
+    { sender: "/root/a", text: "FIRST FINAL", options: { triggerTurn: false } },
+    { sender: "/root/a", text: "SECOND FINAL", options: { triggerTurn: false } },
+  ]);
+});

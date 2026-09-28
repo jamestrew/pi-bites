@@ -119,7 +119,7 @@ export class SubagentController {
       if (this.tool(name).captureHistory?.(args) && !forkContext)
         throw new Error("Fork history was not captured for this call");
       const targets =
-        name === "wait_agent"
+        name === "wait_agent" && !this.registration.directOnly
           ? (params.targets as string[])
           : [params.target ?? params.id].filter((id): id is string => typeof id === "string");
       for (const id of targets) {

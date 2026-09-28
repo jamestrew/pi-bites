@@ -131,8 +131,8 @@ unavailable routes must remain explicitly unverified. No host pin change is need
 
 `v2-integration-harness.ts` is an explicit test entrypoint, not imported by ordinary
 extension activation and not enabled by configuration. It registers executable
-`spawn_agent`, `list_agents`, `send_message`, and `followup_task`; wait and interrupt
-definitions remain provenance, not stub executors. The existing controller, manager, Fleet/navigation, approvals, runner,
+`spawn_agent`, `list_agents`, `send_message`, `followup_task`, and `wait_agent`; interrupt
+remains provenance, not a stub executor. The existing controller, manager, Fleet/navigation, approvals, runner,
 provider registry and selected-tool intersection remain authoritative. The V1 Code
 Mode bridge declines this direct-only controller, including in child sessions.
 Ordinary sessions retain their existing surface until the coherent six-tool cutover.
@@ -195,3 +195,37 @@ endpoints do not touch invalidated extension APIs. Fleet retains idle rows with
 pending messages, and direct result metadata updates the call row without adding
 model-visible acknowledgments. The staged tests use real Pi and a canned provider;
 live GPT/Anthropic timing and residency/recovery remain unverified here.
+
+## Completion mail and mailbox waits (#348)
+
+The staged V2 completion path queues attributed final answers through the same
+native queue-only messenger as information messages. Each completed generation
+delivers once, including later follow-up turns; stopped/interrupted turns do not
+send finals. Failures queue attributed failure text. Fleet/status/usage events
+remain separate from model content; completion metadata styles the single incoming
+message instead of adding a second result notification. Idle completion never
+requests a parent model turn. Ordinary V1 activation remains unchanged.
+
+Direct `wait_agent` accepts only the supported integer `timeout_ms`, with the
+default, limits, notice and generic summaries documented above. It subscribes to
+the caller's mailbox, not agent terminal states. Pending mail returns immediately;
+arrival wakes all current waits without consuming or copying messages. Only context
+preparation acknowledges activity IDs. Cancellation/replacement releases listeners
+and timers without closing agents or consuming pending mail.
+
+Pi's `input` hook precedes queue insertion and later hooks may asynchronously delay
+or handle the input. The messenger observes interactive/RPC input without changing
+it, then checks the extracted pending-user-input predicate every 25 ms while a wait
+exists. It does not wake merely because the input hook fired. Pi has no extension
+post-enqueue event; replace this bounded polling with that event if Pi exposes one.
+The timer never dereferences a captured context: the predicate is extracted while
+active, guarded against runtime invalidation, and polling stops on completion,
+cancellation or messenger disposal. This guarded capability is runtime-bound, not
+an assertion that extracted Pi methods survive replacement. Handled input does not
+wake a wait, and accepted input remains in Pi's normal queue.
+
+Real-Pi scheduling regressions delay a downstream input handler before enqueue,
+exercise handled input, and verify the next request receives input once. Canned
+child-provider tests cover repeated completion delivery; real idle parent sessions
+verify zero unsolicited requests. Focused tests cover timeout/clamping, ownership,
+throwing getters, UI outcomes and cleanup. Live provider timing remains unverified.

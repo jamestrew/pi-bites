@@ -11,6 +11,7 @@ export function textResult<const TDetails = AgentDetails>(msg: string, details?:
 /** Model payload and display details travel separately across direct/nested transports. */
 export type SubagentPayload =
   | ""
+  | { message: string; timed_out: boolean }
   | { task_name: string }
   | { agents: Array<{ agent_name: string; agent_status: WaitAgentStatus }> }
   | { agent_id: string; nickname: string | null }
