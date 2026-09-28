@@ -66,6 +66,41 @@ export async function spawnNamed(
   signal?: AbortSignal,
 ): Promise<string> {
   signal?.throwIfAborted();
+  manager.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
+  manager.taskPaths.available(ctx.sessionManager.getSessionId(), options.taskName ?? "");
+  const release = await manager.runtimes.admit(signal);
+  try {
+    return await spawnAdmitted(
+      manager,
+      pi,
+      ctx,
+      type,
+      prompt,
+      {
+        ...options,
+        onSessionCreated: (session) => {
+          // The record now owns this loaded slot, before callbacks can admit more work.
+          release();
+          options.onSessionCreated?.(session);
+        },
+      },
+      signal,
+    );
+  } finally {
+    release();
+  }
+}
+
+async function spawnAdmitted(
+  manager: AgentManager,
+  pi: ExtensionAPI,
+  ctx: SubagentContext,
+  type: string,
+  prompt: string,
+  options: SpawnOptions,
+  signal?: AbortSignal,
+): Promise<string> {
+  signal?.throwIfAborted();
   let committed = false;
   let ready!: () => void;
   const initialized = new Promise<void>((resolve) => {

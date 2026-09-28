@@ -348,6 +348,10 @@ export class FleetList {
     }
     const record = entry.record;
     if (!this.ui) return;
+    if (this.manager.isRuntimeDisposing(record.id)) {
+      this.ui.notify("Agent runtime is unloading; retry to view retained history.", "info");
+      return;
+    }
     const session = getConversationSource(record);
     if (!session) {
       this.ui.notify(`Agent is ${record.status} — no session available.`, "info");
@@ -356,6 +360,7 @@ export class FleetList {
     const activity = this.agentActivity.get(record.id);
     this.viewingAgentId = record.id;
 
+    const release = this.manager.runtimes.protect(record.id);
     void this.ui
       .custom<undefined>((tui, theme, keybindings, done) => {
         this.viewerClose = () => done(undefined);
@@ -381,8 +386,14 @@ export class FleetList {
         );
       }, CONVERSATION_OVERLAY_OPTIONS)
       .then(
-        () => this.clearViewer(),
-        () => this.clearViewer(),
+        () => {
+          release();
+          this.clearViewer();
+        },
+        () => {
+          release();
+          this.clearViewer();
+        },
       );
   }
 
@@ -451,8 +462,9 @@ export class FleetList {
       record.status === "stopped"
         ? ` · ${lifecycleStatusLabel(getAgentStatus(record), "pending_init")}`
         : "";
+    const residency = !record.session && record.retainedConversation ? " · unloaded" : "";
     const interaction = pending ? ` · ${pending} pending message${pending === 1 ? "" : "s"}` : "";
-    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}${theme.fg("dim", terminal + interaction)}`;
+    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}${theme.fg("dim", terminal + residency + interaction)}`;
     const tokens = getLifetimeTotal(
       this.agentActivity.get(record.id)?.lifetimeUsage ?? record.lifetimeUsage,
     );

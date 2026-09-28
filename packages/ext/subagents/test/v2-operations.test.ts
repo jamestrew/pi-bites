@@ -133,6 +133,7 @@ it("releases initialization failures and cancelled reservations for retry", asyn
   );
   const owner = new AbortController();
   const cancelled = h.call("spawn_agent", { task_name: "a", message: "x" }, owner.signal);
+  await vi.waitFor(() => expect(runAgent).toHaveBeenCalledTimes(2));
   owner.abort();
   await expect(cancelled).rejects.toThrow("cancelled");
   readyChild();
@@ -146,6 +147,7 @@ it("keeps committed agents discoverable after caller cancellation loses a result
   const h = harness();
   const owner = new AbortController();
   const pending = h.call("spawn_agent", { task_name: "a", message: "x" }, owner.signal);
+  await vi.waitFor(() => expect(runAgent).toHaveBeenCalledOnce());
   owner.abort();
   await pending;
   expect(vi.mocked(runAgent).mock.calls[0]?.[3].signal?.aborted).toBe(false);
@@ -308,6 +310,7 @@ it("cancels initialization on owner replacement and does not start late", async 
   );
   const h = harness();
   const pending = h.call("spawn_agent", { task_name: "a", message: "x" });
+  await vi.waitFor(() => expect(runAgent).toHaveBeenCalledOnce());
   await h.emit("session_before_switch");
   await expect(pending).rejects.toThrow("cancelled");
   expect(vi.mocked(runAgent).mock.calls[0]?.[3].signal?.aborted).toBe(true);
@@ -409,3 +412,21 @@ it.each(["all", "none", "1"])(
     });
   },
 );
+
+it("transfers admission to a published runtime before reentrant spawning", async () => {
+  readyChild();
+  const h = harness();
+  const cwd = mkdtempSync(join(tmpdir(), "v2-publication-"));
+  cleanup.push(async () => rmSync(cwd, { recursive: true, force: true }));
+  h.ctx.cwd = cwd;
+  saveSettings({ maxConcurrent: 2 }, cwd);
+  await h.emit("session_start");
+  let second: Promise<any> | undefined;
+  h.pi.events.on("subagents:created", (event: any) => {
+    if (event.description === "a")
+      second = h.call("spawn_agent", { task_name: "b", message: "B", fork_turns: "none" });
+  });
+  await h.call("spawn_agent", { task_name: "a", message: "A", fork_turns: "none" });
+  await expect(second).resolves.toMatchObject({ value: { task_name: "/root/b" } });
+  expect((await h.call("list_agents", {})).value.agents).toHaveLength(3);
+});

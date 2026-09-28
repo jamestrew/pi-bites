@@ -937,3 +937,28 @@ describe("AgentManager runtime disposal", () => {
     expect(completed.mock.calls.filter(([record]) => record.id === id)).toHaveLength(1);
   });
 });
+
+it("protects viewed terminal runtimes and unseen persisted mail independently of native input", async () => {
+  const manager = new AgentManager();
+  const session = {
+    ...mockSession(),
+    pendingMessageCount: 0,
+    sessionManager: SessionManager.inMemory("/tmp"),
+  };
+  vi.mocked(runAgent).mockResolvedValueOnce({ session, responseText: "done" });
+  try {
+    const id = manager.spawn(mockPi, mockCtx, "worker", "task", { description: "task" });
+    await manager.getRecord(id)!.promise;
+    const release = manager.runtimes.protect(id);
+    await expect(manager.disposeRuntime(id)).rejects.toThrow("busy");
+    release();
+    manager.runtimes.hasPendingMail = () => true;
+    await expect(manager.disposeRuntime(id)).rejects.toThrow("busy");
+    manager.runtimes.hasPendingMail = () => false;
+    await manager.disposeRuntime(id);
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(manager.getRecord(id)!.retainedConversation).toBeDefined();
+  } finally {
+    await manager.dispose();
+  }
+});

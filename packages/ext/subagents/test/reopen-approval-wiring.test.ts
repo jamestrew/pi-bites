@@ -112,8 +112,8 @@ it.each([false, true])(
       expect(pi.sendMessage).not.toHaveBeenCalled();
       await manager.close(id);
       ui.select.mockResolvedValue("Deny");
-      expect(await approve(oldIncarnation)).toEqual(denied);
-      expect(ui.select).toHaveBeenCalledTimes(2);
+      expect(await approve(oldIncarnation)).toMatchObject({ outcome: "failure" });
+      expect(ui.select).toHaveBeenCalledTimes(1);
 
       vi.mocked(openAgentSession).mockResolvedValueOnce({
         ...mockSession(),
@@ -124,7 +124,7 @@ it.each([false, true])(
       expect(incarnation).toEqual(expect.any(String));
       expect(incarnation).not.toBe(oldIncarnation);
       expect(await approve(incarnation)).toEqual(denied);
-      expect(ui.select).toHaveBeenCalledTimes(3);
+      expect(ui.select).toHaveBeenCalledTimes(2);
 
       if (advanceGeneration) {
         // The first input starts the idle reopen's generation; the second advances it.
@@ -140,7 +140,7 @@ it.each([false, true])(
       expect(manager.getRecord(id).generation === oldRecord.generation).toBe(!advanceGeneration);
       ui.select.mockResolvedValue('Allow for session ("rm")');
       expect(await approve(incarnation)).toEqual(allowed);
-      expect(ui.select).toHaveBeenCalledTimes(4);
+      expect(ui.select).toHaveBeenCalledTimes(3);
       expect(pi.sendMessage).not.toHaveBeenCalled();
 
       await lifecycle.get("agent_settled")({}, { ...ctx, isIdle: () => true });
@@ -150,7 +150,7 @@ it.each([false, true])(
       );
       // Delivering the old completion must not erase this incarnation's new approval.
       expect(await approve(incarnation)).toEqual(allowed);
-      expect(ui.select).toHaveBeenCalledTimes(4);
+      expect(ui.select).toHaveBeenCalledTimes(3);
     } finally {
       finished.resolve({ session: child, responseText: "cleanup" });
       await lifecycle.get("session_shutdown")({}, ctx);

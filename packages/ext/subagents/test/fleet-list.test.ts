@@ -57,6 +57,8 @@ function makeActivity(record: AgentRecord): AgentActivity {
 function fakeManager(agents: AgentRecord[]): AgentManager {
   return {
     listAgents: () => agents,
+    runtimes: { protect: () => () => {} },
+    isRuntimeDisposing: () => false,
     abort: () => true,
     steer: vi.fn(() => true),
   } as unknown as AgentManager;

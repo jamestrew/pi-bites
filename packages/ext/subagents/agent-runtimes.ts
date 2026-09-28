@@ -4,13 +4,20 @@ import { getAgentSessionId } from "./agent-tree.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";
 import type { AgentRecord } from "./types.js";
 
-/** Owns loaded-runtime teardown, not conversation retirement or capacity. */
+/** Owns runtime admission and teardown, never conversation retirement. */
 export class AgentRuntimes {
+  hasPendingMail = (_record: AgentRecord) => false;
+  private claims = new Set<symbol>();
+  private protections = new Map<string, number>();
+  private touched = new Map<string, number>();
+  private clock = 0;
   private teardowns = new Set<Promise<void>>();
   private disposals = new Map<string, Promise<void>>();
 
   constructor(
     private hooks: {
+      records: () => AgentRecord[];
+      limit: () => number;
       getRecord: (id: string) => AgentRecord | undefined;
       isClosing: (id: string) => boolean;
       isSettled: (record: AgentRecord) => boolean;
@@ -46,10 +53,75 @@ export class AgentRuntimes {
     return this.disposals.has(id);
   }
 
-  /** Internal residency seam. V1 slots remain reserved until conversation close.
-   * Only settled runtimes without queued input may unload; admission/reload policy
-   * belongs to the later V2 cutover, not this lifecycle prefactor.
+  touch(id: string): void {
+    this.touched.set(id, ++this.clock);
+  }
+
+  protect(id: string): () => void {
+    this.protections.set(id, (this.protections.get(id) ?? 0) + 1);
+    this.touch(id);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const count = (this.protections.get(id) ?? 1) - 1;
+      if (count) this.protections.set(id, count);
+      else this.protections.delete(id);
+    };
+  }
+
+  private eligible(record: AgentRecord): boolean {
+    return (
+      !!record.session &&
+      !this.hooks.isClosing(record.id) &&
+      !this.isDisposing(record.id) &&
+      !this.protections.has(record.id) &&
+      record.status !== "running" &&
+      record.status !== "queued" &&
+      (record.status === "idle" || this.hooks.isSettled(record)) &&
+      !record.session.pendingMessageCount &&
+      !this.hasPendingMail(record) &&
+      !record.pendingSteers?.length &&
+      !record.pendingCancelSteers?.length
+    );
+  }
+
+  /** Claim before awaiting eviction; failure is explicit, never an admission queue.
+   * Once disposal is claimed, cancellation does not roll it back.
    */
+  async admit(signal?: AbortSignal): Promise<() => void> {
+    signal?.throwIfAborted();
+    const records = this.hooks.records();
+    const loaded = records.filter((r) => r.session && !this.isDisposing(r.id)).length;
+    const needed = Math.max(0, loaded + this.claims.size - this.hooks.limit() + 1);
+    const candidates = needed
+      ? records
+          .filter((r) => r.taskName && this.eligible(r))
+          .sort((a, b) => (this.touched.get(a.id) ?? 0) - (this.touched.get(b.id) ?? 0))
+          .filter((r) => {
+            const retained = this.hooks.retain(r);
+            return retained.recoverable && "conversation" in retained;
+          })
+          .slice(0, needed)
+      : [];
+    if (candidates.length < needed)
+      throw new Error("No runtime slot is available: all resident agents are busy or protected.");
+    const disposal = Promise.all(candidates.map((r) => this.dispose(r.id)));
+    const claim = Symbol();
+    this.claims.add(claim);
+    const release = () => {
+      this.claims.delete(claim);
+    };
+    try {
+      await disposal;
+      signal?.throwIfAborted();
+      return release;
+    } catch (error) {
+      release();
+      throw error;
+    }
+  }
+
   dispose(id: string): Promise<void> {
     const pending = this.disposals.get(id);
     if (pending) return pending;
@@ -58,15 +130,7 @@ export class AgentRuntimes {
       return Promise.reject(new Error("Subagent owner is closed"));
     const session = record.session;
     if (!session) return Promise.resolve();
-    if (
-      record.status === "running" ||
-      record.status === "queued" ||
-      (record.status !== "idle" && !this.hooks.isSettled(record)) ||
-      session.pendingMessageCount > 0 ||
-      record.pendingSteers?.length ||
-      record.pendingCancelSteers?.length
-    )
-      return Promise.reject(new Error("Subagent runtime is busy"));
+    if (!this.eligible(record)) return Promise.reject(new Error("Subagent runtime is busy"));
     const snapshot = this.hooks.retain(record);
     if (!snapshot.recoverable || !("conversation" in snapshot))
       return Promise.reject(new Error("Subagent has no recoverable conversation"));

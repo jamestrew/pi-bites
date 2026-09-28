@@ -151,8 +151,8 @@ initial-input boundary. Before handoff, owner/caller cancellation aborts initial
 failure tears down the record and releases its path and capacity. After handoff,
 caller result loss does not cancel the child: the loaded task remains discoverable
 through list/Fleet and manageable by the shared manager. Paths remain reserved when
-a settled runtime unloads. Terminal named tasks release execution capacity; automatic
-residency-pressure admission and reload policy belong to later slices.
+a settled runtime unloads. Terminal named tasks release execution capacity; residency-pressure admission and
+reload follow the policy below.
 
 The tests exercise direct tools, shared operations and real Pi sessions with a canned
 provider, including full/fresh imports, additive policy, selected tools, Code Mode
@@ -167,8 +167,8 @@ Direct messaging validates text and root-tree membership before native delivery.
 Relative paths resolve beneath the caller; canonical paths permit parent and sibling
 communication. Sender task paths and message text are attributed in model content;
 activity IDs and interaction status remain display/bookkeeping metadata. Both tools
-return empty text, without V1 submission receipts. Unloaded agents fail explicitly;
-rehydration belongs to the residency slice.
+return empty text, without V1 submission receipts. Known unloaded targets reload
+under the residency policy below.
 
 `send_message` uses Pi's explicit `{triggerTurn: false}` custom-message path. Pi
 persists idle mail immediately and appends running mail after the complete tool
@@ -248,9 +248,8 @@ is partial, not a completed final; completion mail is suppressed and Fleet shows
 A follow-up submitted during interruption waits cancellably for the old turn to
 settle before committing input. Parent replacement or cancellation before that commit
 prevents delivery. Already accepted input is not rolled back, and interruption does
-not promise that pending mailbox work can never resume. Residency reload remains a
-later integration slice; these regressions use the staged direct harness and real Pi
-sessions with canned providers, not live-provider timing.
+not promise that pending mailbox work can never resume. These regressions use the staged direct harness and real Pi sessions with canned
+providers, not live-provider timing.
 
 ## Recent instruction/task forks (#350)
 
@@ -289,3 +288,56 @@ parent independence, explicit cross-provider child model selection and throwing 
 context getters. Compaction/edit fixtures pass stock OpenAI Responses conversion and
 Anthropic payload construction intercepted before transport, including tool pairing.
 These checks are offline conversion evidence, not live provider acceptance.
+
+## Execution capacity and retained residency (#351)
+
+Named tasks release their execution reservation when a turn settles, while their
+Pi runtime may remain loaded. The local `maxConcurrent` setting still counts **child
+agents**, not root plus children. It independently bounds executing tasks and loaded
+child runtimes (including initialization/reload claims). No additional setting or
+waiting queue is introduced. Unlike the upstream four-total-thread default and
+advisory execution admission, local reservations enforce the configured ceiling.
+Role tool intersections, model scope and delegation-depth restrictions still apply.
+
+When a new runtime needs a slot, admission unloads the least-recently-touched eligible
+terminal runtime. Completion, input/reload and opening a conversation viewer touch
+the runtime. Active/unsettled turns, protected viewers/operations, and pending mail
+are ineligible. Native pending input and the messenger's unseen activity are checked
+separately: persisted queue-only history is not evidence that mail has been read.
+No eligible slot produces an explicit error. Concurrent admission claims count
+before teardown starts; a reduced ceiling may require several eligible unloads.
+
+Unloading preserves the same manager record, canonical path, session ID, transcript,
+generation, usage, descendants and ownership. It invalidates the runtime incarnation
+and approval allowances, not the conversation. Fleet/history label unloaded history;
+saved messages and usage are not represented as a restored live runtime. An open
+retained-history viewer stays an explicitly read-only snapshot if another operation
+reloads the identity; reopen the viewer to follow its live session. Descendant
+completion arriving while a parent is unloaded is retained in a live-manager mailbox
+and queued into Pi after successful reopening, without starting a parent turn.
+
+Both `send_message` and `followup_task` can reopen owned unloaded identities. Reopen
+retains the child's model (which must still be authorized and in scope), role,
+thinking and conversation ID, and intersects its delegated tool ceiling with the
+current caller's selected tools. It does not silently switch to the caller's model.
+Fresh runtime tokens require fresh approvals. Reload itself is queue-only; only
+follow-up requests work. Concurrent reopeners join one initialization, and operation
+protection covers the gap through input submission. `list_agents` omits unloaded
+identities; `interrupt_agent` returns `not_found` for them without loading.
+
+Validation precedes admission. Claiming unload is a commit point: later cancellation
+can leave the victim unloaded, even if the new operation fails. Admission waits for
+claimed teardown to finish before releasing its reservation. Failed/uncommitted
+reopening leaves history recoverable and releases the claim; successful publication
+is not rolled back if delivery later fails or the result is lost. The initiating
+call owns reopen cancellation; joining callers cancel only their own wait. Accepted
+native input is another commit point and is not retractable by later cancellation.
+Follow-up checks execution capacity before accepting idle input, without double-start.
+Root replacement/navigation/shutdown retire ownership and reject old captures;
+runtime-only unload does not recursively retire descendants.
+
+Recovery is in-memory for the current manager, not application-restart persistence.
+The direct canned-provider regressions exercise pressure/unload/message/follow-up/
+interrupt/follow-up, concurrent admission/reload, cancellation, failed reopen, stale
+contexts, model/tool restrictions, approval reset and descendant routing. Live
+provider timing/authentication remains a final-cutover smoke-test responsibility.

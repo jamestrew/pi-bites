@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { getApiProvider, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import { vi } from "vitest";
 import { createEventBus, SessionManager } from "@earendil-works/pi-coding-agent";
 import { createV2IntegrationHarness } from "../../v2-integration-harness.js";
@@ -37,4 +41,46 @@ export function harness(
   const call = (name: string, args: unknown, signal?: AbortSignal) =>
     direct.get(name).execute(crypto.randomUUID(), args, signal, undefined, ctx);
   return { pi, ctx, controller, direct, call, emit };
+}
+
+export async function setupV2(
+  cleanup: (() => Promise<unknown>)[],
+  autoMode?: Parameters<typeof harness>[1],
+) {
+  const cwd = mkdtempSync(join(tmpdir(), "v2-mail-"));
+  const faux = registerFauxProvider({
+    provider: "v2-mail",
+    models: [{ id: "test-model", contextWindow: 200_000 }],
+  });
+  const model = faux.getModel();
+  const h = harness(cleanup, autoMode);
+  cleanup.push(async () => {
+    faux.unregister();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+  h.pi.getActiveTools = () => [
+    "spawn_agent",
+    "list_agents",
+    "send_message",
+    "followup_task",
+    "read",
+  ];
+  h.pi.exec = async () => ({ code: 1, stdout: "", stderr: "" });
+  h.ctx.cwd = cwd;
+  h.ctx.model = model;
+  h.ctx.modelRegistry = {
+    ...h.ctx.modelRegistry,
+    getAvailable: () => [model],
+    getRegisteredProviderIds: () => [model.provider],
+    getRegisteredProviderConfig: () => ({
+      api: faux.api,
+      baseUrl: model.baseUrl,
+      apiKey: "faux",
+      models: [model],
+      streamSimple: getApiProvider(faux.api)!.streamSimple,
+    }),
+  };
+  await h.emit("session_start");
+  const manager = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));
+  return { ...h, faux, manager };
 }

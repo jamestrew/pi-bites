@@ -866,7 +866,7 @@ describe("ConversationViewer", () => {
   });
 });
 
-it("renders retained conversation history without a loaded session", () => {
+it("keeps an open retained-history viewer read-only after the identity reloads", () => {
   const record = mockRecord({
     status: "completed",
     lifetimeUsage: { input: 1, output: 1, cacheWrite: 0 },
@@ -900,5 +900,11 @@ it("renders retained conversation history without a loaded session", () => {
     vi.fn(),
   );
   expect(viewer.render(80).join("\n")).toContain("Remember the blue door");
+  record.session = mockSession();
+  record.status = "running";
+  record.retainedConversation = undefined;
+  const lines = viewer.render(80).join("\n");
+  expect(lines).toContain("retained history");
+  expect(lines).not.toContain("●");
   viewer.dispose();
 });

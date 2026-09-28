@@ -1,15 +1,9 @@
 import { saveSettings } from "../settings.js";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  fauxAssistantMessage,
-  getApiProvider,
-  registerFauxProvider,
-  type TranscriptContext,
-} from "@earendil-works/pi-ai/compat";
-import { harness } from "./helpers/v2-harness.js";
+import { fauxAssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai/compat";
+import { setupV2 } from "./helpers/v2-harness.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 const cleanup: (() => Promise<unknown>)[] = [];
@@ -17,44 +11,7 @@ afterEach(async () => {
   for (const fn of cleanup.splice(0)) await fn();
 });
 
-async function setup(autoMode?: Parameters<typeof harness>[1]) {
-  const cwd = mkdtempSync(join(tmpdir(), "v2-mail-"));
-  const faux = registerFauxProvider({
-    provider: "v2-mail",
-    models: [{ id: "test-model", contextWindow: 200_000 }],
-  });
-  const model = faux.getModel();
-  const h = harness(cleanup, autoMode);
-  cleanup.push(async () => {
-    faux.unregister();
-    rmSync(cwd, { recursive: true, force: true });
-  });
-  h.pi.getActiveTools = () => [
-    "spawn_agent",
-    "list_agents",
-    "send_message",
-    "followup_task",
-    "read",
-  ];
-  h.pi.exec = async () => ({ code: 1, stdout: "", stderr: "" });
-  h.ctx.cwd = cwd;
-  h.ctx.model = model;
-  h.ctx.modelRegistry = {
-    ...h.ctx.modelRegistry,
-    getAvailable: () => [model],
-    getRegisteredProviderIds: () => [model.provider],
-    getRegisteredProviderConfig: () => ({
-      api: faux.api,
-      baseUrl: model.baseUrl,
-      apiKey: "faux",
-      models: [model],
-      streamSimple: getApiProvider(faux.api)!.streamSimple,
-    }),
-  };
-  await h.emit("session_start");
-  const manager = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));
-  return { ...h, faux, manager };
-}
+const setup = (autoMode?: Parameters<typeof setupV2>[1]) => setupV2(cleanup, autoMode);
 
 it("queues attributed information without waking an idle agent and later delivers it exactly once", async () => {
   const h = await setup();
@@ -80,7 +37,7 @@ it("queues attributed information without waking an idle agent and later deliver
   expect(payload).toContain("<sender_id>/root</sender_id>");
 });
 
-it("validates both messaging tools before delivery and rejects root follow-up, foreign trees and unloaded targets", async () => {
+it("validates both messaging tools before delivery and rejects root follow-up, foreign trees before reloading targets", async () => {
   const h = await setup();
   h.faux.setResponses([fauxAssistantMessage("done")]);
   let id = "";
@@ -115,8 +72,8 @@ it("validates both messaging tools before delivery and rejects root follow-up, f
   await expect(h.call("followup_task", { target: "/root", message: "x" })).rejects.toThrow("root");
   expect(session.messages).toHaveLength(before);
   await h.manager.disposeRuntime(id);
-  await expect(h.call("send_message", { target: "a", message: "x" })).rejects.toThrow("loaded");
-  await expect(h.call("followup_task", { target: "a", message: "x" })).rejects.toThrow("loaded");
+  await h.call("send_message", { target: "a", message: "x" });
+  expect(h.manager.getRecord(id).session).not.toBe(session);
 });
 
 it("routes attributed sibling and parent information without waking the sibling", async () => {

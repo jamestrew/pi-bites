@@ -33,7 +33,6 @@ export type MessageParent = (
 ) => boolean;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
-/** Default max concurrent agents. */
 const DEFAULT_MAX_CONCURRENT = 6;
 export const MAX_RETAINED_TOOL_CALLS = 200;
 
@@ -71,7 +70,7 @@ export class AgentManager {
   private maxConcurrent: number;
   /** Queue of agents waiting to start. */
   private queue: QueuedTurn[] = [];
-  /** Number of open agents holding a concurrency slot, including completed agents. */
+  /** Execution reservations; unnamed V1 agents retain theirs until close. */
   private reservedCount = 0;
   private reservations = new WeakSet<AgentRecord>();
   private closer: AgentCloser;
@@ -82,7 +81,10 @@ export class AgentManager {
   private turnCounts = new WeakMap<AgentRecord, number>();
   private followupPending = new WeakMap<AgentRecord, () => boolean>();
   private pendingAgents = new Set<Promise<string>>();
-  private runtimes = new AgentRuntimes({
+  onRuntimeLoaded?: (record: AgentRecord) => void;
+  readonly runtimes = new AgentRuntimes({
+    records: () => this.listAgents(),
+    limit: () => this.maxConcurrent,
     getRecord: (id) => this.agents.get(id),
     isClosing: (id) => this.isClosing(id),
     isSettled: (record) => (this.settledGeneration.get(record) ?? 0) >= record.generation,
@@ -91,7 +93,6 @@ export class AgentManager {
   });
   private reopener: AgentReopener;
   private closing = false;
-  private disposed = false;
   private shutdownPromise?: Promise<void>;
 
   constructor(
@@ -136,21 +137,29 @@ export class AgentManager {
     this.reopener = new AgentReopener(this.agents, this.closer, {
       assertOwnerAvailable: (parentId, rootId) => this.tree.assertOwnerAvailable(parentId, rootId),
       reserve: (record) => this.reserve(record),
+      admitRuntime: (signal) => this.runtimes.admit(signal),
       release: (record) => this.releaseReservation(record),
+      invalidate: (record) => this.onAgentInvalidated?.(record),
       commit: (record) => {
-        this.onAgentInvalidated?.(record);
         this.options.set(record, {
+          ...this.options.get(record),
           description: record.description,
           model: record.session?.model,
           thinkingLevel: record.invocation?.thinking,
+          allowedTools: record.allowedTools,
         });
+        this.runtimes.touch(record.id);
+        try {
+          this.onRuntimeLoaded?.(record);
+        } catch {
+          /* Display cannot revoke a loaded runtime. */
+        }
       },
       registerCollaboration,
       autoCompactionThreshold: getAutoCompactionThreshold,
     });
   }
 
-  /** Reservations, not this diagnostic count, own capacity. */
   private get runningCount(): number {
     return [...this.agents.values()].filter((record) => record.status === "running").length;
   }
@@ -204,10 +213,8 @@ export class AgentManager {
     this.recordDiagnostic(record, "failure_observed", { ...failure });
   }
 
-  /** Update the max concurrent agents limit. */
   setMaxConcurrent(n: number) {
     this.maxConcurrent = Math.max(1, n);
-    // Start queued agents if the new limit allows
     this.drainQueue();
   }
 
@@ -253,6 +260,7 @@ export class AgentManager {
     const record: AgentRecord = {
       id,
       taskName,
+      allowedTools: options.allowedTools && [...options.allowedTools],
       incarnation: randomUUID(),
       generation: 1,
       type,
@@ -449,6 +457,7 @@ export class AgentManager {
 
   private settleGeneration(record: AgentRecord, generation: number): void {
     this.settledGeneration.set(record, generation);
+    this.runtimes.touch(record.id);
     this.recordDiagnostic(record, "completed", {
       status: record.status,
       error: record.error,
@@ -700,6 +709,13 @@ export class AgentManager {
 
     const options = this.options.get(record);
     if (!options) return false;
+    if (
+      record.taskName &&
+      !this.reservations.has(record) &&
+      this.reservedCount >= this.maxConcurrent
+    )
+      throw new Error("No concurrency slot is available.");
+    this.runtimes.touch(id);
     const session = record.session;
 
     if (record.status !== "idle") record.generation++;
@@ -833,6 +849,21 @@ export class AgentManager {
     });
   }
 
+  async reload(pi: ExtensionAPI, ctx: SubagentContext, id: string, signal?: AbortSignal) {
+    await this.runtimes.pending(id);
+    signal?.throwIfAborted();
+    if (this.isClosing(id)) throw new Error("Subagent owner is closed");
+    return this.reopener.open(pi, ctx, id, {
+      signal,
+      scopeModels: ctx.scopeModels,
+      rootSessionId: this.tree.rootSessionId(ctx.sessionManager.getSessionId()),
+    });
+  }
+
+  isRuntimeReopening(id: string): boolean {
+    return !!this.reopener.pending(id);
+  }
+
   isRuntimeDisposing(id: string): boolean {
     return this.runtimes.isDisposing(id);
   }
@@ -844,6 +875,7 @@ export class AgentManager {
   /** Close a retained agent and every descendant represented by this manager. */
   close(id: string) {
     const pending = this.reopener.pending(id);
+    if (pending && this.agents.get(id)?.taskName) this.reopener.cancel(id);
     if (pending) return pending.catch(() => undefined).then(() => this.closer.close(id));
     return this.closer.close(id);
   }
@@ -958,24 +990,11 @@ export class AgentManager {
       this.releaseReservation(record);
     }
     await this.runtimes.waitForAll();
-    this.finalizeDispose();
-    await this.runtimes.waitForAll();
+    this.agents.clear();
+    this.closer.clear();
   }
 
   dispose(): Promise<void> {
     return this.shutdown();
-  }
-
-  private finalizeDispose(): void {
-    if (this.disposed) return;
-    this.closing = true;
-    this.disposed = true;
-    this.abortAll();
-    for (const record of this.agents.values()) {
-      if (record.session) void this.runtimes.teardown(record.session);
-      this.releaseReservation(record);
-    }
-    this.agents.clear();
-    this.closer.clear();
   }
 }
