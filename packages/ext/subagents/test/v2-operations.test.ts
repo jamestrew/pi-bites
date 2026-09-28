@@ -24,6 +24,7 @@ it("spawns and lists named agents through direct tools and the shared manager", 
   });
   const h = harness();
   expect([...h.direct.keys()]).toEqual([
+    "interrupt_agent",
     "wait_agent",
     "spawn_agent",
     "list_agents",

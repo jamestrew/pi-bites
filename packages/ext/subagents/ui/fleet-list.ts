@@ -1,3 +1,5 @@
+import { lifecycleStatusLabel } from "./agent-lifecycle-render.js";
+import { getAgentStatus } from "../agent-status.js";
 /**
  * fleet-list.ts — Claude Code-style "FleetView" list rendered above the editor.
  *
@@ -445,8 +447,12 @@ export class FleetList {
     theme: Theme,
   ): string {
     const pending = this.pendingMail.get(record.id);
+    const terminal =
+      record.status === "stopped"
+        ? ` · ${lifecycleStatusLabel(getAgentStatus(record), "pending_init")}`
+        : "";
     const interaction = pending ? ` · ${pending} pending message${pending === 1 ? "" : "s"}` : "";
-    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}${theme.fg("dim", interaction)}`;
+    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}${theme.fg("dim", terminal + interaction)}`;
     const tokens = getLifetimeTotal(
       this.agentActivity.get(record.id)?.lifetimeUsage ?? record.lifetimeUsage,
     );

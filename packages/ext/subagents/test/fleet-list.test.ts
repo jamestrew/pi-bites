@@ -512,3 +512,19 @@ it("keeps idle agents with pending mail visible until their next request", () =>
   expect(h.render(150)).toEqual([]);
   h.fleet.dispose();
 });
+
+it("distinguishes an interrupted turn from shutdown in the retained Fleet row", () => {
+  const record = makeRecord({
+    status: "stopped",
+    completedAt: Date.now(),
+    abort: { source: "interrupt", timestamp: Date.now(), reason: "interrupt" },
+  });
+  const h = harness([record]);
+  try {
+    expect(h.render(160).join("\n")).toContain("interrupted");
+    record.abort = undefined;
+    expect(h.render(160).join("\n")).toContain("shutdown");
+  } finally {
+    h.fleet.dispose();
+  }
+});
