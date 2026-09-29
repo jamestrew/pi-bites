@@ -1,3 +1,4 @@
+import { SubagentOperationError } from "./tool-result.js";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import { describeSpawnModels } from "./invocation-config.js";
 import type { createV2Tools } from "./v2-tools.js";
@@ -27,6 +28,7 @@ export interface SubagentCall {
 export class SubagentController {
   private owner = new AbortController();
   private activeCalls = new Set<string>();
+  private failedResults = new Map<string, unknown>();
 
   constructor(
     private pi: ExtensionAPI,
@@ -47,6 +49,7 @@ export class SubagentController {
     this.owner.abort(new Error("Subagent owner changed"));
     this.owner = new AbortController();
     this.activeCalls = new Set();
+    this.failedResults = new Map();
   }
 
   /** Call while ctx is active. Only requested fork history crosses the async boundary. */
@@ -130,6 +133,14 @@ export class SubagentController {
   }
 
   registerTools(): void {
+    // Pi discards thrown error.details. Its result hook preserves the error flag
+    // while attaching our frozen UI snapshot to the live and persisted result.
+    this.pi.on("tool_result", (event) => {
+      if (!this.failedResults.has(event.toolCallId)) return;
+      const details = this.failedResults.get(event.toolCallId);
+      this.failedResults.delete(event.toolCallId);
+      return { details };
+    });
     if (this.child) {
       const path = this.child.taskName;
       if (!path) throw new Error("Named agent has no task path");
@@ -148,12 +159,19 @@ export class SubagentController {
           const operation = this.capture(ctx, {
             forkContext: this.tool(name).captureHistory?.(args),
           });
-          return operation.execute(name, args, {
-            callerId: operation.callerId,
-            callId,
-            signal,
-            onUpdate,
-          });
+          const failedResults = this.failedResults;
+          try {
+            return await operation.execute(name, args, {
+              callerId: operation.callerId,
+              callId,
+              signal,
+              onUpdate,
+            });
+          } catch (error) {
+            if (error instanceof SubagentOperationError && error.details !== undefined)
+              failedResults.set(callId, error.details);
+            throw error;
+          }
         },
       };
       this.pi.registerTool(definition);

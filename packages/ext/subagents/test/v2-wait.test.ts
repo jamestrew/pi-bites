@@ -99,7 +99,11 @@ it("renders wait outcomes once in the call row, with bounded width and styled de
     bold: (s: string) => `<b>${s}</b>`,
     fg: (c: string, s: string) => `<${c}>${s}</${c}>`,
   };
-  for (const summary of ["Wait completed.", "Wait timed out.", "Wait interrupted by new input."]) {
+  for (const [summary, label] of [
+    ["Wait completed.", "completed"],
+    ["Wait timed out.", "timed out"],
+    ["Wait interrupted by new input.", "interrupted by new input"],
+  ]) {
     for (const expanded of [false, true]) {
       const context = { state: {}, expanded, isError: false };
       const result = tool.renderResult(
@@ -110,14 +114,14 @@ it("renders wait outcomes once in the call row, with bounded width and styled de
       );
       expect(result.render(120)).toEqual([]);
       const row = tool.renderCall({}, theme, context).render(120).join("\n");
-      expect(row).toBe(`<b>wait_agent</b><accent> 30000ms ${summary}</accent>`);
+      expect(row).toBe(`<b>wait_agent</b><accent> ${label}</accent>`);
     }
   }
   for (const error of ["Wait cancelled.", "Mailbox is unavailable"]) {
     const context = { state: {}, expanded: false, isError: true };
     tool.renderResult({ content: [{ type: "text", text: error }] }, {}, theme, context);
     expect(tool.renderCall({}, theme, context).render(120).join("\n")).toContain(
-      `\n\n<dim>${error}</dim>`,
+      `\n\n<dim>Error: ${error}</dim>`,
     );
   }
   const plain = { bold: (s: string) => s, fg: (_c: string, s: string) => s };

@@ -35,7 +35,9 @@ export function harness(
   } as any;
   const controller = registerSubagents(pi, autoMode);
   const emit = async (event: string, payload: unknown = {}) => {
-    for (const fn of handlers.get(event) ?? []) await fn(payload, ctx);
+    let result: unknown;
+    for (const fn of handlers.get(event) ?? []) result = (await fn(payload, ctx)) ?? result;
+    return result;
   };
   cleanup.push(() => emit("session_shutdown"));
   const call = (name: string, args: unknown, signal?: AbortSignal) =>

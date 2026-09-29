@@ -227,7 +227,9 @@ it("returns settled status unchanged and renders the previous snapshot, not a st
     const context = { state: {}, expanded, isError: false };
     expect(tool.renderResult(result, {}, theme, context).render(120)).toEqual([]);
     expect(tool.renderCall({ target: "a" }, theme, context).render(120)).toEqual([
-      "<b>interrupt_agent</b><accent> a previous: completed</accent>",
+      "<b>interrupt_agent</b><accent> /root/a interrupt requested</accent>",
+      "",
+      "<dim>Previous status: completed</dim>",
     ]);
   }
 });

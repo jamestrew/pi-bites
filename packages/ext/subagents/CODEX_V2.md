@@ -406,3 +406,30 @@ selection after unload/follow-up. The shared spawn execution check covers role
 precedence and pre-role validation; settings tests cover merge/save/reset behavior.
 No new live provider requests were made; earlier payload/token counts describe the
 previous static descriptions, not this dynamic catalog.
+
+## Observation receipts (#363)
+
+`interrupt_agent`, `list_agents`, and `wait_agent` use one call-owned row with
+Pi's default padding and error background. Interrupt receipts acknowledge the
+request and retain the returned previous status, not a claim that unwinding has
+finished. Listings freeze matching loaded agents' own metadata/usage, without
+current tool text or descendant counts; root metadata is omitted when unavailable.
+
+Waits still observe mailbox/input/timeout events, not selected child completion.
+While executing, UI updates sample elapsed time and the caller's direct children
+once per second. The result freezes timing, activity, own-agent usage, and known
+direct-child counts (including unloaded identities). Expanded views expose retained
+tool activity, never descendant rows or duplicate final answers. All additional
+metadata lives in result details; the model-facing contracts remain unchanged.
+
+Saved rows read only these snapshots, without timers or live agent lookup. Older
+results remain readable but cannot supply timing/activity that was never recorded.
+Pi drops details from thrown errors, so the direct registration's `tool_result`
+hook attaches executed-wait cancellation/failure snapshots while preserving the
+host error flag. A wait cancelled before execution has no timing snapshot. Timers
+are released on settlement; deferred updates use stable dependencies, not a Pi ctx.
+
+Regression checks exercise registered execution, real Pi cancellation/persistence,
+final redraw/restoration, retained child identities, configured expansion bindings,
+and narrow-width/control-character handling. These are offline checks, not live
+provider smoke-test claims.

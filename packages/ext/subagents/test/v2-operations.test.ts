@@ -242,7 +242,7 @@ it("renders safe list_agents scanlines without duplicate result rows", () => {
       .renderResult({ content: [{ type: "text", text: "denied" }] }, {}, theme, context)
       .render(100),
   ).toEqual([]);
-  expect(row.render(100).at(-1)).toBe("<dim>denied</dim>");
+  expect(row.render(100).at(-1)).toBe("<dim>Error: denied</dim>");
   const plain = tool.renderCall(
     { path_prefix: "很长的名称" },
     { bold: (s: string) => s, fg: (_c: string, s: string) => s },
