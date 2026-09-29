@@ -225,31 +225,30 @@ it("shares a root tree with child callers without widening selected tools", asyn
   ).toEqual({ agents: [{ agent_name: "/root", agent_status: "running" }] });
 });
 
-it("renders safe direct scanlines without duplicate result rows", () => {
+it("renders safe list_agents scanlines without duplicate result rows", () => {
   const h = harness();
   const theme = {
     bold: (s: string) => `<b>${s}</b>`,
     fg: (c: string, s: string) => `<${c}>${s}</${c}>`,
   };
-  for (const name of ["spawn_agent", "list_agents", "send_message", "followup_task"]) {
-    const tool = h.direct.get(name);
-    const context = { state: {}, isError: true, expanded: false };
-    const row = tool.renderCall({ task_name: "a\nunsafe", path_prefix: "/root" }, theme, context);
-    expect(row.render(100)[0]).toMatch(new RegExp(`^<b>${name}</b><accent>`));
-    expect(row.render(100)).toHaveLength(1);
-    expect(
-      tool
-        .renderResult({ content: [{ type: "text", text: "denied" }] }, {}, theme, context)
-        .render(100),
-    ).toEqual([]);
-    expect(row.render(100).at(-1)).toBe("<dim>denied</dim>");
-    const plain = tool.renderCall(
-      { task_name: "很长的名称" },
-      { bold: (s: string) => s, fg: (_c: string, s: string) => s },
-      context,
-    );
-    expect(plain.render(8).every((line: string) => visibleWidth(line) <= 8)).toBe(true);
-  }
+  const name = "list_agents";
+  const tool = h.direct.get(name);
+  const context = { state: {}, isError: true, expanded: false };
+  const row = tool.renderCall({ path_prefix: "/root/a\nunsafe" }, theme, context);
+  expect(row.render(100)[0]).toMatch(new RegExp(`^<b>${name}</b><accent>`));
+  expect(row.render(100)).toHaveLength(1);
+  expect(
+    tool
+      .renderResult({ content: [{ type: "text", text: "denied" }] }, {}, theme, context)
+      .render(100),
+  ).toEqual([]);
+  expect(row.render(100).at(-1)).toBe("<dim>denied</dim>");
+  const plain = tool.renderCall(
+    { path_prefix: "很长的名称" },
+    { bold: (s: string) => s, fg: (_c: string, s: string) => s },
+    context,
+  );
+  expect(plain.render(8).every((line: string) => visibleWidth(line) <= 8)).toBe(true);
 });
 
 it("renders loaded-agent results with expansion", async () => {
@@ -359,27 +358,6 @@ it("does not deliver a stopped turn's final, and still updates completion UI eve
   await Reflect.get(globalThis, Symbol.for("pi-subagents:manager")).waitForAll();
   expect(h.pi.sendMessage).not.toHaveBeenCalled();
   expect(failed).toHaveBeenCalledTimes(1);
-});
-
-it.each([
-  [undefined, "all"],
-  [" NONE ", "none"],
-  [" +002 ", "2"],
-])("renders the normalized fork choice %j throughout the row lifecycle", (fork_turns, choice) => {
-  const h = harness();
-  const tool = h.direct.get("spawn_agent");
-  const theme = {
-    bold: (s: string) => `<b>${s}</b>`,
-    fg: (c: string, s: string) => `<${c}>${s}</${c}>`,
-  };
-  const context = { state: {}, isError: false, expanded: false };
-  const row = tool.renderCall({ task_name: "work", fork_turns }, theme, context);
-  expect(row.render(100)).toEqual([`<b>spawn_agent</b><accent> work fork=${choice}</accent>`]);
-  tool.renderResult({ content: [], details: { status: "running" } }, {}, theme, context);
-  context.expanded = true;
-  expect(row.render(100)).toEqual([
-    `<b>spawn_agent</b><accent> work fork=${choice} running</accent>`,
-  ]);
 });
 
 it.each(["all", "none", "1"])(

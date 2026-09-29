@@ -1,3 +1,4 @@
+import { taskReceiptRenderers } from "./ui/task-receipt.js";
 import type { SubagentsSettings } from "./settings.js";
 import { recentTurnEntries } from "./fork-history.js";
 import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
@@ -69,7 +70,7 @@ export function createV2Tools(
       reasoning_effort?: string;
     }>(CODEX_V2_CONTRACT.tools.spawn_agent.parameters),
     captureHistory: (args) => forkMode(args) !== "none",
-    ...renderers("spawn_agent"),
+    ...taskReceiptRenderers("spawn_agent", deps.getModelDefaults),
     async execute(callId, args, signal, onUpdate, ctx) {
       const fork = forkMode(args);
       if (typeof fork === "bigint") {
@@ -106,7 +107,10 @@ export function createV2Tools(
       const record = deps.manager.getRecord(result.agentId);
       if (!record?.taskName) throw new Error("Spawned task is no longer available");
       const value = { task_name: record.taskName };
-      return { ...textResult(JSON.stringify(value), result.details), value };
+      return {
+        ...textResult(JSON.stringify(value), { ...result.details, task_name: record.taskName }),
+        value,
+      };
     },
   });
   const list_agents = defineSubagentTool({
@@ -151,7 +155,7 @@ export function createV2Tools(
       parameters: Type.Unsafe<{ target: string; message: string }>(
         CODEX_V2_CONTRACT.tools[name].parameters,
       ),
-      ...renderers(name),
+      ...taskReceiptRenderers(name),
       async execute(_id, args, signal, _update, ctx) {
         signal?.throwIfAborted();
         if (!args.message.trim()) throw new Error("Empty message can't be sent to an agent");
@@ -288,14 +292,11 @@ function renderers(name: string) {
   return {
     renderCall(
       args: {
-        task_name?: string;
-        fork_turns?: string;
         path_prefix?: string;
         target?: string;
         timeout_ms?: number;
         // Read-only saved V1 calls; these arguments are not accepted by executors.
         targets?: unknown[];
-        agent_type?: string;
       },
       theme: { bold(s: string): string; fg(color: "accent" | "dim", s: string): string },
       context: { state: RenderState; expanded: boolean },
@@ -307,22 +308,14 @@ function renderers(name: string) {
               ? Array.isArray(args.targets)
                 ? `${args.targets.length} agents`
                 : `${Math.max(10_000, args.timeout_ms ?? 30_000)}ms`
-              : (args.task_name ?? args.agent_type ?? args.target ?? args.path_prefix ?? "/root"),
+              : (args.target ?? args.path_prefix ?? "/root"),
           );
-          let fork = "";
-          if (name === "spawn_agent") {
-            try {
-              fork = ` fork=${forkMode(args)}`;
-            } catch {
-              fork = " fork=invalid";
-            }
-          }
           const lines = [
             fitLine(
               theme.bold(name) +
                 theme.fg(
                   "accent",
-                  ` ${summary}${fork}${context.state.status ? ` ${context.state.status}` : ""}`,
+                  ` ${summary}${context.state.status ? ` ${context.state.status}` : ""}`,
                 ),
               width,
             ),
