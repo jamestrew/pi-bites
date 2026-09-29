@@ -1,3 +1,5 @@
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
+import { describeSpawnModels } from "./invocation-config.js";
 import type { createV2Tools } from "./v2-tools.js";
 import type { AgentRecord } from "./types.js";
 import type { TSchema } from "typebox";
@@ -140,7 +142,7 @@ export class SubagentController {
     }
     for (const name of Object.keys(this.tools) as SubagentOperation[]) {
       const tool = this.tool(name) as ToolDefinition<TSchema, unknown>;
-      this.pi.registerTool<TSchema, unknown>({
+      const definition: ToolDefinition<TSchema, unknown> = {
         ...tool,
         execute: async (callId, args, signal, onUpdate, ctx) => {
           const operation = this.capture(ctx, {
@@ -153,7 +155,34 @@ export class SubagentController {
             onUpdate,
           });
         },
-      });
+      };
+      this.pi.registerTool(definition);
+      if (name === "spawn_agent") {
+        const refresh = (_event: unknown, ctx: ExtensionContext) => {
+          const available = ctx.modelRegistry.getAvailable();
+          const models =
+            this.isScopeModelsEnabled() && ctx.scopedModels.length
+              ? available.filter((model) =>
+                  ctx.scopedModels.some(
+                    ({ model: scoped }) =>
+                      model.provider === scoped.provider && model.id === scoped.id,
+                  ),
+                )
+              : available;
+          const description = tool.description.replace(
+            "No picker-visible model overrides are currently loaded.",
+            describeSpawnModels(models, SettingsManager.create(ctx.cwd)),
+          );
+          if (description !== definition.description) {
+            definition.description = description;
+            this.pi.registerTool({ ...definition });
+          }
+        };
+        // Read fresh lifecycle contexts synchronously, never a captured ctx in deferred work.
+        this.pi.on("session_start", refresh);
+        this.pi.on("model_select", refresh);
+        this.pi.on("before_agent_start", refresh);
+      }
     }
   }
 }

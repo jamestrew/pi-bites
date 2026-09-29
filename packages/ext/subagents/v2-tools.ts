@@ -1,3 +1,4 @@
+import type { SubagentsSettings } from "./settings.js";
 import { recentTurnEntries } from "./fork-history.js";
 import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
 import { lifecycleStatusLabel } from "./ui/agent-lifecycle-render.js";
@@ -27,6 +28,7 @@ export function createV2Tools(
     agentActivity: Map<string, AgentActivity>;
     fleet: FleetList;
     isScopeModelsEnabled: () => boolean;
+    getModelDefaults?: () => Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">;
     getMessenger: (sessionId: string) => ReturnType<typeof createSubagentMessenger> | undefined;
   },
 ) {

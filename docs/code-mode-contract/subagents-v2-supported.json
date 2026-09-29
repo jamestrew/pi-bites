@@ -32,7 +32,7 @@
     "available_models": [],
     "user_defined_roles": {},
     "expose_agent_type": true,
-    "hide_agent_type_model_reasoning": true,
+    "hide_agent_type_model_reasoning": false,
     "expose_spawn_agent_model_overrides": true,
     "usage_hint_text": null,
     "description_override": null,
@@ -48,7 +48,7 @@
   "native_tools": {
     "spawn_agent": {
       "name": "spawn_agent",
-      "description": "\n        No picker-visible model overrides are currently loaded.\n        Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name \"task_3\" the agent will have canonical task name `/root/task1/task_3`.\nYou are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.\nThe spawned agent will have the same tools as you and the ability to spawn its own subagents.\n\nIt will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.\nThe new agent's canonical task name will be provided to it along with the message.\n\nNote that passing `fork_turns=\"none\"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns=\"all\"` will provide the subagent with all surrounding context.",
+      "description": "\n        No picker-visible model overrides are currently loaded.\n        Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name \"task_3\" the agent will have canonical task name `/root/task1/task_3`.\nYou are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.\nThe spawned agent will have the same tools as you and the ability to spawn its own subagents.\nSpawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.\nIt will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.\nThe new agent's canonical task name will be provided to it along with the message.\n\nNote that passing `fork_turns=\"none\"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns=\"all\"` will provide the subagent with all surrounding context.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -299,7 +299,7 @@
     "tools": {
       "spawn_agent": {
         "name": "spawn_agent",
-        "description": "\n        No picker-visible model overrides are currently loaded.\n        Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name \"task_3\" the agent will have canonical task name `/root/task1/task_3`.\nYou are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.\nThe spawned agent will have the same tools as you and the ability to spawn its own subagents.\n\nIt will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.\nThe new agent's canonical task name will be provided to it along with the message.\n\nNote that passing `fork_turns=\"none\"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns=\"all\"` will provide the subagent with all surrounding context.",
+        "description": "\n        No picker-visible model overrides are currently loaded.\n        Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name \"task_3\" the agent will have canonical task name `/root/task1/task_3`.\nYou are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.\nThe spawned agent will have the same tools as you and the ability to spawn its own subagents.\nSpawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.\nIt will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.\nThe new agent's canonical task name will be provided to it along with the message.\n\nNote that passing `fork_turns=\"none\"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns=\"all\"` will provide the subagent with all surrounding context.",
         "parameters": {
           "type": "object",
           "properties": {
@@ -615,7 +615,7 @@
     "wait_agent": "Wait completed. / Wait interrupted by new input. / Wait timed out.; multi_agents_v2/wait.rs:155-182"
   },
   "sha256": {
-    "native_tools": "76d62b6d81aaff9f3fd2d1924812871365ed1b38d6ccd9c0f37e01000e973c50",
-    "contract": "950a122e43b29db97ceb15820c7e8155b684dd9e11de0435d462b72878ef4400"
+    "native_tools": "0bcaefef1fd69015cb06dc3500f0179845ffa1a7ca2680fc4908bd5c34785470",
+    "contract": "187dff64ff8d10532670c1dd258c04f33b35671385f8ad34f2d148ca619617de"
   }
 }

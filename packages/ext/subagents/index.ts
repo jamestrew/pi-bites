@@ -1,5 +1,5 @@
 import { getAgentSessionId } from "./agent-tree.js";
-import { applyAndEmitLoaded } from "./settings.js";
+import { applyAndEmitLoaded, type SubagentsSettings } from "./settings.js";
 import type { AgentRecord } from "./types.js";
 import { SubagentController } from "./operations.js";
 import { withApprovalDialog, waitForAuthorization } from "../bash-gate/pending.js";
@@ -272,6 +272,9 @@ export function createSubagents(
       {
         setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
         setMaxDepth: (n) => manager.tree.setMaxDepth(n),
+        setModelDefaults: (defaults) => {
+          modelDefaults = defaults;
+        },
         setScopeModels: setScopeModelsEnabled,
         setFleetView: setFleetViewEnabled,
       },
@@ -579,6 +582,7 @@ export function createSubagents(
   }
 
   // ---- Scope models configuration ----
+  let modelDefaults: Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort"> = {};
   let scopeModelsEnabled = false;
   function isScopeModelsEnabled(): boolean {
     return scopeModelsEnabled;
@@ -595,6 +599,7 @@ export function createSubagents(
   operations = new SubagentController(
     pi,
     createV2Tools(pi, {
+      getModelDefaults: () => modelDefaults,
       manager,
       agentActivity,
       fleet,

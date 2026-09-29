@@ -34,6 +34,14 @@ not selected agent IDs. Completion releases execution capacity; retained identit
 remain addressable even when idle runtimes unload. `/agents` and Fleet show live and
 retained conversations. Saved displays do not restore live agents.
 
+Subagents inherit the caller's model unless `model` is supplied or `defaultModel`
+is configured in `~/.pi/agent/subagents.json` or project `.pi/subagents.json`.
+`defaultReasoningEffort` sets the corresponding effort default; explicit spawn fields
+win over these defaults. Use exact `provider/modelId` values (or an unambiguous exact
+model ID), not fuzzy names. Selecting a model without an effort override resets effort
+to Pi's default for that model; otherwise effort is inherited. Applied role settings
+win last, but the built-in roles currently have no model/effort overrides.
+
 See [the V2 contract](packages/ext/subagents/CODEX_V2.md) and
 [cutover verification](docs/code-mode-contract/subagents-v2-cutover.md) and
 [release validation and remaining live gaps](docs/code-mode-contract/subagents-v2-validation.md).

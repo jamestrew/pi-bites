@@ -7,8 +7,11 @@ import { dirname, join } from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import * as Value from "typebox/value";
+import { isThinkingLevel, type ThinkingLevel } from "./types.js";
 
 export const SubagentsSettingsSchema = Type.Object({
+  defaultModel: Type.Optional(Type.String()),
+  defaultReasoningEffort: Type.Optional(Type.Unsafe<ThinkingLevel>(Type.String())),
   maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1024 })),
   maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
   /**
@@ -24,6 +27,9 @@ export type SubagentsSettings = Static<typeof SubagentsSettingsSchema>;
 
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
+  setModelDefaults?: (
+    defaults: Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">,
+  ) => void;
   setMaxDepth?: (n: number) => void;
   setMaxConcurrent: (n: number) => void;
   setScopeModels: (enabled: boolean) => void;
@@ -43,6 +49,10 @@ export type SettingsEmit = <K extends keyof SettingsEventMap>(
 export function parseSubagentsSettings(value: unknown): SubagentsSettings | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const settings: SubagentsSettings = {};
+  if ("defaultModel" in value && typeof value.defaultModel === "string")
+    settings.defaultModel = value.defaultModel;
+  if ("defaultReasoningEffort" in value && isThinkingLevel(value.defaultReasoningEffort))
+    settings.defaultReasoningEffort = value.defaultReasoningEffort;
   if (
     "maxDepth" in value &&
     typeof value.maxDepth === "number" &&
@@ -104,7 +114,14 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
   const path = projectPath(cwd);
   try {
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(s, null, 2), "utf-8");
+    // /agents saves operational fields only; preserve manual project defaults,
+    // never materialize inherited global defaults into the project file.
+    const { defaultModel, defaultReasoningEffort } = readSettingsFile(path);
+    writeFileSync(
+      path,
+      JSON.stringify({ defaultModel, defaultReasoningEffort, ...s }, null, 2),
+      "utf-8",
+    );
     return true;
   } catch {
     return false;
@@ -113,6 +130,10 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
 
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
 export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers): void {
+  appliers.setModelDefaults?.({
+    defaultModel: s.defaultModel,
+    defaultReasoningEffort: s.defaultReasoningEffort,
+  });
   if (typeof s.maxDepth === "number") appliers.setMaxDepth?.(s.maxDepth);
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);

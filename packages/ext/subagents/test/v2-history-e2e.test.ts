@@ -120,7 +120,7 @@ it.each([
       fork_turns,
       agent_type: "explorer",
       model: `${model.provider}/${model.id}`,
-      reasoning_effort: "low",
+      reasoning_effort: "off",
     });
     expect(result.value).toEqual({ task_name: "/root/work" });
     const manager = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));

@@ -107,3 +107,18 @@ export function resolveModel(input: string, registry: ModelRegistry): Model<Api>
     .join("\n");
   return `Model not found: "${input}".\n\nAvailable models:\n${modelList}`;
 }
+
+/** Direct collaboration uses exact catalog identities, never fuzzy/provider fallback. */
+export function resolveExactModel(input: string, registry: ModelRegistry): Model<Api> | string {
+  const models = registry.getAvailable?.() ?? registry.getAll();
+  const qualified = models.find((model) => `${model.provider}/${model.id}` === input);
+  if (qualified) return qualified;
+  const matches = models.filter((model) => model.id === input);
+  const match = matches[0];
+  if (matches.length === 1 && match) return match;
+  const available = (matches.length ? matches : models)
+    .map((model) => `  ${model.provider}/${model.id}`)
+    .sort()
+    .join("\n");
+  return `${matches.length ? "Ambiguous model" : "Model not found"}: "${input}".\n\nAvailable models:\n${available}`;
+}

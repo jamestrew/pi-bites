@@ -62,7 +62,7 @@ def extract(sources):
     spawn_templates = re.findall(r'r#"(.*?)"#', function(spec, "spawn_agent_tool_description_v2"), re.S)
     spawn_description = spawn_templates[1].format_map(dict(
         agent_role_guidance=json.loads(one(r'return (' + STRING + r')\.to_string\(\);', function(spec, "spawn_agent_models_description"))),
-        inherited_model_guidance=""))
+        inherited_model_guidance=json.loads(one(r'const SPAWN_AGENT_INHERITED_MODEL_GUIDANCE: &str = (' + STRING + r');', spec))))
 
     def output(name, previous=None):
         body = function(spec, name)
@@ -142,7 +142,7 @@ def main():
     contract, native, edits, timeouts, status_schema = extract(sources)
     result = dict(revision=REVISION, source_paths=SOURCES,
                   configuration=dict(version="V2", available_models=[], user_defined_roles={}, expose_agent_type=True,
-                                     hide_agent_type_model_reasoning=True, expose_spawn_agent_model_overrides=True,
+                                     hide_agent_type_model_reasoning=False, expose_spawn_agent_model_overrides=True,
                                      usage_hint_text=None, description_override=None, wait_timeouts_ms=timeouts,
                                      wait_agent_enabled=True, disable_direct_message=False, message_board_in_memory=False),
                   native_tools=native, contract=contract, edits=edits, agent_status_schema=status_schema,

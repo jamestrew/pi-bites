@@ -2,8 +2,8 @@ import { expect, test, vi } from "vitest";
 import { createSpawnExecution } from "../agent-tool-execute.js";
 import { resolveAgent } from "../agent-types.js";
 
-const inside = { provider: "test", id: "inside", name: "Inside", reasoning: false };
-const outside = { provider: "test", id: "outside", name: "Outside", reasoning: false };
+const inside = { provider: "test", id: "inside", name: "Inside", reasoning: true };
+const outside = { provider: "test", id: "outside", name: "Outside", reasoning: true };
 
 function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "high" }> = []) {
   const notify = vi.fn();
@@ -41,6 +41,7 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
     model?: string,
     overrides: Partial<{
       message: string;
+      agent: ReturnType<typeof resolveAgent>;
       agent_type: string | undefined;
       forkContext: boolean;
       reasoning_effort: string;
@@ -112,4 +113,23 @@ test("rejects an unsupported reasoning effort without spawning", async () => {
     details: expect.any(Object),
   });
   expect(runtime.spawn).not.toHaveBeenCalled();
+});
+
+test("role model and effort override validated explicit spawn choices", async () => {
+  const runtime = harness();
+  const role = resolveAgent("worker");
+  const agent = { ...role, config: { ...role.config, model: "test/outside", thinking: "high" } };
+  const result = await runtime.run("test/inside", { agent, reasoning_effort: "low" });
+  expect(result.details).toMatchObject({ modelName: "test/outside", thinking: "high" });
+  await expect(runtime.run("missing", { agent })).rejects.toThrow("Model not found");
+  await expect(runtime.run("test/inside", { agent, reasoning_effort: "max" })).rejects.toThrow(
+    "Unsupported reasoning_effort",
+  );
+});
+
+test("role overrides cannot hide an explicit out-of-scope request", async () => {
+  const runtime = harness([{ model: inside }]);
+  const role = resolveAgent("worker");
+  const agent = { ...role, config: { ...role.config, model: "test/inside" } };
+  await expect(runtime.run("test/outside", { agent })).rejects.toThrow("Model not in scope");
 });

@@ -87,6 +87,53 @@ describe("settings persistence", () => {
     });
   });
 
+  it("loads global model defaults and overrides each field from the project", () => {
+    writeGlobal({ defaultModel: "openai/gpt-5.4", defaultReasoningEffort: "high" });
+    expect(loadSettings(projectDir)).toEqual({
+      defaultModel: "openai/gpt-5.4",
+      defaultReasoningEffort: "high",
+    });
+    writeProject({ defaultModel: "openai/gpt-5.4-mini" });
+    expect(loadSettings(projectDir)).toEqual({
+      defaultModel: "openai/gpt-5.4-mini",
+      defaultReasoningEffort: "high",
+    });
+    writeProject({ defaultReasoningEffort: "off" });
+    expect(loadSettings(projectDir)).toEqual({
+      defaultModel: "openai/gpt-5.4",
+      defaultReasoningEffort: "off",
+    });
+  });
+
+  it("operational saves preserve project model defaults without pinning global defaults", () => {
+    writeGlobal({ defaultModel: "global-model", defaultReasoningEffort: "high" });
+    writeProject({ defaultModel: "project-model", maxDepth: 4 });
+    saveAndEmitChanged({ maxConcurrent: 2 }, "Saved", vi.fn(), projectDir);
+    expect(loadSettings(projectDir)).toEqual({
+      defaultModel: "project-model",
+      defaultReasoningEffort: "high",
+      maxConcurrent: 2,
+    });
+    writeGlobal({ defaultModel: "new-global-model", defaultReasoningEffort: "low" });
+    expect(loadSettings(projectDir)).toEqual({
+      defaultModel: "project-model",
+      defaultReasoningEffort: "low",
+      maxConcurrent: 2,
+    });
+    expect(saveSettings({ defaultReasoningEffort: "off" }, projectDir)).toBe(true);
+    saveAndEmitChanged({ fleetView: false }, "Saved", vi.fn(), projectDir);
+    expect(loadSettings(projectDir)).toEqual({
+      defaultModel: "project-model",
+      defaultReasoningEffort: "off",
+      fleetView: false,
+    });
+    expect(saveSettings({ defaultModel: "replacement-model" }, projectDir)).toBe(true);
+    expect(loadSettings(projectDir)).toEqual({
+      defaultModel: "replacement-model",
+      defaultReasoningEffort: "off",
+    });
+  });
+
   it("round-trips values: saveSettings then loadSettings", () => {
     const settings = {
       maxConcurrent: 7,
@@ -136,6 +183,27 @@ describe("settings persistence", () => {
   });
 
   describe("sanitizer", () => {
+    it("drops invalid model defaults without masking valid global defaults", () => {
+      writeGlobal({ defaultModel: "global-model", defaultReasoningEffort: "high" });
+      for (const invalid of [null, 7, false, {}, []]) {
+        writeProject({ defaultModel: invalid, defaultReasoningEffort: invalid });
+        expect(loadSettings(projectDir)).toEqual({
+          defaultModel: "global-model",
+          defaultReasoningEffort: "high",
+        });
+      }
+      writeProject({ defaultReasoningEffort: "turbo" });
+      expect(loadSettings(projectDir).defaultReasoningEffort).toBe("high");
+    });
+
+    it.each(["off", "minimal", "low", "medium", "high", "xhigh", "max"])(
+      "loads the valid reasoning effort %s",
+      (defaultReasoningEffort) => {
+        writeProject({ defaultReasoningEffort });
+        expect(loadSettings(projectDir)).toEqual({ defaultReasoningEffort });
+      },
+    );
+
     it("drops maxConcurrent < 1", () => {
       writeProject({ maxConcurrent: 0, scopeModels: true });
       expect(loadSettings(projectDir)).toEqual({ scopeModels: true });
@@ -328,6 +396,24 @@ describe("settings persistence", () => {
         setScopeModels: vi.fn(),
         setFleetView: vi.fn(),
       };
+    });
+
+    it("applies model defaults on load and resets missing defaults on the next load", () => {
+      appliers.setModelDefaults = vi.fn();
+      writeGlobal({ defaultModel: "global-model", defaultReasoningEffort: "high" });
+      writeProject({ defaultReasoningEffort: "off" });
+      applyAndEmitLoaded(appliers, vi.fn(), projectDir);
+      expect(appliers.setModelDefaults).toHaveBeenLastCalledWith({
+        defaultModel: "global-model",
+        defaultReasoningEffort: "off",
+      });
+      writeGlobal({});
+      writeProject({});
+      applyAndEmitLoaded(appliers, vi.fn(), projectDir);
+      expect(appliers.setModelDefaults).toHaveBeenLastCalledWith({
+        defaultModel: undefined,
+        defaultReasoningEffort: undefined,
+      });
     });
 
     it("loads, applies, and emits subagents:settings_loaded with merged settings", () => {

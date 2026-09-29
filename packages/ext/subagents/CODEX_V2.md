@@ -353,3 +353,56 @@ The direct canned-provider regressions exercise pressure/unload/message/follow-u
 interrupt/follow-up, concurrent admission/reload, cancellation, failed reopen, stale
 contexts, model/tool restrictions, approval reset and descendant routing. Live
 provider timing/authentication remains a final-cutover smoke-test responsibility.
+
+## Model selection (#363)
+
+Fresh spawn follows the pinned `core/src/agent/child_config.rs:57-84,196-249`
+ordering: invoking model/effort → explicit spawn fields (independently falling back
+to configured subagent defaults) → applied role fields. Requested/default choices
+are validated before a role may override them. Full-history forks without an
+explicit role skip role model/effort application; fresh/recent forks and explicit
+roles apply it. The three embedded roles currently specify neither model nor effort.
+No model, including GPT-5.4, is hardcoded as the subagent default.
+
+Configure `defaultModel` and `defaultReasoningEffort` in global
+`~/.pi/agent/subagents.json` or project `.pi/subagents.json` (project fields win).
+They correspond to Codex's `agents.default_subagent_model` and
+`agents.default_subagent_reasoning_effort`. Settings load on session start/reload;
+changing operational settings through `/agents` preserves manual project defaults
+without copying inherited global values into the project. Existing children retain
+their selected model/effort through follow-up and unload/reload.
+
+Direct spawn accepts exact authenticated Pi `provider/modelId` identities or an
+unambiguous exact model ID. Ambiguous bare IDs require provider qualification;
+unknown/unavailable choices fail rather than fuzzy-matching, changing providers,
+or falling back to the parent. Internal RPC/small-model fuzzy resolution is unchanged.
+Existing optional scope policy remains: explicit out-of-scope choices fail;
+configured/role/inherited choices warn and proceed. Reload still rechecks current
+authorization and scope.
+
+Reasoning overrides use Pi's levels and `getSupportedThinkingLevels`, not Codex's
+provider-specific effort names/catalog. Unsupported explicit/configured efforts fail
+before admission, including reasoning on a non-reasoning model. With a selected
+model but no effort override, Codex resets to the catalog's model default. Pi has no
+such metadata: our reset uses Pi's fresh-session per-model setting → global thinking
+setting → `medium`, then Pi's capability clamp. Without either override, the parent
+model/effort is inherited (`off` for non-reasoning models). A role-only model change
+retains and validates the resolved effort, matching the pinned ordering.
+
+The generated declaration now enables upstream inheritance guidance
+(`hide_agent_type_model_reasoning=false`). At runtime each owning Pi extension
+refreshes spawn's advertised model list on session start, model selection and before
+a turn, using fresh contexts synchronously. Like Codex's `multi_agents_spec.rs:782-845`,
+the list is capped at five; it does not limit exact lookup. Pi's authenticated
+registry (restricted to session scope when enabled) supplies picker choices,
+provider-qualified identities, names and supported/default efforts. Pi has no Codex
+service-tier or backend-eligibility metadata; neither is invented or enforced.
+The static generated artifact retains the empty-catalog placeholder, replaced by the
+runtime list. Tool rendering remains a separate #363 task.
+
+Regression evidence: direct-tool real-Pi/canned-provider tests cover exact selection,
+configured defaults, effort reset/validation, provider-observed effort and retained
+selection after unload/follow-up. The shared spawn execution check covers role
+precedence and pre-role validation; settings tests cover merge/save/reset behavior.
+No new live provider requests were made; earlier payload/token counts describe the
+previous static descriptions, not this dynamic catalog.
