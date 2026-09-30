@@ -73,19 +73,20 @@ test.each([
       headers: {
         authorization: "Bearer resolved",
         "X-Keep": "yes",
+        "ChatGPT-Account-Id": "account",
         "X-Delete": null,
       },
     },
-    { authorization: "Bearer resolved", "X-Keep": "yes" },
+    { authorization: "Bearer resolved", "X-Keep": "yes", "ChatGPT-Account-Id": "account" },
   ],
   [
     "API-key fallback for a null authorization marker",
     {
       ok: true,
       apiKey: "fallback-key",
-      headers: { Authorization: null, "X-Keep": "yes" },
+      headers: { Authorization: null, "X-Keep": "yes", "ChatGPT-Account-Id": "account" },
     },
-    { Authorization: "Bearer fallback-key", "X-Keep": "yes" },
+    { Authorization: "Bearer fallback-key", "X-Keep": "yes", "ChatGPT-Account-Id": "account" },
   ],
 ])(
   "Codex direct fetch filters nullable headers and preserves %s",
@@ -99,7 +100,7 @@ test.each([
     };
     const ctx = {
       model: { provider: "openai-codex", id: "codex", api: "openai-responses" },
-      modelRegistry: { getApiKeyAndHeaders: async () => auth },
+      modelRegistry: { getProviderAuth: async () => ({ source: "OAuth", auth }) },
       ui: { setStatus: vi.fn(), theme: { fg: (_color: string, text: string) => text } },
     } as unknown as ExtensionContext;
     registerTokenCount(pi as never);
@@ -401,4 +402,344 @@ test("extension lifecycle selects providers, caches, deduplicates, and suppresse
   provider = "github-copilot";
   await handlers.get("turn_end")!({}, ctx);
   expect(statuses.at(-1)).toBeUndefined();
+});
+
+test.each(["auth", "usage", "unavailable status"])(
+  "session replacement retires pending %s without reading stale context",
+  async (phase) => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const statuses: Array<string | undefined> = [];
+    let stale = false;
+    const ctx = {
+      get model() {
+        if (stale) throw new Error("stale model getter");
+        return { provider: "github-copilot", id: "model" };
+      },
+      get ui() {
+        if (stale) throw new Error("stale ui getter");
+        return {
+          setStatus: (_key: string, value?: string) => statuses.push(value),
+          theme: { fg: (_color: string, value: string) => value },
+        };
+      },
+    };
+    let finish!: () => void;
+    const deferred = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const source: AccountUsageSource = {
+      key: "old-account",
+      provider: "github-copilot",
+      query: async () => {
+        if (phase === "usage") await deferred;
+        return normalizeCopilotUsage(tokenBillingPayload, NOW);
+      },
+    };
+    registerTokenCount(
+      {
+        on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+          handlers.set(event, handler),
+      } as never,
+      {
+        resolveSource: () => {
+          if (phase === "unavailable status")
+            return deferred.then(() => ({ status: "usage unavailable" }));
+          return phase === "auth" ? deferred.then(() => source) : source;
+        },
+        now: () => NOW,
+      },
+    );
+    const pending = handlers.get("session_start")!({}, ctx);
+    stale = true;
+    await handlers.get("session_shutdown")!(
+      {},
+      {
+        model: { provider: "anthropic", id: "other" },
+        ui: {
+          setStatus: (_key: string, value?: string) => statuses.push(value),
+          theme: { fg: (_color: string, value: string) => value },
+        },
+      },
+    );
+    finish();
+    await expect(pending).resolves.toBeUndefined();
+    expect(statuses).toEqual([undefined, undefined]);
+  },
+);
+
+test.each([true, false])(
+  "direct OpenAI OAuth=%s never sends credentials to subscription usage endpoints",
+  async (oauth) => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const setStatus = vi.fn();
+    const fetchMock = vi.fn();
+    const getApiKeyAndHeaders = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    registerTokenCount({
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never);
+    await handlers.get("session_start")!(
+      {},
+      {
+        model: { provider: "openai", id: "gpt-6.1-sol", api: "openai-responses" },
+        modelRegistry: {
+          // A stale registry snapshot must not authorize a runtime API-key override.
+          isUsingOAuth: () => true,
+          getProviderAuth: async () => ({
+            source: oauth ? "OAuth" : "runtime",
+            auth: { apiKey: "token" },
+          }),
+          getProvider: () => ({ auth: { oauth: { isSubscription: true } } }),
+          getApiKeyAndHeaders,
+        },
+        ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
+      },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(getApiKeyAndHeaders).not.toHaveBeenCalled();
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "token-count",
+      oauth
+        ? "openai: subscription usage unavailable; https://chatgpt.com/settings/usage"
+        : undefined,
+    );
+  },
+);
+
+test("legacy usage follows OAuth account headers instead of reusing another account's cache", async () => {
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  let account = "account-a";
+  const setStatus = vi.fn();
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          rate_limit: {
+            primary_window: {
+              used_percent: account === "account-a" ? 12 : 34,
+              limit_window_seconds: 18000,
+              reset_after_seconds: 3600,
+            },
+          },
+        }),
+      ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const auth = () => ({
+    ok: true,
+    source: "OAuth",
+    auth: { apiKey: "same-token", headers: { "ChatGPT-Account-Id": account } },
+  });
+  const ctx = {
+    model: { provider: "openai-codex", id: "gpt-6.1-sol" },
+    modelRegistry: {
+      getProviderAuth: async () => auth(),
+      getApiKeyAndHeaders: async () => ({ ok: true, ...auth().auth }),
+    },
+    ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
+  };
+  registerTokenCount({
+    on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+      handlers.set(event, handler),
+  } as never);
+  await handlers.get("session_start")!({}, ctx);
+  expect(setStatus).toHaveBeenLastCalledWith("token-count", "codex: 5h: 12% (1.0h)");
+  account = "account-b";
+  await handlers.get("turn_end")!({}, ctx);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(setStatus).toHaveBeenLastCalledWith("token-count", "codex: 5h: 34% (1.0h)");
+});
+
+test.each(["stored", "env", undefined])(
+  "legacy usage rejects non-OAuth auth source %s",
+  async (source) => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ rate_limit: {} })));
+    vi.stubGlobal("fetch", fetchMock);
+    registerTokenCount({
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never);
+    const auth = { apiKey: "ordinary-api-key", headers: { "ChatGPT-Account-Id": "account" } };
+    await handlers.get("session_start")!(
+      {},
+      {
+        model: { provider: "openai-codex", id: "model" },
+        modelRegistry: {
+          getProviderAuth: async () => ({ source, auth }),
+          getApiKeyAndHeaders: async () => ({ ok: true, ...auth }),
+        },
+        ui: { setStatus: vi.fn(), theme: { fg: (_color: string, value: string) => value } },
+      },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+test.each([undefined, "", "   "])(
+  "legacy usage omits requests with invalid account metadata %s",
+  async (accountId) => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ rate_limit: {} })));
+    vi.stubGlobal("fetch", fetchMock);
+    registerTokenCount({
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never);
+    await handlers.get("session_start")!(
+      {},
+      {
+        model: { provider: "openai-codex", id: "model" },
+        modelRegistry: {
+          getProviderAuth: async () => ({
+            source: "OAuth",
+            auth: { apiKey: "token", headers: { "ChatGPT-Account-Id": accountId } },
+          }),
+        },
+        ui: { setStatus: vi.fn(), theme: { fg: (_color: string, value: string) => value } },
+      },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+test("a new session retires the previous session's pending usage even for the same account", async () => {
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const completions: Array<() => void> = [];
+  const query = vi.fn(
+    () =>
+      new Promise<ReturnType<typeof normalizeCopilotUsage>>((resolve) =>
+        completions.push(() => resolve(normalizeCopilotUsage(tokenBillingPayload, NOW))),
+      ),
+  );
+  const setStatus = vi.fn();
+  const ctx = {
+    model: { provider: "github-copilot", id: "model" },
+    ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
+  };
+  registerTokenCount(
+    {
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never,
+    {
+      resolveSource: () => ({ provider: "github-copilot", key: "account", query }),
+      now: () => NOW,
+    },
+  );
+  const old = handlers.get("session_start")!({}, ctx);
+  const current = handlers.get("session_start")!({}, ctx);
+  expect(query).toHaveBeenCalledTimes(2);
+  completions[0]!();
+  await old;
+  expect(setStatus).toHaveBeenLastCalledWith("token-count", undefined);
+  completions[1]!();
+  await current;
+  expect(setStatus).toHaveBeenLastCalledWith(
+    "token-count",
+    "copilot: 412/1,000 credits (59% left, 26d)",
+  );
+});
+
+test("expired legacy auth clears usage without querying or rejecting the lifecycle event", async () => {
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const fetchMock = vi.fn();
+  const setStatus = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  registerTokenCount({
+    on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+      handlers.set(event, handler),
+  } as never);
+  await expect(
+    handlers.get("session_start")!(
+      {},
+      {
+        model: { provider: "openai-codex", id: "model" },
+        modelRegistry: {
+          getProviderAuth: async () => {
+            throw new Error("expired refresh token");
+          },
+        },
+        ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
+      },
+    ),
+  ).resolves.toBeUndefined();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(setStatus).toHaveBeenLastCalledWith("token-count", undefined);
+});
+
+test("stock legacy OAuth without headers uses the token's ChatGPT account claim", async () => {
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ rate_limit: {} })));
+  vi.stubGlobal("fetch", fetchMock);
+  const token = `header.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "stock-account" } })).toString("base64url")}.signature`;
+  registerTokenCount({
+    on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+      handlers.set(event, handler),
+  } as never);
+  await handlers.get("session_start")!(
+    {},
+    {
+      model: { provider: "openai-codex", id: "gpt-6.1-sol" },
+      modelRegistry: {
+        getProviderAuth: async () => ({ source: "OAuth", auth: { apiKey: token } }),
+      },
+      ui: { setStatus: vi.fn(), theme: { fg: (_color: string, value: string) => value } },
+    },
+  );
+  expect(fetchMock).toHaveBeenCalledWith(
+    "https://chatgpt.com/backend-api/wham/usage",
+    expect.objectContaining({
+      headers: { Authorization: `Bearer ${token}`, "chatgpt-account-id": "stock-account" },
+    }),
+  );
+});
+
+test.each([undefined, "", "   ", 42])(
+  "stock legacy OAuth omits invalid JWT account claim %s",
+  async (accountId) => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const token = `header.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: accountId } })).toString("base64url")}.signature`;
+    registerTokenCount({
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never);
+    await handlers.get("session_start")!(
+      {},
+      {
+        model: { provider: "openai-codex", id: "model" },
+        modelRegistry: {
+          getProviderAuth: async () => ({ source: "OAuth", auth: { apiKey: token } }),
+        },
+        ui: { setStatus: vi.fn(), theme: { fg: (_color: string, value: string) => value } },
+      },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  },
+);
+
+test("the usage resolution seam can display an unavailable status without registry access", async () => {
+  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+  const setStatus = vi.fn();
+  registerTokenCount(
+    {
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never,
+    { resolveSource: () => ({ status: "subscription usage unavailable" }) },
+  );
+  await handlers.get("session_start")!(
+    {},
+    {
+      model: { provider: "openai", id: "model" },
+      get modelRegistry() {
+        throw new Error("resolution owns registry access");
+      },
+      ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
+    },
+  );
+  expect(setStatus).toHaveBeenLastCalledWith("token-count", "subscription usage unavailable");
 });

@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Box, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OwnedToolDefinition, ToolExecutionContext } from "../tool-execution.js";
 import { Type, type Static } from "typebox";
 
+import { codexAccountId } from "../../codex-account.js";
 import type { CodexAdapterConfig } from "../../config.js";
 import { nativeBinaryRecoveryMessage } from "../native-binary-error.js";
 import { runBundledTool } from "../native/runner.js";
@@ -142,6 +143,8 @@ function isStockCodex(model: AdapterModel | undefined): boolean {
 
 function isAllowlisted(model: AdapterModel | undefined, config: CodexAdapterConfig): boolean {
   const provider = normalize(model?.provider);
+  // The direct OpenAI grant does not establish support for Codex alpha/search.
+  if (provider === "openai") return false;
   return (config.webSearchProviders ?? []).some((allowed) => normalize(allowed) === provider);
 }
 
@@ -198,26 +201,17 @@ function selectRoute(
     }
     return { kind: "fallback", label: "OpenAI Codex fallback", model };
   }
+  if (normalize(provider) === "openai") {
+    throw new Error(
+      "OpenAI ChatGPT login and API keys do not have a verified web_run route; " +
+        "repeating /login openai will not enable it. Select a separately authenticated legacy " +
+        "openai-codex model, configure a verified compatible provider under its own ID, or " +
+        "explicitly enable OpenAI Codex fallback to use that other account",
+    );
+  }
   throw new Error(
     `web_run has no permitted route for ${provider}; allowlist a compatible Responses provider or explicitly enable OpenAI Codex fallback`,
   );
-}
-
-function jwtAccountId(token: string): string | undefined {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return undefined;
-    const value = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-    const auth = value["https://api.openai.com/auth"];
-    if (!auth || typeof auth !== "object") return undefined;
-    const accountId = (auth as Record<string, unknown>).chatgpt_account_id;
-    return typeof accountId === "string" && accountId.trim() ? accountId : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function headerEntry(headers: Record<string, string>, name: string): string | undefined {
@@ -233,6 +227,12 @@ function setHeader(headers: Record<string, string>, name: string, value: string)
 
 function requestHeaders(route: SelectedRoute, auth: Extract<ResolvedAuth, { ok: true }>) {
   const headers: Record<string, string> = { ...route.model.headers };
+  if (route.kind !== "compatible") {
+    for (const name of Object.keys(headers)) {
+      if (["authorization", "chatgpt-account-id"].includes(name.toLowerCase()))
+        delete headers[name];
+    }
+  }
   for (const [key, value] of Object.entries(auth.headers ?? {})) {
     const existing = Object.keys(headers).find((name) => name.toLowerCase() === key.toLowerCase());
     if (value === null) {
@@ -250,9 +250,8 @@ function requestHeaders(route: SelectedRoute, auth: Extract<ResolvedAuth, { ok: 
     if (!authorization) {
       throw new Error(`${route.label} route authentication is missing an access token`);
     }
-    const token = authorization.replace(/^Bearer\s+/iu, "");
-    const accountId = headerEntry(headers, "chatgpt-account-id") ?? jwtAccountId(token);
-    if (!accountId) {
+    const accountId = headerEntry(headers, "chatgpt-account-id") ?? codexAccountId(authorization);
+    if (!accountId?.trim()) {
       throw new Error(
         `${route.label} route authentication is missing a valid ChatGPT account ID; run "/login openai-codex"`,
       );
@@ -392,6 +391,8 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
   let navigationId = randomUUID();
   let navigationCalls = 0;
   let navigationRoute: string | undefined;
+  let generation = 0;
+  let routeGeneration = 0;
   return {
     name: "web_run",
     label: "web_run",
@@ -401,6 +402,7 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
     parameters,
     transformCitations: (markdown) => renderCitationMarkers(markdown, sources),
     resetNavigationState() {
+      generation++;
       sources.clear();
       navigationId = randomUUID();
       navigationCalls = 0;
@@ -415,13 +417,29 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
       ctx: ToolExecutionContext,
     ): Promise<AgentToolResult<WebRunDetails>> {
       // Contexts are session-bound. Snapshot all getters before auth or process awaits.
+      const executionGeneration = generation;
+      const authRouteGeneration = routeGeneration;
       const activeModel = ctx.model as AdapterModel | undefined;
       const registry = ctx.modelRegistry;
       const config = { ...options.getConfig() };
       const models = registry.getAll() as AdapterModel[];
       const route = selectRoute(activeModel, config, models);
       if (signal?.aborted) throw new Error(`${route.label} route cancelled before execution`);
-      const auth = (await registry.getApiKeyAndHeaders(route.model as never)) as ResolvedAuth;
+      let auth: ResolvedAuth;
+      if (route.kind === "compatible") {
+        auth = await registry.getApiKeyAndHeaders(route.model as never);
+      } else {
+        // Resolve credentials and their source together: availability snapshots can lag a login.
+        try {
+          const resolved = await registry.getProviderAuth(STOCK_CODEX_PROVIDER);
+          if (resolved && resolved.source !== "OAuth")
+            throw new Error('requires legacy OAuth; run "/login openai-codex"');
+          auth = resolved ? { ok: true, ...resolved.auth } : { ok: false, error: "not logged in" };
+        } catch (error) {
+          auth = { ok: false, error: error instanceof Error ? error.message : String(error) };
+        }
+      }
+      if (executionGeneration !== generation) throw routeError(route, "search context changed");
       if (!auth.ok) {
         const login =
           route.kind === "compatible"
@@ -432,12 +450,22 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
       if (signal?.aborted)
         throw new Error(`${route.label} route cancelled before native execution`);
       const headers = requestHeaders(route, auth);
-      const routeKey = `${route.kind}:${normalize(route.model.provider)}:${route.model.id ?? ""}:${nativeInputBaseUrl(route, auth)}`;
+      const fingerprint = createHash("sha256")
+        .update(JSON.stringify(Object.entries(headers).sort(([a], [b]) => a.localeCompare(b))))
+        .digest("hex");
+      const routeKey = `${route.kind}:${normalize(route.model.provider)}:${route.model.id ?? ""}:${nativeInputBaseUrl(route, auth)}:${fingerprint}`;
+      if (authRouteGeneration !== routeGeneration && navigationRoute !== routeKey)
+        throw routeError(route, "search context changed");
+      if (navigationRoute !== routeKey) {
+        routeGeneration++;
+        sources.clear();
+      }
       if (navigationRoute !== routeKey || navigationCalls >= MAX_NAVIGATION_CALLS) {
         navigationId = randomUUID();
         navigationCalls = 0;
         navigationRoute = routeKey;
       }
+      const executionRouteGeneration = routeGeneration;
       navigationCalls += 1;
       const nativeInput: WebRunNativeInput = {
         route: route.label,
@@ -456,6 +484,8 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
           options.runNative ?? ((input) => defaultNativeRunner(input, options.binaryPath))
         )(nativeInput);
         if (signal?.aborted) throw new Error("cancelled");
+        if (executionGeneration !== generation || executionRouteGeneration !== routeGeneration)
+          throw new Error("search context changed");
         let output: WebRunOutput;
         try {
           output = JSON.parse(stdout) as WebRunOutput;
@@ -533,5 +563,6 @@ export function registerWebRunTool(
     context.messageType === "assistant" ? tool.transformCitations(markdown) : markdown,
   );
   pi.on("session_start", () => tool.resetNavigationState());
+  pi.on("model_select", () => tool.resetNavigationState());
   return tool;
 }

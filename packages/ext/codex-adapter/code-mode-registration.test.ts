@@ -92,6 +92,30 @@ test("registered Code Mode lifecycle preserves custom tools and restores cores o
   await h.emit("session_shutdown", {}, ctx);
 });
 
+test.each([
+  "gpt-6.1-sol",
+  " GPT-6.1-SOL ",
+  ...["openai", "openai-codex", "azure", "azure-openai", "github-copilot", "openrouter"].map(
+    (prefix) => `${prefix}/gpt-6.1-sol`,
+  ),
+  "gpt-6.1",
+])("GPT-6.1 selection %s preserves tools across scope and login changes", async (id) => {
+  const h = setup();
+  const ctx = context(id);
+  ctx.model.provider = "openai";
+  ctx.model.api = "openai-responses";
+  await h.emit("session_start", {}, ctx);
+  expect(h.pi.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+  h.pi.setActiveTools(["wait", "custom"]);
+  await h.emit("turn_start", {}, ctx);
+  expect(h.pi.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom", "wait"]);
+  await h.emit("model_select", {}, context("claude"));
+  expect(h.pi.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom"]);
+  await h.emit("model_select", {}, context(id));
+  expect(h.pi.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom", "wait"]);
+  await h.emit("session_shutdown", {}, ctx);
+});
+
 function hostPath() {
   if (process.env.PI_BITES_TEST_CODE_MODE_HOST) return process.env.PI_BITES_TEST_CODE_MODE_HOST;
   try {

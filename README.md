@@ -110,7 +110,7 @@ Example:
 
 ### Codex adapter
 
-`codexAdapter` exposes Code Mode through `exec` and `wait` for GPT-5.6 and GPT-6 base IDs and hyphenated variants. The five owned capabilities—`exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`—are callable inside `exec`, subject to session selection and availability. Unrelated direct tools remain available. Other model families use normal Pi core tools, with no standalone adapter web tool.
+`codexAdapter` exposes Code Mode through `exec` and `wait` for GPT-5.6 and GPT-6 base IDs and hyphenated variants, plus GPT-6.1 base and Sol IDs. The five owned capabilities—`exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`—are callable inside `exec`, subject to session selection and availability. Unrelated direct tools remain available. Other model families use normal Pi core tools, with no standalone adapter web tool.
 
 The four core nested contracts are documented eagerly. Web help is loaded on demand through `text(ALL_TOOLS.filter(tool => tool.name === "web_run"));` before browsing, including after compaction removes previously loaded help. Initial guidance retains browsing triggers. Discovery is documentation only and does not enable unavailable web routes or credential fallback. It leaves tool definitions and the system prompt stable; it does not guarantee provider cache savings.
 
@@ -120,7 +120,7 @@ Commands still pass through bash-gate and Auto Mode individually, after argument
 
 Vision-capable models can use local-only `view_image({ path })`, accepting PNG, JPEG, WebP and non-animated GIF up to 32 MiB and 4096 pixels per dimension. Text-only models never receive it. Image viewing makes no hidden provider request; emit the returned image explicitly with `image(...)` to send it to the model.
 
-Stock `openai-codex` Responses models get nested `web_run` through their existing Pi login. Other providers are hidden by default. Trust a verified Responses provider's own `/alpha/search` endpoint by exact provider ID, or independently opt in to stock OpenAI Codex fallback:
+Legacy `openai-codex` Responses models get nested `web_run` through their existing Pi login. Other providers are hidden by default. Trust a verified Responses provider's own `/alpha/search` endpoint by exact provider ID, or independently opt in to stock OpenAI Codex fallback:
 
 ```json
 {
@@ -130,6 +130,8 @@ Stock `openai-codex` Responses models get nested `web_run` through their existin
   }
 }
 ```
+
+Pi's new `/login openai` ChatGPT subscription uses the direct OpenAI Responses grant, not the legacy Codex backend. Code Mode works with GPT-6.1 Sol on either login, but direct OpenAI subscription usage and `web_run` are not verified and remain unavailable. View subscription usage at <https://chatgpt.com/settings/usage>. Repeating `/login openai` does not enable these capabilities. Existing `/login openai-codex` credentials remain usable; no migration is required. The `openai` provider cannot opt into `webSearchProviders`; configure a verified proxy under its own provider ID. Explicit fallback uses the separately authenticated legacy account, never the direct OpenAI token. See [route verification and limits](docs/code-mode-contract/openai-compatibility.md).
 
 `allowOpenAICodexFallback` defaults to `false`. Set it to `true` only where sending explicit search/navigation arguments through personal stock Codex authentication is permitted. A selected route never retries through another provider after auth, compatibility, HTTP, or native failure. `web_run` sends no Pi conversation or project context.
 

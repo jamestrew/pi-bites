@@ -22,7 +22,10 @@ test("only GPT-5.6/GPT-6 families and recognized prefixes enter Code Mode", () =
   for (const id of [
     "gpt-5",
     "gpt-5.60",
-    "gpt-6.1",
+    "gpt-6.10-sol",
+    "gpt-6.1-sol-extra",
+    "gpt-6.1-luna",
+    "unknown/gpt-6.1-sol",
     "gpt-60",
     "gpt-7",
     "team-codex-model",

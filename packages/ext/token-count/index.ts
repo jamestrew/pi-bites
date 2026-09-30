@@ -2,12 +2,14 @@
 
 import { createHash } from "node:crypto";
 
-import type { Api, Model, ProviderHeaders } from "@earendil-works/pi-ai";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import {
   readStoredCredential,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+
+import { codexAccountId } from "../codex-account.js";
 
 const CODEX_PROVIDER_ID = "openai-codex";
 const COPILOT_PROVIDER_ID = "github-copilot";
@@ -61,13 +63,15 @@ export type AccountUsageSource =
       query(): Promise<CopilotAccountUsage | undefined>;
     };
 
+type AccountUsageResolution = AccountUsageSource | { status: string } | undefined;
+
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 type TokenCountDependencies = {
   now?: () => number;
   resolveSource?: (
     ctx: ExtensionContext,
-  ) => AccountUsageSource | undefined | Promise<AccountUsageSource | undefined>;
+  ) => AccountUsageResolution | Promise<AccountUsageResolution>;
 };
 
 export function formatCodexUsage(usage: CodexUsage): string | undefined {
@@ -296,25 +300,43 @@ function normalizeDomain(value: unknown): string | undefined {
   }
 }
 
-function resolveDefaultSource(
+async function resolveDefaultSource(
   ctx: ExtensionContext,
   now: () => number,
-): AccountUsageSource | undefined | Promise<AccountUsageSource | undefined> {
-  if (ctx.model?.provider === COPILOT_PROVIDER_ID) return readCopilotSource(now, ctx.model.headers);
-  if (ctx.model?.provider !== CODEX_PROVIDER_ID) return undefined;
+): Promise<AccountUsageResolution> {
+  const model = ctx.model;
+  const registry = ctx.modelRegistry;
+  if (model?.provider === COPILOT_PROVIDER_ID) return readCopilotSource(now, model.headers);
+  if (
+    model?.provider === "openai" &&
+    registry.getProvider(model.provider)?.auth.oauth?.isSubscription
+  ) {
+    const auth = await registry.getProviderAuth(model.provider);
+    return auth?.source === "OAuth"
+      ? { status: "openai: subscription usage unavailable; https://chatgpt.com/settings/usage" }
+      : undefined;
+  }
+  if (model?.provider !== CODEX_PROVIDER_ID) return undefined;
   return resolveCodexSource(ctx);
 }
 
 async function resolveCodexSource(ctx: ExtensionContext): Promise<AccountUsageSource | undefined> {
-  const model = ctx.model as Model<Api>;
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok) return undefined;
+  // Resolve provenance and credentials together: an API-key override is not a subscription.
+  // Usage belongs to the provider account, not model-specific header overrides.
+  const resolved = await ctx.modelRegistry.getProviderAuth(CODEX_PROVIDER_ID);
+  if (resolved?.source !== "OAuth") return undefined;
+  const auth = resolved.auth;
   const headers = mergeHeaders(auth.headers, {});
   if (!getHeader(headers, "Authorization") && auth.apiKey)
     headers.Authorization = `Bearer ${auth.apiKey}`;
   const authorization = getHeader(headers, "Authorization");
   if (!authorization) return undefined;
-  const fingerprint = createHash("sha256").update(authorization).digest("hex");
+  const accountId = getHeader(headers, "chatgpt-account-id") ?? codexAccountId(authorization);
+  if (!accountId?.trim()) return undefined;
+  if (!getHeader(headers, "chatgpt-account-id")) headers["chatgpt-account-id"] = accountId;
+  const fingerprint = createHash("sha256")
+    .update(JSON.stringify([authorization, accountId]))
+    .digest("hex");
   return {
     key: `${CODEX_PROVIDER_ID}:${fingerprint}`,
     provider: CODEX_PROVIDER_ID,
@@ -359,26 +381,26 @@ export default function registerTokenCount(
   const activeKeys = new Map<AccountUsageSource["provider"], string>();
   let generation = 0;
 
-  const setStatus = (ctx: ExtensionContext, usage?: AccountUsage) => {
+  const setStatus = (ui: ExtensionContext["ui"], usage?: AccountUsage) => {
     const text = formatAccountUsage(usage, now());
-    ctx.ui.setStatus("token-count", text ? ctx.ui.theme.fg("dim", text) : undefined);
+    ui.setStatus("token-count", text ? ui.theme.fg("dim", text) : undefined);
   };
 
   const update = async (ctx: ExtensionContext) => {
     const requestGeneration = ++generation;
-    setStatus(ctx);
-    const modelKey = ctx.model && `${ctx.model.provider}/${ctx.model.id}`;
+    // Context getters expire on session replacement; lifecycle generations own completion.
+    const ui = ctx.ui;
+    setStatus(ui);
     const provider = ctx.model?.provider;
     const resolving = resolveSource(ctx);
-    const source = resolving instanceof Promise ? await resolving : resolving;
-    const resolvedModelKey = ctx.model && `${ctx.model.provider}/${ctx.model.id}`;
-    if (
-      !source ||
-      source.provider !== provider ||
-      resolvedModelKey !== modelKey ||
-      requestGeneration !== generation
-    )
+    const source =
+      resolving instanceof Promise ? await resolving.catch(() => undefined) : resolving;
+    if (!source || requestGeneration !== generation) return;
+    if ("status" in source) {
+      ui.setStatus("token-count", ui.theme.fg("dim", source.status));
       return;
+    }
+    if (source.provider !== provider) return;
 
     const previousKey = activeKeys.get(source.provider);
     if (previousKey && previousKey !== source.key) {
@@ -389,7 +411,7 @@ export default function registerTokenCount(
 
     const cached = cache.get(source.key);
     if (cached && now() - cached.capturedAt < CACHE_TTL_MS) {
-      setStatus(ctx, cached);
+      setStatus(ui, cached);
       return;
     }
     let pending = inFlight.get(source.key);
@@ -411,17 +433,25 @@ export default function registerTokenCount(
       inFlight.set(source.key, pending);
     }
     const usage = await pending;
-    const activeModelKey = ctx.model && `${ctx.model.provider}/${ctx.model.id}`;
-    if (!usage || requestGeneration !== generation || activeModelKey !== modelKey) return;
-    setStatus(ctx, usage);
+    if (!usage || requestGeneration !== generation) return;
+    setStatus(ui, usage);
   };
 
-  pi.on("session_start", async (_event, ctx) => update(ctx));
+  const reset = () => {
+    generation++;
+    cache.clear();
+    inFlight.clear();
+    activeKeys.clear();
+  };
+  pi.on("session_start", async (_event, ctx) => {
+    reset();
+    await update(ctx);
+  });
   pi.on("turn_end", async (_event, ctx) => update(ctx));
   pi.on("session_compact", async (_event, ctx) => update(ctx));
   pi.on("model_select", async (_event, ctx) => update(ctx));
   pi.on("session_shutdown", (_event, ctx) => {
-    generation++;
-    setStatus(ctx);
+    reset();
+    setStatus(ctx.ui);
   });
 }
