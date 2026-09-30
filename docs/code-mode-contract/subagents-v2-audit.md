@@ -1,5 +1,8 @@
 # V2-only subagents: source audit and replacement plan
 
+> Historical source/validation evidence. The V8 host and associated paths/commands
+> are retired by #371; see [current native contracts](README.md).
+
 ## Decision and scope
 
 #346 follow-through: the reproducible six-tool declaration/provenance layer is now

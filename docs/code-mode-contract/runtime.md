@@ -1,5 +1,9 @@
 # Internal Code Mode runtime
 
+> Historical V8 evidence. Both parent and SDK child sessions now use
+> [native codemode](native-parent.md); the host and its build/install/test assets
+> are removed by #371. Commands and paths below are historical, not current setup.
+
 Implemented for #297, using the [contract baseline](README.md). This runtime is
 not registered with Pi and exposes no new model tools. The validated/authorized
 five-tool dispatcher (#299), activation (#300), and nested presentation (#301)
