@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { getCodeModeHostPath } from "./code-mode/binary.js";
 import { expect, test, vi } from "vitest";
-import registerCodeMode from "./index.js";
+import registerCodeMode from "./code-mode/registration.js";
 import { createBashGateHarness } from "../bash-gate/test/harness.js";
 import type { BashGateController } from "../bash-gate/index.js";
 

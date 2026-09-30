@@ -1,5 +1,8 @@
 # Codex Code Mode contract baseline
 
+> Parent runtime superseded by [native codemode (#369)](native-parent.md). The host-specific
+> contract below remains historical and applies only to not-yet-migrated SDK children.
+
 Accepted 2026-09-09 for [#295](https://github.com/jamestrew/pi-bites/issues/295), under [epic #294](https://github.com/jamestrew/pi-bites/issues/294). This is the active contract implemented through #296–#302; see [cutover validation](cutover.md). RTK removal (#292) is already in ancestor commit `6dc4c867`.
 
 ## Source selection and reproduction

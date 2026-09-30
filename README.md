@@ -75,8 +75,9 @@ pi install git:github.com/jamestrew/pi-bites
 
 For exact release pins and the compatibility policy, see [Releases](RELEASES.md).
 
-On Linux x64 or arm64, Code Mode also needs its standalone host installed on
-`PATH`; the Pi package does not download it automatically. From the pi-bites
+Parent Code Mode requires Pi 0.99.1 or newer and needs no standalone V8 host.
+SDK children still need the standalone host on Linux x64 or arm64 until their
+separate migration; the Pi package does not download it automatically. From the pi-bites
 checkout (or the installed package directory), run:
 
 ```bash
@@ -94,10 +95,9 @@ after changing `PATH`. To use pi-bites without Code Mode, add
 
 Pi-bites builds and tests against Pi 0.99.1. `bun run dev` keeps extension discovery
 isolated with `--no-extensions`, then explicitly loads only `builtin:codemode`,
-`builtin:tool-search`, and the local pi-bites extension. Loading those built-ins does
-not activate their tools or cut GPT sessions over to native codemode; activate a safe
-manual demo with Pi settings such as `defaultTools: ["+codemode"]` or a one-off tool
-selection that includes `codemode`.
+`builtin:tool-search`, and the local pi-bites extension. Eligible parent GPT sessions
+select native `codemode`; `tool_search` remains separately enabled, for example
+with `defaultTools: ["+tool_search"]`. Loading search does not grant capabilities.
 
 ## Configuration
 
@@ -140,13 +140,13 @@ Auto-compaction triggers at the lower of `autoCompaction.thresholdTokens` (defau
 
 ### Codex adapter
 
-`codexAdapter` exposes Code Mode through `exec` and `wait` for GPT-5.6 and GPT-6 base IDs and hyphenated variants, plus GPT-6.1 base and Sol IDs. The five owned capabilities—`exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`—are callable inside `exec`, subject to session selection and availability. Unrelated direct tools remain available. Other model families use normal Pi core tools, with no standalone adapter web tool.
+`codexAdapter` exposes native Code Mode through `codemode` in parent sessions for GPT-5.6 and GPT-6 base IDs and hyphenated variants, plus GPT-6.1 base and Sol IDs. The five owned capabilities—`exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`—are callable inside native JavaScript, subject to session selection and availability. Unrelated direct tools remain available. Other model families use normal Pi core tools, with no standalone adapter web tool.
 
-The four core nested contracts are documented eagerly. Web help is loaded on demand through `text(ALL_TOOLS.filter(tool => tool.name === "web_run"));` before browsing, including after compaction removes previously loaded help. Initial guidance retains browsing triggers. Discovery is documentation only and does not enable unavailable web routes or credential fallback. It leaves tool definitions and the system prompt stable; it does not guarantee provider cache savings.
+Native discovery exposes permitted tools through `searchTools`, `describeTool`, and `ALL_TOOLS`. Web help is loaded on demand through `text(await describeTool("web_run"));` before browsing, including after compaction removes previously loaded help. Initial guidance retains browsing triggers. Discovery is documentation only and does not enable unavailable web routes or credential fallback. It leaves tool definitions and the system prompt stable; it does not guarantee provider cache savings.
 
 Recognized model-ID prefixes are `openai/`, `openai-codex/`, `azure/`, `azure-openai/`, `github-copilot/`, and `openrouter/`. A provider name alone never enables the adapter. The obsolete `codexAdapter.providers` option has been removed; existing unknown configuration keys are ignored, so it no longer selects models.
 
-Commands still pass through bash-gate and Auto Mode individually, after argument construction and before launch. Nested activity uses the existing tool renderers; raw JavaScript is hidden, and expansion shows nested details. A cell resumed with `wait` is distinct from a shell session resumed with `tools.write_stdin`. Normal completed cells can leave background shells. Explicit cancellation cleans up that cell's shells; leaving supported scope, tree navigation, replacement, reload and shutdown clear runtime state and owned processes. Saved transcripts restore display only.
+Commands still pass through bash-gate and Auto Mode individually, after validation and before launch. Pi owns native nested operation/error rows and expansion. Scripts complete once; there are no yielded cells or outer `wait` calls. A returned shell session can still be polled with `tools.write_stdin` in a later script. Normal completion preserves these shells; explicit cancellation cleans up only shells launched by that script. Unhandled script errors cancel pending calls, not already-returned shell launches. Leaving scope, navigation, replacement, reload and shutdown clear owned state. Saved transcripts restore display only. See [native parent behavior and verification](docs/code-mode-contract/native-parent.md).
 
 Vision-capable models can use local-only `view_image({ path })`, accepting PNG, JPEG, WebP and non-animated GIF up to 32 MiB and 4096 pixels per dimension. Text-only models never receive it. Image viewing makes no hidden provider request; emit the returned image explicitly with `image(...)` to send it to the model.
 
@@ -167,18 +167,18 @@ Pi's new `/login openai` ChatGPT subscription uses the direct OpenAI Responses g
 
 Linux x86-64 and arm64 native helpers, including `view_image`, are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
 
-### Code Mode host dependency
+### Child Code Mode host dependency
 
-Code Mode requires the pinned standalone host from Codex’s GitHub release for
+Not-yet-migrated SDK children require the pinned standalone host from Codex’s GitHub release for
 Linux x64 or arm64. Run `bash scripts/code-mode-install.sh` (optionally with
 `--install-dir "$HOME/bin"`); see the [installation and checksum instructions](packages/ext/codex-adapter/vendor/code-mode/README.md#manual-installation).
 Pi finds `codex-code-mode-host` on `PATH`, so it can be supplied by your package
 manager or installed in any directory on Pi’s `PATH`. Pi never downloads it automatically. Source, checksums, notices and rebuild
 instructions remain in this repository.
 
-The default adapter requires this host. A missing or crashed host fails visibly and keeps the Code Mode interface; install/repair the host and `/reload`, or explicitly disable `codexAdapter` to use normal Pi tools. There is no second structured adapter mode.
+The parent adapter does not load or start this host; only the child path still requires it. A missing or crashed host fails visibly and keeps the Code Mode interface; install/repair the host and `/reload`, or explicitly disable `codexAdapter` to use normal Pi tools. There is no second structured adapter mode.
 
-The surface exposes `exec` and `wait`, hides the five nested adapter tools,
+The retained child surface exposes `exec` and `wait`, hides the five nested adapter tools,
 and preserves unrelated direct tools. It respects session tool selection and
 restores only displaced core tools on leaving scope. Stock Pi sends raw JavaScript
 through grammar tools where the actual API/model supports them; other routes send
