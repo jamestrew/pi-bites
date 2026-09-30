@@ -507,49 +507,147 @@ test.each([true, false])(
   },
 );
 
-test("legacy usage follows OAuth account headers instead of reusing another account's cache", async () => {
-  const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
-  let account = "account-a";
-  const setStatus = vi.fn();
-  const fetchMock = vi.fn(
-    async () =>
-      new Response(
+test.each([
+  ["OAuth", "OAuth", true],
+  ["OAuth", "runtime", false],
+  ["OAuth", "missing", false],
+  ["OAuth", "expired", false],
+  ["OAuth", "unauthorized", false],
+  ["OAuth", "network failure", false],
+  ["OAuth", "empty usage", false],
+  ["runtime", "OAuth", false],
+])(
+  "OpenAI %s uses separately authenticated Codex %s usage=%s",
+  async (directSource, legacySource, expectedUsage) => {
+    const queryFails = ["unauthorized", "network failure", "empty usage"].includes(legacySource);
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const setStatus = vi.fn();
+    const fetchMock = vi.fn(async () => {
+      if (legacySource === "unauthorized") return new Response(null, { status: 401 });
+      if (legacySource === "network failure") throw new Error("offline");
+      if (legacySource === "empty usage") return new Response("{}");
+      return new Response(
         JSON.stringify({
           rate_limit: {
             primary_window: {
-              used_percent: account === "account-a" ? 12 : 34,
+              used_percent: 12,
               limit_window_seconds: 18000,
               reset_after_seconds: 3600,
             },
           },
         }),
-      ),
-  );
-  vi.stubGlobal("fetch", fetchMock);
-  const auth = () => ({
-    ok: true,
-    source: "OAuth",
-    auth: { apiKey: "same-token", headers: { "ChatGPT-Account-Id": account } },
-  });
-  const ctx = {
-    model: { provider: "openai-codex", id: "gpt-6.1-sol" },
-    modelRegistry: {
-      getProviderAuth: async () => auth(),
-      getApiKeyAndHeaders: async () => ({ ok: true, ...auth().auth }),
-    },
-    ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
-  };
-  registerTokenCount({
-    on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
-      handlers.set(event, handler),
-  } as never);
-  await handlers.get("session_start")!({}, ctx);
-  expect(setStatus).toHaveBeenLastCalledWith("token-count", "codex: 5h: 12% (1.0h)");
-  account = "account-b";
-  await handlers.get("turn_end")!({}, ctx);
-  expect(fetchMock).toHaveBeenCalledTimes(2);
-  expect(setStatus).toHaveBeenLastCalledWith("token-count", "codex: 5h: 34% (1.0h)");
-});
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let stale = false;
+    const getProviderAuth = vi.fn(async (provider: string) => {
+      if (provider === "openai") {
+        stale = true;
+        return { source: directSource, auth: { apiKey: "direct-token" } };
+      }
+      expect(provider).toBe("openai-codex");
+      if (legacySource === "expired") throw new Error("expired legacy token");
+      if (legacySource === "missing") return undefined;
+      return {
+        source: queryFails ? "OAuth" : legacySource,
+        auth: {
+          apiKey: "legacy-token",
+          headers: { "ChatGPT-Account-Id": "legacy-account" },
+        },
+      };
+    });
+    const registry = {
+      getProviderAuth,
+      getProvider: () => ({ auth: { oauth: { isSubscription: true } } }),
+    };
+    registerTokenCount({
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never);
+    await handlers.get("session_start")!(
+      {},
+      {
+        model: { provider: "openai", id: "gpt-6.1-sol" },
+        get modelRegistry() {
+          if (stale) throw new Error("stale registry getter");
+          return registry;
+        },
+        ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
+      },
+    );
+    if (expectedUsage || queryFails) {
+      expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+        "https://chatgpt.com/backend-api/wham/usage",
+        expect.objectContaining({
+          headers: {
+            Authorization: "Bearer legacy-token",
+            "ChatGPT-Account-Id": "legacy-account",
+          },
+        }),
+      );
+    } else {
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+    expect(setStatus).toHaveBeenLastCalledWith(
+      "token-count",
+      expectedUsage
+        ? "codex: 5h: 12% (1.0h)"
+        : directSource === "OAuth"
+          ? "openai: subscription usage unavailable; https://chatgpt.com/settings/usage"
+          : undefined,
+    );
+    expect(getProviderAuth).toHaveBeenCalledTimes(directSource === "OAuth" ? 2 : 1);
+  },
+);
+
+test.each(["openai-codex", "openai"])(
+  "%s usage follows legacy OAuth account headers instead of reusing another account's cache",
+  async (provider) => {
+    const handlers = new Map<string, (...args: unknown[]) => Promise<void>>();
+    let account = "account-a";
+    const setStatus = vi.fn();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            rate_limit: {
+              primary_window: {
+                used_percent: account === "account-a" ? 12 : 34,
+                limit_window_seconds: 18000,
+                reset_after_seconds: 3600,
+              },
+            },
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const auth = () => ({
+      ok: true,
+      source: "OAuth",
+      auth: { apiKey: "same-token", headers: { "ChatGPT-Account-Id": account } },
+    });
+    const ctx = {
+      model: { provider, id: "gpt-6.1-sol" },
+      modelRegistry: {
+        getProviderAuth: async (id: string) =>
+          id === "openai" ? { source: "OAuth", auth: { apiKey: "direct-token" } } : auth(),
+        getProvider: () => ({ auth: { oauth: { isSubscription: true } } }),
+        getApiKeyAndHeaders: async () => ({ ok: true, ...auth().auth }),
+      },
+      ui: { setStatus, theme: { fg: (_color: string, value: string) => value } },
+    };
+    registerTokenCount({
+      on: (event: string, handler: (...args: unknown[]) => Promise<void>) =>
+        handlers.set(event, handler),
+    } as never);
+    await handlers.get("session_start")!({}, ctx);
+    expect(setStatus).toHaveBeenLastCalledWith("token-count", "codex: 5h: 12% (1.0h)");
+    account = "account-b";
+    await handlers.get("turn_end")!({}, ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(setStatus).toHaveBeenLastCalledWith("token-count", "codex: 5h: 34% (1.0h)");
+  },
+);
 
 test.each(["stored", "env", undefined])(
   "legacy usage rejects non-OAuth auth source %s",

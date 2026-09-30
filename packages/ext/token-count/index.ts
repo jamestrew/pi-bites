@@ -13,6 +13,8 @@ import { codexAccountId } from "../codex-account.js";
 
 const CODEX_PROVIDER_ID = "openai-codex";
 const COPILOT_PROVIDER_ID = "github-copilot";
+const OPENAI_USAGE_UNAVAILABLE =
+  "openai: subscription usage unavailable; https://chatgpt.com/settings/usage";
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const TIMEOUT_MS = 10_000;
 
@@ -312,18 +314,24 @@ async function resolveDefaultSource(
     registry.getProvider(model.provider)?.auth.oauth?.isSubscription
   ) {
     const auth = await registry.getProviderAuth(model.provider);
-    return auth?.source === "OAuth"
-      ? { status: "openai: subscription usage unavailable; https://chatgpt.com/settings/usage" }
-      : undefined;
+    if (auth?.source !== "OAuth") return undefined;
+    // The legacy account supplies usage only; never send the direct OpenAI token here.
+    return (
+      (await resolveCodexSource(registry).catch(() => undefined)) ?? {
+        status: OPENAI_USAGE_UNAVAILABLE,
+      }
+    );
   }
   if (model?.provider !== CODEX_PROVIDER_ID) return undefined;
-  return resolveCodexSource(ctx);
+  return resolveCodexSource(registry);
 }
 
-async function resolveCodexSource(ctx: ExtensionContext): Promise<AccountUsageSource | undefined> {
+async function resolveCodexSource(
+  registry: ExtensionContext["modelRegistry"],
+): Promise<AccountUsageSource | undefined> {
   // Resolve provenance and credentials together: an API-key override is not a subscription.
   // Usage belongs to the provider account, not model-specific header overrides.
-  const resolved = await ctx.modelRegistry.getProviderAuth(CODEX_PROVIDER_ID);
+  const resolved = await registry.getProviderAuth(CODEX_PROVIDER_ID);
   if (resolved?.source !== "OAuth") return undefined;
   const auth = resolved.auth;
   const headers = mergeHeaders(auth.headers, {});
@@ -381,8 +389,8 @@ export default function registerTokenCount(
   const activeKeys = new Map<AccountUsageSource["provider"], string>();
   let generation = 0;
 
-  const setStatus = (ui: ExtensionContext["ui"], usage?: AccountUsage) => {
-    const text = formatAccountUsage(usage, now());
+  const setStatus = (ui: ExtensionContext["ui"], usage?: AccountUsage, fallback?: string) => {
+    const text = formatAccountUsage(usage, now()) ?? fallback;
     ui.setStatus("token-count", text ? ui.theme.fg("dim", text) : undefined);
   };
 
@@ -400,8 +408,13 @@ export default function registerTokenCount(
       ui.setStatus("token-count", ui.theme.fg("dim", source.status));
       return;
     }
-    if (source.provider !== provider) return;
+    if (
+      source.provider !== provider &&
+      !(provider === "openai" && source.provider === CODEX_PROVIDER_ID)
+    )
+      return;
 
+    const fallback = provider === "openai" ? OPENAI_USAGE_UNAVAILABLE : undefined;
     const previousKey = activeKeys.get(source.provider);
     if (previousKey && previousKey !== source.key) {
       cache.delete(previousKey);
@@ -411,7 +424,7 @@ export default function registerTokenCount(
 
     const cached = cache.get(source.key);
     if (cached && now() - cached.capturedAt < CACHE_TTL_MS) {
-      setStatus(ui, cached);
+      setStatus(ui, cached, fallback);
       return;
     }
     let pending = inFlight.get(source.key);
@@ -433,8 +446,8 @@ export default function registerTokenCount(
       inFlight.set(source.key, pending);
     }
     const usage = await pending;
-    if (!usage || requestGeneration !== generation) return;
-    setStatus(ui, usage);
+    if (requestGeneration !== generation) return;
+    setStatus(ui, usage, fallback);
   };
 
   const reset = () => {

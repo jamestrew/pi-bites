@@ -2,13 +2,13 @@
 
 ## Supported routes
 
-| Selected route                         | Code Mode on GPT-6.1 Sol | Account usage                     | Nested web_run                      |
-| -------------------------------------- | ------------------------ | --------------------------------- | ----------------------------------- |
-| OpenAI ChatGPT subscription (`openai`) | Yes                      | Unavailable; use ChatGPT settings | Unavailable                         |
-| OpenAI API key (`openai`)              | Yes                      | No subscription request           | Unavailable                         |
-| Legacy Codex OAuth (`openai-codex`)    | Yes                      | Existing Codex usage endpoint     | Existing Codex search endpoint      |
-| Explicit compatible Responses provider | Yes, for eligible IDs    | No inferred subscription access   | Its configured search endpoint      |
-| Unauthenticated route                  | Model eligibility only   | No usage request                  | Route-specific authentication error |
+| Selected route                         | Code Mode on GPT-6.1 Sol | Account usage                                               | Nested web_run                      |
+| -------------------------------------- | ------------------------ | ----------------------------------------------------------- | ----------------------------------- |
+| OpenAI ChatGPT subscription (`openai`) | Yes                      | Legacy Codex OAuth if available; otherwise ChatGPT settings | Unavailable                         |
+| OpenAI API key (`openai`)              | Yes                      | No subscription request                                     | Unavailable                         |
+| Legacy Codex OAuth (`openai-codex`)    | Yes                      | Existing Codex usage endpoint                               | Existing Codex search endpoint      |
+| Explicit compatible Responses provider | Yes, for eligible IDs    | No inferred subscription access                             | Its configured search endpoint      |
+| Unauthenticated route                  | Model eligibility only   | No usage request                                            | Route-specific authentication error |
 
 Direct OpenAI subscription inference is not proof that the grant can use hosted
 search or the legacy backend. Do not add `openai` to `webSearchProviders` as a
@@ -16,12 +16,15 @@ workaround; it is excluded. Configure an independently verified proxy under its
 own provider ID. Ordinary API keys are never used for subscription usage or legacy
 Codex search, even if a token resembles a JWT with account claims.
 
-`allowOpenAICodexFallback: true` remains an explicit authorization to use a
-separately authenticated legacy account. Without it, selecting direct OpenAI never
-uses stored Codex credentials. A selected compatible route never retries with
-another account after failure. Search navigation and citations are auth-scoped;
+`allowOpenAICodexFallback: true` remains an explicit authorization for web search
+to use a separately authenticated legacy account. Without it, direct OpenAI search
+never uses stored Codex credentials. A selected compatible search route never
+retries with another account after failure. Search navigation and citations are auth-scoped;
 session replacement retires pending results. Usage caches include resolved auth
-and account headers and suppress superseded completions.
+and account headers and suppress superseded completions. When the selected
+`openai` route uses subscription OAuth, account usage automatically uses available
+legacy Codex OAuth and remains labeled `codex:`. This is legacy account usage, not
+a verified quota for the direct route; inference credentials are unchanged.
 
 ## Upstream evidence
 
@@ -53,9 +56,10 @@ regeneration, or host change is required.
 
 ## Recovery and validation limits
 
-For direct OpenAI usage, open <https://chatgpt.com/settings/usage>. Repeating
-`/login openai` does not enable usage or web search in pi-bites. For missing or
-expired legacy authentication, use `/login openai-codex`; for compatible-provider
+For direct OpenAI usage, open <https://chatgpt.com/settings/usage>. For the legacy
+usage display while using the new subscription login, use `/login openai-codex`.
+Repeating `/login openai` does not enable direct usage or web search in pi-bites.
+For missing or expired legacy authentication, use `/login openai-codex`; for compatible-provider
 failures, repair that provider's configured authentication and endpoint. Selecting
 a legacy model or enabling explicit fallback uses that legacy account, not the
 account selected through the new login.
