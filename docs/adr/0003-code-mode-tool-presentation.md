@@ -7,3 +7,12 @@ Source definitions and supported deviations: [Code Mode contract baseline](../co
 Reuse the five tools' existing renderers inside Code Mode results and hide raw JavaScript by default, preserving recognizable commands, patches, and other tool activity. Expansion exposes nested details; errors and images remain visible, and explicit script output is shown when there are no nested calls to display. This follows upstream's ordinary-tool presentation while avoiding its potentially empty display for successful standalone computations; UI visibility remains separate from model-visible output.
 
 Render child traces inside the enclosing `exec`/`wait` result; do not manufacture independent Pi tool messages. Pi partial updates are UI events. Native yields and final results carry model-visible text/images, including queued notification text. Restored display details cannot restore live cells, stored values, or shell sessions. Bound retained trace data and keep images/error details usable under text truncation.
+
+## Native parent amendment (#369)
+
+For parent sessions, the accepted [native parent contract](../code-mode-contract/native-parent.md)
+supersedes runtime-specific statements above: use Pi 0.99.1 native `codemode`,
+registry discovery, one-shot finalization and native nested rendering/persistence.
+No parent V8 host, live cells or exec/wait facade remain. Keep the bounded model
+scope, concrete capabilities, shared per-launch authorization and route restrictions.
+The child path retains this historical host contract until its separate migration.

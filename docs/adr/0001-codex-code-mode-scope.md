@@ -91,3 +91,12 @@ preserve legacy login and explicit cross-provider fallback, and reserve the
 compatible-provider allowlist for independently verified provider IDs.
 [Verification and recovery](../code-mode-contract/openai-compatibility.md) distinguish
 upstream source evidence from live transport validation.
+
+## Native parent amendment (#369)
+
+For parent sessions, the accepted [native parent contract](../code-mode-contract/native-parent.md)
+supersedes runtime-specific statements above: use Pi 0.99.1 native `codemode`,
+registry discovery, one-shot finalization and native nested rendering/persistence.
+No parent V8 host, live cells or exec/wait facade remain. Keep the bounded model
+scope, concrete capabilities, shared per-launch authorization and route restrictions.
+The child path retains this historical host contract until its separate migration.

@@ -1,5 +1,8 @@
 # Native contracts and activation (#300)
 
+> Parent runtime superseded by [native codemode (#369)](native-parent.md). The host-specific
+> contract below remains historical and applies only to not-yet-migrated SDK children.
+
 The default `packages/ext/codex-adapter/index.ts` exports the Code Mode registration in `code-mode/registration.ts`. The temporary gate and legacy direct adapter registration/guidance have been removed by #302. Unsupported models use normal Pi core tools.
 
 ## Reproduce the definitions

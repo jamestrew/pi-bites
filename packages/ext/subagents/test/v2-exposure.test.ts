@@ -195,7 +195,7 @@ it.each([
   { route: "older-gpt" as const },
   {
     route: "gpt" as const,
-    selected: ["spawn_agent", "send_message", "list_agents", "read", "exec", "wait"],
+    selected: ["spawn_agent", "send_message", "list_agents", "read", "codemode"],
   },
   { route: "anthropic" as const, selected: ["spawn_agent", "send_message", "list_agents", "read"] },
   { route: "gpt" as const, disabled: true, selected: ["spawn_agent", "list_agents", "read"] },
@@ -208,7 +208,7 @@ it.each([
   expect(h.payloads.length, JSON.stringify(h.session.messages)).toBeGreaterThan(0);
   assertPayload(h.payloads.at(-1), permitted);
   const codeMode = options.route === "gpt" && !options.disabled;
-  expect(h.session.getActiveToolNames().includes("exec")).toBe(codeMode);
+  expect(h.session.getActiveToolNames().includes("codemode")).toBe(codeMode);
   const spawn = await h.call("spawn_agent", {
     task_name: "probe",
     message: "Inspect the permitted tools.",
@@ -255,15 +255,7 @@ it.each([
 it("preserves child ownership, tool restrictions and controls across provider switches", async () => {
   const h = await setup({
     route: "gpt",
-    selected: [
-      "spawn_agent",
-      "send_message",
-      "followup_task",
-      "list_agents",
-      "read",
-      "exec",
-      "wait",
-    ],
+    selected: ["spawn_agent", "send_message", "followup_task", "list_agents", "read", "codemode"],
   });
   await h.call("spawn_agent", {
     task_name: "probe",
@@ -283,7 +275,7 @@ it("preserves child ownership, tool restrictions and controls across provider sw
   await h.manager.waitForAll();
   assertPayload(h.payloads.at(-1), ["spawn_agent", "send_message", "followup_task", "list_agents"]);
   await h.session.setModel(h.gpt);
-  expect(h.session.getActiveToolNames()).toContain("exec");
+  expect(h.session.getActiveToolNames()).toContain("codemode");
   expect(h.session.getActiveToolNames()).not.toContain("interrupt_agent");
   expect(h.fetch).not.toHaveBeenCalled();
 });
@@ -292,7 +284,31 @@ it("disabling subagents leaves unrelated Code Mode tools available", async () =>
   const h = await setup({ route: "gpt", subagentsDisabled: true });
   await h.session.prompt("Inspect tools.");
   assertPayload(h.payloads.at(-1), []);
-  expect(h.session.getActiveToolNames()).toContain("exec");
+  expect(h.session.getActiveToolNames()).toContain("codemode");
   expect(JSON.stringify(h.payloads.at(-1).tools)).toContain("exec_command");
   expect(h.fetch).not.toHaveBeenCalled();
 });
+
+it.each([false, true])(
+  "native parent payload uses stock grammar=%s without exec/wait or nested collaboration",
+  async (grammar) => {
+    const h = await setup({ route: "gpt" });
+    h.gpt.compat = { ...h.gpt.compat, supportsOpenAIGrammarTools: grammar };
+    await h.session.setModel(h.gpt);
+    await h.session.prompt("Inspect native tools.");
+    const payload = h.payloads.at(-1);
+    const names = payload.tools.map((t: any) => t.name);
+    expect(names).toContain("codemode");
+    expect(names).not.toContain("exec");
+    expect(names).not.toContain("wait");
+    expect(names).not.toContain("exec_command");
+    const codemode = payload.tools.find((t: any) => t.name === "codemode");
+    expect(codemode.type).toBe(grammar ? "custom" : "function");
+    if (grammar) expect(codemode.format).toMatchObject({ type: "grammar", syntax: "lark" });
+    else expect(codemode.parameters.required).toEqual(["code"]);
+    const callable = h.session.getCallableToolNames();
+    for (const name of collaboration) expect(callable).not.toContain(name);
+    assertPayload(payload, collaboration);
+    expect(h.fetch).not.toHaveBeenCalled();
+  },
+);

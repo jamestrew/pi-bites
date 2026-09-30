@@ -25,7 +25,7 @@ A compact, read-only summary of all host-local tracked Pi panes displayed within
 _Avoid_: Tmux status bar
 
 **Code Mode**:
-A tool interface in which the model composes nested tool calls using JavaScript through `exec`, and resumes yielded executions through `wait`.
+A tool interface in which the model composes nested tool calls using JavaScript. Parent sessions use one-shot native scripts; the legacy child interface still has resumable cells.
 _Avoid_: Notebook Mode, shell execution
 
 **Nested tool**:
@@ -41,11 +41,11 @@ The retired Codex adapter interface that exposed its capabilities as direct stru
 _Avoid_: Code Mode
 
 **Cell**:
-A JavaScript execution in Code Mode that can yield and later be resumed or terminated through `wait`.
+A legacy child Code Mode execution that can yield and later be resumed or terminated. Native parent scripts are not cells.
 _Avoid_: Shell session
 
 **Shell session**:
-A running command that can receive input or be polled through `write_stdin`, independently of whether the cell that started it has finished.
+A running command that can receive input or be polled through `write_stdin`, independently of whether the script or legacy cell that started it has finished.
 _Avoid_: Cell
 
 **Bash gate**:
@@ -53,11 +53,11 @@ A permission gate that classifies requested shell commands and obtains automated
 _Avoid_: JavaScript sandbox
 
 **Runtime session**:
-Branch-owned Code Mode state containing cells and serializable stored values; it is cleared on branch/session replacement, reload, shutdown, or leaving supported model scope.
+Branch-owned Code Mode state containing serializable stored values and, in legacy child sessions, cells; it is cleared on branch/session replacement, reload, shutdown, or leaving supported model scope.
 _Avoid_: Shell session, persistent notebook
 
 **Nested trace**:
-Presentation data for an owned tool invocation rendered inside its enclosing `exec`/`wait` result. It is not an independent model-visible tool message.
+Presentation data for a tool invocation inside its enclosing Code Mode result. It is not an independent model-visible tool message.
 _Avoid_: Injected tool result
 
 **Contract baseline**:
