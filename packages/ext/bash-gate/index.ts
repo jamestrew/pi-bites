@@ -49,6 +49,8 @@ export interface CommandAuthorizationSession {
 }
 
 export interface BashGateController {
+  /** Native exec_command authorizes at execute, with its per-call cancellation signal. */
+  manageExecCommand(): void;
   isYolo(): boolean;
   captureSession(ctx: ExtensionContext): CommandAuthorizationSession;
 }
@@ -93,6 +95,7 @@ export default function registerBashGate(
     default: false,
   });
 
+  let managedExecCommand = false;
   let rules: BashGateRule[] = [];
   let mainAgentYolo = false;
   let owner = new AbortController();
@@ -472,6 +475,7 @@ export default function registerBashGate(
   }
 
   pi.on("tool_call", async (event, ctx) => {
+    if (managedExecCommand && event.toolName === "exec_command") return;
     const input = event.input as Record<string, unknown>;
     const command = commandPolicyRequest(event.toolName, input);
     if (!command) return undefined;
@@ -497,5 +501,11 @@ export default function registerBashGate(
     }
   });
 
-  return { isYolo: () => pi.getFlag("yolo") === true || mainAgentYolo, captureSession };
+  return {
+    manageExecCommand: () => {
+      managedExecCommand = true;
+    },
+    isYolo: () => pi.getFlag("yolo") === true || mainAgentYolo,
+    captureSession,
+  };
 }

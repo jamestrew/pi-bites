@@ -39,7 +39,11 @@ async function loadExtension(
   const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
   const previewCodexPrompt = vi.fn((prompt: string) => `codex:${prompt}`);
   const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
-  const bashGate = { isYolo: vi.fn(() => false), captureSession: vi.fn() };
+  const bashGate = {
+    manageExecCommand: vi.fn(),
+    isYolo: vi.fn(() => false),
+    captureSession: vi.fn(),
+  };
   if (options.realCodex) vi.doUnmock("./codex-adapter/index.js");
   for (const modulePath of registerModules) {
     if (modulePath === "./codex-adapter/index.js" && options.realCodex) continue;
@@ -60,7 +64,8 @@ async function loadExtension(
     } else vi.doMock(modulePath, () => ({ default: spy }));
   }
 
-  vi.doMock("@earendil-works/pi-coding-agent", () => ({}));
+  if (options.realCodex) vi.doUnmock("@earendil-works/pi-coding-agent");
+  else vi.doMock("@earendil-works/pi-coding-agent", () => ({}));
 
   const loadConfig = vi.fn(() => (options.disable ? { disable: options.disable } : {}));
   const registerBitesCommands = vi.fn();
@@ -75,15 +80,20 @@ async function loadExtension(
   const { default: registerExtension } = await import("./index.js");
   const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
   let activeTools = ["read", "bash", "edit", "write", "custom"];
+  const allTools = new Map<string, { name: string; defaultActive?: boolean }>();
   const pi = {
+    getAllTools: () => [...allTools.values()],
+    getSettings: () => ({}),
     on: vi.fn((name: string, handler: (event: any, ctx: any) => unknown) => {
       const registered = handlers.get(name) ?? [];
       registered.push(handler);
       handlers.set(name, registered);
     }),
     registerCommand: vi.fn(),
-    registerTool: vi.fn((tool: { name: string }) => {
-      if (!activeTools.includes(tool.name)) activeTools.push(tool.name);
+    registerTool: vi.fn((tool: { name: string; defaultActive?: boolean }) => {
+      allTools.set(tool.name, tool);
+      if (tool.defaultActive !== false && !activeTools.includes(tool.name))
+        activeTools.push(tool.name);
     }),
     registerMarkdownTransformer: vi.fn(),
     sendMessage: vi.fn(),
@@ -147,6 +157,7 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,
         expect.any(Function),
+        undefined,
       );
       const preview = loaded.registerSpies.get("./context.js")?.mock.calls[0]?.[1];
       expect(
@@ -235,34 +246,32 @@ describe("extension entrypoint", () => {
         input: ["text", "image"],
       },
       ui: { notify: vi.fn() },
-      sessionManager: { getSessionId: () => "assembled-session" },
+      sessionManager: { getSessionId: () => "assembled-session", getBranch: () => [] },
       modelRegistry: {},
       isProjectTrusted: () => true,
     };
     try {
       expect(loaded.pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
-        "apply_patch",
+        "codemode",
         "exec_command",
         "write_stdin",
-        "view_image",
+        "apply_patch",
         "web_run",
-        "exec",
-        "wait",
+        "view_image",
       ]);
       const registeredTool = (name: string) =>
         loaded.pi.registerTool.mock.calls.find(([tool]) => tool.name === name)?.[0] as
           | { exposure?: string }
           | undefined;
-      expect(registeredTool("exec")?.exposure).toBe("model-only");
-      expect(registeredTool("wait")?.exposure).toBe("model-only");
+      expect(registeredTool("codemode")?.exposure).toBe("model-only");
       for (const handler of loaded.handlers.get("session_start") ?? []) await handler({}, ctx);
-      expect(loaded.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+      expect(loaded.getActiveTools()).toEqual(["codemode", "custom"]);
       for (const handler of loaded.handlers.get("model_select") ?? [])
         await handler(
           {},
           { ...ctx, model: { ...ctx.model, id: "gpt-5.6", provider: "work-provider" } },
         );
-      expect(loaded.getActiveTools()).toEqual(["exec", "wait", "custom"]);
+      expect(loaded.getActiveTools()).toEqual(["codemode", "custom"]);
       for (const handler of loaded.handlers.get("model_select") ?? [])
         await handler(
           {},

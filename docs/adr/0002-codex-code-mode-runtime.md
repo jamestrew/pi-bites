@@ -51,3 +51,12 @@ wait cancellation removes only the waiter. Interrupt stops one turn, not descend
 Navigation/replacement/reload/shutdown still retire conversation-owned work. Historical
 saved display data never restores runtime ownership. See the
 [V2 commit points](../../packages/ext/subagents/CODEX_V2.md).
+
+## Native parent amendment (#369)
+
+For parent sessions, the accepted [native parent contract](../code-mode-contract/native-parent.md)
+supersedes runtime-specific statements above: use Pi 0.99.1 native `codemode`,
+registry discovery, one-shot finalization and native nested rendering/persistence.
+No parent V8 host, live cells or exec/wait facade remain. Keep the bounded model
+scope, concrete capabilities, shared per-launch authorization and route restrictions.
+The child path retains this historical host contract until its separate migration.

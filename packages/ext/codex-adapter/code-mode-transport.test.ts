@@ -14,7 +14,7 @@ import {
   getGrammarToolInput,
 } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { expect, test, vi } from "vitest";
-import registerCodeMode from "./index.js";
+import registerCodeMode from "./code-mode/registration.js";
 import { parseHostMessage } from "./code-mode/host-protocol.js";
 
 test("readonly JSON arguments and results cross the host protocol", () => {

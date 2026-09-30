@@ -8,20 +8,30 @@ import { renderExecResult, renderExecScanline, throwForExecFailure } from "./com
 import type { ExecSessionManager, UnifiedExecResult, WriteStdinInput } from "./session-manager.js";
 
 const parameters = Type.Object({
-  session_id: Type.Number({ description: "Session identifier returned by exec_command." }),
+  session_id: Type.Integer({
+    minimum: 0,
+    maximum: Number.MAX_SAFE_INTEGER,
+    description: "Session identifier returned by exec_command.",
+  }),
   chars: Type.Optional(
     Type.String({
       description: "Characters to write. Omit or pass empty to poll without writing.",
     }),
   ),
   yield_time_ms: Type.Optional(
-    Type.Number({
+    Type.Integer({
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
       description:
         "Wait before yielding output. Non-empty writes default to 250 ms; empty polls default to 5000 ms and clamp to 5000–300000 ms.",
     }),
   ),
   max_output_tokens: Type.Optional(
-    Type.Number({ description: "Output token budget. Defaults to 10000 tokens." }),
+    Type.Integer({
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+      description: "Output token budget. Defaults to 10000 tokens.",
+    }),
   ),
 });
 

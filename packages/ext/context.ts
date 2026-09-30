@@ -241,6 +241,7 @@ function estimateMessages(ctx: ExtensionCommandContext): number {
 export default function registerContext(
   pi: ExtensionAPI,
   previewPrompt?: ContextPromptPreview,
+  previewTools?: (tools: ToolInfo[]) => ToolInfo[],
 ): void {
   pi.registerCommand("context", {
     description: "Show usage or export static context",
@@ -261,7 +262,8 @@ export default function registerContext(
       if (ctx.mode !== "tui" || !ctx.model) return;
       const currentSystemPrompt = ctx.getSystemPrompt();
       const systemPrompt = previewPrompt?.(currentSystemPrompt, ctx) ?? currentSystemPrompt;
-      const tools = pi.getAllTools();
+      const registeredTools = pi.getAllTools();
+      const tools = previewTools?.(registeredTools) ?? registeredTools;
       const activeTools = pi.getActiveTools();
       if (argument === "log") {
         try {
@@ -298,15 +300,10 @@ export default function registerContext(
         activeTools,
         messageTokens: estimateMessages(ctx),
       });
+      const modelName = ctx.model.name || ctx.model.id;
       await ctx.ui.custom<void>(
         (_tui, theme, _kb, done) =>
-          new ContextComponent(
-            theme,
-            data,
-            ctx.model?.name ?? ctx.model?.id ?? "Unknown model",
-            argument === "all",
-            done,
-          ),
+          new ContextComponent(theme, data, modelName, argument === "all", done),
       );
     },
   });

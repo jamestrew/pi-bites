@@ -91,6 +91,7 @@ export default async function (pi: ExtensionAPI) {
       previewCodexPrompt?.(prompt, ctx.model, ctx.getSystemPromptOptions()) ?? prompt;
     return previewPonytailPrompt?.(withCodex) ?? withCodex;
   };
-  if (!isNonInteractive && !disabled.has("context")) registerContext(pi, previewSystemPrompt);
+  if (!isNonInteractive && !disabled.has("context"))
+    registerContext(pi, previewSystemPrompt, codexAdapter?.previewTools);
   registerBitesCommands(pi);
 }
