@@ -52,6 +52,35 @@ export function checkMailbox(history: readonly unknown[]) {
   };
 }
 
+/** Native nested hooks expose real launches; script output is not launch evidence. */
+export function checkApprovedExecution(approvals: string[], observations: Json[]) {
+  const launches = observations.filter(
+    (o) => o.owner !== "parent" && ["exec_command", "bash"].includes(String(o.tool)),
+  );
+  const launch = launches[0];
+  if (
+    launches.length !== 1 ||
+    !launch ||
+    launch.isError ||
+    approvals.length !== 1 ||
+    approvals[0] !== command
+  )
+    return false;
+  const native = launch.tool === "exec_command";
+  return (
+    (native ? object(launch.input).cmd : object(launch.input).command) === command &&
+    (native
+      ? object(launch.details).exit_code === 0 &&
+        object(launch.details).output === "subagent-approved"
+      : Array.isArray(launch.content) &&
+        launch.content
+          .filter((c) => object(c).type === "text")
+          .map((c) => object(c).text)
+          .join("\n")
+          .trim() === "subagent-approved")
+  );
+}
+
 /** Check controller results, never the parent's claimed success or echoed input. */
 export function checkLifecycle(operations: Operation[], route: string) {
   const parent = operations.filter((o) => o.owner === "parent" && !o.error);
@@ -75,18 +104,19 @@ export function checkLifecycle(operations: Operation[], route: string) {
     );
   };
   const first = parent.findIndex((o, i) => i > spawnIndex && listedCompletion(o));
+  const target = (o: Operation) => object(o.result?.details).target ?? o.args.target;
   const interrupt = parent.findIndex(
     (o, i) =>
       i > first &&
       o.name === "interrupt_agent" &&
-      o.args.target === task &&
+      target(o) === task &&
       "completed" in object(wire(o).previous_status),
   );
   const followup = parent.findIndex(
     (o, i) =>
       i > interrupt &&
       o.name === "followup_task" &&
-      o.args.target === task &&
+      target(o) === task &&
       typeof o.args.message === "string" &&
       !o.args.message.includes(marker) &&
       o.result?.content[0]?.text === "",
@@ -348,7 +378,7 @@ async function main() {
       onError: (error) => failures.push(JSON.stringify(error)),
     });
     record.activeTools = session.getActiveToolNames();
-    const nested = session.getActiveToolNames().includes("exec");
+    const nested = session.getActiveToolNames().includes("codemode");
     record.nested = nested;
     await session.prompt(`I explicitly authorize delegation for this smoke test. Use tools, not a simulated transcript.
 Use the six DIRECT subagent tools, including when Code Mode is active. Do not discover collaboration via ALL_TOOLS or call nested collaboration functions.
@@ -357,29 +387,9 @@ Use wait_agent to observe mailbox activity and list_agents to verify actual comp
     record.contextUsage = session.getContextUsage();
     record.parentHistory = session.messages;
     const lifecycle = checkLifecycle(operations, route);
-    const childShell = observations.filter((o) => o.owner !== "parent");
     const checks = {
       ...lifecycle,
-      approvedExecution:
-        approvals.length === 1 &&
-        childShell.some(
-          (o) =>
-            !o.isError &&
-            ((o.tool === "bash" &&
-              object(o.input).command === command &&
-              JSON.stringify(o.content).includes("subagent-approved")) ||
-              (["exec", "wait"].includes(String(o.tool)) &&
-                Array.isArray(object(o.details).traces) &&
-                (object(o.details).traces as unknown[]).some((value) => {
-                  const trace = object(value);
-                  return (
-                    trace.name === "exec_command" &&
-                    trace.state === "completed" &&
-                    object(trace.input).cmd === command &&
-                    JSON.stringify(object(trace.result).content).includes("subagent-approved")
-                  );
-                }))),
-        ),
+      approvedExecution: checkApprovedExecution(approvals, observations),
       ...checkMailbox(session.messages),
       childPayload:
         (record.payloads as Json[] | undefined)?.some((p) => p.owner !== "parent") ?? false,
