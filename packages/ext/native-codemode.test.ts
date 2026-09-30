@@ -74,6 +74,14 @@ function demoTools(pi: ExtensionAPI): void {
         content: [{ type: "text", text: params.message }],
         details: undefined,
         structuredContent: { message: params.message },
+        usage: {
+          input: 11,
+          output: 6,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 17,
+          cost: { input: 0.1, output: 0.15, cacheRead: 0, cacheWrite: 0, total: 0.25 },
+        },
       };
     },
   });
@@ -255,6 +263,52 @@ test("tool_search activates an eligible deferred tool without exposing hidden to
     assert.ok(session.getActiveToolNames().includes("deferred_lookup"));
     assert.equal(session.getActiveToolNames().includes("hidden_secret"), false);
     assert.equal(session.getActiveToolNames().includes("model_only_secret"), false);
+  } finally {
+    session.dispose();
+  }
+});
+
+test("nested results and usage persist once on the enclosing native result", async () => {
+  const { session } = await createNativeSession(["+codemode"]);
+  try {
+    await session.bindExtensions({});
+    let turns = 0;
+    session.agent.streamFunction = (model) =>
+      turns++ === 0
+        ? response(
+            model,
+            [
+              {
+                type: "toolCall",
+                id: "usage-script",
+                name: "codemode",
+                arguments: { code: "text(await tools.safe_echo({message:'accounted'}));" },
+              },
+            ],
+            "toolUse",
+          )
+        : response(model, [{ type: "text", text: "done" }], "stop");
+    await session.prompt("run the usage probe");
+    const results = session.messages.filter((message) => message.role === "toolResult");
+    assert.equal(results.length, 1);
+    const result = results[0]!;
+    assert.equal(result.toolName, "codemode");
+    assert.match(textOf(result), /accounted/);
+    assert.equal(result.nestedCalls?.calls.length, 1);
+    assert.equal(result.nestedCalls.calls[0]?.name, "safe_echo");
+    assert.equal(result.usage?.totalTokens, 17);
+    const stats = session.getSessionStats();
+    assert.equal(stats.toolCalls, 1);
+    assert.equal(stats.toolResults, 1);
+    // Two synthetic assistant messages each contribute one input/output token.
+    assert.deepEqual(stats.tokens, {
+      input: 13,
+      output: 8,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 21,
+    });
+    assert.equal(stats.cost, 0.25);
   } finally {
     session.dispose();
   }

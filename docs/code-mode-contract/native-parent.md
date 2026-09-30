@@ -139,6 +139,9 @@ host-free typed shell execution/polling, parent selections, discovery/search, mo
 changes, reload/recovery and late approvals with real throwing stale contexts.
 Obsolete host suites and their test-host overrides are removed, not skipped.
 
-Evidence is offline on Linux x64 with Pi 0.99.1. Web transport is an injected native
-helper fixture, not a live service. No live provider acceptance, subscription web
-route or arm64 execution is claimed; those remain the epic's separate validation work.
+Migration-slice evidence is offline on Linux x64 with Pi 0.99.1. Its web transport
+is an injected native helper fixture, not a live service. The separate
+[#372 integrated validation](native-validation.md) records CLI/package loading,
+SDK execution, live supported-route acceptance and remaining release limitations.
+Neither the fixture nor an x64 pass establishes arm64 execution or direct OpenAI
+subscription web/usage support.

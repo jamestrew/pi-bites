@@ -1,0 +1,426 @@
+{
+  "baseline": "30374dd3",
+  "dateUTC": "2026-09-30",
+  "architecture": "linux-x64",
+  "pi": "0.99.1",
+  "node": "24.20.0",
+  "bun": "1.4.2",
+  "cliLoading": [
+    {
+      "name": "dev",
+      "status": "passed",
+      "registered": [
+        "read",
+        "bash",
+        "powershell",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task",
+        "codemode",
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "web_run",
+        "view_image",
+        "get_goal",
+        "create_goal",
+        "update_goal",
+        "spotme_status",
+        "spotme_exercise",
+        "spotme_end",
+        "tool_search"
+      ],
+      "active": [
+        "codemode",
+        "tool_search",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "warning": "Pi omits its replaceable codemode builtin because the adapter registers codemode."
+    },
+    {
+      "name": "package",
+      "status": "passed",
+      "registered": [
+        "read",
+        "bash",
+        "powershell",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task",
+        "codemode",
+        "exec_command",
+        "write_stdin",
+        "apply_patch",
+        "web_run",
+        "view_image",
+        "get_goal",
+        "create_goal",
+        "update_goal",
+        "spotme_status",
+        "spotme_exercise",
+        "spotme_end",
+        "tool_search"
+      ],
+      "active": [
+        "codemode",
+        "tool_search",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task",
+        "get_goal",
+        "create_goal",
+        "update_goal"
+      ],
+      "warning": "Pi omits its replaceable codemode builtin because the adapter registers codemode.",
+      "packageCommands": [
+        "agents",
+        "goal",
+        "view",
+        "eview",
+        "pi-sessions",
+        "pi-sessions-ack",
+        "pi-sessions-restart-daemon",
+        "usage",
+        "spotme:on",
+        "spotme:off",
+        "spotme:status",
+        "spotme:done",
+        "spotme:hint",
+        "spotme:solve",
+        "spotme:skip",
+        "spotme:rep",
+        "ponytail",
+        "context",
+        "bites:off",
+        "bites:on",
+        "bites:list"
+      ]
+    }
+  ],
+  "liveRoutes": [
+    {
+      "route": "openai-codex/gpt-6.1-sol",
+      "date": "2026-09-30T05:13:13.329Z",
+      "scenario": "cutover",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "activeTools": ["codemode"],
+      "approvals": 1,
+      "checks": {
+        "normal": true,
+        "polling": true,
+        "approval": true,
+        "image": true
+      },
+      "timedOut": false,
+      "name": "native-codex",
+      "requests": 4,
+      "failureCount": 0,
+      "declarations": [
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ]
+      ]
+    },
+    {
+      "route": "openai/gpt-6.1-sol",
+      "date": "2026-09-30T05:13:14.390Z",
+      "scenario": "cutover",
+      "status": "passed",
+      "api": "openai-responses",
+      "activeTools": ["codemode"],
+      "approvals": 1,
+      "checks": {
+        "normal": true,
+        "polling": true,
+        "approval": true,
+        "image": true
+      },
+      "timedOut": false,
+      "name": "native-openai",
+      "requests": 4,
+      "failureCount": 0,
+      "declarations": [
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ]
+      ]
+    },
+    {
+      "route": "openai-codex/gpt-6.1-sol",
+      "date": "2026-09-30T05:14:07.256Z",
+      "scenario": "normal",
+      "status": "failed",
+      "api": "openai-codex-responses",
+      "activeTools": [
+        "codemode",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task"
+      ],
+      "approvals": ["printf subagent-approved"],
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "interruptRetainsTask": false,
+        "recallWithoutReminder": false,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": false,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "name": "v2-original-checker",
+      "requests": 13,
+      "failureCount": 0,
+      "limitation": "Retired exec/wait trace check and canonical-only target check falsely fail a completed native exercise; not retroactively marked passed."
+    },
+    {
+      "route": "openai-codex/gpt-6.1-sol",
+      "date": "2026-09-30T05:17:54.930Z",
+      "scenario": "normal",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "activeTools": [
+        "codemode",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task"
+      ],
+      "approvals": ["printf subagent-approved"],
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "interruptRetainsTask": true,
+        "recallWithoutReminder": true,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "name": "v2-native",
+      "requests": 12,
+      "failureCount": 0,
+      "approvedShell": {
+        "launchObservations": 1,
+        "tool": "exec_command",
+        "stdout": "subagent-approved",
+        "exitCode": 0
+      }
+    },
+    {
+      "route": "openai/gpt-6.1-sol",
+      "date": "2026-09-30T05:14:08.353Z",
+      "scenario": "adapter-disabled",
+      "status": "failed",
+      "api": "openai-responses",
+      "activeTools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task"
+      ],
+      "approvals": ["printf subagent-approved"],
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": false,
+        "interruptRetainsTask": false,
+        "recallWithoutReminder": false,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": false,
+        "independentProgress": true,
+        "childPayload": true,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "name": "v2-disabled-first",
+      "requests": 7,
+      "failureCount": 1,
+      "limitation": "Direct OpenAI subscription returns HTTP 503 subscription_sharing_user_unavailable; the bounded retry is separate."
+    },
+    {
+      "route": "openai/gpt-6.1-sol",
+      "date": "2026-09-30T05:17:55.940Z",
+      "scenario": "adapter-disabled",
+      "status": "passed",
+      "api": "openai-responses",
+      "activeTools": [
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "interrupt_agent",
+        "wait_agent",
+        "spawn_agent",
+        "list_agents",
+        "send_message",
+        "followup_task"
+      ],
+      "approvals": ["printf subagent-approved"],
+      "checks": {
+        "sameModelDefaultChild": true,
+        "firstCompletion": true,
+        "interruptRetainsTask": true,
+        "recallWithoutReminder": true,
+        "mailboxWait": true,
+        "parentProgress": true,
+        "noOperationErrors": true,
+        "approvedExecution": true,
+        "independentFinals": true,
+        "independentProgress": true,
+        "childPayload": true,
+        "directPayloads": true,
+        "noToolErrors": true
+      },
+      "name": "v2-disabled-retry",
+      "requests": 12,
+      "failureCount": 0,
+      "approvedShell": {
+        "launchObservations": 1,
+        "tool": "bash",
+        "stdout": "subagent-approved"
+      }
+    },
+    {
+      "route": "openai-codex/gpt-6.1-sol",
+      "date": "2026-09-30T05:19:06.319Z",
+      "scenario": "explicit",
+      "status": "passed",
+      "api": "openai-codex-responses",
+      "activeTools": ["codemode"],
+      "approvals": 0,
+      "checks": {
+        "discovered": true,
+        "webAfterHelp": true
+      },
+      "timedOut": false,
+      "name": "web",
+      "requests": 3,
+      "failureCount": 0,
+      "declarations": [
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ],
+        [
+          {
+            "name": "codemode",
+            "type": "custom",
+            "syntax": "lark"
+          }
+        ]
+      ]
+    }
+  ]
+}
