@@ -1,6 +1,6 @@
 # Use the standalone Codex host for Code Mode
 
-Status: Accepted (2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
+Status: Accepted historically; runtime-specific decisions superseded by #371 below (originally 2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
 
 Source definitions and supported deviations: [Code Mode contract baseline](../code-mode-contract/README.md).
 
@@ -18,7 +18,7 @@ Cancelling an individual cell terminates shell sessions created by that cell whi
 
 Keep runtime execution, Pi-side validated/authorized dispatch, and presentation separate. Preserve the pinned host source unchanged, with packaging and Pi adaptations outside it. The host protocol does not export descriptions; the pinned library builder supplies the generation seam. Bound output and retained trace/state data, and preserve existing native/shell limits. Pi extension contexts are ephemeral: snapshot stable dependencies before asynchronous work and test stale getters that throw.
 
-Nested discovery (#304) uses the existing pinned host metadata global. Discovery has no lifecycle state and requires no host upgrade; see the [exposure policy](../code-mode-contract/README.md#nested-discovery-policy-304-2026-09-12).
+Nested discovery (#304) uses the existing pinned host metadata global. Discovery has no lifecycle state and requires no host upgrade; see the [exposure policy](../code-mode-contract/historical-baseline.md#nested-discovery-policy-304-2026-09-12).
 
 ## Historical agent ownership amendment (#305; superseded for agents by #352)
 
@@ -69,3 +69,14 @@ authorization. Explicit SDK builtin factories and the child's registry ceiling k
 parent permissions separate from discovery. Direct V2 collaboration remains
 independent; see the [native adapter contract](../code-mode-contract/native-parent.md).
 The historical host code/tests await separate retirement, not a selectable fallback.
+
+## Host retirement and one-shot tradeoff (#371)
+
+The standalone-host decision is superseded for all sessions by Pi 0.99.1 native
+one-shot execution. Native workers, heap/metadata/output bounds and retained
+concrete tool limits replace host IPC/RSS/cell supervision. Branch/session changes,
+reload, shutdown and leaving scope still clear owned shells/store/navigation;
+supported GPT switches preserve stores/shells. Finalization aborts pending calls,
+while normal completion retains returned shell sessions and explicit cancellation
+terminates only its owned launches. Saved transcripts never restore resources.
+See [native ownership and limits](../code-mode-contract/native-parent.md).

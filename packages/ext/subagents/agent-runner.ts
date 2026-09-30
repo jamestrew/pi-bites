@@ -382,7 +382,12 @@ export async function openAgentSession(
     extensionFactories: noExtensions
       ? []
       : [
-          createCodemodeExtension({ mode: "on", models: false }),
+          {
+            name: "codemode",
+            factory: createCodemodeExtension({ mode: "on", models: false }),
+            // The adapter replaces this default with its scoped native registration.
+            replaceable: true,
+          },
           createToolSearchExtension(),
           (pi) =>
             runAsSubagent(

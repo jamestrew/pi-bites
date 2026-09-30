@@ -490,9 +490,9 @@ test("removing codemode restores displaced tools and permits a new read-only sel
 });
 
 test("no Code Mode host is needed, and validation/startup failures reject rather than return values", async () => {
-  const h = await setup();
   vi.stubEnv("PATH", "/no-code-mode-host");
   try {
+    const h = await setup();
     const result = await h.run(
       `text(await tools.exec_command({cmd:'printf native',shell:'/bin/sh',login:false}));`,
     );
@@ -578,3 +578,69 @@ test("context previews follow native prepared loadouts and model/classifier help
   await h.session.setModel(h.runtime.getModel("native-test", "claude")!);
   expect(h.previewTools()).toEqual(h.session.getAllTools());
 });
+
+test("native timeout interrupts a script and leaves the next invocation usable", async () => {
+  const h = await setup();
+  const result = await h.call("codemode", {
+    code: '// @options: {"timeout_ms":500}\ntext("entered"); while (true) {}',
+  });
+  expect(result.isError).toBe(true);
+  expect(textOf(result)).toMatch(/timed out/i);
+  expect(textOf(result)).toContain("entered");
+  expect(textOf(await h.run("text(42);"))).toContain("42");
+});
+
+for (const api of ["openai-responses", "openai-codex-responses", "openai-completions"] as const) {
+  test.each([true, false])(
+    `${api} serializes registered native codemode with grammar=%s`,
+    async (grammar) => {
+      const h = await setup();
+      const { normalizeContext } = await import("@earendil-works/pi-ai");
+      const { stream } = await import(`@earendil-works/pi-ai/api/${api}`);
+      const tools = h.session.agent.state.tools;
+      const model = { ...h.session.model!, api, compat: { supportsOpenAIGrammarTools: grammar } };
+      const jwt = `test.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "test" } })).toString("base64url")}.test`;
+      let payload: any;
+      const options = {
+        apiKey: jwt,
+        transport: "sse" as const,
+        onPayload(value: unknown) {
+          payload = value;
+          throw new Error("captured before network");
+        },
+      };
+      await stream(model, normalizeContext({ messages: [], tools }), options).result();
+      expect(payload).toBeDefined();
+      expect(payload.tools).toHaveLength(1);
+      const declaration = payload.tools[0];
+      expect(declaration.type).toBe(grammar ? "custom" : "function");
+      const tool = api === "openai-completions" ? declaration[declaration.type] : declaration;
+      expect(tool.name).toBe("codemode");
+      if (grammar) {
+        const format = api === "openai-completions" ? tool.format.grammar : tool.format;
+        expect(format.syntax).toBe("lark");
+        expect(format.definition).not.toContain("PRAGMA_LINE");
+      } else expect(tool.parameters.required).toContain("code");
+      const initial = payload.tools;
+      await stream(
+        model,
+        normalizeContext({
+          systemPrompt: "stable project instructions",
+          messages: [
+            {
+              role: "toolResult",
+              toolCallId: "lookup",
+              toolName: "codemode",
+              content: [{ type: "text", text: "discovered documentation" }],
+              isError: false,
+              timestamp: 0,
+            },
+          ],
+          tools,
+        }),
+        options,
+      ).result();
+      expect(payload.tools).toEqual(initial);
+    },
+  );
+}
