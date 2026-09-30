@@ -10,7 +10,6 @@ describe("buildAgentPrompt", () => {
         name: "worker",
         description: "test",
         builtinToolNames: [],
-        extensions: [],
         systemPrompt: "Do the task.",
         promptMode,
       };

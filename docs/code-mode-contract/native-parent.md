@@ -1,9 +1,9 @@
-# Native parent adapter (#369)
+# Native adapter (#369, #370)
 
-Parent GPT sessions use Pi 0.99.1's public `createCodemodeExtension()` factory and
-native `codemode` tool. This supersedes the parent exec/wait runtime described in
-[the baseline](README.md) and [activation history](activation.md). SDK children
-still use `code-mode/registration.ts` until #370; their host and tests remain.
+Parent and SDK child GPT sessions use Pi 0.99.1's public `createCodemodeExtension()` factory and
+native `codemode` tool. This supersedes the exec/wait runtime described in
+[the baseline](README.md) and [activation history](activation.md). The unused host
+implementation and historical tests remain pending their separate retirement (#371).
 There is no selectable runtime, renamed native tool, or exec/wait emulation.
 The factory uses `models: false`: model-catalog/classifier helpers are outside this migration.
 
@@ -21,8 +21,14 @@ tools are **hidden**, not merely removed from active declarations: native
 `codemode`/`deferred` exposure would otherwise make them callable. Availability is
 checked again at execution. Enabled tools use codemode exposure; unrelated tools
 keep their exposure. V2 collaboration is model-only and never script-callable.
-Child permissions recover the parent's underlying core capabilities, with the
-legacy exec/wait entrypoints retained only for the child migration boundary.
+Child permissions recover the parent's underlying core capabilities and permitted
+owned tool names without translating native entrypoints back into exec/wait.
+The SDK runner explicitly loads native codemode/tool-search factories and this
+extension only; no discovered extensions execute. Its extension factory reapplies
+child identity and collaboration registration on every reload. SDK `tools` supplies
+a durable registry ceiling, so both script discovery and model-facing search omit
+parent-forbidden or explicitly unselected tools even when factories register them.
+Isolated RPC children still load no extensions.
 
 Native `on` mode is deliberate: `only` would hide unrelated direct tools and still
 would not hide codemode/deferred tools activated by search. Script `searchTools`,
@@ -100,7 +106,7 @@ observes and forwards its synchronous preparation unchanged, passing those nativ
 descriptions to `/context` while codemode is active. It does not regenerate
 declarations or maintain another tool registry. Other extensions can still override
 descriptions later, and provider-specific serialization remains the estimate
-accuracy ceiling. No old exec/wait description is active in the parent.
+accuracy ceiling. No old exec/wait description is active.
 
 ## Verification and limits
 
@@ -108,10 +114,11 @@ accuracy ceiling. No old exec/wait description is active in the parent.
 including all five capabilities, permissions, approvals/cancellation, store/shell
 lifetime, script errors, discovery/search and restored native rendering. Existing
 concrete tool tests remain. V2 exposure tests capture actual stock provider payloads
-before transport for parents and still-legacy children. The host suites explicitly
-import child registration, rather than pretending to validate the native parent.
+before transport for parents and native children. SDK capability scenarios cover
+host-free typed shell execution/polling, parent selections, discovery/search, model
+changes, reload/recovery and late approvals with real throwing stale contexts.
+Historical host suites import legacy registration, not the live adapter.
 
 Evidence is offline on Linux x64 with Pi 0.99.1. Web transport is an injected native
 helper fixture, not a live service. No live provider acceptance, subscription web
-route, arm64 execution or migrated SDK child runtime is claimed; those remain the
-epic's separate validation/migration work.
+route or arm64 execution is claimed; those remain the epic's separate validation work.

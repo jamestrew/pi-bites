@@ -46,7 +46,6 @@ describe("embedded agent types", () => {
       const { config } = resolveAgent(type);
 
       expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
-      expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
       expect(config.promptMode).toBe("append");
     },
   );
@@ -55,7 +54,6 @@ describe("embedded agent types", () => {
     const { config } = resolveAgent("explorer");
 
     expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
-    expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
     expect(config.description).toContain("files, symbols, definitions, references, call paths");
     expect(config.description).toContain("documentation or third-party source reading");
     expect(config.description).toContain("after 2-4 direct lookups fail");
