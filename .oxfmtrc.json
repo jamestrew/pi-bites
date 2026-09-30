@@ -5,6 +5,6 @@
     "packages/ext/codex-adapter/vendor/web-run/THIRD_PARTY_LICENSES.html",
     "packages/ext/codex-adapter/vendor/view-image/about.hbs",
     "packages/ext/codex-adapter/vendor/view-image/THIRD_PARTY_LICENSES.html",
-    "packages/ext/codex-adapter/vendor/code-mode/**"
+    "packages/ext/codex-adapter/owned-tool-contracts.generated.json"
   ]
 }

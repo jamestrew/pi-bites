@@ -1,6 +1,6 @@
 # Replace the structured Codex adapter with scoped Code Mode
 
-Status: Accepted (2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
+Status: Accepted historically; runtime-specific decisions superseded by #371 below (originally 2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
 
 Source definitions and supported deviations: [Code Mode contract baseline](../code-mode-contract/README.md).
 
@@ -109,3 +109,13 @@ authorization. Explicit SDK builtin factories and the child's registry ceiling k
 parent permissions separate from discovery. Direct V2 collaboration remains
 independent; see the [native adapter contract](../code-mode-contract/native-parent.md).
 The historical host code/tests await separate retirement, not a selectable fallback.
+
+## Host retirement and one-shot tradeoff (#371)
+
+The approved #367 tradeoff replaces the pinned V8 runtime with Pi 0.99.1 native
+`codemode` in parent and SDK child sessions, avoiding an independent runtime and
+its maintenance surface. Parallel calls and resumable shell sessions remain;
+JavaScript cells do not yield or resume. No host installation, exec/wait facade,
+legacy selection or fallback remains. Keep the owned-tool contracts/licenses and
+unrelated native helpers. The #365 bounded model/route amendment and independent
+V2 collaboration remain unchanged. See the [current contract](../code-mode-contract/native-parent.md).

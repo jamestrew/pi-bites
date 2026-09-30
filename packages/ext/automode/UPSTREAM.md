@@ -137,3 +137,12 @@ diagnostics; cache-hit frequency counts provider responses, not review attempts.
 Tests exercise transport and lifecycle at the provider/gate seams, not live model
 quality or measured cache savings. [Evaluation](../../../docs/automode-evaluation.md)
 documents the explicit paid runner and historical pilot limitations.
+
+## Native codemode amendment (#371)
+
+The exec/wait live-cell trace transport above is historical. Parent and SDK child
+scripts now use Pi's native nested execution; authorization still reviews each
+validated command once through the shared gate/broker. Retained historical trace
+snapshots remain untrusted evidence, not live runtime state. Native finalization
+invalidates pending approval, and shell/store/lifecycle ownership follows the
+[native adapter contract](../../../docs/code-mode-contract/native-parent.md).

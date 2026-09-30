@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { complete, createAutoModeHarness, response, rmRequest } from "./test/support.js";
+import { snapshotNestedEvidence } from "./tool-evidence.js";
 
 vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
 
@@ -246,10 +247,8 @@ test("transcript budgets keep recent tools independently of conversation comment
   expect(prompt()).toContain("COMMENTARY_25 ");
 });
 
-test("nested review evidence retains the original tail before display truncation", async () => {
-  const { NestedTraces } = await import("../codex-adapter/code-mode/nested-traces.js");
-  const traces = new NestedTraces();
-  traces.record({
+test("nested review evidence retains the original tail in bounded snapshots", async () => {
+  const trace = snapshotNestedEvidence({
     cellId: "cell",
     callId: "read",
     name: "read",
@@ -260,13 +259,12 @@ test("nested review evidence retains the original tail before display truncation
       details: {},
     },
   });
-  expect(JSON.stringify(traces.forCell("cell"))).not.toContain("REAL_TAIL");
   const { controller, ctx } = createAutoModeHarness();
   complete.mockResolvedValue(response('{"outcome":"allow"}'));
   await controller.review(
     {
       ...rmRequest("python script.py"),
-      nestedEvidence: traces.forReview("cell"),
+      nestedEvidence: [trace],
     },
     ctx as any,
   );
@@ -322,15 +320,19 @@ test("selected factual observations remain in original conversation order", asyn
 });
 
 test("retained nested evidence does not change with later mutation of tool arguments", async () => {
-  const { NestedTraces } = await import("../codex-adapter/code-mode/nested-traces.js");
-  const traces = new NestedTraces();
   const input = { path: "ORIGINAL_PATH" };
-  traces.record({ cellId: "cell", callId: "read", name: "read", input, state: "completed" });
+  const trace = snapshotNestedEvidence({
+    cellId: "cell",
+    callId: "read",
+    name: "read",
+    input,
+    state: "completed",
+  });
   input.path = "MUTATED_PATH";
   const { controller, ctx } = createAutoModeHarness();
   complete.mockResolvedValue(response('{"outcome":"allow"}'));
   await controller.review(
-    { ...rmRequest("python script.py"), nestedEvidence: traces.forReview("cell") },
+    { ...rmRequest("python script.py"), nestedEvidence: [trace] },
     ctx as any,
   );
   expect(prompt()).toContain("ORIGINAL_PATH");

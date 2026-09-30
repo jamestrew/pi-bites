@@ -146,7 +146,7 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
     { modelId: "faux-1", omitted: ["apply_patch"] },
   ])("initializes $modelId with parent restrictions $omitted", async ({ modelId, omitted }) => {
     const initial = INITIAL.filter((name) => !omitted.includes(name));
-    const state = createAdapterToolState(["codemode"]);
+    const state = createAdapterToolState();
     const projected = reconcileTools(initial, true, state);
     expect(projected).toContain("codemode");
     expect(projected).not.toContain("read");
@@ -190,6 +190,14 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
       for (const name of NESTED_TOOLS) expect(active).not.toContain(name);
     }
   });
+  it("loads embedded SDK native factories without duplicate tool errors", async () => {
+    configure();
+    await open();
+    expect(child!.resourceLoader.getExtensions().errors).toEqual([]);
+    await child!.reload();
+    expect(child!.resourceLoader.getExtensions().errors).toEqual([]);
+  });
+
   it("discovers and executes typed native shell values host-free, then polls a resumable shell", async () => {
     configure();
     const pi = {

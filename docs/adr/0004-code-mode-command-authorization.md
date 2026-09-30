@@ -1,6 +1,6 @@
 # Authorize nested commands individually
 
-Status: Accepted (2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
+Status: Accepted historically; runtime-specific decisions superseded by #371 below (originally 2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
 
 Source definitions and supported deviations: [Code Mode contract baseline](../code-mode-contract/README.md).
 
@@ -27,3 +27,14 @@ authorization. Explicit SDK builtin factories and the child's registry ceiling k
 parent permissions separate from discovery. Direct V2 collaboration remains
 independent; see the [native adapter contract](../code-mode-contract/native-parent.md).
 The historical host code/tests await separate retirement, not a selectable fallback.
+
+## Host retirement and one-shot tradeoff (#371)
+
+Native execution replaces the cell/delegate dispatcher without changing command
+policy. Each validated launch still uses the shared gate once, with unique nested
+identity, pinned launch context, serialized dialogs, allowance rechecks, independent
+reviews and subagent escalation. Native finalization cancels pending calls and
+late approval cannot launch; do not promise sibling survival after script failure.
+Polling/input remain outside command classification. Returned shell sessions may
+outlive a successful script; explicit cancellation and lifecycle invalidation retain
+owned cleanup. See [native authorization](../code-mode-contract/native-parent.md).

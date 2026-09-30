@@ -61,5 +61,5 @@ Presentation data for a tool invocation inside its enclosing Code Mode result. I
 _Avoid_: Injected tool result
 
 **Contract baseline**:
-The selected Codex revision plus explicit Pi capability projections, recorded in [the Code Mode baseline](docs/code-mode-contract/README.md). It specifies the active adapter interface and its supported deviations.
+The accepted [native Code Mode contract](docs/code-mode-contract/native-parent.md) and the [owned-tool provenance](docs/code-mode-contract/README.md) recording its supported capability projections.
 _Avoid_: Latest upstream, conversion prompt

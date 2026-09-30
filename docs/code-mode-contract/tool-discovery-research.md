@@ -1,5 +1,8 @@
 # Codex tool discovery research
 
+> Historical source/validation evidence. The V8 host and associated paths/commands
+> are retired by #371; see [current native contracts](README.md).
+
 Research date: 2026-09-12. This records findings and a proposed follow-up to the implemented cutover; it does not change the accepted contract or implement discovery. See also [token accounting](token-accounting-research.md).
 
 ## Baselines
