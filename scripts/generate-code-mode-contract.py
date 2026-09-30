@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Generate the supported #300 surface from #295's hash-verified evidence bundle."""
+"""Generate owned-tool contracts from the hash-verified Codex source evidence."""
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import re
-import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -29,7 +28,6 @@ def main():
 
     prefix = "codex-rs/core/src/tools/"
     shell = source(prefix + "handlers/shell_spec.rs")
-    wait = source(prefix + "code_mode/wait_spec.rs").split("#[cfg(test)]")[0]
     view = source(prefix + "handlers/view_image_spec.rs")
     search = source("codex-rs/codex-api/src/search.rs")
     native = json.loads((args.evidence / "native-text.json").read_text())
@@ -90,12 +88,7 @@ def main():
     image_output = output_schema(view, "view_image_output_schema")
     image_output["properties"]["detail"] = dict(type="string", enum=["original"], description="Image detail hint returned by view_image. Returns `original` when original resolution is preserved.")
     tools.append(definition("view_image", re.search(r'description: "([^"]+)"', view)[1], object_schema({"path": primitive_fields(view)["path"]}, ["path"]), image_output))
-    generated = subprocess.run(["cargo", "run", "--quiet", "--locked", "--offline", "--manifest-path", str(ROOT / "scripts/code-mode-contract/Cargo.toml")], input=json.dumps(tools), stdout=subprocess.PIPE, text=True, check=True)
-    rendered = json.loads(generated.stdout)
-    base = "\n".join(line for line in rendered["deferred_base"].split("\n") if not line.startswith(("- `audio(", "- `generatedImage(")))
-    base = base.replace(' Tool names are exposed as normalized JavaScript identifiers, for example `await tools.mcp__ologs__get_profile(...)`.', '')
-    base = base.replace('immediately injects an extra `custom_tool_call_output` for the current `exec` call.', 'queues output for the next `exec`/`wait` observation; Pi UI updates are not immediate model messages.')
-    result = dict(revision=manifest["revision"], exec_base=base, exec_grammar=native["exec_grammar"], wait_description=native["wait_description"], wait_schema=object_schema(primitive_fields(wait), ["cell_id"]), tools=[dict(**tool, section=section, runtime_description=description) for tool, section, description in zip(tools, rendered["sections"], rendered["descriptions"], strict=True)])
+    result = dict(revision=manifest["revision"], tools=tools)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
 
 

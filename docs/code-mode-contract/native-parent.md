@@ -1,9 +1,10 @@
-# Native adapter (#369, #370)
+# Native adapter (#369–#371)
 
 Parent and SDK child GPT sessions use Pi 0.99.1's public `createCodemodeExtension()` factory and
 native `codemode` tool. This supersedes the exec/wait runtime described in
-[the baseline](README.md) and [activation history](activation.md). The unused host
-implementation and historical tests remain pending their separate retirement (#371).
+[the historical baseline](historical-baseline.md) and [activation history](activation.md).
+#371 removes the unused host, protocol/process/connection modules, cell/delegate
+supervision, installer/build/smoke assets, host vendor and obsolete skipped suites.
 There is no selectable runtime, renamed native tool, or exec/wait emulation.
 The factory uses `models: false`: model-catalog/classifier helpers are outside this migration.
 
@@ -23,7 +24,7 @@ checked again at execution. Enabled tools use codemode exposure; unrelated tools
 keep their exposure. V2 collaboration is model-only and never script-callable.
 Child permissions recover the parent's underlying core capabilities and permitted
 owned tool names without translating native entrypoints back into exec/wait.
-The SDK runner explicitly loads native codemode/tool-search factories and this
+The SDK runner explicitly loads a replaceable native codemode factory, tool-search and this
 extension only; no discovered extensions execute. Its extension factory reapplies
 child identity and collaboration registration on every reload. SDK `tools` supplies
 a durable registry ceiling, so both script discovery and model-facing search omit
@@ -63,7 +64,8 @@ Native scripts allow awaited parallel calls and return once, on completion. Ther
 are no live cell IDs, outer waits, yielding promises, notifications, timers or V8
 pragmas. Shell `yield_time_ms` still controls the initial process observation;
 returned session IDs can be polled in later scripts. Native output budgets and
-error text replace the old output headers and helper contract.
+error text replace the old output headers and helper contract. Native first-line
+`// @options: {"timeout_ms": 1000}` bounds a script; it is not a top-level tool field.
 
 ## Authorization and lifetime
 
@@ -86,6 +88,7 @@ abort the adapter generation and terminate owned shells. Known native JSON store
 keys are cleared through the documented `codemode-store` entry format and public
 `CodemodeStoreEntryData`; no private store or second sandbox is introduced. Native
 writes commit only on successful scripts. Saved display never restores resources.
+Supported-to-supported GPT switches preserve stores/shells; web navigation resets.
 Stable dependencies are captured before awaits; cancellation tests invalidate real
 Pi contexts and assert their getters throw before releasing late approval.
 
@@ -108,6 +111,23 @@ declarations or maintain another tool registry. Other extensions can still overr
 descriptions later, and provider-specific serialization remains the estimate
 accuracy ceiling. No old exec/wait description is active.
 
+## Native safety ceilings
+
+Pi creates and closes a fresh worker per invocation, limits QuickJS heap to 256 MiB,
+and aborts pending nested calls on finalization. Native nested metadata is bounded
+at 256 calls, 8 KiB arguments per call and 32 KiB per result, without retaining nested
+results. Output uses native truncation/spill behavior. Native scripts have no default
+deadline; use the first-line timeout option for a bounded script. The former 64-cell
+and host RSS/IPC limits have no live-cell/process counterpart; they are replaced by
+worker lifetime, native heap/metadata limits and the retained concrete tool ceilings,
+not by an unbounded shared V8 process.
+
+The shell manager retains its 1 MiB live/8 MiB native output buffers, bounded session
+history and process-group cleanup. Patch mutation queues/partial-failure feedback,
+web request/body/process limits and image input/dimension/allocation limits remain.
+See [UPSTREAM.md](../../packages/ext/codex-adapter/UPSTREAM.md). Explicit cancellation
+and branch/session invalidation still terminate owned shells and reject late approvals.
+
 ## Verification and limits
 
 `native-registration.test.ts` drives real registered sessions without a V8 host,
@@ -117,7 +137,7 @@ concrete tool tests remain. V2 exposure tests capture actual stock provider payl
 before transport for parents and native children. SDK capability scenarios cover
 host-free typed shell execution/polling, parent selections, discovery/search, model
 changes, reload/recovery and late approvals with real throwing stale contexts.
-Historical host suites import legacy registration, not the live adapter.
+Obsolete host suites and their test-host overrides are removed, not skipped.
 
 Evidence is offline on Linux x64 with Pi 0.99.1. Web transport is an injected native
 helper fixture, not a live service. No live provider acceptance, subscription web

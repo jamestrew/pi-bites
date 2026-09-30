@@ -14,6 +14,7 @@ import { Value } from "typebox/value";
 import type { ToolExecutionContext, OwnedToolDefinition } from "./tool-execution.js";
 import type { BashGateController } from "../bash-gate/index.js";
 import type { BitesConfig } from "../config.js";
+import { snapshotNestedEvidence } from "../automode/tool-evidence.js";
 import {
   createAdapterToolState,
   getDelegationTools,
@@ -31,7 +32,7 @@ import { pinExecLaunch } from "./exec/launch-context.js";
 import { createViewImageTool } from "./view-image/tool.js";
 import { getBundledViewImagePath } from "./view-image/binary.js";
 import { createWebRunTool, isWebRunAvailable } from "./web-run/tool.js";
-import { contract } from "./code-mode/contracts.js";
+import contract from "./owned-tool-contracts.generated.json" with { type: "json" };
 
 /** Shared parent/SDK-child registration. Pi owns the sandbox, discovery, nested hooks, traces and usage. */
 export default function registerNativeAdapter(
@@ -56,7 +57,7 @@ export default function registerNativeAdapter(
     },
   });
   gate?.manageExecCommand();
-  const state = createAdapterToolState(["codemode"]);
+  const state = createAdapterToolState();
   const sessions = createExecSessionManager();
   const owned = {
     exec_command: createExecCommandTool(sessions),
@@ -68,7 +69,14 @@ export default function registerNativeAdapter(
   let owner = new AbortController();
   let callable = new Set<string>();
   let active = false;
-  const scripts = new Map<string, { shells: Set<number>; dispose(): void }>();
+  const scripts = new Map<
+    string,
+    {
+      shells: Set<number>;
+      evidence: Map<string, ReturnType<typeof snapshotNestedEvidence>>;
+      dispose(): void;
+    }
+  >();
   const parents = new Map<string, string>();
   const available = (name: string, ctx: Pick<ExtensionContext, "model">) =>
     name === "web_run"
@@ -217,7 +225,14 @@ export default function registerNativeAdapter(
     try {
       return authorization
         ? await authorization.authorize(
-            { toolCallId: id, toolName: "exec_command", command: params.cmd, execution, signal },
+            {
+              toolCallId: id,
+              toolName: "exec_command",
+              command: params.cmd,
+              execution,
+              signal,
+              nestedEvidence: script ? [...script.evidence.values()] : undefined,
+            },
             run,
           )
         : await run();
@@ -363,6 +378,26 @@ export default function registerNativeAdapter(
     ctx.messageType === "assistant" ? owned.web_run.transformCitations(markdown) : markdown,
   );
   pi.on("tool_call", (event, ctx) => {
+    const parentId = event.parentToolCallId;
+    const script = scripts.get(parentId ?? "");
+    if (script && parentId) {
+      script.evidence.set(
+        event.toolCallId,
+        snapshotNestedEvidence({
+          cellId: parentId,
+          callId: event.toolCallId,
+          name: event.toolName,
+          cwd: ctx.cwd,
+          input: event.input,
+          state: "running",
+        }),
+      );
+      // Match the retired trace collector's 128-call retention ceiling.
+      if (script.evidence.size > 128) {
+        const oldest = script.evidence.keys().next().value;
+        if (oldest !== undefined) script.evidence.delete(oldest);
+      }
+    }
     if (event.parentToolCallId && event.toolName === "exec_command")
       parents.set(event.toolCallId, event.parentToolCallId);
     if (event.toolName !== "codemode") return;
@@ -374,14 +409,37 @@ export default function registerNativeAdapter(
     signal?.addEventListener("abort", cancel, { once: true });
     scripts.set(event.toolCallId, {
       shells,
+      evidence: new Map(),
       dispose: () => signal?.removeEventListener("abort", cancel),
     });
+  });
+  pi.on("tool_execution_end", (event) => {
+    const evidence = scripts.get(event.parentToolCallId ?? "")?.evidence;
+    const trace = evidence?.get(event.toolCallId);
+    if (trace && evidence)
+      evidence.set(
+        event.toolCallId,
+        snapshotNestedEvidence({
+          ...trace,
+          cwd: typeof trace.cwd === "string" ? trace.cwd : undefined,
+          state: event.isError ? "error" : "completed",
+          result: event.result as AgentToolResult<unknown>,
+        }),
+      );
   });
   pi.on("tool_result", (event) => {
     parents.delete(event.toolCallId);
     if (event.toolName !== "codemode") return;
-    scripts.get(event.toolCallId)?.dispose();
+    const script = scripts.get(event.toolCallId);
+    script?.dispose();
     scripts.delete(event.toolCallId);
+    if (script)
+      return {
+        details: {
+          ...(event.details && typeof event.details === "object" ? event.details : {}),
+          reviewEvidence: [...script.evidence.values()],
+        },
+      };
   });
   pi.on("agent_end", () => {
     for (const script of scripts.values()) script.dispose();

@@ -28,7 +28,7 @@ const modelId = route.slice(separator + 1);
 const directory = resolve(output);
 mkdirSync(directory, { recursive: true });
 const cwd = mkdtempSync(join(tmpdir(), "pi-code-mode-route-"));
-const command = "printf code-mode-approved";
+const command = "printf code-mode-approved; sleep 1; printf polled";
 const record: Record<string, unknown> = {
   route,
   date: new Date().toISOString(),
@@ -162,7 +162,7 @@ try {
       };
       await session.prompt(
         discoveryPrompts[scenario ?? ""] ??
-          `Run this Code Mode smoke exercise using the available exec/wait tools. First execute text(6 * 7). Then execute text("before-yield"); await yield_control(); text("after-yield"); and use wait to consume its result. Next execute text(await tools.exec_command({cmd:${JSON.stringify(command)},login:false})); exactly once; the test UI approves that exact command. Finally execute image(await tools.view_image({path:"image.png"})); to emit the supplied local image. Do not use web or other commands. Finish with one sentence describing any failure.`,
+          `Run this native codemode smoke exercise. First run text(6 * 7). Then use Promise.all to launch tools.exec_command({cmd:${JSON.stringify(command)},login:false,yield_time_ms:250}) and tools.view_image({path:"image.png"}) in parallel. Launch that exact command only once; the test UI approves it. Emit the shell value with text and the picture with image. Save the returned shell session ID with store. In a later codemode script, poll it with tools.write_stdin and emit its output. JavaScript scripts complete once; do not use exec/wait or yielding cells. Do not use web or other commands. Finish with one sentence describing any failure.`,
       );
       record.usage = usage;
       record.contextUsage = session.getContextUsage();
@@ -177,9 +177,11 @@ try {
         isError?: boolean;
       }[];
       record.checks = {
-        normal: results.some((r) => r.tool === "exec" && r.content.some((c) => c.text === "42")),
-        wait: results.some(
-          (r) => r.tool === "wait" && r.content.some((c) => c.text === "after-yield"),
+        normal: results.some(
+          (r) => r.tool === "codemode" && r.content.some((c) => c.text?.includes("42")),
+        ),
+        polling: results.some(
+          (r) => r.tool === "write_stdin" && r.content.some((c) => c.text?.includes("polled")),
         ),
         approval:
           approvals === 1 &&
@@ -189,13 +191,9 @@ try {
       if (scenario) {
         const serialized = JSON.stringify(observations);
         const discoveryIndex = results.findIndex((r) =>
-          r.content.some(
-            (c) => c.text?.includes("exec tool declaration:") && c.text.includes("web_run"),
-          ),
+          r.content.some((c) => c.text?.includes("Citations") && c.text.includes("search_query")),
         );
-        const webIndex = (observations as { details?: unknown }[]).findIndex((r) =>
-          JSON.stringify(r.details ?? {}).includes('"name":"web_run"'),
-        );
+        const webIndex = results.findIndex((r) => r.tool === "web_run");
         record.checks =
           scenario === "coding"
             ? {
