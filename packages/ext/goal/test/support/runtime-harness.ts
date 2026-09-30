@@ -7,6 +7,7 @@ import {
   type ExtensionCommandContext,
   type ExtensionContext,
   type ExtensionEvent,
+  type ExtensionToolContext,
   type TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
 
@@ -140,7 +141,7 @@ export function createRuntimeHarness(
   let commandHandler:
     | ((args: string, ctx: ExtensionCommandContext) => void | Promise<void>)
     | null = null;
-  let ctx: ExtensionCommandContext;
+  let ctx: ExtensionCommandContext & Pick<ExtensionToolContext, "tools" | "executeTool">;
   let entryIndex = 0;
 
   const on = ((event: string, handler: EventHandler) => {
@@ -193,6 +194,8 @@ export function createRuntimeHarness(
     getActiveTools: () => [],
     getAllTools: () => [],
     getCommands: () => [],
+    getMcpServers: () => [],
+    getSettings: () => ({}),
     getFlag: () => undefined,
     getSessionName: () => undefined,
     getThinkingLevel: () => "medium",
@@ -210,8 +213,14 @@ export function createRuntimeHarness(
     registerMessageRenderer() {
       unsupportedHarnessMethod("pi.registerMessageRenderer");
     },
+    registerMcpServer() {
+      unsupportedHarnessMethod("pi.registerMcpServer");
+    },
     registerProvider() {
       unsupportedHarnessMethod("pi.registerProvider");
+    },
+    registerVirtualModel() {
+      unsupportedHarnessMethod("pi.registerVirtualModel");
     },
     registerShortcut() {},
     registerTool(tool) {
@@ -244,8 +253,14 @@ export function createRuntimeHarness(
     setThinkingLevel() {
       unsupportedHarnessMethod("pi.setThinkingLevel");
     },
+    unregisterMcpServer() {
+      unsupportedHarnessMethod("pi.unregisterMcpServer");
+    },
     unregisterProvider() {
       unsupportedHarnessMethod("pi.unregisterProvider");
+    },
+    unregisterVirtualModel() {
+      unsupportedHarnessMethod("pi.unregisterVirtualModel");
     },
   };
 
@@ -355,7 +370,9 @@ export function createRuntimeHarness(
     switchSession: async () => ({ cancelled: false }),
     ui,
     waitForIdle: async () => {},
-  } satisfies ExtensionCommandContext;
+    tools: [],
+    executeTool: async () => unsupportedHarnessMethod("ctx.executeTool"),
+  } satisfies ExtensionCommandContext & Pick<ExtensionToolContext, "tools" | "executeTool">;
 
   if (options.contextWindow !== undefined) {
     ctx.model = {
