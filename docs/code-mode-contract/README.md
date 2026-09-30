@@ -7,6 +7,9 @@ legacy runtime selection or fallback. The [native adapter contract](native-paren
 is authoritative for invocation, values, permissions, ownership and presentation.
 The [ADRs](../adr/0001-codex-code-mode-scope.md) retain the historical decisions and
 explicitly record this approved tradeoff. The #365 model/route amendment remains.
+The [integrated validation record](native-validation.md) separates local checks,
+CLI/package loading, SDK child execution and live route acceptance, with release
+limitations requiring explicit maintainer disposition before promotion.
 
 ## Owned-tool provenance and reproduction
 
@@ -47,5 +50,6 @@ The [V8 baseline](historical-baseline.md), [activation](activation.md),
 [runtime](runtime.md) and [cutover](cutover.md) records describe retired host behavior.
 Their old smoke/build/install/generation commands are historical only.
 The native [route smoke](../../scripts/code-mode-route-smoke.ts) uses codemode,
-parallel calls and shell polling, not cell resumption. Live provider/arm64 release
-validation remains separate; offline passes do not assert live route acceptance.
+parallel calls and shell polling, not cell resumption. See the
+[native release validation](native-validation.md) for current live-route results
+and unexecuted architectures; offline passes do not assert live acceptance.

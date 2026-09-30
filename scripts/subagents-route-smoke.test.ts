@@ -1,5 +1,10 @@
 import { expect, test } from "vitest";
-import { checkLifecycle, checkMailbox, type Operation } from "./subagents-route-smoke.js";
+import {
+  checkLifecycle,
+  checkMailbox,
+  checkApprovedExecution,
+  type Operation,
+} from "./subagents-route-smoke.js";
 import { findMatchedPatterns } from "../packages/ext/bash-gate/policy.js";
 
 test("smoke validates queue-only history separately from streaming events and rejects duplicate finals", () => {
@@ -62,6 +67,12 @@ test("V2 smoke requires ordered completion, retained-task recall and direct mail
     { owner: "parent", name: "list_agents", args: {}, result: listed("V2_RETAINED_352") },
   ];
   expect(Object.values(checkLifecycle(operations, "provider/model")).every(Boolean)).toBe(true);
+  const relative = structuredClone(operations);
+  for (const index of [4, 5]) {
+    relative[index]!.args.target = "probe";
+    relative[index]!.result!.details = { target: "/root/probe" };
+  }
+  expect(Object.values(checkLifecycle(relative, "provider/model")).every(Boolean)).toBe(true);
   for (const mutate of [
     (copy: Operation[]) => {
       copy[5]!.args.message = "Recall V2_RETAINED_352";
@@ -96,4 +107,66 @@ test("V2 smoke requires ordered completion, retained-task recall and direct mail
     expect((await findMatchedPatterns(command, { rules: [{ cmd: [] }] })).length).toBeGreaterThan(
       0,
     );
+});
+
+test("native child approval evidence requires one actual shell result, not an echoed script", () => {
+  const shell = {
+    owner: "/root/probe",
+    tool: "exec_command",
+    input: { cmd: "printf subagent-approved" },
+    content: [{ type: "text", text: "Output:\nsubagent-approved" }],
+    details: { output: "subagent-approved", exit_code: 0 },
+    isError: false,
+  };
+  expect(checkApprovedExecution(["printf subagent-approved"], [shell])).toBe(true);
+  expect(checkApprovedExecution(["printf subagent-approved"], [shell, shell])).toBe(false);
+  expect(
+    checkApprovedExecution(
+      ["printf subagent-approved"],
+      [
+        {
+          ...shell,
+          content: [{ type: "text", text: "Command: printf subagent-approved\nOutput:\n" }],
+          details: { output: "", session_id: 1 },
+        },
+      ],
+    ),
+  ).toBe(false);
+  expect(checkApprovedExecution([], [shell])).toBe(false);
+  expect(
+    checkApprovedExecution(
+      ["printf subagent-approved"],
+      [
+        {
+          ...shell,
+          details: { output: "subagent-approved", exit_code: 7 },
+        },
+      ],
+    ),
+  ).toBe(false);
+  expect(checkApprovedExecution(["printf subagent-approved"], [{ ...shell, isError: true }])).toBe(
+    false,
+  );
+  expect(
+    checkApprovedExecution(["printf subagent-approved"], [{ ...shell, tool: "codemode" }]),
+  ).toBe(false);
+  expect(
+    checkApprovedExecution(
+      ["printf subagent-approved"],
+      [{ ...shell, input: { cmd: "printf other" } }],
+    ),
+  ).toBe(false);
+  expect(
+    checkApprovedExecution(
+      ["printf subagent-approved"],
+      [
+        {
+          ...shell,
+          tool: "bash",
+          input: { command: "printf subagent-approved" },
+          content: [{ type: "text", text: "subagent-approved" }],
+        },
+      ],
+    ),
+  ).toBe(true);
 });
