@@ -6,7 +6,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "pi -ne -e ./packages/ext/index.ts",
+    "dev": "pi -ne -e builtin:codemode -e builtin:tool-search -e ./packages/ext/index.ts",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
     "fmt": "oxfmt --write .",

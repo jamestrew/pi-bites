@@ -30,6 +30,7 @@ export function registerCodeModeTools(
     label: "exec",
     description: execDescription([], false),
     parameters: Type.Object({ code: Type.String() }, { additionalProperties: false }),
+    exposure: "model-only" as const,
     constrainedSampling: {
       type: "grammar" as const,
       variants: { openai_lark: contract.exec_grammar },
@@ -69,6 +70,7 @@ export function registerCodeModeTools(
       },
       { additionalProperties: false },
     ),
+    exposure: "model-only" as const,
     async execute(
       _id: string,
       params: { cell_id: string; yield_time_ms?: number; max_tokens?: number; terminate?: boolean },

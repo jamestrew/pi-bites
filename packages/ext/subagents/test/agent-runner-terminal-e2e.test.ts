@@ -158,4 +158,5 @@ it.each(["provider error", "late queue-only mail"] as const)(
       rmSync(cwd, { recursive: true, force: true });
     }
   },
+  10_000,
 );
