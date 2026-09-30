@@ -9,3 +9,12 @@ Apply the existing bash-gate policy to each actual nested command, with independ
 Preserve the existing policy scope of authorizing command launches; `write_stdin` polling and interactive input remain outside command classification. A denial rejects that nested call without directly revoking unrelated authorizations or cancelling sibling calls. Preserve Codex's native rejection and cleanup contract: if an unhandled rejection ends the cell, unfinished sibling delegates can be cancelled by runtime cleanup. Do not change denials into successful structured values or add bespoke batching instructions to promise stronger isolation than Codex provides.
 
 Extract one callable authorization path shared by the ordinary Pi hook and nested dispatcher. Validate constructed arguments, then authorize each actual command with a unique nested call ID before process creation. Preserve subagent broker behavior and reuse #286’s host escalation seam if available. Bash-gate is not Codex sandbox enforcement: omit unsupported permission-profile, justification, and prefix-rule arguments rather than accepting inert controls.
+
+## Native parent amendment (#369)
+
+For parent sessions, the accepted [native parent contract](../code-mode-contract/native-parent.md)
+supersedes runtime-specific statements above: use Pi 0.99.1 native `codemode`,
+registry discovery, one-shot finalization and native nested rendering/persistence.
+No parent V8 host, live cells or exec/wait facade remain. Keep the bounded model
+scope, concrete capabilities, shared per-launch authorization and route restrictions.
+The child path retains this historical host contract until its separate migration.

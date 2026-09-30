@@ -155,6 +155,7 @@ export class SubagentController {
       const tool = this.tool(name) as ToolDefinition<TSchema, unknown>;
       const definition: ToolDefinition<TSchema, unknown> = {
         ...tool,
+        exposure: "model-only",
         execute: async (callId, args, signal, onUpdate, ctx) => {
           const operation = this.capture(ctx, {
             forkContext: this.tool(name).captureHistory?.(args),

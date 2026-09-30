@@ -150,12 +150,18 @@ const parameters = Type.Object({
   ),
   tty: Type.Optional(Type.Boolean({ description: "Run in an interactive pseudo-terminal." })),
   yield_time_ms: Type.Optional(
-    Type.Number({
+    Type.Integer({
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
       description: "Wait before yielding output. Defaults to 10000 ms; clamps to 250–30000 ms.",
     }),
   ),
   max_output_tokens: Type.Optional(
-    Type.Number({ description: "Output token budget. Defaults to 10000 tokens." }),
+    Type.Integer({
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+      description: "Output token budget. Defaults to 10000 tokens.",
+    }),
   ),
   login: Type.Optional(
     Type.Boolean({ description: "Start the shell as a login shell. Defaults to true." }),
