@@ -249,6 +249,12 @@ describe("extension entrypoint", () => {
         "exec",
         "wait",
       ]);
+      const registeredTool = (name: string) =>
+        loaded.pi.registerTool.mock.calls.find(([tool]) => tool.name === name)?.[0] as
+          | { exposure?: string }
+          | undefined;
+      expect(registeredTool("exec")?.exposure).toBe("model-only");
+      expect(registeredTool("wait")?.exposure).toBe("model-only");
       for (const handler of loaded.handlers.get("session_start") ?? []) await handler({}, ctx);
       expect(loaded.getActiveTools()).toEqual(["exec", "wait", "custom"]);
       for (const handler of loaded.handlers.get("model_select") ?? [])

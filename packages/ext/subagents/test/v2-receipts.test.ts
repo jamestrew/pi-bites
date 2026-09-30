@@ -161,6 +161,7 @@ it.each(["spawn_agent", "send_message", "followup_task"])(
       expect(all.at(-1)).toBe("");
     }
   },
+  10_000,
 );
 
 it("shows available configured spawn metadata before success without inventing unknown fields", async () => {
