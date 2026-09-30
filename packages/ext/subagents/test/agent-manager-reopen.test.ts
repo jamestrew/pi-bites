@@ -60,6 +60,8 @@ it("reopens the owned identity without a task, retains capacity and completes se
     pi,
     getRecord: (id) => manager.getRecord(id),
     onAgentFinishedUI: () => {},
+    shouldNotify: () => true,
+    queueCompletion: () => {},
   });
   await manager.dispose();
   manager = new AgentManager(completion.onAgentComplete, 1);
@@ -89,12 +91,10 @@ it("reopens the owned identity without a task, retains capacity and completes se
   );
   expect(await manager.reopen(pi, ctx, id)).toBe("pending_init");
   expect(openAgentSession).toHaveBeenCalledOnce();
-  const waiting = completion.waitFor([id], 10_000);
   vi.mocked(resumeAgent).mockResolvedValueOnce("blue door remembered");
   expect(await manager.sendInput(id, "what door?")).toBe(true);
   await record.promise;
-  const waited = await waiting;
-  expect(waited).toMatchObject({ status: { [id]: { completed: "blue door remembered" } } });
+  expect(record.result).toBe("blue door remembered");
   await manager.close(id);
   expect(manager.getRecord(id)).toBeUndefined();
   expect(await manager.reopen(pi, ctx, id)).toBe("pending_init");
@@ -200,6 +200,7 @@ it("cancels before and during reopening, tears down once, and preserves committe
   const caller = new AbortController();
   const opening = manager.reopen(pi, ctx, id, { signal: caller.signal });
   const rejected = expect(opening).rejects.toThrow();
+  await vi.waitFor(() => expect(openAgentSession).toHaveBeenCalledOnce());
   caller.abort();
   loading.resolve(session);
   await rejected;
@@ -231,6 +232,7 @@ it("uses stable snapshots when ctx getters throw after entry and cancels on shut
   const opening = manager.reopen(pi, ephemeral as any, id);
   stale = true;
   const rejected = expect(opening).rejects.toThrow();
+  await vi.waitFor(() => expect(openAgentSession).toHaveBeenCalledOnce());
   const shutdown = manager.shutdown();
   const session = mockSession();
   loading.resolve(session);
@@ -258,26 +260,6 @@ it("lets a concurrent caller cancel only its own wait and closes a committing re
   expect(await closing).toBe("pending_init");
   expect(session.dispose).toHaveBeenCalledOnce();
   expect(manager.getRecord(id)).toBeUndefined();
-});
-
-it("selected waits observe closing an idle reopen without a synthetic turn", async () => {
-  const completion = createAgentCompletionHandler({
-    pi,
-    getRecord: (id) => manager.getRecord(id),
-    onAgentFinishedUI: () => {},
-  });
-  await manager.dispose();
-  manager = new AgentManager(completion.onAgentComplete, 1);
-  const id = await closedAgent();
-  vi.mocked(openAgentSession).mockResolvedValueOnce(mockSession());
-  await manager.reopen(pi, ctx, id);
-  expect(manager.getRecord(id)?.status).toBe("idle");
-  expect(manager.hasRunning()).toBe(false);
-  const waiting = completion.waitFor([id], 10_000);
-  expect(await manager.close(id)).toBe("pending_init");
-  expect(await waiting).toMatchObject({ timed_out: false, status: { [id]: "shutdown" } });
-  expect(resumeAgent).not.toHaveBeenCalled();
-  completion.dispose();
 });
 
 it.each(["interrupt", "redirect"])(
@@ -355,4 +337,34 @@ it("closing an owning subtree cancels a sibling-initiated descendant reopen befo
   expect(manager.getRecord(descendant)).toBeUndefined();
   await expect(manager.reopen(pi, ctx, descendant)).rejects.toThrow("owner is closed");
   expect(openAgentSession).toHaveBeenCalledTimes(1);
+});
+
+it("keeps an unloaded named identity recoverable after failed reopening and shares a later reload", async () => {
+  const sessionManager = SessionManager.inMemory("/tmp", { id: "retained-named" });
+  sessionManager.appendMessage({ role: "user", content: "retained", timestamp: 1 });
+  vi.mocked(runAgent).mockResolvedValueOnce({
+    session: { ...mockSession(), sessionManager },
+    responseText: "done",
+  });
+  const id = manager.spawn(pi, ctx, "worker", "remember", { taskName: "a", description: "a" });
+  await manager.getRecord(id)!.promise;
+  const record = manager.getRecord(id)!;
+  await manager.disposeRuntime(id);
+  vi.mocked(openAgentSession).mockRejectedValueOnce(new Error("loader failed"));
+  await expect(manager.reload(pi, ctx, id)).rejects.toThrow("loader failed");
+  expect(manager.getRecord(id)).toBe(record);
+  expect(record.retainedConversation).toBeDefined();
+  expect(record.incarnation).toBeUndefined();
+  const loading = deferred<any>();
+  vi.mocked(openAgentSession).mockReturnValueOnce(loading.promise);
+  const first = manager.reload(pi, ctx, id);
+  const second = manager.reload(pi, ctx, id);
+  await vi.waitFor(() => expect(openAgentSession).toHaveBeenCalledTimes(2));
+  loading.resolve({ ...mockSession(), sessionManager });
+  await Promise.all([first, second]);
+  expect(manager.getRecord(id)).toBe(record);
+  expect(record.taskName).toBe("/root/a");
+  expect(record.sessionId).toBe("retained-named");
+  expect(record.retainedConversation).toBeUndefined();
+  expect(record.session).toBeDefined();
 });

@@ -57,6 +57,8 @@ function makeActivity(record: AgentRecord): AgentActivity {
 function fakeManager(agents: AgentRecord[]): AgentManager {
   return {
     listAgents: () => agents,
+    runtimes: { protect: () => () => {} },
+    isRuntimeDisposing: () => false,
     abort: () => true,
     steer: vi.fn(() => true),
   } as unknown as AgentManager;
@@ -472,7 +474,7 @@ describe("FleetList overlay lifecycle", () => {
       status: "completed",
       completedAt: Date.now() - 60_000,
     });
-    h.fleet.onAgentFinished("live");
+    h.fleet.onAgentFinished();
     expect(h.overlayClosed()).toBe(false); // viewer stays open
     expect(h.render().some((l) => l.includes("the one"))).toBe(true); // and stays listed while viewed
   });
@@ -501,4 +503,30 @@ describe("FleetList overlay lifecycle", () => {
         .some((l) => l.includes("old done")),
     ).toBe(false);
   });
+});
+
+it("keeps idle agents with pending mail visible until their next request", () => {
+  const record = makeRecord({ status: "completed", completedAt: 1 });
+  const h = harness([record]);
+  h.fleet.setPendingMail(record.id, 2);
+  expect(h.render(150).join("\n")).toContain("2 pending messages");
+  h.fleet.setPendingMail(record.id, 0);
+  expect(h.render(150)).toEqual([]);
+  h.fleet.dispose();
+});
+
+it("distinguishes an interrupted turn from shutdown in the retained Fleet row", () => {
+  const record = makeRecord({
+    status: "stopped",
+    completedAt: Date.now(),
+    abort: { source: "interrupt", timestamp: Date.now(), reason: "interrupt" },
+  });
+  const h = harness([record]);
+  try {
+    expect(h.render(160).join("\n")).toContain("interrupted");
+    record.abort = undefined;
+    expect(h.render(160).join("\n")).toContain("shutdown");
+  } finally {
+    h.fleet.dispose();
+  }
 });

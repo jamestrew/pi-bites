@@ -1,5 +1,6 @@
 /** usage.ts — Token usage: shapes, accumulator operators, session-stats readers. */
 
+import type { AgentRecord } from "./types.js";
 import { appendFile, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -104,6 +105,31 @@ export async function appendSubagentUsageRecord(record: SubagentUsageRecord): Pr
   const file = getSubagentUsageFile();
   await mkdir(dirname(file), { recursive: true });
   await appendFile(file, JSON.stringify(record) + "\n", "utf8");
+}
+
+/** Accumulate accepted usage synchronously; persistence failure never invalidates a turn. */
+export function recordAssistantUsage(
+  record: Pick<AgentRecord, "lifetimeUsage" | "type" | "id" | "parentSessionId">,
+  usage: AssistantUsage,
+  model?: { provider: string; id: string },
+): void {
+  addUsage(record.lifetimeUsage, usage);
+  appendSubagentUsageRecord({
+    type: "subagent_usage",
+    subagent: record.type,
+    sessionId: record.id,
+    parentSessionId: record.parentSessionId,
+    timestamp: usage.timestamp ?? Date.now(),
+    provider: usage.provider ?? model?.provider ?? "unknown",
+    model: usage.model ?? model?.id ?? "unknown",
+    usage: {
+      input: usage.input,
+      output: usage.output,
+      cacheRead: usage.cacheRead ?? 0,
+      cacheWrite: usage.cacheWrite,
+      cost: { total: usage.cost ?? 0 },
+    },
+  }).catch(() => undefined);
 }
 
 /** Sum of lifetime usage components, or 0 if undefined. */

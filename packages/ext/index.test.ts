@@ -59,7 +59,6 @@ async function loadExtension(
     if (modulePath === "./subagents/index.js") {
       spy.mockReturnValue({
         registerTools: vi.fn(),
-        definitions: {},
         capture: vi.fn(),
         renderers: vi.fn(),
       });
@@ -158,7 +157,6 @@ describe("extension entrypoint", () => {
         loaded.pi,
         expect.any(Object),
         loaded.bashGate,
-        loaded.registerSpies.get("./subagents/index.js")!.mock.results[0]!.value,
       );
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,

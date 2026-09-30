@@ -1,5 +1,10 @@
 # V1 revision evidence
 
+> Historical V1 record, superseded by #352's direct V2 cutover. V1 executors,
+> nested declarations and their generator are removed; commands and paths below
+> describe the original revision, not current activation. See `CODEX_V2.md` and
+> `docs/code-mode-contract/subagents-v2-cutover.md` for current behavior/evidence.
+
 #305 selects `25af12f7e61572b0bc18ddb1008be543b91519b0` (`rust-v0.145.0`), the
 existing Code Mode model-facing and host pin. Sources are Git objects in
 `~/projects/codex`, not that checkout's current working files. No host upgrade,

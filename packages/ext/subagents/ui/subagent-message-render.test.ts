@@ -58,3 +58,34 @@ describe("incoming subagent message rendering", () => {
     }
   });
 });
+
+it.each(["completed", "failed"] as const)(
+  "renders V2 %s mail once with the completion scanline",
+  (completion) => {
+    const marked = {
+      bold: (s: string) => `<b>${s}</b>`,
+      fg: (c: string, s: string) => `<${c}>${s}</${c}>`,
+    };
+    const mail = { ...details, sender: { ...details.sender, title: "/root/work" }, completion };
+    for (const expanded of [false, true]) {
+      const lines = renderer()({ details: mail }, { expanded }, marked).render(120);
+      expect(lines[0]).toBe(`<b>Agent</b><accent> /root/work ${completion}</accent>`);
+      expect(lines[1]).toBe("");
+      expect(lines[2]).toBe("<dim>line one</dim>");
+      expect(lines.filter((line: string) => line.includes("line one"))).toHaveLength(1);
+      expect(lines.join("\n")).not.toContain("expand");
+    }
+    const long = { ...mail, message: Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n") };
+    const collapsed = renderer()({ details: long }, { expanded: false }, theme).render(80);
+    expect(collapsed.at(-1)).toContain("expand");
+    expect(collapsed).not.toContain("line 8");
+    const expanded = renderer()({ details: long }, { expanded: true }, theme).render(80);
+    expect(expanded).toContain("line 11");
+    for (const width of [1, 12, 40])
+      expect(
+        renderer()({ details: long }, { expanded: false }, theme)
+          .render(width)
+          .every((line: string) => visibleWidth(line) <= width),
+      ).toBe(true);
+  },
+);

@@ -16,11 +16,10 @@ import {
 import { expect, test, vi } from "vitest";
 import registerCodeMode from "./index.js";
 import { parseHostMessage } from "./code-mode/host-protocol.js";
-import { v1Result } from "../subagents/tool-result.js";
 
-test("readonly JSON arguments and subagent results cross the host protocol", () => {
+test("readonly JSON arguments and results cross the host protocol", () => {
   const input = { items: ["one", { enabled: true }, null] } as const satisfies JsonValue;
-  const result = v1Result({ status: { child: { completed: "done" } }, timed_out: false }, {});
+  const result = { value: { output: "done" }, content: [{ type: "text", text: "done" }] };
   result.value satisfies JsonValue;
   result.content satisfies JsonValue;
   expect(
@@ -51,7 +50,7 @@ test("readonly JSON arguments and subagent results cross the host protocol", () 
   ).toEqual({
     type: "operation/response",
     id: 1,
-    result: { status: "ok", value: { status: { child: { completed: "done" } }, timed_out: false } },
+    result: { status: "ok", value: { output: "done" } },
   });
 });
 

@@ -117,29 +117,29 @@ test("native namespaces retain normalized JavaScript names alongside ordinary to
   const host = runtime({
     tools: [
       {
-        ...tool("multi_agent_v1__spawn_agent", async (input) => ({ agent: input })),
-        toolName: { namespace: "multi_agent_v1", name: "spawn_agent" },
+        ...tool("catalog__lookup", async (input) => ({ agent: input })),
+        toolName: { namespace: "catalog", name: "lookup" },
       },
       {
-        ...tool("other__spawn_agent", async () => "other namespace"),
-        toolName: { namespace: "other", name: "spawn_agent" },
+        ...tool("other__lookup", async () => "other namespace"),
+        toolName: { namespace: "other", name: "lookup" },
       },
-      tool("spawn_agent", async () => "ordinary tool"),
+      tool("lookup", async () => "ordinary tool"),
     ],
   });
   expect(
     await host.execute(`
 text(ALL_TOOLS.map(t => t.name));
-text(await tools.multi_agent_v1__spawn_agent({task:"test"}));
-text(await tools.other__spawn_agent({}));
-text(await tools.spawn_agent({}));
+text(await tools.catalog__lookup({task:"test"}));
+text(await tools.other__lookup({}));
+text(await tools.lookup({}));
 `),
   ).toMatchObject({
     kind: "result",
     contentItems: [
       {
         type: "input_text",
-        text: '["multi_agent_v1__spawn_agent","other__spawn_agent","spawn_agent"]',
+        text: '["catalog__lookup","other__lookup","lookup"]',
       },
       { type: "input_text", text: '{"agent":{"task":"test"}}' },
       { type: "input_text", text: "other namespace" },

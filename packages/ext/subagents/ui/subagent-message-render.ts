@@ -1,3 +1,4 @@
+import { keyHint } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import type { SubagentMessageDetails } from "../subagent-messages.js";
 import type { Theme } from "./agent-format.js";
@@ -12,6 +13,32 @@ export function renderSubagentMessage(
 ): Component {
   return {
     render(width: number): string[] {
+      if (details.completion) {
+        const lines = [
+          fitLine(
+            theme.bold("Agent") +
+              theme.fg(
+                "accent",
+                ` ${sanitizeSingleLine(details.sender.title)} ${details.completion}`,
+              ),
+            width,
+          ),
+          "",
+        ];
+        const body = wrapDisplayLines(details.message, width);
+        for (const line of expanded ? body : body.slice(0, 8))
+          lines.push(fitLine(theme.fg("dim", line), width));
+        if (!expanded && body.length > 8) {
+          let hint = "ctrl+o to expand";
+          try {
+            hint = keyHint("app.tools.expand", "to expand");
+          } catch {
+            /* Print mode. */
+          }
+          lines.push(fitLine(theme.fg("dim", `(${hint})`), width));
+        }
+        return lines;
+      }
       const invocation = [details.sender.model_name, details.sender.thinking]
         .filter(Boolean)
         .map((value) => sanitizeSingleLine(String(value)))

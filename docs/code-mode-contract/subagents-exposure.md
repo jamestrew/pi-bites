@@ -1,5 +1,10 @@
 # V1 Code Mode exposure (#308)
 
+> Historical V1 record, superseded by #352's direct V2 cutover. V1 executors,
+> nested declarations and their generator are removed; commands and paths below
+> describe the original revision, not current activation. See `CODEX_V2.md` and
+> `docs/code-mode-contract/subagents-v2-cutover.md` for current behavior/evidence.
+
 The composition root creates one session-owned subagent controller before registering
 Code Mode. The adapter consumes that controller's operations and renderers; it never
 looks up third-party executors. Unsupported models and adapter-disabled sessions keep

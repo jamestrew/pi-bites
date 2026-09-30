@@ -91,7 +91,14 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
 
   async function viewAgentConversation(ctx: ExtensionCommandContext, record: AgentRecord) {
     const ui = ctx.ui;
-    if (!record.session) {
+    const { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer, getConversationSource } =
+      await import("./ui/conversation-viewer.js");
+    if (manager.isRuntimeDisposing(record.id)) {
+      ui.notify("Agent runtime is unloading; retry to view retained history.", "info");
+      return;
+    }
+    const session = getConversationSource(record);
+    if (!session) {
       ui.notify(
         `Agent is ${record.status === "queued" ? "queued" : "expired"} — no session available.`,
         "info",
@@ -99,32 +106,34 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
       return;
     }
 
-    const { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } =
-      await import("./ui/conversation-viewer.js");
-    const session = record.session;
-    await ui.custom<undefined>(
-      (tui, theme, keybindings, done) =>
-        new ConversationViewer(
-          tui,
-          session,
-          record,
-          agentActivity.get(record.id),
-          theme,
-          done,
-          () => {
-            if (manager.abort(record.id)) ui.notify(`Stopped "${record.description}".`, "info");
-          },
-          keybindings,
-          (message: string) => manager.steer(record.id, message),
-          (message: string) => {
-            void manager.cancelAndSteer(record.id, message).then((interrupted) => {
-              if (interrupted)
-                ui.notify(`Canceled current operation for "${record.description}".`, "info");
-            });
-          },
-        ),
-      CONVERSATION_OVERLAY_OPTIONS,
-    );
+    const release = manager.runtimes.protect(record.id);
+    try {
+      await ui.custom<undefined>(
+        (tui, theme, keybindings, done) =>
+          new ConversationViewer(
+            tui,
+            session,
+            record,
+            agentActivity.get(record.id),
+            theme,
+            done,
+            () => {
+              if (manager.abort(record.id)) ui.notify(`Stopped "${record.description}".`, "info");
+            },
+            keybindings,
+            (message: string) => manager.steer(record.id, message),
+            (message: string) => {
+              void manager.cancelAndSteer(record.id, message).then((interrupted) => {
+                if (interrupted)
+                  ui.notify(`Canceled current operation for "${record.description}".`, "info");
+              });
+            },
+          ),
+        CONVERSATION_OVERLAY_OPTIONS,
+      );
+    } finally {
+      release();
+    }
   }
 
   function snapshotSettings(): SubagentsSettings {

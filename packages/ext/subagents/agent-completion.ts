@@ -1,146 +1,23 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildEventData } from "./event-data.js";
-import { getAgentStatus } from "./agent-status.js";
-import { buildNotificationDetails, formatTaskNotification } from "./notifications.js";
-import { isMissingFinalResponse, MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
-import type {
-  AgentRecord,
-  NotificationDetails,
-  WaitAgentOutcome,
-  WaitAgentResult,
-  WaitAgentStatus,
-} from "./types.js";
-import { getLifetimeTotal } from "./usage.js";
+import type { AgentRecord } from "./types.js";
 
-function isTerminal(record: AgentRecord): boolean {
-  const status = getAgentStatus(record);
-  return status !== "pending_init" && status !== "running" && status !== "interrupted";
-}
-
-export function buildWaitAgentResult(record: AgentRecord, includeOutput: boolean): WaitAgentResult {
-  const missingFinal = isMissingFinalResponse(record.status, record.result);
-  return {
-    id: record.id,
-    type: record.type,
-    description: record.description,
-    status: missingFinal ? "error" : record.status,
-    ...(includeOutput && record.result !== undefined && !missingFinal
-      ? { result: record.result }
-      : {}),
-    ...(includeOutput && (missingFinal || record.error !== undefined)
-      ? { error: missingFinal ? MISSING_FINAL_RESPONSE_ERROR : record.error }
-      : {}),
-    tool_uses: record.toolUses,
-    duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
-    total_tokens: getLifetimeTotal(record.lifetimeUsage),
-    lifetime_usage: { ...record.lifetimeUsage },
-    ...(includeOutput && record.failureHistory.length > 0
-      ? { failure_history: record.failureHistory.map((failure) => ({ ...failure })) }
-      : {}),
-    ...(includeOutput && record.abort ? { abort: { ...record.abort } } : {}),
-  };
-}
-
-function buildMissingWaitAgentResult(id: string): WaitAgentResult {
-  return {
-    id,
-    type: "unknown",
-    description: id,
-    status: "not_found",
-    tool_uses: 0,
-    duration_ms: 0,
-    total_tokens: 0,
-    lifetime_usage: { input: 0, output: 0, cacheWrite: 0 },
-  };
-}
-
-type AgentCompletionDeps = {
-  pi: ExtensionAPI;
-  getRecord: (id: string) => AgentRecord | undefined;
-  onAgentFinishedUI: (id: string) => void;
-  onAgentResultPendingUI?: (id: string) => void;
-  deliveryPi?: (parentSessionId: string) => Pick<ExtensionAPI, "sendMessage"> | undefined;
-  shouldNotify?: (record: AgentRecord) => boolean;
-  scheduleAutomatic?: (parentSessionId: string, deliver: () => void, cancel: () => void) => boolean;
-};
-
-type Waiter = {
-  id: number;
-  agentIds: string[];
-  generations: Map<string, number>;
-  resolve: (outcome: WaitAgentOutcome) => void;
-  timer?: ReturnType<typeof setTimeout>;
-  signal?: AbortSignal;
-  onAbort?: () => void;
-};
-
+/** Completion mail and UI events are separate; neither starts an idle parent turn. */
 export function createAgentCompletionHandler({
   pi,
   getRecord,
   onAgentFinishedUI,
-  onAgentResultPendingUI,
-  scheduleAutomatic,
   shouldNotify,
-  deliveryPi,
-}: AgentCompletionDeps) {
+  queueCompletion,
+}: {
+  pi: ExtensionAPI;
+  getRecord: (id: string) => AgentRecord | undefined;
+  onAgentFinishedUI: (id: string) => void;
+  shouldNotify: (record: AgentRecord) => boolean;
+  queueCompletion: (record: AgentRecord) => void;
+}) {
   const completedGeneration = new WeakMap<AgentRecord, number>();
-  const waiters = new Map<number, Waiter>();
-  let nextWaiterId = 1;
   let disposed = false;
-
-  function release(waiter: Waiter): void {
-    waiters.delete(waiter.id);
-    if (waiter.timer) clearTimeout(waiter.timer);
-    if (waiter.signal && waiter.onAbort) {
-      waiter.signal.removeEventListener("abort", waiter.onAbort);
-    }
-  }
-
-  function finish(waiter: Waiter, outcome: WaitAgentOutcome): void {
-    release(waiter);
-    waiter.resolve(outcome);
-  }
-
-  function terminalOutcome(agentIds: string[], completedRecord?: AgentRecord): WaitAgentOutcome {
-    const status = Object.create(null) as Record<string, WaitAgentStatus>;
-    const agents = agentIds.map((id) => {
-      const record = id === completedRecord?.id ? completedRecord : getRecord(id);
-      if (!record) {
-        status[id] = "not_found";
-        return buildMissingWaitAgentResult(id);
-      }
-      const terminal = isTerminal(record);
-      if (terminal) status[id] = getAgentStatus(record);
-      return buildWaitAgentResult(record, terminal);
-    });
-    return { outcome: "terminal", timed_out: false, status, agents };
-  }
-
-  function resolveWaiters(completedRecord: AgentRecord): void {
-    if (!isTerminal(completedRecord)) return;
-    for (const waiter of waiters.values()) {
-      if (
-        waiter.agentIds.includes(completedRecord.id) &&
-        (waiter.generations.get(completedRecord.id) ?? Infinity) <= completedRecord.generation
-      ) {
-        finish(waiter, terminalOutcome(waiter.agentIds, completedRecord));
-      }
-    }
-  }
-
-  function emitAutomatic(record: AgentRecord): void {
-    const details = buildNotificationDetails(record);
-    (deliveryPi ? deliveryPi(record.parentSessionId) : pi)?.sendMessage<NotificationDetails>(
-      {
-        customType: "subagent-notification",
-        content: formatTaskNotification(record),
-        display: true,
-        details,
-      },
-      { deliverAs: "steer", triggerTurn: true },
-    );
-  }
-
   function emitCompletionEvent(record: AgentRecord, failed: boolean): void {
     try {
       pi.events.emit(failed ? "subagents:failed" : "subagents:completed", buildEventData(record));
@@ -171,133 +48,22 @@ export function createAgentCompletionHandler({
       }
     };
 
-    resolveWaiters(finished);
     emitCompletionEvent(finished, failed);
-    if (!isTerminal(finished) || (shouldNotify && !shouldNotify(record))) {
+    if (finished.status === "stopped" || !shouldNotify(record)) {
       notifyFinishedUI();
       return;
     }
 
-    let finishedUI = false;
-    const finishUI = () => {
-      if (finishedUI) return;
-      finishedUI = true;
+    try {
+      queueCompletion(finished);
+    } finally {
       notifyFinishedUI();
-    };
-    try {
-      if (getRecord(record.id)?.generation === generation) onAgentResultPendingUI?.(record.id);
-    } catch {
-      /* UI state must not block completion delivery */
-    }
-    const deliver = () => {
-      if (finishedUI || disposed) return;
-      try {
-        emitAutomatic(finished);
-      } finally {
-        finishUI();
-      }
-    };
-    try {
-      const accepted = scheduleAutomatic
-        ? scheduleAutomatic(record.parentSessionId, deliver, finishUI)
-        : (deliver(), true);
-      if (!accepted) finishUI();
-    } catch {
-      finishUI();
-      /* notification failure must not change explicit wait results */
     }
   }
-
-  function waitFor(
-    agentIds: string[],
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ): Promise<WaitAgentOutcome> {
-    const uniqueIds = [...new Set(agentIds)];
-    if (uniqueIds.length === 0) {
-      return Promise.resolve({
-        outcome: "error",
-        timed_out: false,
-        status: {},
-        message: "agent ids must be non-empty",
-        agents: [],
-      });
-    }
-
-    const records = uniqueIds.map(getRecord);
-    const generations = new Map(
-      records
-        .filter((record): record is AgentRecord => Boolean(record))
-        .map((record) => [record.id, record.generation]),
-    );
-    if (records.some((record) => !record || isTerminal(record))) {
-      return Promise.resolve(terminalOutcome(uniqueIds));
-    }
-
-    const agents = (records as AgentRecord[]).map((record) => buildWaitAgentResult(record, false));
-    if (signal?.aborted) {
-      return Promise.resolve({
-        outcome: "cancelled",
-        timed_out: false,
-        status: {},
-        agents,
-      });
-    }
-
-    return new Promise((resolve) => {
-      const waiter: Waiter = {
-        id: nextWaiterId++,
-        agentIds: uniqueIds,
-        generations,
-        resolve,
-        signal,
-      };
-      waiters.set(waiter.id, waiter);
-      waiter.timer = setTimeout(() => {
-        finish(waiter, {
-          outcome: "timeout",
-          timed_out: true,
-          status: {},
-          agents: waiter.agentIds
-            .map(getRecord)
-            .filter((record): record is AgentRecord => Boolean(record))
-            .map((record) => buildWaitAgentResult(record, false)),
-        });
-      }, timeoutMs);
-      if (signal) {
-        waiter.onAbort = () => {
-          finish(waiter, {
-            outcome: "cancelled",
-            timed_out: false,
-            status: {},
-            agents: waiter.agentIds
-              .map(getRecord)
-              .filter((record): record is AgentRecord => Boolean(record))
-              .map((record) => buildWaitAgentResult(record, false)),
-          });
-        };
-        signal.addEventListener("abort", waiter.onAbort, { once: true });
-      }
-    });
-  }
-
   return {
-    waitFor,
     onAgentComplete,
-    onAgentStatusChanged: resolveWaiters,
-    dispose(): void {
+    dispose() {
       disposed = true;
-      for (const waiter of waiters.values()) {
-        finish(waiter, {
-          outcome: "cancelled",
-          timed_out: false,
-          status: {},
-          agents: waiter.agentIds
-            .map(getRecord)
-            .filter((record): record is AgentRecord => Boolean(record))
-            .map((record) => buildWaitAgentResult(record, false)),
-        });
-      }
     },
   };
 }

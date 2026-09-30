@@ -1,3 +1,5 @@
+import { lifecycleStatusLabel } from "./agent-lifecycle-render.js";
+import { getAgentStatus } from "../agent-status.js";
 /**
  * fleet-list.ts — Claude Code-style "FleetView" list rendered above the editor.
  *
@@ -24,7 +26,11 @@ import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal } from "../usage.js";
 import { type AgentActivity, getDisplayName, type Theme } from "./agent-format.js";
-import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./conversation-viewer.js";
+import {
+  CONVERSATION_OVERLAY_OPTIONS,
+  ConversationViewer,
+  getConversationSource,
+} from "./conversation-viewer.js";
 
 /** Widget key for the FleetView list. */
 const FLEET_KEY = "fleet";
@@ -90,7 +96,7 @@ export class FleetList {
   private viewerClose: (() => void) | undefined;
   private viewingAgentId: string | undefined;
   /** Terminal agents whose final notification is still queued behind child messages. */
-  private pendingResults = new Set<string>();
+  private pendingMail = new Map<string, number>();
 
   constructor(
     private manager: AgentManager,
@@ -138,13 +144,15 @@ export class FleetList {
    * Called when an agent finishes. The viewer (if open on it) stays open so the
    * final output remains readable, and the row lingers in the list — just refresh.
    */
-  onAgentResultPending(id: string): void {
-    this.pendingResults.add(id);
+  setPendingMail(id: string, count: number): void {
+    if (count > 0) {
+      this.pendingMail.set(id, count);
+      this.ensureTimer();
+    } else this.pendingMail.delete(id);
     this.update();
   }
 
-  onAgentFinished(id: string): void {
-    this.pendingResults.delete(id);
+  onAgentFinished(): void {
     this.update();
   }
 
@@ -165,7 +173,7 @@ export class FleetList {
     this.tui = undefined;
     this.active = false;
     this.pendingBashGates.clear();
-    this.pendingResults.clear();
+    this.pendingMail.clear();
     // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
   }
@@ -230,12 +238,16 @@ export class FleetList {
     return records
       .filter(
         (a) =>
-          this.pendingResults.has(a.id) ||
+          this.pendingMail.has(a.id) ||
           a.status === "idle" ||
           a.status === "running" ||
           a.status === "queued" ||
           a.id === this.viewingAgentId ||
-          Boolean(a.session && a.completedAt != null && now - a.completedAt < FINISHED_LINGER_MS),
+          Boolean(
+            (a.session || a.retainedConversation) &&
+            a.completedAt != null &&
+            now - a.completedAt < FINISHED_LINGER_MS,
+          ),
       )
       .sort((a, b) => a.startedAt - b.startedAt);
   }
@@ -327,14 +339,19 @@ export class FleetList {
     }
     const record = entry.record;
     if (!this.ui) return;
-    if (!record.session) {
+    if (this.manager.isRuntimeDisposing(record.id)) {
+      this.ui.notify("Agent runtime is unloading; retry to view retained history.", "info");
+      return;
+    }
+    const session = getConversationSource(record);
+    if (!session) {
       this.ui.notify(`Agent is ${record.status} — no session available.`, "info");
       return;
     }
-    const session = record.session;
     const activity = this.agentActivity.get(record.id);
     this.viewingAgentId = record.id;
 
+    const release = this.manager.runtimes.protect(record.id);
     void this.ui
       .custom<undefined>((tui, theme, keybindings, done) => {
         this.viewerClose = () => done(undefined);
@@ -360,8 +377,14 @@ export class FleetList {
         );
       }, CONVERSATION_OVERLAY_OPTIONS)
       .then(
-        () => this.clearViewer(),
-        () => this.clearViewer(),
+        () => {
+          release();
+          this.clearViewer();
+        },
+        () => {
+          release();
+          this.clearViewer();
+        },
       );
   }
 
@@ -425,7 +448,14 @@ export class FleetList {
     width: number,
     theme: Theme,
   ): string {
-    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}`;
+    const pending = this.pendingMail.get(record.id);
+    const terminal =
+      record.status === "stopped"
+        ? ` · ${lifecycleStatusLabel(getAgentStatus(record), "pending_init")}`
+        : "";
+    const residency = !record.session && record.retainedConversation ? " · unloaded" : "";
+    const interaction = pending ? ` · ${pending} pending message${pending === 1 ? "" : "s"}` : "";
+    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}${theme.fg("dim", terminal + residency + interaction)}`;
     const tokens = getLifetimeTotal(
       this.agentActivity.get(record.id)?.lifetimeUsage ?? record.lifetimeUsage,
     );

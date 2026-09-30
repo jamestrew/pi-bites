@@ -7,7 +7,7 @@ import type { AssistantUsage } from "./usage.js";
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, FileEntry } from "@earendil-works/pi-coding-agent";
 import type { DiagnosticErrorInfo } from "./diagnostics.js";
 import type { LifetimeUsage } from "./usage.js";
 
@@ -55,6 +55,14 @@ export interface AgentConfig {
 
 export interface AgentRecord {
   id: string;
+  /** Canonical named-task identity, retained across runtime replacement. */
+  taskName?: string;
+  /** Original delegation ceiling; reload may narrow but never widen it. */
+  allowedTools?: string[];
+  /** Conversation identity survives unloading its Pi runtime. */
+  sessionId?: string;
+  /** Manager-owned active branch, without extension state or approval allowances. */
+  retainedConversation?: { sessionId: string; cwd: string; entries: FileEntry[] };
   /** Random token for this live session; a reopened conversation gets a new one. */
   incarnation?: string;
   /** Turn generation within this live session. An idle reopen reserves generation 1 for its first input. */
@@ -131,28 +139,6 @@ export interface AgentInvocation {
   isolated?: boolean;
 }
 
-export interface WaitAgentResult {
-  id: string;
-  type: string;
-  description: string;
-  status: AgentRecord["status"] | "not_found";
-  result?: string;
-  error?: string;
-  tool_uses: number;
-  duration_ms: number;
-  total_tokens: number;
-  lifetime_usage?: LifetimeUsage;
-  /** Chronological errors for terminal agents; catches an original error later masked by abort. */
-  failure_history?: AgentFailure[];
-  /** Manager-initiated cancellation, when it explains the terminal abort. */
-  abort?: AgentAbort;
-  /** UI-only invocation metadata; omitted from the tool's text result. */
-  model_name?: string;
-  thinking?: ThinkingLevel;
-  /** UI-only tool-call summaries; omitted from the tool's text result. */
-  tool_calls?: string[];
-}
-
 export interface WaitAgentSender {
   id: string;
   type: SubagentType;
@@ -170,43 +156,6 @@ export type WaitAgentStatus =
   | "not_found"
   | { completed: string | null }
   | { errored: string };
-
-export type WaitAgentOutcome =
-  | {
-      outcome: "terminal";
-      timed_out: false;
-      status: Record<string, WaitAgentStatus>;
-      agents: WaitAgentResult[];
-    }
-  | {
-      outcome: "cancelled";
-      timed_out: false;
-      status: Record<string, never>;
-      agents: WaitAgentResult[];
-    }
-  | {
-      outcome: "timeout";
-      timed_out: true;
-      status: Record<string, never>;
-      agents: WaitAgentResult[];
-    }
-  | {
-      outcome: "error";
-      timed_out: false;
-      status: Record<string, never>;
-      message: string;
-      agents: WaitAgentResult[];
-    };
-
-type WaitAgentTiming = {
-  wait_started_at?: number;
-  wait_ended_at?: number;
-  /** Only present when the caller explicitly configured a timeout. */
-  timeout_ms?: number;
-};
-
-export type WaitAgentDetails = WaitAgentTiming &
-  (WaitAgentOutcome | { outcome: "waiting"; timed_out: false; agents: WaitAgentResult[] });
 
 /** Details attached to custom notification messages for visual rendering. */
 export interface NotificationDetails {
@@ -232,6 +181,8 @@ export interface EnvInfo {
 }
 
 export interface SpawnOptions {
+  /** Harness-only named task segment; validated and reserved by the manager. */
+  taskName?: string;
   description: string;
   allowedTools?: string[];
   /** Explicitly wait for another agent to close when capacity is exhausted. */

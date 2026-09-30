@@ -89,7 +89,7 @@ describe("embedded agent runner (real pi session)", () => {
       expect(active).toEqual(expect.arrayContaining(["read", "bash", "edit", "write"]));
       expect(active).not.toContain("spawn_agent");
       expect(active).not.toContain("wait_agent");
-      for (const name of ["send_input", "close_agent", "resume_agent", "MessageAgent"]) {
+      for (const name of ["send_message", "interrupt_agent", "followup_task", "MessageAgent"]) {
         expect(active).not.toContain(name);
         expect(session.getToolDefinition(name)).toBeUndefined();
       }

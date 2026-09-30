@@ -4,7 +4,7 @@ A small collection of personal extensions for the pi coding agent.
 
 ## What's included
 
-- Codex V1 subagents (`default`, `worker`, and `explorer` roles)
+- Direct V2 subagents (`default`, `worker`, and `explorer` roles)
 - Configurable bash command gate
 - Optional model-reviewed automode for bash-gate approvals
 - Better fuzzy finding for `@` file mentions powered by `fff`
@@ -17,6 +17,34 @@ A small collection of personal extensions for the pi coding agent.
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
 - Inline `$skill:name` / `$prompt:name` references with hidden context injection
 - Codex-style `/goal` workflow with persisted goals and automatic continuation
+
+## Subagents
+
+The six direct tools are `spawn_agent`, `send_message`, `followup_task`, `wait_agent`,
+`interrupt_agent`, and `list_agents`, on every tool-calling model. They stay direct
+with Code Mode active and with `disable: ["codexAdapter"]`. Disable them with
+`disable: ["subagents"]` and reload; selected tools and inherited parent permissions
+still restrict children, including across provider switches.
+
+Spawn requires `task_name` and `message`; `fork_turns` defaults to `all` (`none` or a
+positive integer string selects fresh/recent history). Use canonical `/root/...`
+paths for parent/sibling messages. `send_message` queues information without waking
+idle work; `followup_task` assigns another task. `wait_agent` observes mailbox activity,
+not selected agent IDs. Completion releases execution capacity; retained identities
+remain addressable even when idle runtimes unload. `/agents` and Fleet show live and
+retained conversations. Saved displays do not restore live agents.
+
+Subagents inherit the caller's model unless `model` is supplied or `defaultModel`
+is configured in `~/.pi/agent/subagents.json` or project `.pi/subagents.json`.
+`defaultReasoningEffort` sets the corresponding effort default; explicit spawn fields
+win over these defaults. Use exact `provider/modelId` values (or an unambiguous exact
+model ID), not fuzzy names. Selecting a model without an effort override resets effort
+to Pi's default for that model; otherwise effort is inherited. Applied role settings
+win last, but the built-in roles currently have no model/effort overrides.
+
+See [the V2 contract](packages/ext/subagents/CODEX_V2.md) and
+[cutover verification](docs/code-mode-contract/subagents-v2-cutover.md) and
+[release validation and remaining live gaps](docs/code-mode-contract/subagents-v2-validation.md).
 
 ## Installation
 

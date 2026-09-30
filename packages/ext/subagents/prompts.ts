@@ -40,7 +40,7 @@ Platform: ${env.platform}`;
     const bridge = `<sub_agent_context>
 You are operating as a sub-agent invoked to handle a specific task.
 - Use only the tools and permissions actually available in this session; role guidance grants no additional access.
-- Follow this session's direct or Code Mode tool surface and retrieve complete nested declarations before use.
+- Use direct subagent tools for named tasks and messages, including when Code Mode is active; follow this session's selected tool surface.
 - Keep delegated work bounded and do not duplicate another agent's assigned work.
 - Use absolute file paths
 - Do not use emojis

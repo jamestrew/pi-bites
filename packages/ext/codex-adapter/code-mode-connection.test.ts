@@ -87,11 +87,11 @@ send({type:"operation/response", id:execute.id, result:{status:"ok", value:{type
 `;
 
 test.each([
-  [{ namespace: "multi_agent_v1", name: "spawn_agent" }, true],
-  [{ namespace: "other", name: "spawn_agent" }, false],
-  [{ namespace: "multi_agent", name: "v1__spawn_agent" }, false],
-  [{ name: "multi_agent_v1__spawn_agent" }, false],
-  [{ name: "spawn_agent" }, false],
+  [{ namespace: "catalog", name: "lookup" }, true],
+  [{ namespace: "other", name: "lookup" }, false],
+  [{ namespace: "multi_agent", name: "v1__lookup" }, false],
+  [{ name: "catalog__lookup" }, false],
+  [{ name: "lookup" }, false],
 ] as const)("authorizes exact native tool identity %j", async (toolName, allowed) => {
   const host = fixture(`${readySession}
 send({type:"delegate/request", id:42, sessionId:open.request.sessionId,
@@ -107,8 +107,8 @@ setInterval(() => {}, 1000);
 `);
   let calls = 0;
   const tool: RuntimeTool = {
-    name: "multi_agent_v1__spawn_agent",
-    toolName: { namespace: "multi_agent_v1", name: "spawn_agent" },
+    name: "catalog__lookup",
+    toolName: { namespace: "catalog", name: "lookup" },
     description: "Spawn an agent",
     kind: "function",
     invoke: async (input) => {
@@ -121,8 +121,8 @@ setInterval(() => {}, 1000);
   expect(item?.type).toBe("input_text");
   const result = JSON.parse(item?.type === "input_text" ? item.text : "{}");
   expect(result.metadata).toMatchObject({
-    name: "multi_agent_v1__spawn_agent",
-    tool_name: { namespace: "multi_agent_v1", name: "spawn_agent" },
+    name: "catalog__lookup",
+    tool_name: { namespace: "catalog", name: "lookup" },
   });
   expect(result.reply).toEqual(
     allowed

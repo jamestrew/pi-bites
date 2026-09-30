@@ -1,3 +1,4 @@
+import type { AgentRecord } from "./types.js";
 /** Persistent, payload-free diagnostics for reconstructing subagent failures. */
 
 import { appendFile, mkdir } from "node:fs/promises";
@@ -81,4 +82,31 @@ export function appendSubagentDiagnostic(record: SubagentDiagnosticRecord): Prom
   const result = writeQueue.then(write, write);
   writeQueue = result.catch(() => undefined);
   return result;
+}
+
+export function agentDiagnostic(
+  record: AgentRecord,
+  event: string,
+  details?: Record<string, unknown>,
+): SubagentDiagnosticRecord {
+  return {
+    type: "subagent_diagnostic",
+    version: 1,
+    timestamp: Date.now(),
+    event,
+    agentId: record.id,
+    parentSessionId: record.parentSessionId,
+    subagent: record.type,
+    pid: process.pid,
+    ...(record.invocation?.modelName
+      ? {
+          provider: record.invocation.modelName.split("/", 1)[0],
+          model: record.invocation.modelName.includes("/")
+            ? record.invocation.modelName.slice(record.invocation.modelName.indexOf("/") + 1)
+            : record.invocation.modelName,
+        }
+      : {}),
+    ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
+    details: { generation: record.generation, ...details },
+  };
 }

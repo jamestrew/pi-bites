@@ -5,7 +5,7 @@
  * Subscribes to session events for real-time streaming updates.
  */
 
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, type AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   Input,
@@ -44,6 +44,21 @@ export const CONVERSATION_OVERLAY_OPTIONS = {
 
 const MIN_VIEWPORT = 3;
 
+type ConversationSource = Pick<AgentSession, "messages" | "subscribe"> & { historyOnly?: true };
+
+/** Read-only history needs no loaded runtime or live extension context. */
+export function getConversationSource(record: AgentRecord): ConversationSource | undefined {
+  if (record.session) return record.session;
+  const conversation = record.retainedConversation;
+  if (!conversation) return undefined;
+  return {
+    historyOnly: true,
+    messages: buildSessionContext(conversation.entries.filter((entry) => entry.type !== "session"))
+      .messages,
+    subscribe: () => () => {},
+  };
+}
+
 export class ConversationViewer implements Component {
   private scrollOffset = 0;
   private autoScroll = true;
@@ -59,7 +74,7 @@ export class ConversationViewer implements Component {
 
   constructor(
     private tui: TUI,
-    private session: AgentSession,
+    private session: ConversationSource,
     private record: AgentRecord,
     private activity: AgentActivity | undefined,
     private theme: Theme,
@@ -73,6 +88,13 @@ export class ConversationViewer implements Component {
     /** Cancel the current operation, then resume with this steering message. */
     private onCancelSteer?: (message: string) => void,
   ) {
+    if (session.historyOnly) {
+      this.record = { ...record, lifetimeUsage: { ...record.lifetimeUsage } };
+      this.activity = undefined;
+      this.onStop = undefined;
+      this.onSteer = undefined;
+      this.onCancelSteer = undefined;
+    }
     this.keys = createViewerKeys(keybindings);
     this.unsubscribe = session.subscribe(() => {
       if (this.closed) return;
@@ -171,11 +193,12 @@ export class ConversationViewer implements Component {
             : th.fg("dim", "○");
     const duration = formatDuration(this.record.startedAt, this.record.completedAt);
     const headerParts: string[] = [duration];
+    if (this.session.historyOnly) headerParts.push("retained history");
     const toolUses = this.activity?.toolUses ?? this.record.toolUses;
     if (toolUses > 0) headerParts.unshift(`${toolUses} tool${toolUses === 1 ? "" : "s"}`);
-    const tokens = getLifetimeTotal(this.activity?.lifetimeUsage);
+    const tokens = getLifetimeTotal(this.activity?.lifetimeUsage ?? this.record.lifetimeUsage);
     if (tokens > 0) {
-      const percent = getSessionContextPercent(this.activity?.session);
+      const percent = getSessionContextPercent(this.record.session);
       headerParts.push(formatSessionTokens(tokens, percent, th, this.record.compactionCount));
     }
 

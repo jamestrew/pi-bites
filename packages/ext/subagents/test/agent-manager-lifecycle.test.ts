@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AgentManager } from "../agent-manager.js";
 
 vi.mock("../agent-runner.js", () => ({
@@ -6,9 +7,10 @@ vi.mock("../agent-runner.js", () => ({
   resumeAgent: vi.fn(),
 }));
 
-vi.mock("../usage.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../usage.js")>()),
-  appendSubagentUsageRecord: vi.fn(() => Promise.resolve()),
+vi.mock("node:fs/promises", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs/promises")>()),
+  mkdir: vi.fn(() => Promise.resolve()),
+  appendFile: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../diagnostics.js", async (importOriginal) => ({
@@ -18,7 +20,13 @@ vi.mock("../diagnostics.js", async (importOriginal) => ({
 
 import { resumeAgent, runAgent } from "../agent-runner.js";
 import { appendSubagentDiagnostic } from "../diagnostics.js";
-import { mockCtx, mockPendingRun, mockPi, mockSession } from "./helpers/agent-manager-mocks.js";
+import {
+  mockCtx,
+  mockPendingRun,
+  mockPi,
+  mockSession,
+  waitForCancellation,
+} from "./helpers/agent-manager-mocks.js";
 
 function staleableParentCtx(): { parent: any; goStale: () => void } {
   let stale = false;
@@ -845,4 +853,112 @@ describe("AgentManager — detached lifecycle", () => {
     expect(manager.getRecord(id)?.result).toBeUndefined();
     expect(onComplete).toHaveBeenCalledOnce();
   });
+});
+
+describe("AgentManager runtime disposal", () => {
+  let manager: AgentManager;
+  afterEach(() => manager.dispose());
+
+  it("rejects active turns and pending input without invalidating the runtime", async () => {
+    manager = new AgentManager();
+    let finish!: (value: { responseText: string; session: any }) => void;
+    const session = {
+      ...mockSession(),
+      pendingMessageCount: 0,
+      sessionManager: SessionManager.inMemory("/tmp"),
+    };
+    vi.mocked(runAgent).mockImplementationOnce((_parent, _type, _prompt, options) => {
+      options.onSessionCreated?.(session);
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const id = manager.spawn(mockPi, mockCtx, "worker", "task", { description: "task" });
+    await expect(manager.disposeRuntime(id)).rejects.toThrow("busy");
+    finish({ responseText: "done", session });
+    await manager.getRecord(id)!.promise;
+    session.pendingMessageCount = 1;
+    await expect(manager.disposeRuntime(id)).rejects.toThrow("busy");
+    expect(manager.getRecord(id)!.session).toBe(session);
+    expect(session.dispose).not.toHaveBeenCalled();
+  });
+
+  it("claims before input, retains shutdown-flushed history, and joins concurrent retirement", async () => {
+    const completed = vi.fn();
+    manager = new AgentManager(completed);
+    const sessionManager = SessionManager.inMemory("/tmp");
+    let release!: () => void;
+    const cleanup = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const session = {
+      ...mockSession(),
+      sessionManager,
+      extensionRunner: {
+        emit: vi.fn(async () => {
+          await cleanup;
+          sessionManager.appendCustomMessageEntry("subagent-message", "flushed finding", true);
+        }),
+      },
+    };
+    vi.mocked(runAgent).mockResolvedValueOnce({ responseText: "done", session });
+    const id = manager.spawn(mockPi, mockCtx, "worker", "task", { description: "task" });
+    await manager.getRecord(id)!.promise;
+    manager.tree.setMaxDepth(2);
+    vi.mocked(runAgent).mockImplementationOnce((_parent, _type, _prompt, options) =>
+      waitForCancellation(options.signal),
+    );
+    const descendantId = manager.spawn(
+      mockPi,
+      { ...mockCtx, sessionManager },
+      "worker",
+      "descendant",
+      {
+        description: "descendant",
+      },
+    );
+    const descendant = manager.getRecord(descendantId)!;
+    const disposing = manager.disposeRuntime(id);
+    expect(manager.disposeRuntime(id)).toBe(disposing);
+    expect(manager.startTurn(id, "too late")).toBe(false);
+    const closing = manager.close(id);
+    try {
+      expect(manager.isClosing(id)).toBe(true);
+      expect(manager.isClosing(descendantId)).toBe(true);
+      await vi.waitFor(() => expect(descendant.abortController!.signal.aborted).toBe(true));
+    } finally {
+      release();
+      await Promise.all([disposing, closing]);
+    }
+    expect(session.extensionRunner.emit).toHaveBeenCalledOnce();
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(manager.getRecord(id)).toBeUndefined();
+    expect(JSON.stringify(manager.getClosedRecord(id))).toContain("flushed finding");
+    expect(completed.mock.calls.filter(([record]) => record.id === id)).toHaveLength(1);
+  });
+});
+
+it("protects viewed terminal runtimes and unseen persisted mail independently of native input", async () => {
+  const manager = new AgentManager();
+  const session = {
+    ...mockSession(),
+    pendingMessageCount: 0,
+    sessionManager: SessionManager.inMemory("/tmp"),
+  };
+  vi.mocked(runAgent).mockResolvedValueOnce({ session, responseText: "done" });
+  try {
+    const id = manager.spawn(mockPi, mockCtx, "worker", "task", { description: "task" });
+    await manager.getRecord(id)!.promise;
+    const release = manager.runtimes.protect(id);
+    await expect(manager.disposeRuntime(id)).rejects.toThrow("busy");
+    release();
+    manager.runtimes.hasPendingMail = () => true;
+    await expect(manager.disposeRuntime(id)).rejects.toThrow("busy");
+    manager.runtimes.hasPendingMail = () => false;
+    await manager.disposeRuntime(id);
+    expect(session.dispose).toHaveBeenCalledOnce();
+    expect(manager.getRecord(id)!.retainedConversation).toBeDefined();
+  } finally {
+    await manager.dispose();
+  }
 });

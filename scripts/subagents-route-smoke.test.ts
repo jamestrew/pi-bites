@@ -1,82 +1,76 @@
 import { expect, test } from "vitest";
-import { checkLifecycle, type Operation } from "./subagents-route-smoke.js";
+import { checkLifecycle, checkMailbox, type Operation } from "./subagents-route-smoke.js";
 import { findMatchedPatterns } from "../packages/ext/bash-gate/policy.js";
 
-test("real-shaped V1 results require ordered retained-id lifecycle and unprompted recall", async () => {
-  const result = (value: unknown, details = {}) => ({
-    content: [{ type: "text", text: JSON.stringify(value) }],
-    details,
+test("smoke validates queue-only history separately from streaming events and rejects duplicate finals", () => {
+  const mail = (completion?: string) => ({
+    role: "custom",
+    customType: "subagent-message",
+    details: { sender: { id: "/root/probe" }, ...(completion ? { completion } : {}) },
   });
+  const history = [mail(), mail("completed"), mail("completed")];
+  expect(checkMailbox(history)).toEqual({ independentFinals: true, independentProgress: true });
+  expect(checkMailbox(history.slice(1)).independentProgress).toBe(false);
+  expect(checkMailbox([...history, mail("completed")]).independentFinals).toBe(false);
+  expect(checkMailbox([mail(), mail("failed")]).independentFinals).toBe(false);
+  expect(checkMailbox([]).independentFinals).toBe(false);
+});
+
+test("V2 smoke requires ordered completion, retained-task recall and direct mailbox/message results", async () => {
+  const result = (value: unknown) => ({
+    content: [{ type: "text", text: value === "" ? "" : JSON.stringify(value) }],
+  });
+  const listed = (answer: string) =>
+    result({ agents: [{ agent_name: "/root/probe", agent_status: { completed: answer } }] });
   const operations: Operation[] = [
     {
       owner: "parent",
       name: "spawn_agent",
       args: {
+        task_name: "probe",
         agent_type: "default",
         model: "provider/model",
-        message: "Retain V1_RETAINED_278; printf subagent-approved",
+        message: "Retain V2_RETAINED_352; printf subagent-approved",
       },
-      result: result({ agent_id: "child", nickname: "Default" }),
+      result: result({ task_name: "/root/probe" }),
     },
     {
-      owner: "child",
-      name: "send_input",
-      args: { target: "parent-session", message: "progress" },
-      result: result({ submission_id: "progress-id" }),
-    },
-    {
-      owner: "parent",
-      name: "wait_agent",
-      args: { targets: ["child"] },
-      result: result({ status: { child: { completed: "done" } }, timed_out: false }),
-    },
-    {
-      owner: "parent",
-      name: "close_agent",
-      args: { target: "child" },
-      result: result({ previous_status: { completed: "done" } }, { status: "closed" }),
-    },
-    {
-      owner: "parent",
-      name: "resume_agent",
-      args: { id: "child" },
-      result: result({ status: "pending_init" }, { status: "resumed" }),
-    },
-    {
-      owner: "parent",
-      name: "send_input",
-      args: { target: "child", message: "Recall the retained marker" },
-      result: result({ submission_id: "recall-id" }),
+      owner: "/root/probe",
+      name: "send_message",
+      args: { target: "/root", message: "progress" },
+      result: result(""),
     },
     {
       owner: "parent",
       name: "wait_agent",
-      args: { targets: ["child"] },
-      result: result({ status: { child: { completed: "V1_RETAINED_278" } }, timed_out: false }),
+      args: {},
+      result: result({ message: "Wait completed.", timed_out: false }),
+    },
+    { owner: "parent", name: "list_agents", args: {}, result: listed("done") },
+    {
+      owner: "parent",
+      name: "interrupt_agent",
+      args: { target: "/root/probe" },
+      result: result({ previous_status: { completed: "done" } }),
     },
     {
       owner: "parent",
-      name: "close_agent",
-      args: { target: "child" },
-      result: result({ previous_status: { completed: "V1_RETAINED_278" } }, { status: "closed" }),
+      name: "followup_task",
+      args: { target: "/root/probe", message: "Recall the retained marker" },
+      result: result(""),
     },
+    { owner: "parent", name: "list_agents", args: {}, result: listed("V2_RETAINED_352") },
   ];
   expect(Object.values(checkLifecycle(operations, "provider/model")).every(Boolean)).toBe(true);
   for (const mutate of [
     (copy: Operation[]) => {
-      copy[5]!.args.message = "Recall V1_RETAINED_278";
+      copy[5]!.args.message = "Recall V2_RETAINED_352";
     },
     (copy: Operation[]) => {
-      copy[4]!.args.id = "other-child";
+      copy[5]!.args.target = "/root/other";
     },
     (copy: Operation[]) => {
-      copy[6]!.result = result({ status: { child: "running" }, timed_out: true });
-    },
-    (copy: Operation[]) => {
-      copy[6]!.result = result({
-        status: { child: { completed: "I succeeded" } },
-        timed_out: false,
-      });
+      copy[6]!.result = listed("I succeeded");
     },
     (copy: Operation[]) => {
       copy.splice(3, 1);
@@ -84,12 +78,14 @@ test("real-shaped V1 results require ordered retained-id lifecycle and unprompte
     (copy: Operation[]) => {
       copy[0]!.error = "provider failed";
     },
+    (copy: Operation[]) => {
+      copy[2]!.args.targets = ["old-id"];
+    },
   ]) {
     const copy = structuredClone(operations);
     mutate(copy);
     expect(Object.values(checkLifecycle(copy, "provider/model")).every(Boolean)).toBe(false);
   }
-  // Harness all-command configuration must override even normally allowlisted commands.
   for (const command of [
     "printf subagent-approved",
     "printf unexpected",
