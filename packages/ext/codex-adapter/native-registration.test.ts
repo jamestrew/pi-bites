@@ -1,0 +1,580 @@
+import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, expect, test, vi } from "vitest";
+import {
+  InMemoryCredentialStore,
+  createAssistantMessageEventStream,
+  type AssistantMessage,
+  type StreamFunction,
+} from "@earendil-works/pi-ai";
+import {
+  createAgentSession,
+  createToolSearchExtension,
+  type ExtensionContext,
+  type ExtensionUIContext,
+  DefaultResourceLoader,
+  ModelRuntime,
+  SessionManager,
+  SettingsManager,
+} from "@earendil-works/pi-coding-agent";
+import registerAdapter from "./index.js";
+import registerBashGate from "../bash-gate/index.js";
+import type { BitesConfig } from "../config.js";
+
+const cleanup: (() => Promise<void>)[] = [];
+afterEach(async () => {
+  for (const fn of cleanup.splice(0).reverse()) await fn();
+});
+function response(
+  model: Parameters<StreamFunction>[0],
+  content: AssistantMessage["content"],
+  stopReason: "stop" | "toolUse",
+) {
+  const stream = createAssistantMessageEventStream();
+  const message: AssistantMessage = {
+    role: "assistant",
+    content,
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason,
+    timestamp: Date.now(),
+  };
+  queueMicrotask(() => {
+    stream.push({ type: "done", reason: stopReason, message });
+    stream.end(message);
+  });
+  return stream;
+}
+async function setup(
+  selected?: string[],
+  options: { config?: BitesConfig; defaultTools?: string[]; gate?: boolean } = {},
+) {
+  const config = { current: options.config ?? {} };
+  const ui = {
+    select: vi.fn(async () => "Allow" as string | undefined),
+    notify: vi.fn(),
+    setStatus: vi.fn(),
+    input: vi.fn(),
+  };
+  let captured: ExtensionContext | undefined;
+  let setTools: (names: string[]) => void;
+  let adapter: ReturnType<typeof registerAdapter>;
+  let preview: ReturnType<typeof registerAdapter>["previewPrompt"] | undefined;
+  let transform: ((text: string, ctx: any) => string) | undefined;
+  const cwd = mkdtempSync(join(tmpdir(), "native-adapter-"));
+  const runtime = await ModelRuntime.create({
+    allowModelNetwork: false,
+    credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
+  });
+  runtime.registerProvider("native-test", {
+    api: "openai-responses",
+    apiKey: "test",
+    authHeader: true,
+    baseUrl: "http://localhost",
+    models: ["gpt-6.1-sol", "claude"].map((id) => ({
+      id,
+      name: id,
+      reasoning: false,
+      input: ["text", "image"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200000,
+      maxTokens: 100,
+    })),
+  });
+  const loader = new DefaultResourceLoader({
+    cwd,
+    agentDir: cwd,
+    noExtensions: true,
+    noSkills: true,
+    noContextFiles: true,
+    extensionFactories: [
+      createToolSearchExtension(),
+      (pi) => {
+        setTools = pi.setActiveTools;
+        const gate = options.gate ? registerBashGate(pi, config) : undefined;
+        const original = pi.registerMarkdownTransformer;
+        adapter = registerAdapter(
+          {
+            ...pi,
+            registerMarkdownTransformer: (fn) => {
+              transform = fn;
+              original(fn);
+            },
+          },
+          config,
+          gate,
+        );
+        preview = adapter.previewPrompt;
+        pi.on("session_start", (_e, ctx) => {
+          captured = ctx;
+        });
+      },
+    ],
+  });
+  await loader.reload();
+  const { session } = await createAgentSession({
+    cwd,
+    agentDir: cwd,
+    modelRuntime: runtime,
+    model: runtime.getModel("native-test", "gpt-6.1-sol")!,
+    resourceLoader: loader,
+    sessionManager: SessionManager.inMemory(cwd),
+    settingsManager: SettingsManager.inMemory({
+      compaction: { enabled: false },
+      retry: { enabled: false },
+      ...(options.defaultTools ? { defaultTools: options.defaultTools } : {}),
+    }),
+    ...(selected ? { tools: selected } : {}),
+  });
+  cleanup.push(async () => {
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    session.dispose();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+  await session.bindExtensions(
+    options.gate ? { uiContext: ui as unknown as ExtensionUIContext } : {},
+  );
+  const events: any[] = [];
+  session.subscribe((event) => events.push(event));
+  let seq = 0;
+  async function call(name: string, args: import("@earendil-works/pi-ai").JsonObject) {
+    const id = `script-${++seq}`;
+    let turns = 0;
+    session.agent.streamFunction = (model) =>
+      turns++ === 0
+        ? response(model, [{ type: "toolCall", id, name, arguments: args }], "toolUse")
+        : response(model, [{ type: "text", text: "done" }], "stop");
+    await session.prompt("run");
+    const end = events.find((e) => e.type === "tool_execution_end" && e.toolCallId === id);
+    expect(end).toBeDefined();
+    return end;
+  }
+  const run = (code: string) => call("codemode", { code });
+  return {
+    session,
+    run,
+    call,
+    events,
+    cwd,
+    runtime,
+    config,
+    ui,
+    setTools: (names: string[]) => setTools(names),
+    getContext: () => captured!,
+    preview: () => preview!,
+    previewTools: () => adapter.previewTools!(session.getAllTools()),
+    transform: (text: string) => transform!(text, { messageType: "assistant" }),
+  };
+}
+const textOf = (event: any) =>
+  event.result.content
+    .filter((c: any) => c.type === "text")
+    .map((c: any) => c.text)
+    .join("\n");
+
+test("parent uses host-free native discovery and typed parallel shell results", async () => {
+  const h = await setup();
+  expect(h.session.getActiveToolNames()).toContain("codemode");
+  expect(h.session.getActiveToolNames()).not.toContain("exec");
+  expect(h.session.getActiveToolNames()).not.toContain("wait");
+  const result = await h.run(
+    `text(ALL_TOOLS.map(t=>t.name)); text(await Promise.all([tools.exec_command({cmd:'printf hello',login:false}),tools.exec_command({cmd:'printf failed; exit 7',login:false})]));`,
+  );
+  expect(result.isError, textOf(result)).toBe(false);
+  expect(textOf(result)).toContain('"output":"hello"');
+  expect(textOf(result)).toContain('"exit_code":7');
+  expect(textOf(result)).not.toContain("web_run");
+  const nested = h.events.filter(
+    (e) => e.type === "tool_execution_end" && e.toolName === "exec_command",
+  );
+  expect(nested).toHaveLength(2);
+  expect(new Set(nested.map((e) => e.toolCallId)).size).toBe(2);
+});
+
+test("native patch accepts object and raw string, reports partial mutation failure, and emits images only explicitly", async () => {
+  const h = await setup();
+  const patch = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch";
+  const applied = await h.run(`text(await tools.apply_patch(${JSON.stringify(patch)}));`);
+  expect(applied.isError).toBe(false);
+  expect(textOf(applied)).toContain('"status":"success"');
+  const partial =
+    "*** Begin Patch\n*** Add File: created.txt\n+created\n*** Update File: missing.txt\n@@\n-x\n+y\n*** End Patch";
+  const failed = await h.run(
+    `text('before'); await tools.apply_patch({input:${JSON.stringify(partial)}}); text('unreachable');`,
+  );
+  expect(failed.isError).toBe(true);
+  expect(textOf(failed)).toContain("before");
+  expect(textOf(failed)).toContain("partially failed");
+  expect(textOf(failed)).not.toContain("unreachable");
+  const inspect = await h.run(
+    `text((await tools.exec_command({cmd:'cat hello.txt created.txt',login:false})).output);`,
+  );
+  expect(textOf(inspect)).toContain("hello\ncreated");
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(
+    join(h.cwd, "pixel.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGNkZGJmYGAAAAAqAAjaWO5EAAAAAElFTkSuQmCC",
+      "base64",
+    ),
+  );
+  const silent = await h.run(`store('picture',await tools.view_image({path:'pixel.png'}));`);
+  expect(silent.result.content.some((c: any) => c.type === "image")).toBe(false);
+  const shown = await h.run(`image(load('picture')); text('shown');`);
+  expect(shown.result.content).toContainEqual(
+    expect.objectContaining({ type: "image", mimeType: "image/png" }),
+  );
+  const missing = await h.run(`await tools.view_image({path:'missing.png'});`);
+  expect(missing.isError).toBe(true);
+});
+
+test("normal completion and script error retain returned shell sessions for later polling", async () => {
+  const h = await setup();
+  const start = await h.run(
+    `store('shell',await tools.exec_command({cmd:'sleep 0.5; printf later; exit 3',login:false,yield_time_ms:250})); text(load('shell').session_id);`,
+  );
+  expect(start.isError).toBe(false);
+  const failed = await h.run(`text('retained'); throw new Error('native failure');`);
+  expect(failed.isError).toBe(true);
+  expect(textOf(failed)).toContain("retained");
+  const poll = await h.run(`text(await tools.write_stdin({session_id:load('shell').session_id}));`);
+  expect(textOf(poll)).toContain('"output":"later"');
+  expect(textOf(poll)).toContain('"exit_code":3');
+});
+
+test("read-only registry selections cannot discover or call inactive shell and patch tools", async () => {
+  const h = await setup([
+    "read",
+    "codemode",
+    "exec_command",
+    "write_stdin",
+    "apply_patch",
+    "view_image",
+  ]);
+  expect(h.session.getCallableToolNames()).not.toContain("exec_command");
+  expect(h.session.getCallableToolNames()).not.toContain("apply_patch");
+  const discovered = await h.run(
+    `text(ALL_TOOLS.map(t=>t.name)); text(await searchTools('shell command patch'));`,
+  );
+  expect(textOf(discovered)).not.toContain("exec_command");
+  expect(textOf(discovered)).not.toContain("apply_patch");
+  expect((await h.run(`await tools.exec_command({cmd:'touch forbidden'});`)).isError).toBe(true);
+});
+
+test("model transitions restore core selection, clear store, and do not broaden GPT scope", async () => {
+  const h = await setup();
+  await h.run(`store('old',42);`);
+  await h.session.setModel(h.runtime.getModel("native-test", "claude")!);
+  expect(h.session.getActiveToolNames()).toEqual(
+    expect.arrayContaining(["read", "bash", "edit", "write"]),
+  );
+  expect(h.session.getCallableToolNames()).not.toContain("exec_command");
+  expect(h.session.getActiveToolNames()).not.toContain("codemode");
+  await h.session.setModel(h.runtime.getModel("native-test", "gpt-6.1-sol")!);
+  expect(h.session.getActiveToolNames()).toContain("codemode");
+  expect(textOf(await h.run(`text(load('old'));`))).not.toContain("42");
+});
+
+test("separately enabled tool search cannot recover read-only tools or explicit disables", async () => {
+  const h = await setup(undefined, {
+    defaultTools: ["read", "codemode", "tool_search", "-exec_command", "-apply_patch"],
+  });
+  expect(h.session.getCallableToolNames()).not.toContain("exec_command");
+  const search = await h.call("tool_search", {
+    query: "exec_command apply_patch shell patch",
+    limit: 10,
+  });
+  expect(search.result.details.loaded).not.toContain("exec_command");
+  expect(search.result.details.loaded).not.toContain("apply_patch");
+  expect(h.session.getCallableToolNames()).not.toContain("exec_command");
+  h.config.current.disable = ["codexAdapter"];
+  await h.session.extensionRunner.emit({
+    type: "model_select",
+    model: h.runtime.getModel("native-test", "gpt-6.1-sol")!,
+    previousModel: undefined,
+    source: "set",
+  } as never);
+  expect(h.session.getActiveToolNames()).not.toContain("codemode");
+  expect(h.session.getCallableToolNames()).not.toContain("view_image");
+});
+
+test("web route returns text and collects citations once through native execution", async () => {
+  const h = await setup(undefined, {
+    config: { codexAdapter: { webSearchProviders: ["native-test"] } },
+    defaultTools: ["+tool_search"],
+  });
+  const helper = join(h.cwd, "web-helper");
+  const output = {
+    output_text: "Evidence citeturn0search0",
+    search_results: [{ ref_id: "turn0search0", url: "https://example.com/source" }],
+  };
+  writeFileSync(helper, `#!/bin/sh\ncat >/dev/null\nprintf '%s' '${JSON.stringify(output)}'\n`, {
+    mode: 0o755,
+  });
+  vi.stubEnv("PI_CODEX_WEB_RUN_BIN", helper);
+  try {
+    const search = await h.call("tool_search", { query: "web_run", limit: 1 });
+    expect(search.result.details.loaded).toContain("web_run");
+    const result = await h.run(
+      `const value=await tools.web_run({search_query:[{q:'evidence'}]});text(typeof value);text(value);`,
+    );
+    expect(result.isError, textOf(result)).toBe(false);
+    expect(textOf(result)).toContain("string");
+    expect(textOf(result)).toContain("Evidence citeturn0search0");
+    expect(h.transform("Evidence citeturn0search0")).toBe(
+      "Evidence [source](<https://example.com/source>)",
+    );
+    expect(
+      h.events.filter((e) => e.type === "tool_execution_end" && e.toolName === "web_run"),
+    ).toHaveLength(1);
+    expect(h.session.getActiveToolNames()).toContain("web_run");
+    h.config.current.codexAdapter = {};
+    expect((await h.run(`await tools.web_run({search_query:[{q:'forbidden'}]});`)).isError).toBe(
+      true,
+    );
+    expect(h.session.getCallableToolNames()).not.toContain("web_run");
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+test("parallel shell reviews serialize dialogs, authorize once per launch, and pin launch cwd", async () => {
+  const h = await setup(undefined, {
+    gate: true,
+    config: { bashGate: { rules: [{ cmd: "printf" }] } },
+  });
+  const first = Promise.withResolvers<string>();
+  h.ui.select.mockImplementationOnce(() => first.promise);
+  const pending = h.run(
+    `text(await Promise.all([tools.exec_command({cmd:'printf one',login:false}),tools.exec_command({cmd:'printf two',login:false})]));`,
+  );
+  await expect.poll(() => h.ui.select.mock.calls.length).toBe(1);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  expect(h.ui.select).toHaveBeenCalledTimes(1);
+  first.resolve("Allow");
+  const result = await pending;
+  expect(result.isError, textOf(result)).toBe(false);
+  expect(textOf(result)).toContain('"output":"one"');
+  expect(textOf(result)).toContain('"output":"two"');
+  expect(h.ui.select).toHaveBeenCalledTimes(2);
+});
+
+test("cancellation and throwing stale contexts reject late approval without launching", async () => {
+  const h = await setup(undefined, {
+    gate: true,
+    config: { bashGate: { rules: [{ cmd: "touch" }] } },
+  });
+  const choice = Promise.withResolvers<string>();
+  h.ui.select.mockImplementationOnce(() => choice.promise);
+  const ctx = h.getContext();
+  const pending = h.run(`await tools.exec_command({cmd:'touch forbidden',login:false});`);
+  await expect.poll(() => h.ui.select.mock.calls.length).toBe(1);
+  await h.session.abort();
+  await pending;
+  h.session.dispose();
+  expect(() => ctx.cwd).toThrow();
+  choice.resolve("Allow");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(existsSync(join(h.cwd, "forbidden"))).toBe(false);
+});
+
+test("explicit cancellation kills only shells launched by the cancelled script", async () => {
+  const h = await setup();
+  await h.run(
+    `store('unrelated',await tools.exec_command({cmd:'sleep 60',login:false,yield_time_ms:250}));`,
+  );
+  const pending = h.run(
+    `store('cancelled',await tools.exec_command({cmd:'echo $$ > owned.pid; sleep 60',login:false,yield_time_ms:250})); await tools.exec_command({cmd:'sleep 60',login:false,yield_time_ms:30000});`,
+  );
+  await expect
+    .poll(
+      () =>
+        h.events.filter((e) => e.type === "tool_execution_end" && e.toolName === "exec_command")
+          .length,
+    )
+    .toBe(2);
+  const pid = Number(readFileSync(join(h.cwd, "owned.pid"), "utf8").trim());
+  expect(
+    pid,
+    JSON.stringify(h.events.filter((e) => e.type === "tool_execution_end")),
+  ).toBeGreaterThan(1);
+  await h.session.abort();
+  await pending;
+  await expect
+    .poll(() => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    })
+    .toBe(false);
+  // Polling a pre-existing session is not ownership: cancellation above leaves it alive.
+  const result = await h.run(
+    `text(await tools.write_stdin({session_id:load('unrelated').session_id,chars:''}));`,
+  );
+  expect(result.isError, textOf(result)).toBe(false);
+  expect(textOf(result)).toContain('"session_id"');
+}, 15000);
+
+test("unhandled script errors cancel pending approvals but preserve finished shell launches", async () => {
+  const h = await setup(undefined, {
+    gate: true,
+    config: { bashGate: { rules: [{ cmd: "touch" }] } },
+  });
+  const choice = Promise.withResolvers<string>();
+  h.ui.select.mockResolvedValueOnce("Allow").mockImplementationOnce(() => choice.promise);
+  const pending = h.run(
+    `const shell=await tools.exec_command({cmd:'echo $$ > owned.pid; sleep 60',login:false,yield_time_ms:250}); text(shell); await Promise.all([tools.exec_command({cmd:'touch forbidden',login:false}),tools.exec_command({cmd:'printf done',login:false}).then(()=>{throw new Error('stop script');})]);`,
+  );
+  await expect.poll(() => h.ui.select.mock.calls.length).toBe(2);
+  const result = await pending;
+  expect(result.isError).toBe(true);
+  choice.resolve("Allow");
+  expect(() =>
+    process.kill(Number(readFileSync(join(h.cwd, "owned.pid"), "utf8").trim()), 0),
+  ).not.toThrow();
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  expect(existsSync(join(h.cwd, "forbidden"))).toBe(false);
+});
+
+test.each(["session_tree", "session_start", "session_shutdown"] as const)(
+  "native %s invalidates shell and store ownership without restoring resources",
+  async (event) => {
+    const h = await setup();
+    const launched = await h.run(
+      `store('old',await tools.exec_command({cmd:'echo $$ > owned.pid; sleep 60',login:false,yield_time_ms:250}));text(load('old'));`,
+    );
+    expect(launched.isError).toBe(false);
+    const pid = Number(readFileSync(join(h.cwd, "owned.pid"), "utf8").trim());
+    await h.session.extensionRunner.emit({ type: event, reason: "reload" } as never);
+    await expect
+      .poll(() => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+      .toBe(false);
+    if (event !== "session_shutdown")
+      expect(textOf(await h.run(`text(load('old'));`))).not.toContain("session_id");
+  },
+);
+
+test("removing codemode restores displaced tools and permits a new read-only selection", async () => {
+  const h = await setup();
+  h.setTools([]);
+  await h.session.extensionRunner.emit({ type: "model_select" } as never);
+  expect(h.session.getActiveToolNames()).toEqual(
+    expect.arrayContaining(["read", "bash", "edit", "write"]),
+  );
+  h.setTools(["read", "codemode"]);
+  await h.session.extensionRunner.emit({ type: "model_select" } as never);
+  expect(h.session.getCallableToolNames()).not.toContain("exec_command");
+  expect(h.session.getCallableToolNames()).not.toContain("apply_patch");
+  expect(h.session.getCallableToolNames()).toContain("read");
+});
+
+test("no Code Mode host is needed, and validation/startup failures reject rather than return values", async () => {
+  const h = await setup();
+  vi.stubEnv("PATH", "/no-code-mode-host");
+  try {
+    const result = await h.run(
+      `text(await tools.exec_command({cmd:'printf native',shell:'/bin/sh',login:false}));`,
+    );
+    expect(result.isError, textOf(result)).toBe(false);
+    expect(textOf(result)).toContain("native");
+    expect(
+      (await h.run(`await tools.exec_command({cmd:'printf no',yield_time_ms:-1});`)).isError,
+    ).toBe(true);
+    expect(
+      (
+        await h.run(
+          `await tools.exec_command({cmd:'printf no',sandbox_permissions:'require_escalated'});`,
+        )
+      ).isError,
+    ).toBe(true);
+    expect(
+      (await h.run(`await tools.exec_command({cmd:'printf no',shell:'/missing-shell'});`)).isError,
+    ).toBe(true);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+test("native renderer restores bounded operation/error rows and script-only output", async () => {
+  const h = await setup();
+  const script = await h.run(`text('standalone');`);
+  const nested = await h.run(
+    `await tools.exec_command({cmd:'printf visible',login:false}); throw new Error('render failure');`,
+  );
+  const tool = h.session.getToolDefinition("codemode")!;
+  const theme = {
+    bold: (s: string) => s,
+    fg: (_role: string, s: string) => s,
+    bg: (_role: string, s: string) => s,
+  };
+  const render = (result: any, expanded: boolean) =>
+    tool.renderResult!(
+      JSON.parse(JSON.stringify(result.result)),
+      { expanded, isPartial: false },
+      theme as never,
+      {
+        args: { code: "" },
+        toolCallId: "restored",
+        invalidate() {},
+        lastComponent: undefined,
+        state: {},
+        cwd: h.cwd,
+        executionStarted: true,
+        argsComplete: true,
+        isPartial: false,
+        expanded,
+        showImages: false,
+        isError: result.isError,
+      },
+    )
+      .render(80)
+      .join("\n");
+  expect(render(script, false)).toContain("standalone");
+  expect(render(nested, false)).toContain("exec_command");
+  expect(render(nested, true)).toContain("render failure");
+  expect(JSON.stringify(nested.result.details)).not.toContain("traces");
+});
+
+test("context previews follow native prepared loadouts and model/classifier helpers stay out of scope", async () => {
+  const h = await setup();
+  const prepared = () => h.previewTools().find((t) => t.name === "codemode")!.description;
+  expect(prepared()).toBe(
+    h.session.agent.state.tools.find((t) => t.name === "codemode")!.description,
+  );
+  expect(prepared()).toContain("exec_command");
+  expect(prepared()).toContain("exit_code");
+  const helpers = await h.run(`text({models:typeof models,classify:typeof classify});`);
+  expect(textOf(helpers)).toContain('"models":"undefined"');
+  expect(textOf(helpers)).toContain('"classify":"undefined"');
+  h.setTools([]);
+  await h.session.extensionRunner.emit({ type: "model_select" } as never);
+  h.setTools(["read", "codemode"]);
+  await h.session.extensionRunner.emit({ type: "model_select" } as never);
+  expect(prepared()).toBe(
+    h.session.agent.state.tools.find((t) => t.name === "codemode")!.description,
+  );
+  expect(prepared()).not.toContain("tools.exec_command");
+  await h.session.setModel(h.runtime.getModel("native-test", "claude")!);
+  expect(h.previewTools()).toEqual(h.session.getAllTools());
+});
