@@ -28,12 +28,14 @@ describe("renderContextMarkdown", () => {
         name: "read",
         description: "Read a file.",
         parameters: { type: "object", properties: { path: { type: "string" } } },
+        exposure: "direct" as const,
         sourceInfo,
       },
       {
         name: "write",
         description: "Write a file.",
         parameters: { type: "object", properties: {} },
+        exposure: "direct" as const,
         sourceInfo,
       },
     ] as ToolInfo[];

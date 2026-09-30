@@ -69,6 +69,15 @@ you do **not** need to install V8 separately. Restart Pi, or run `/reload`
 after changing `PATH`. To use pi-bites without Code Mode, add
 `"codexAdapter"` to the `disable` list instead.
 
+## Development
+
+Pi-bites builds and tests against Pi 0.99.1. `bun run dev` keeps extension discovery
+isolated with `--no-extensions`, then explicitly loads only `builtin:codemode`,
+`builtin:tool-search`, and the local pi-bites extension. Loading those built-ins does
+not activate their tools or cut GPT sessions over to native codemode; activate a safe
+manual demo with Pi settings such as `defaultTools: ["+codemode"]` or a one-off tool
+selection that includes `codemode`.
+
 ## Configuration
 
 `pi-bites` reads JSON config from two places:

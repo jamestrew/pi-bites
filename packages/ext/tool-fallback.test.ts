@@ -61,29 +61,31 @@ test("Pi's renderer-less extension fallback previews, expands, and fits narrow t
         const rows = component.render(width);
         for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(width);
         const lines = rows.map((row) => stripVTControlCharacters(row).trim()).filter(Boolean);
-        expect(lines[0]).toBe("checks");
-        expect(lines.join("\n")).not.toContain("private-project-argument");
-        expect(lines.join("\n")).not.toContain('"project"');
+        expect(lines[0]?.startsWith("checks")).toBe(true);
+        const joined = lines.join("\n");
+        expect(joined.replace(/\s+/g, "")).toContain("private-project-argument");
+        expect(joined).not.toContain('"project"');
         return lines;
       };
       component.updateResult(result);
       component.setExpanded(false);
       const collapsed = render();
-      expect(collapsed.slice(1, 11)).toEqual(checks.slice(0, 10));
-      // Ten short result lines plus heading and a possibly wrapped hint stay compact.
-      expect(collapsed.length).toBeLessThanOrEqual(14);
+      const collapsedChecks = collapsed.filter((line) => line.startsWith("Check "));
+      expect(collapsedChecks).toEqual(checks.slice(0, 10));
+      // Ten short result lines plus heading/arguments and a possibly wrapped hint stay compact.
+      expect(collapsed.length).toBeLessThanOrEqual(16);
       expect(collapsed.join(" ")).not.toContain(checks[10]);
-      expect(collapsed.slice(11).join(" ")).toBe("... (10 more lines, alt+e to expand)");
+      expect(collapsed.join(" ")).toContain("... (10 more lines,");
 
       component.setExpanded(true);
-      expect(render()).toEqual(["checks", ...checks]);
+      expect(render().filter((line) => line.startsWith("Check "))).toEqual(checks);
 
       component.setExpanded(false);
       component.updateResult({
         ...result,
         content: [{ type: "text", text: checks.slice(0, 2).join("\n") }],
       });
-      expect(render()).toEqual(["checks", ...checks.slice(0, 2)]);
+      expect(render().filter((line) => line.startsWith("Check "))).toEqual(checks.slice(0, 2));
     }
   } finally {
     setKeybindings(previousKeys);

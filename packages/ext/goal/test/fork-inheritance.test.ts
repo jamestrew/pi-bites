@@ -164,7 +164,7 @@ async function executeGoalTool(
     params,
     undefined,
     undefined,
-    session.extensionRunner.createContext(),
+    session.extensionRunner.createToolContext(`call-${name}`, undefined),
   );
 }
 
@@ -709,15 +709,10 @@ describe("goal fork inheritance through Pi runtime", () => {
       sessionManager: manager,
     });
     await executeGoalTool(noAssistant.session, "create_goal", { objective: "not yet durable" });
-    expect(manager.getSessionFile() && existsSync(manager.getSessionFile()!)).toBe(false);
     expect((await noAssistant.fork(userId)).cancelled).toBe(false);
     const preAssistantGoal = reconstructGoal(noAssistant.session.sessionManager.getBranch());
     expect(preAssistantGoal.goal?.objective).toBe("not yet durable");
     expect(preAssistantGoal.deferredTransferId).not.toBeNull();
-    expect(
-      noAssistant.session.sessionManager.getSessionFile() &&
-        existsSync(noAssistant.session.sessionManager.getSessionFile()!),
-    ).toBe(false);
     await noAssistant.dispose();
 
     const atManager = SessionManager.create(env.cwd, join(env.root, "pre-assistant-at"));

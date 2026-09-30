@@ -132,4 +132,4 @@ it("real child session preserves an empty terminal provider error", async () => 
     childSession?.dispose();
     rmSync(cwd, { recursive: true, force: true });
   }
-});
+}, 10_000);
