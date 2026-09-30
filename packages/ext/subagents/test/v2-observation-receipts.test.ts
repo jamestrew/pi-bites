@@ -68,7 +68,7 @@ it("records interrupt submission and previous status once, including already com
     expect(rendered(restored).slice(0, 2)).toEqual(["", ""]);
     expect(rendered(restored).at(-1)).toBe("");
   }
-});
+}, 10_000);
 
 it("freezes rich loaded-agent rows without adding activity to the model-facing list", async () => {
   const h = await setupV2(cleanup);

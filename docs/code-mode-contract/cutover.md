@@ -2,6 +2,12 @@
 
 The default adapter now selects Code Mode for GPT-5.6/GPT-6 families. The false integration gate, legacy registration/activation, structured prompt guidance and their obsolete tests are removed. `codexAdapter.providers` no longer selects models; unknown old config keys remain ignored under the existing config parser. Web-route configuration and independent disable remain supported. RTK removal is the prerequisite ancestor `6dc4c867`.
 
+## Native discovery baseline (#368)
+
+Pi-bites now targets the supported Pi 0.99.1 baseline for `@earendil-works/pi-coding-agent`, `@earendil-works/pi-server`, and `@earendil-works/pi-tui`. Isolated development loads `builtin:codemode` and `builtin:tool-search` explicitly next to the local extension; it does not load MCP, arbitrary configured extensions, or credentials-backed servers. Loading remains separate from activation: `codemode` and `tool_search` are only active when selected by settings or tools.
+
+The native foundation test uses public `createCodemodeExtension()` and `createToolSearchExtension()` factories through Pi's registered-extension/session seam. It proves script `searchTools`, `describeTool`, `ALL_TOOLS`, and safe tool execution; separately, `tool_search` activates an eligible deferred tool. The test also records exposure limits: direct active tools differ from registered codemode/deferred tools, `hidden` and `model-only` tools are not script-callable, and discovery is not an authorization grant. No live provider acceptance, MCP connection, or credential fallback is claimed by this local validation.
+
 ## Reproducible integration checks
 
 A real host is required to exercise the native tests. The normal suite can skip native integration if no manual installation or retained local build exists, so supply the host explicitly when validating this cutover:
