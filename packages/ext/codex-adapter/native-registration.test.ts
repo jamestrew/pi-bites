@@ -562,7 +562,7 @@ test("no Code Mode host is needed, and validation/startup failures reject rather
   }
 });
 
-test("native renderer restores bounded operation/error rows and script-only output", async () => {
+test("native renderer restores command/patch/error rows, image fallback and script-only output", async () => {
   const h = await setup();
   const script = await h.run(`text('standalone');`);
   const nested = await h.run(
@@ -600,6 +600,24 @@ test("native renderer restores bounded operation/error rows and script-only outp
   expect(render(nested, false)).toContain("exec_command");
   expect(render(nested, true)).toContain("render failure");
   expect(JSON.stringify(nested.result.details)).not.toContain("traces");
+  const patch = "*** Begin Patch\n*** Add File: rendered.txt\n+hello\n*** End Patch";
+  const patched = await h.run(`text(await tools.apply_patch(${JSON.stringify(patch)}));`);
+  for (const expanded of [false, true]) {
+    // Native rendering shows the operation and emitted value, not the owned diff renderer.
+    expect(render(patched, expanded)).toContain("apply_patch");
+    expect(render(patched, expanded)).toContain('"status":"success"');
+    expect(render(patched, expanded)).toContain("rendered.txt");
+  }
+  writeFileSync(
+    join(h.cwd, "pixel.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGNkZGJmYGAAAAAqAAjaWO5EAAAAAElFTkSuQmCC",
+      "base64",
+    ),
+  );
+  const pictured = await h.run(`image(await tools.view_image({path:'pixel.png'}));`);
+  for (const expanded of [false, true])
+    expect(render(pictured, expanded)).toContain("[Image: [image/png] 2x1]");
 });
 
 test("context previews follow native prepared loadouts and model/classifier helpers stay out of scope", async () => {
