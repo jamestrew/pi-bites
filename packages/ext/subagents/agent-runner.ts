@@ -205,7 +205,8 @@ function getToolCallName(value: unknown): string {
 function collectResponseText(session: AgentSession) {
   let text: string | undefined;
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "message_start") text = "";
+    // Queue-only mail can start after the final assistant response, before prompt resolves.
+    if (event.type === "message_start" && event.message.role === "assistant") text = "";
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       text = (text ?? "") + event.assistantMessageEvent.delta;
     }

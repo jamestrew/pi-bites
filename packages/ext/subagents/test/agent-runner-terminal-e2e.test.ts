@@ -9,7 +9,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { createEventBus, ModelRuntime, type AgentSession } from "@earendil-works/pi-coding-agent";
 import { expect, it } from "vitest";
-import { runAgent } from "../agent-runner.js";
+import { resumeAgent, runAgent } from "../agent-runner.js";
 function response(
   model: Parameters<StreamFunction>[0],
   content: AssistantMessage["content"],
@@ -47,89 +47,115 @@ function response(
   return stream;
 }
 
-it("real child session preserves an empty terminal provider error", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "subagent-terminal-error-"));
-  const runtime = await ModelRuntime.create({
-    allowModelNetwork: false,
-    credentials: new InMemoryCredentialStore(),
-    modelsPath: null,
-  });
-  runtime.registerProvider("terminal-test", {
-    api: "openai-completions",
-    apiKey: "test",
-    baseUrl: "http://localhost",
-    models: [
-      {
-        id: "model",
-        name: "Terminal Test",
-        reasoning: false,
-        input: ["text"],
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 10_000,
-        maxTokens: 100,
-      },
-    ],
-  });
-  const model = runtime.getModel("terminal-test", "model");
-  if (!model) throw new Error("test model missing");
-
-  let childSession: AgentSession | undefined;
-  try {
-    const run = runAgent(
-      {
-        cwd,
-        sessionId: "parent",
-        systemPrompt: "parent",
-        model,
-        availableModels: [model],
-        providers: [
-          [
-            "terminal-test",
-            {
-              api: "openai-completions",
-              apiKey: "test",
-              baseUrl: "http://localhost",
-              models: [
-                {
-                  id: "model",
-                  name: "Terminal Test",
-                  reasoning: false,
-                  input: ["text"],
-                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-                  contextWindow: 10_000,
-                  maxTokens: 100,
-                },
-              ],
-            },
-          ],
-        ],
-      },
-      "worker",
-      "go",
-      {
-        pi: {
-          exec: async () => ({ code: 1, stdout: "", stderr: "" }),
-          events: createEventBus(),
-        } as any,
-        model,
-        onSessionCreated: (session) => {
-          childSession = session;
-          session.agent.streamFunction = (streamModel) =>
-            response(streamModel, [], "error", "fatal provider rejection");
+it.each(["provider error", "late queue-only mail"] as const)(
+  "real child session preserves its terminal response: %s",
+  async (scenario) => {
+    const cwd = mkdtempSync(join(tmpdir(), "subagent-terminal-error-"));
+    const runtime = await ModelRuntime.create({
+      allowModelNetwork: false,
+      credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
+    });
+    runtime.registerProvider("terminal-test", {
+      api: "openai-completions",
+      apiKey: "test",
+      baseUrl: "http://localhost",
+      models: [
+        {
+          id: "model",
+          name: "Terminal Test",
+          reasoning: false,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 10_000,
+          maxTokens: 100,
         },
-      },
-    );
+      ],
+    });
+    const model = runtime.getModel("terminal-test", "model");
+    if (!model) throw new Error("test model missing");
 
-    let error: unknown;
+    let childSession: AgentSession | undefined;
+    let requests = 0;
+    const endedRoles: string[] = [];
     try {
-      await run;
-    } catch (caught) {
-      error = caught;
+      const run = runAgent(
+        {
+          cwd,
+          sessionId: "parent",
+          systemPrompt: "parent",
+          model,
+          availableModels: [model],
+          providers: [
+            [
+              "terminal-test",
+              {
+                api: "openai-completions",
+                apiKey: "test",
+                baseUrl: "http://localhost",
+                models: [
+                  {
+                    id: "model",
+                    name: "Terminal Test",
+                    reasoning: false,
+                    input: ["text"],
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                    contextWindow: 10_000,
+                    maxTokens: 100,
+                  },
+                ],
+              },
+            ],
+          ],
+        },
+        "worker",
+        "go",
+        {
+          pi: {
+            exec: async () => ({ code: 1, stdout: "", stderr: "" }),
+            events: createEventBus(),
+          } as any,
+          model,
+          onSessionCreated: (session) => {
+            childSession = session;
+            session.subscribe((event) => {
+              if (event.type === "message_end") endedRoles.push(event.message.role);
+            });
+            session.agent.streamFunction = (streamModel) => {
+              requests++;
+              if (scenario === "provider error") {
+                return response(streamModel, [], "error", "fatal provider rejection");
+              }
+              // Arrives during final inference, after the last tool boundary.
+              void session.sendCustomMessage(
+                { customType: "subagent-message", content: "Please finalize.", display: true },
+                { triggerTurn: false },
+              );
+              return response(streamModel, [{ type: "text", text: "Final findings." }]);
+            };
+          },
+        },
+      );
+
+      if (scenario === "provider error") {
+        await expect(run).rejects.toThrow("fatal provider rejection");
+      } else {
+        const result = await run;
+        expect(requests).toBe(1);
+        expect(endedRoles.slice(-2)).toEqual(["assistant", "custom"]);
+        expect(
+          result.session.messages
+            .slice()
+            .reverse()
+            .find((message) => message.role === "assistant")?.content,
+        ).toEqual([{ type: "text", text: "Final findings." }]);
+        expect(result.responseText).toBe("Final findings.");
+        await expect(resumeAgent(result.session, "Continue")).resolves.toBe("Final findings.");
+        expect(requests).toBe(2);
+      }
+    } finally {
+      childSession?.dispose();
+      rmSync(cwd, { recursive: true, force: true });
     }
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe("fatal provider rejection");
-  } finally {
-    childSession?.dispose();
-    rmSync(cwd, { recursive: true, force: true });
-  }
-});
+  },
+);
