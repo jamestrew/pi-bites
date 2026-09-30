@@ -293,13 +293,12 @@ describe("extension entrypoint", () => {
     const loaded = await loadExtension({ subagent: "general", realCodex: true });
     try {
       expect(loaded.pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
-        "apply_patch",
+        "codemode",
         "exec_command",
         "write_stdin",
-        "view_image",
+        "apply_patch",
         "web_run",
-        "exec",
-        "wait",
+        "view_image",
       ]);
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
       expect(loaded.registerSpies.get("./footer/index.js")).not.toHaveBeenCalled();

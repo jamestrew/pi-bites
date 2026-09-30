@@ -100,3 +100,12 @@ registry discovery, one-shot finalization and native nested rendering/persistenc
 No parent V8 host, live cells or exec/wait facade remain. Keep the bounded model
 scope, concrete capabilities, shared per-launch authorization and route restrictions.
 The child path retains this historical host contract until its separate migration.
+
+## Native SDK child amendment (#370)
+
+The native amendment above also applies to SDK children. Parent and child sessions
+share native registration, one-shot execution, ownership cleanup and per-launch
+authorization. Explicit SDK builtin factories and the child's registry ceiling keep
+parent permissions separate from discovery. Direct V2 collaboration remains
+independent; see the [native adapter contract](../code-mode-contract/native-parent.md).
+The historical host code/tests await separate retirement, not a selectable fallback.

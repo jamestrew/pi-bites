@@ -4,14 +4,7 @@
  * These are the only available subagent roles.
  */
 
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { AgentConfig, SubagentType } from "./types.js";
-
-const SELF_EXTENSION = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  `../index${path.extname(fileURLToPath(import.meta.url))}`,
-);
 
 export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Object.freeze({
   default: Object.freeze({
@@ -19,7 +12,6 @@ export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Objec
     displayName: "default",
     description: "Default agent.",
     builtinToolNames: Object.freeze(["read", "bash", "edit", "write"]),
-    extensions: Object.freeze([SELF_EXTENSION]),
     systemPrompt: "",
     promptMode: "append",
     bashGatePolicy: "prompt",
@@ -32,7 +24,6 @@ export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Objec
       "Use when the user requests a subagent, work can run independently in parallel, or delegation has another concrete benefit; handle ordinary implementation directly.",
     ].join(" "),
     builtinToolNames: Object.freeze(["read", "bash", "edit", "write"]),
-    extensions: Object.freeze([SELF_EXTENSION]),
     systemPrompt: "",
     promptMode: "append",
     bashGatePolicy: "prompt",
@@ -48,7 +39,6 @@ export const DEFAULT_AGENTS: Readonly<Record<SubagentType, AgentConfig>> = Objec
       "Do not delegate code review, design or plan evaluation, cross-file audits, root-cause analysis, or other judgment-heavy work; the primary agent owns synthesis.",
     ].join(" "),
     builtinToolNames: Object.freeze(["read", "bash", "edit", "write"]),
-    extensions: Object.freeze([SELF_EXTENSION]),
     systemPrompt: `You are an explorer subagent focused on fast, factual codebase exploration.
 
 This role guidance supplements the inherited system, project, and skill instructions; it does not override their restrictions or grant additional permissions. Use only capabilities allowed by the parent.
