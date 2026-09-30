@@ -28,6 +28,7 @@ const model = (provider: string, id: string, api: string, baseUrl: string) => ({
 function context(options: {
   active: ReturnType<typeof model>;
   models?: ReturnType<typeof model>[];
+  source?: string;
   auth?: { ok: true; apiKey?: string; headers?: Record<string, string | null>; baseUrl?: string };
 }) {
   return {
@@ -37,6 +38,9 @@ function context(options: {
     get modelRegistry() {
       return {
         getAll: () => options.models ?? [options.active],
+        getProviderAuth: vi.fn(async () =>
+          options.auth ? { auth: options.auth, source: options.source ?? "OAuth" } : undefined,
+        ),
         getApiKeyAndHeaders: vi.fn(
           async () => options.auth ?? { ok: false, error: "not logged in" },
         ),
@@ -85,6 +89,107 @@ describe("web_run route policy", () => {
 });
 
 describe("web_run execution", () => {
+  test.each(["subscription-token", "sk-api-key"])(
+    "direct OpenAI auth %s cannot opt into the legacy search protocol",
+    async (apiKey) => {
+      const active = model(
+        "openai",
+        "gpt-6.1-sol",
+        "openai-responses",
+        "https://api.openai.com/v1",
+      );
+      const runNative = vi.fn();
+      const config = { webSearchProviders: ["openai"] };
+      const tool = createWebRunTool({ getConfig: () => config, runNative });
+      expect(isWebRunAvailable(active, config)).toBe(false);
+      await expect(
+        tool.execute(
+          "direct",
+          { search_query: [{ q: "q" }] },
+          undefined,
+          undefined,
+          context({ active, auth: { ok: true, apiKey } }) as never,
+        ),
+      ).rejects.toThrow("OpenAI ChatGPT login and API keys do not have a verified web_run route");
+      expect(runNative).not.toHaveBeenCalled();
+    },
+  );
+
+  test("legacy search rejects API-key auth even with plausible account claims", async () => {
+    const runNative = vi.fn();
+    const tool = createWebRunTool({ getConfig: () => ({}), runNative });
+    const active = model(
+      "openai-codex",
+      "gpt-6.1-sol",
+      "openai-codex-responses",
+      "https://chatgpt.com/backend-api",
+    );
+    await expect(
+      tool.execute(
+        "key",
+        { search_query: [{ q: "q" }] },
+        undefined,
+        undefined,
+        context({ active, source: "stored", auth: { ok: true, apiKey: jwt("account") } }) as never,
+      ),
+    ).rejects.toThrow('requires legacy OAuth; run "/login openai-codex"');
+    expect(runNative).not.toHaveBeenCalled();
+  });
+
+  test.each(["", "   "])("legacy search rejects blank account metadata %s", async (accountId) => {
+    const runNative = vi.fn();
+    const tool = createWebRunTool({ getConfig: () => ({}), runNative });
+    const active = model(
+      "openai-codex",
+      "gpt-6.1-sol",
+      "openai-codex-responses",
+      "https://chatgpt.com/backend-api",
+    );
+    await expect(
+      tool.execute(
+        "invalid",
+        { search_query: [{ q: "q" }] },
+        undefined,
+        undefined,
+        context({
+          active,
+          auth: { ok: true, apiKey: jwt("account"), headers: { "chatgpt-account-id": accountId } },
+        }) as never,
+      ),
+    ).rejects.toThrow("missing a valid ChatGPT account ID");
+    expect(runNative).not.toHaveBeenCalled();
+  });
+
+  test("legacy search uses resolved OAuth identity rather than stale model auth headers", async () => {
+    const runNative = vi.fn(async (_input: WebRunNativeInput) => JSON.stringify({ output: "ok" }));
+    const tool = createWebRunTool({ getConfig: () => ({}), runNative });
+    const active = {
+      ...model(
+        "openai-codex",
+        "gpt-6.1-sol",
+        "openai-codex-responses",
+        "https://chatgpt.com/backend-api",
+      ),
+      headers: {
+        Authorization: "Bearer stale-key",
+        "chatgpt-account-id": "stale-account",
+        "x-static": "keep",
+      },
+    };
+    await tool.execute(
+      "oauth",
+      { search_query: [{ q: "q" }] },
+      undefined,
+      undefined,
+      context({ active, auth: { ok: true, apiKey: jwt("selected") } }) as never,
+    );
+    expect(runNative.mock.calls[0]![0].headers).toMatchObject({
+      Authorization: `Bearer ${jwt("selected")}`,
+      "chatgpt-account-id": "selected",
+      "x-static": "keep",
+    });
+  });
+
   test("bundled client posts only the bounded structured request to the selected route", async () => {
     let captured:
       | { headers: Record<string, string | string[] | undefined>; body: unknown }
@@ -288,41 +393,52 @@ describe("web_run execution", () => {
     expect(inputs[0]?.params).not.toHaveProperty("cwd");
   });
 
-  test("explicit fallback resolves a stock Codex model without changing the active model", async () => {
-    const runNative = vi.fn(async (_input: WebRunNativeInput) =>
-      JSON.stringify({ output: "fallback result" }),
-    );
-    const active = model("bedrock", "claude", "bedrock-converse-stream", "https://bedrock");
-    const codex = model(
-      "openai-codex",
-      "gpt-5.3-codex",
-      "openai-codex-responses",
-      "https://chatgpt.com/backend-api",
-    );
-    const ctx = context({
-      active,
-      models: [active, codex],
-      auth: { ok: true, apiKey: jwt("fallback-account") },
-    });
-    const tool = createWebRunTool({
-      getConfig: () => ({ allowOpenAICodexFallback: true }),
-      runNative,
-    });
+  test.each(["bedrock", "openai"])(
+    "explicit fallback from %s resolves only legacy auth without changing the active model",
+    async (provider) => {
+      const runNative = vi.fn(async (_input: WebRunNativeInput) =>
+        JSON.stringify({ output: "fallback result" }),
+      );
+      const active = model(
+        provider,
+        "gpt-6.1-sol",
+        provider === "openai" ? "openai-responses" : "bedrock-converse-stream",
+        "https://active.example",
+      );
+      const codex = model(
+        "openai-codex",
+        "gpt-5.3-codex",
+        "openai-codex-responses",
+        "https://chatgpt.com/backend-api",
+      );
+      const ctx = context({
+        active,
+        models: [active, codex],
+        auth: { ok: true, apiKey: jwt("fallback-account") },
+      });
+      const registry = ctx.modelRegistry;
+      const tool = createWebRunTool({
+        getConfig: () => ({ allowOpenAICodexFallback: true }),
+        runNative,
+      });
 
-    await tool.execute(
-      "call-1",
-      { open: [{ ref_id: "https://example.com" }] },
-      undefined,
-      undefined,
-      ctx as never,
-    );
+      await tool.execute(
+        "call-1",
+        { open: [{ ref_id: "https://example.com" }] },
+        undefined,
+        undefined,
+        { model: active, modelRegistry: registry } as never,
+      );
 
-    expect(ctx.model).toBe(active);
-    expect(runNative.mock.calls[0]?.[0]).toMatchObject({
-      route: "OpenAI Codex fallback",
-      params: { model: "gpt-5.3-codex", open: [{ ref_id: "https://example.com" }] },
-    });
-  });
+      expect(registry.getProviderAuth).toHaveBeenCalledExactlyOnceWith("openai-codex");
+      expect(registry.getApiKeyAndHeaders).not.toHaveBeenCalled();
+      expect(ctx.model).toBe(active);
+      expect(runNative.mock.calls[0]?.[0]).toMatchObject({
+        route: "OpenAI Codex fallback",
+        params: { model: "gpt-5.3-codex", open: [{ ref_id: "https://example.com" }] },
+      });
+    },
+  );
 
   test("allowlisted provider uses its own endpoint and never retries through fallback", async () => {
     const runNative = vi.fn(async (_input: WebRunNativeInput) => {
@@ -507,7 +623,10 @@ describe("web_run execution", () => {
       },
       get modelRegistry() {
         if (stale) throw new Error("stale registry");
-        return { getAll: () => [active], getApiKeyAndHeaders: () => auth };
+        return {
+          getAll: () => [active],
+          getProviderAuth: async () => ({ auth: await auth, source: "OAuth" }),
+        };
       },
     };
     const tool = createWebRunTool({
@@ -526,42 +645,205 @@ describe("web_run execution", () => {
     await expect(execution).resolves.toMatchObject({ content: [{ text: "ok" }] });
   });
 
-  test("rotates tool-owned navigation state when a new session starts", async () => {
-    let registered!: ReturnType<typeof createWebRunTool>;
-    let onSessionStart!: () => void;
-    const runNative = vi.fn(async (_input: WebRunNativeInput) => JSON.stringify({ output: "ok" }));
-    registerWebRunTool(
-      {
-        registerTool: (tool: unknown) => {
-          registered = tool as typeof registered;
-        },
-        registerMarkdownTransformer: vi.fn(),
-        on: (event: string, handler: () => void) => {
-          if (event === "session_start") onSessionStart = handler;
-        },
-      } as never,
-      { getConfig: () => ({}), runNative },
-    );
-    const codex = model(
+  test("navigation batching preserves pending results and account citations across rollover", async () => {
+    const pending = Promise.withResolvers<string>();
+    const runNative = vi
+      .fn(async (_input: WebRunNativeInput) => JSON.stringify({ output: "fresh" }))
+      .mockImplementationOnce(() => pending.promise)
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          output: "fresh",
+          results: [{ ref_id: "fresh-ref", url: "https://fresh.example" }],
+        }),
+      );
+    const tool = createWebRunTool({ getConfig: () => ({}), runNative });
+    const active = model(
       "openai-codex",
-      "gpt",
+      "gpt-6.1-sol",
       "openai-codex-responses",
       "https://chatgpt.com/backend-api",
     );
-    const ctx = context({ active: codex, auth: { ok: true, apiKey: jwt("account") } }) as never;
-
-    await registered.execute("first", { search_query: [{ q: "one" }] }, undefined, undefined, ctx);
-    const firstId = runNative.mock.calls[0]?.[0].params.id;
-    onSessionStart();
-    await registered.execute(
-      "second",
-      { open: [{ ref_id: "turn0search0" }] },
-      undefined,
-      undefined,
-      ctx,
+    const ctx = context({ active, auth: { ok: true, apiKey: jwt("account") } }) as never;
+    const call = () =>
+      tool.execute("call", { search_query: [{ q: "q" }] }, undefined, undefined, ctx);
+    const old = call();
+    await vi.waitFor(() => expect(runNative).toHaveBeenCalledOnce());
+    for (let i = 0; i < 32; i++) await call();
+    expect(runNative.mock.calls[0]![0].params.id).not.toBe(runNative.mock.calls[32]![0].params.id);
+    pending.resolve(
+      JSON.stringify({
+        output: "old",
+        results: [{ ref_id: "old-ref", url: "https://old.example" }],
+      }),
     );
-    expect(runNative.mock.calls[1]?.[0].params.id).not.toBe(firstId);
+    await expect(old).resolves.toMatchObject({ content: [{ text: "old" }] });
+    expect(tool.transformCitations("citeold-reffresh-ref")).toContain("old.example");
+    expect(tool.transformCitations("citeold-reffresh-ref")).toContain("fresh.example");
   });
+
+  test.each(["old", "new"])(
+    "delayed authentication for %s cannot restore a superseded account",
+    async (account) => {
+      const pending = Promise.withResolvers<{ source: string; auth: { apiKey: string } }>();
+      const runNative = vi.fn(async (_input: WebRunNativeInput) =>
+        JSON.stringify({ output: "ok" }),
+      );
+      const tool = createWebRunTool({ getConfig: () => ({}), runNative });
+      const active = model(
+        "openai-codex",
+        "gpt-6.1-sol",
+        "openai-codex-responses",
+        "https://chatgpt.com/backend-api",
+      );
+      const ctx = {
+        model: active,
+        modelRegistry: {
+          getAll: () => [active],
+          getProviderAuth: vi
+            .fn(async () => ({ source: "OAuth", auth: { apiKey: jwt("new") } }))
+            .mockImplementationOnce(() => pending.promise),
+        },
+      } as never;
+      const call = () =>
+        tool.execute("call", { search_query: [{ q: "q" }] }, undefined, undefined, ctx);
+      const delayed = call();
+      await call();
+      pending.resolve({ source: "OAuth", auth: { apiKey: jwt(account) } });
+      if (account === "old") {
+        await expect(delayed).rejects.toThrow("search context changed");
+        expect(runNative).toHaveBeenCalledOnce();
+      } else {
+        await expect(delayed).resolves.toMatchObject({ content: [{ text: "ok" }] });
+        expect(runNative).toHaveBeenCalledTimes(2);
+        expect(runNative.mock.calls[1]![0].params.id).toBe(runNative.mock.calls[0]![0].params.id);
+      }
+      expect(
+        runNative.mock.calls.every(([input]) => input.headers["chatgpt-account-id"] === "new"),
+      ).toBe(true);
+    },
+  );
+
+  test("account switches rotate navigation and retire old search completions", async () => {
+    const pending = Promise.withResolvers<string>();
+    const runNative = vi
+      .fn(async (_input: WebRunNativeInput) => JSON.stringify({ output: "fresh" }))
+      .mockImplementationOnce(() => pending.promise);
+    const tool = createWebRunTool({ getConfig: () => ({}), runNative });
+    const active = model(
+      "openai-codex",
+      "gpt-6.1-sol",
+      "openai-codex-responses",
+      "https://chatgpt.com/backend-api",
+    );
+    const call = (account: string) =>
+      tool.execute(
+        "call",
+        { search_query: [{ q: "q" }] },
+        undefined,
+        undefined,
+        context({ active, auth: { ok: true, apiKey: jwt(account) } }) as never,
+      );
+    const old = call("old");
+    await vi.waitFor(() => expect(runNative).toHaveBeenCalledOnce());
+    await call("new");
+    expect(runNative.mock.calls[0]![0].params.id).not.toBe(runNative.mock.calls[1]![0].params.id);
+    pending.resolve(
+      JSON.stringify({
+        output: "old",
+        results: [{ ref_id: "old-ref", url: "https://old.example" }],
+      }),
+    );
+    await expect(old).rejects.toThrow("search context changed");
+    expect(tool.transformCitations("citeold-ref")).not.toContain("old.example");
+  });
+
+  test("session replacement retires pending auth even with throwing stale context getters", async () => {
+    const pending = Promise.withResolvers<{ ok: true; apiKey: string }>();
+    const active = model(
+      "openai-codex",
+      "gpt-6.1-sol",
+      "openai-codex-responses",
+      "https://chatgpt.com/backend-api",
+    );
+    const runNative = vi.fn();
+    const tool = createWebRunTool({ getConfig: () => ({}), runNative });
+    let stale = false;
+    const ctx = new Proxy(
+      {
+        model: active,
+        modelRegistry: {
+          getAll: () => [active],
+          getProviderAuth: async () => ({ auth: await pending.promise, source: "OAuth" }),
+        },
+      },
+      {
+        get(target, key) {
+          if (stale) throw new Error("stale ctx");
+          return Reflect.get(target, key);
+        },
+      },
+    );
+    const execution = tool.execute(
+      "old",
+      { search_query: [{ q: "q" }] },
+      undefined,
+      undefined,
+      ctx as never,
+    );
+    stale = true;
+    tool.resetNavigationState();
+    pending.resolve({ ok: true, apiKey: jwt("account") });
+    await expect(execution).rejects.toThrow("search context changed");
+    expect(runNative).not.toHaveBeenCalled();
+  });
+
+  test.each(["session_start", "model_select"])(
+    "rotates tool-owned navigation state on %s",
+    async (eventName) => {
+      let registered!: ReturnType<typeof createWebRunTool>;
+      let onSessionStart!: () => void;
+      const runNative = vi.fn(async (_input: WebRunNativeInput) =>
+        JSON.stringify({ output: "ok" }),
+      );
+      registerWebRunTool(
+        {
+          registerTool: (tool: unknown) => {
+            registered = tool as typeof registered;
+          },
+          registerMarkdownTransformer: vi.fn(),
+          on: (event: string, handler: () => void) => {
+            if (event === eventName) onSessionStart = handler;
+          },
+        } as never,
+        { getConfig: () => ({}), runNative },
+      );
+      const codex = model(
+        "openai-codex",
+        "gpt",
+        "openai-codex-responses",
+        "https://chatgpt.com/backend-api",
+      );
+      const ctx = context({ active: codex, auth: { ok: true, apiKey: jwt("account") } }) as never;
+
+      await registered.execute(
+        "first",
+        { search_query: [{ q: "one" }] },
+        undefined,
+        undefined,
+        ctx,
+      );
+      const firstId = runNative.mock.calls[0]?.[0].params.id;
+      onSessionStart();
+      await registered.execute(
+        "second",
+        { open: [{ ref_id: "turn0search0" }] },
+        undefined,
+        undefined,
+        ctx,
+      );
+      expect(runNative.mock.calls[1]?.[0].params.id).not.toBe(firstId);
+    },
+  );
 });
 
 describe("web_run rendering", () => {

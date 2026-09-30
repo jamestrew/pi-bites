@@ -31,6 +31,7 @@ export function isAdapterModel(model: AdapterModel | undefined): boolean {
     if (!PREFIXES.has(id.slice(0, slash))) return false;
     id = id.slice(slash + 1);
   }
+  if (id === "gpt-6.1" || id === "gpt-6.1-sol") return true;
   return /^gpt-(?:5\.6|6)(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$/.test(id);
 }
 

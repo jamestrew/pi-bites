@@ -75,3 +75,19 @@ adds live GPT Code Mode/adapter-disabled evidence and eager-surface measurements
 Anthropic and the remaining adversarial live scenarios require explicit maintainer
 disposition before the integration is called validated; review or merge of the
 evidence does not waive that gate. This does not authorize integration into `master`.
+
+## GPT-6.1 and direct OpenAI login amendment (#365)
+
+Extend the bounded model policy to `gpt-6.1` and `gpt-6.1-sol`, including the
+existing normalized, recognized provider prefixes. This explicitly amends the
+previous GPT-6.1 exclusion, not the general future-model exclusion. GPT-5.6/GPT-6
+variants, tool permissions, direct collaboration, pinned host and generated native
+contracts remain unchanged.
+
+Model eligibility grants no subscription access. Direct `openai` ChatGPT OAuth
+uses the standard Responses endpoint with a separate grant; it does not authorize
+legacy Codex usage or search. Keep unsupported direct capabilities unavailable,
+preserve legacy login and explicit cross-provider fallback, and reserve the
+compatible-provider allowlist for independently verified provider IDs.
+[Verification and recovery](../code-mode-contract/openai-compatibility.md) distinguish
+upstream source evidence from live transport validation.

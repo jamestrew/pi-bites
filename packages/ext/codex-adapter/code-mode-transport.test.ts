@@ -107,6 +107,7 @@ for (const [api, stream] of [
 ] as const) {
   test.each([
     { grammar: true, disabled: false, active: true, id: "gpt-6" },
+    { grammar: true, disabled: false, active: true, id: "gpt-6.1-sol" },
     { grammar: false, disabled: false, active: true, id: "gpt-6" },
     { grammar: true, disabled: true, active: true, id: "gpt-6" },
     { grammar: true, disabled: false, active: false, id: "gpt-6" },
@@ -133,7 +134,12 @@ for (const [api, stream] of [
       let expected: any;
       const onPayload = async (value: unknown) => {
         expected = structuredClone(value);
-        if (api === "openai-codex-responses" && !disabled && active && id === "gpt-6") {
+        if (
+          api === "openai-codex-responses" &&
+          !disabled &&
+          active &&
+          (id === "gpt-6" || id === "gpt-6.1-sol")
+        ) {
           expected.tools[1].strict = false;
         }
         payload = await request(value, model);
@@ -157,7 +163,9 @@ for (const [api, stream] of [
       }
       expect(payload.tools[1].type).toBe("function");
       if (api === "openai-codex-responses") {
-        expect(payload.tools[1].strict).toBe(!disabled && active && id === "gpt-6" ? false : null);
+        expect(payload.tools[1].strict).toBe(
+          !disabled && active && (id === "gpt-6" || id === "gpt-6.1-sol") ? false : null,
+        );
         expect(payload.tools[1].parameters.required).toEqual(["cell_id"]);
         expect(payload.tools[1].parameters.additionalProperties).toBe(false);
       }

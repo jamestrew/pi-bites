@@ -43,9 +43,10 @@ remain in `details` for nested rendering, never appended to the model result.
 
 IDs are normalized for case and surrounding whitespace. Accepted base families
 are `gpt-5.6` and `gpt-6`, optionally followed by nonempty hyphenated alphanumeric
-variant segments. One recognized provider prefix may precede the ID:
+variant segments. GPT-6.1 base and Sol IDs (`gpt-6.1`, `gpt-6.1-sol`) are also
+explicitly supported under #365; other GPT-6.1 variants remain outside scope. One recognized provider prefix may precede the ID:
 `openai/`, `openai-codex/`, `azure/`, `azure-openai/`, `github-copilot/`, `openrouter/`.
-Thus `gpt-6-astra` and `openai/gpt-5.6-pro` match; `gpt-60`, `gpt-6.1`, `gpt-7`,
+Thus `gpt-6-astra` and `openai/gpt-5.6-pro` match; `gpt-60`, `gpt-6.10-sol`, `gpt-6.1-luna`, `gpt-7`,
 `unknown/gpt-6`, and opaque aliases do not. The provider and API names never grant
 model eligibility. The obsolete `codexAdapter.providers` option has been removed. Unknown keys in existing configuration remain ignored, with no provider-wide activation.
 
