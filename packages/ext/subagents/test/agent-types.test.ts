@@ -40,11 +40,10 @@ describe("embedded agent types", () => {
     expect(resolveAgent("explorer").config.thinking).toBeUndefined();
   });
 
-  it.each(SUBAGENT_TYPES)("gives %s the inherited builtin baseline and extension", (type) => {
+  it.each(SUBAGENT_TYPES)("gives %s the inherited builtin baseline", (type) => {
     const { config } = resolveAgent(type);
 
     expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
-    expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
     expect(config.promptMode).toBe("append");
     expect(config.bashGatePolicy).toBe("prompt");
   });

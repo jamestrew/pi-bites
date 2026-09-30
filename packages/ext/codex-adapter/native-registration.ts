@@ -33,7 +33,7 @@ import { getBundledViewImagePath } from "./view-image/binary.js";
 import { createWebRunTool, isWebRunAvailable } from "./web-run/tool.js";
 import { contract } from "./code-mode/contracts.js";
 
-/** Parent registration. Pi owns the sandbox, discovery, nested hooks, traces and usage. */
+/** Shared parent/SDK-child registration. Pi owns the sandbox, discovery, nested hooks, traces and usage. */
 export default function registerNativeAdapter(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
@@ -293,7 +293,8 @@ export default function registerNativeAdapter(
   const exposures = new Map<string, string>();
   function reconcile(ctx: ExtensionContext) {
     let selected = pi.getActiveTools();
-    if (!state.selection) {
+    const initial = !state.selection;
+    if (initial) {
       const registered = new Set(pi.getAllTools().map((t) => t.name));
       const settings = pi.getSettings();
       const defaults = settings.defaultTools;
@@ -330,10 +331,13 @@ export default function registerNativeAdapter(
       pi.registerTool({ ...definition, exposure });
       exposures.set(definition.name, exposure);
     }
-    // Tool search may deliberately activate an allowed owned tool's direct declaration.
+    // SDK tools supplies a registry ceiling, not eager owned declarations. After
+    // initial projection, tool search may deliberately activate an allowed declaration.
     pi.setActiveTools([
       ...next,
-      ...pi.getActiveTools().filter((name) => callable.has(name) && !next.includes(name)),
+      ...(initial
+        ? []
+        : pi.getActiveTools().filter((name) => callable.has(name) && !next.includes(name))),
     ]);
   }
   const preview: CodexPromptPreview = (prompt, model, options) => {
@@ -420,12 +424,7 @@ export default function registerNativeAdapter(
             description: preparedDescriptions[tool.name] ?? tool.description,
           }))
         : tools,
-    getAllowedTools: () => {
-      const tools = getDelegationTools(pi.getActiveTools(), state);
-      return tools.includes("codemode")
-        ? [...tools.filter((name) => name !== "codemode"), "exec", "wait"]
-        : tools;
-    },
+    getAllowedTools: () => getDelegationTools(pi.getActiveTools(), state),
   };
 }
 
