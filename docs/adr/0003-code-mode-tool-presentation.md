@@ -1,6 +1,6 @@
 # Present nested operations as ordinary tools
 
-Status: Accepted (2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
+Status: Accepted historically; runtime-specific decisions superseded by #371 below (originally 2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
 
 Source definitions and supported deviations: [Code Mode contract baseline](../code-mode-contract/README.md).
 
@@ -25,3 +25,13 @@ authorization. Explicit SDK builtin factories and the child's registry ceiling k
 parent permissions separate from discovery. Direct V2 collaboration remains
 independent; see the [native adapter contract](../code-mode-contract/native-parent.md).
 The historical host code/tests await separate retirement, not a selectable fallback.
+
+## Host retirement and one-shot tradeoff (#371)
+
+For parent and SDK child sessions, Pi's native one-shot codemode owns nested hooks,
+parent IDs, usage, bounded persistence and restored rendering. There are no wait
+observations, queued notifications or per-cell display owners. Native rows show
+operation previews/errors and expanded retained details; script-only output and
+explicit images remain visible. Concrete renderers still serve permitted direct
+declarations activated by tool search. Historical display does not restore shells,
+stores or workers. See [native presentation](../code-mode-contract/native-parent.md).

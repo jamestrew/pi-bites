@@ -360,3 +360,12 @@ archived one-shot comparison, measured limitations, and removal audit are docume
 in [automode evaluation](../../../docs/automode-evaluation.md). The local Codex checkout
 remains at `a62e98d18c6550e3bea152ed1b89d1e931dca961`. Earlier per-increment
 statements above describe what was measured at those increments, not the later pilot.
+
+## Native codemode amendment (#371)
+
+The exec/wait live-cell trace transport above is historical. Parent and SDK child
+scripts now use Pi's native nested execution; authorization still reviews each
+validated command once through the shared gate/broker. Retained historical trace
+snapshots remain untrusted evidence, not live runtime state. Native finalization
+invalidates pending approval, and shell/store/lifecycle ownership follows the
+[native adapter contract](../../../docs/code-mode-contract/native-parent.md).

@@ -1,5 +1,8 @@
 # Pi upstream review: 0.84.0 → 0.87.1
 
+> Historical source/validation evidence. The V8 host and associated paths/commands
+> are retired by #371; see [current native contracts](../code-mode-contract/README.md).
+
 Reviewed 2026-09-23. Checkpoint remains **0.84.0**; acceptance has not been requested.
 
 Source: [deterministically fetched published changelog](latest.md), fetched with the bundled helper from the npm package tarball. All **311 bullets across 10 releases** are classified below, including duplicate feature summaries and repeated fixes. Each numbered source reference is a line in that snapshot. Evidence and action under each heading apply to every entry listed beneath it. Ignore means irrelevant to the local implementation, not unimportant upstream.

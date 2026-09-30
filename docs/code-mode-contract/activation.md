@@ -1,5 +1,9 @@
 # Native contracts and activation (#300)
 
+> Historical V8 evidence. Both parent and SDK child sessions now use
+> [native codemode](native-parent.md); the host and its build/install/test assets
+> are removed by #371. Commands and paths below are historical, not current setup.
+
 > Parent runtime superseded by [native codemode (#369)](native-parent.md). The host-specific
 > contract below remains historical and applies only to not-yet-migrated SDK children.
 

@@ -5,7 +5,7 @@ export interface AdapterModel {
   input?: ("text" | "image")[];
 }
 
-const CODE_MODE_TOOLS = ["exec", "wait"] as const;
+const CODE_MODE_TOOLS = ["codemode"] as const;
 const CORE = new Set(["read", "bash", "edit", "write"]);
 export const NESTED_TOOLS = [
   "exec_command",
@@ -14,7 +14,7 @@ export const NESTED_TOOLS = [
   "web_run",
   "view_image",
 ] as const;
-const OWNED = new Set([...CORE, ...NESTED_TOOLS, "exec", "wait", "codemode"]);
+const OWNED = new Set([...CORE, ...NESTED_TOOLS, "codemode"]);
 const PREFIXES = new Set([
   "openai",
   "openai-codex",
@@ -51,25 +51,18 @@ interface ActiveProjection {
   visible: Set<string>;
 }
 export interface AdapterToolState {
-  readonly entrypoints: readonly [string, ...string[]];
   // Tool selection is first available from session_start, after Pi binds its API.
   selection: SessionSelection | undefined;
   projection: { kind: "inactive" } | ActiveProjection;
 }
-export function createAdapterToolState(
-  entrypoints: readonly [string, ...string[]] = CODE_MODE_TOOLS,
-): AdapterToolState {
-  return { entrypoints, selection: undefined, projection: { kind: "inactive" } };
+export function createAdapterToolState(): AdapterToolState {
+  return { selection: undefined, projection: { kind: "inactive" } };
 }
 export function getNestedTools(state: AdapterToolState): ReadonlySet<string> {
   return state.projection.kind === "active" ? state.projection.nested : new Set();
 }
 
-function activate(
-  active: string[],
-  selection: SessionSelection,
-  entrypoints: readonly string[],
-): ActiveProjection {
+function activate(active: string[], selection: SessionSelection): ActiveProjection {
   const hasShell = active.includes("bash");
   const hasPatch = active.includes("edit") || active.includes("write");
   return {
@@ -84,7 +77,7 @@ function activate(
       }),
     ),
     visible: new Set(
-      entrypoints.filter(
+      CODE_MODE_TOOLS.filter(
         (name) => selection.tools.has(name) && !selection.disabledVisible.has(name),
       ),
     ),
@@ -102,7 +95,7 @@ function restore(tools: string[], displaced: DisplacedTool[]): string[] {
 }
 
 /** Restore tools whenever their replacement disappears, including within supported scope.
- * Initial selection and explicit exec/wait disables survive projection changes.
+ * Initial selection and explicit codemode disables survive projection changes.
  */
 export function reconcileTools(
   active: string[],
@@ -111,8 +104,7 @@ export function reconcileTools(
 ): string[] {
   const selection = (state.selection ??= { tools: new Set(active), disabledVisible: new Set() });
   const previous = state.projection;
-  const entrypoints = state.entrypoints;
-  for (const name of entrypoints) {
+  for (const name of CODE_MODE_TOOLS) {
     if (active.includes(name)) {
       // An explicit addition is authoritative, including after a prior disable.
       selection.tools.add(name);
@@ -129,9 +121,9 @@ export function reconcileTools(
   }
   // Recompute from the current normal selection, including the cores we own.
   // A core removed after restoration must not survive in cached nested membership.
-  const projection = activate(restored, selection, entrypoints);
+  const projection = activate(restored, selection);
   const replaces = (name: string) =>
-    projection.visible.has(entrypoints[0]) &&
+    projection.visible.has("codemode") &&
     (name === "read" || name === "bash"
       ? projection.nested.has("exec_command")
       : (name === "edit" || name === "write") && projection.nested.has("apply_patch"));
@@ -146,7 +138,7 @@ export function reconcileTools(
   }
   const visible = restored.filter((name) => !replaces(name));
   const index = Math.min(projection.displaced[0]?.index ?? visible.length, visible.length);
-  visible.splice(index, 0, ...entrypoints.filter((name) => projection.visible.has(name)));
+  visible.splice(index, 0, ...CODE_MODE_TOOLS.filter((name) => projection.visible.has(name)));
   state.projection = projection;
   return visible;
 }

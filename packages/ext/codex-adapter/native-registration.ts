@@ -31,7 +31,7 @@ import { pinExecLaunch } from "./exec/launch-context.js";
 import { createViewImageTool } from "./view-image/tool.js";
 import { getBundledViewImagePath } from "./view-image/binary.js";
 import { createWebRunTool, isWebRunAvailable } from "./web-run/tool.js";
-import { contract } from "./code-mode/contracts.js";
+import contract from "./owned-tool-contracts.generated.json" with { type: "json" };
 
 /** Shared parent/SDK-child registration. Pi owns the sandbox, discovery, nested hooks, traces and usage. */
 export default function registerNativeAdapter(
@@ -56,7 +56,7 @@ export default function registerNativeAdapter(
     },
   });
   gate?.manageExecCommand();
-  const state = createAdapterToolState(["codemode"]);
+  const state = createAdapterToolState();
   const sessions = createExecSessionManager();
   const owned = {
     exec_command: createExecCommandTool(sessions),
