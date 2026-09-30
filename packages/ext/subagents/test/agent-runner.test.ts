@@ -34,9 +34,8 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   CONFIG_DIR_NAME: ".pi",
   defineTool: (tool: unknown) => tool,
   createAgentSession,
-  // Mock loader simulates pi-mono: reload() applies additionalExtensionPaths
-  // (an unknown path becomes an error row, mirroring a failed load) and then
-  // runs extensionsOverride over the result.
+  createCodemodeExtension: () => () => {},
+  createToolSearchExtension: () => () => {},
   DefaultResourceLoader: class {
     opts: any;
     constructor(options: any) {
@@ -45,16 +44,9 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     }
 
     async reload() {
-      // Mirror the real loader: `noExtensions: true` zeros out the discovered set
-      // entirely. Otherwise tests pre-register the extensions a path should
-      // resolve to; an unregistered path simply yields no extension (a failed load).
-      if (this.opts.noExtensions) {
+      // No discovered extensions; tests supply the explicit factories' registrations.
+      if (!this.opts.extensionFactories?.length)
         loaderExtensionsRef.current = { extensions: [], errors: [], runtime: {} };
-        return;
-      }
-      if (this.opts.extensionsOverride) {
-        loaderExtensionsRef.current = this.opts.extensionsOverride(loaderExtensionsRef.current);
-      }
     }
 
     getExtensions() {
@@ -76,7 +68,6 @@ vi.mock("../agent-types.js", () => ({
       displayName: "Explore",
       description: "Explore",
       builtinToolNames: ["read"],
-      extensions: [],
       systemPrompt: "You are Explore.",
       promptMode: "replace",
     },
@@ -864,7 +855,6 @@ function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     name: "worker",
     description: "Test",
     builtinToolNames: BUILTINS_7,
-    extensions: [] as string[],
     systemPrompt: "Test.",
     promptMode: "replace" as const,
     ...overrides,
@@ -937,7 +927,7 @@ describe("embedded agent runner configuration", () => {
     vi.mocked(resolveAgent).mockReturnValueOnce({
       type: "worker",
       matched: true,
-      config: makeAgentConfig({ extensions: ["/ext/bites.ts"], builtinToolNames: ["read"] }),
+      config: makeAgentConfig({ builtinToolNames: ["read"] }),
     });
     withExtensions({
       "/ext/bites.ts": [

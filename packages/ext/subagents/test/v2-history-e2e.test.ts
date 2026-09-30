@@ -59,8 +59,7 @@ it.each([
         "list_agents",
         "read",
         "bash",
-        "exec",
-        "wait",
+        "codemode",
         "exec_command",
         "write_stdin",
       ];
@@ -141,7 +140,7 @@ it.each([
       .sort();
     expect(tools).toEqual(
       codeMode
-        ? ["exec", "list_agents", "spawn_agent", "wait"]
+        ? ["codemode", "list_agents", "spawn_agent"]
         : ["list_agents", "read", "spawn_agent"],
     );
     expect(JSON.stringify(request.messages)).not.toContain("multi_agent_v1__");

@@ -44,7 +44,6 @@ export interface AgentConfig {
   readonly displayName?: string;
   readonly description: string;
   readonly builtinToolNames: readonly string[];
-  readonly extensions: readonly string[];
   readonly model?: string;
   readonly thinking?: string;
   readonly systemPrompt: string;

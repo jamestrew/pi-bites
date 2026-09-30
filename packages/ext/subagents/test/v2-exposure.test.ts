@@ -219,6 +219,15 @@ it.each([
   expect(h.payloads).toHaveLength(2);
   assertPayload(h.payloads.at(-1), permitted);
   const childPayload = JSON.stringify(h.payloads.at(-1));
+  const childNames = h.payloads.at(-1).tools.map((tool: any) => tool.name);
+  expect(childNames.includes("codemode")).toBe(codeMode);
+  expect(childNames).not.toContain("exec_command");
+  expect(childNames).not.toContain("exec");
+  expect(childNames).not.toContain("wait");
+  if (codeMode) {
+    const declaration = h.payloads.at(-1).tools.find((tool: any) => tool.name === "codemode");
+    for (const name of collaboration) expect(declaration.description).not.toContain(name);
+  }
   expect(childPayload).toContain("Your parent task_name is /root.");
   expect(h.fetch).not.toHaveBeenCalled();
   // Opt-in synthetic evidence for release audits; never sends a provider request.
