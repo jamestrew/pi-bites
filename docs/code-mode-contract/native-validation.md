@@ -41,6 +41,36 @@ under `/tmp/pi-372-*`; only selected summary fields are published. No credential
 are copied into this record. The child probe's temporary auth file is mode `0600`
 and is removed with its temporary execution directory.
 
+## Compiled CLI packaging blocker (session `01a0f3b7`)
+
+The system Nix Pi 0.99.1 executable fails even `text(6 * 7)` with
+`Script sandbox failed: Cannot find module '/$bunfs/root/src/extensions/codemode/worker.js'`.
+No nested calls run. The installed `llm-agents.nix` derivation compiles the CLI
+and image-resize worker only; upstream's binary build also embeds the codemode
+worker. CLI loading and SDK execution above did not cover this distribution seam.
+
+The offline probe asserts the actual codemode result, not just CLI exit status:
+
+```sh
+bun scripts/native-codemode-cli-smoke.ts                    # system package: fails
+bun scripts/native-codemode-cli-smoke.ts node_modules/.bin/pi # npm CLI: passes
+```
+
+The Nix package needs the same wrapper/entrypoint treatment as its image worker:
+
+```sh
+mkdir -p src/extensions/codemode
+echo 'import "../../../dist/extensions/codemode/worker.js";' > src/extensions/codemode/worker.ts
+bun build --compile ./dist/bun/cli.js ./src/utils/image-resize-worker.ts \
+  ./src/extensions/codemode/worker.ts --outfile dist/pi
+```
+
+A temporary Linux x64 rebuild with this additional entry passes the probe and
+an offline replay of the session's three parallel `exec_command` calls. The
+installed system package/configuration remains unchanged: rebuild it with this
+packaging fix and rerun the probe before treating compiled CLI execution as
+validated. The npm CLI is a verified temporary alternative.
+
 ## Reproducible commands
 
 Commands run from the repository root. These setup commands produce the restricted
