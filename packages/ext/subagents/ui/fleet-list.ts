@@ -95,7 +95,7 @@ export class FleetList {
   /** Set while a conversation overlay is open; calling it closes the overlay. */
   private viewerClose: (() => void) | undefined;
   private viewingAgentId: string | undefined;
-  /** Terminal agents whose final notification is still queued behind child messages. */
+  /** Unread mail counts for visible agents; mail does not keep a finished row alive. */
   private pendingMail = new Map<string, number>();
 
   constructor(
@@ -140,10 +140,6 @@ export class FleetList {
     this.pendingBashGates.delete(waitId);
   }
 
-  /**
-   * Called when an agent finishes. The viewer (if open on it) stays open so the
-   * final output remains readable, and the row lingers in the list — just refresh.
-   */
   setPendingMail(id: string, count: number): void {
     if (count > 0) {
       this.pendingMail.set(id, count);
@@ -152,6 +148,7 @@ export class FleetList {
     this.update();
   }
 
+  /** Keep an open viewer readable and let the finished row linger briefly. */
   onAgentFinished(): void {
     this.update();
   }
@@ -227,9 +224,8 @@ export class FleetList {
   /**
    * Agents shown in the list, ordered earliest-launched first so the ones you
    * started sooner sit at the top. Every row is openable (has a session), so Enter
-   * never dead-ends. Included: running/queued, plus the agent currently being
-   * viewed, awaiting final-result delivery, plus recently-finished ones (they linger
-   * briefly before dropping out).
+   * never dead-ends. Included: idle/running/queued, plus the agent currently being
+   * viewed and recently-finished ones (they linger briefly before dropping out).
    * (`listAgents()` is newest-first, so we re-sort.)
    */
   private agentRecords(): AgentRecord[] {
@@ -238,7 +234,6 @@ export class FleetList {
     return records
       .filter(
         (a) =>
-          this.pendingMail.has(a.id) ||
           a.status === "idle" ||
           a.status === "running" ||
           a.status === "queued" ||

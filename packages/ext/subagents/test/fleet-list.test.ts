@@ -505,14 +505,28 @@ describe("FleetList overlay lifecycle", () => {
   });
 });
 
-it("keeps idle agents with pending mail visible until their next request", () => {
-  const record = makeRecord({ status: "completed", completedAt: 1 });
+it("expires completed rows without discarding pending mail for a later turn", () => {
+  const record = makeRecord();
   const h = harness([record]);
-  h.fleet.setPendingMail(record.id, 2);
-  expect(h.render(150).join("\n")).toContain("2 pending messages");
-  h.fleet.setPendingMail(record.id, 0);
-  expect(h.render(150)).toEqual([]);
-  h.fleet.dispose();
+  try {
+    h.fleet.setPendingMail(record.id, 1);
+    expect(h.render(150).join("\n")).toContain("1 pending message");
+
+    record.status = "completed";
+    record.completedAt = Date.now();
+    h.fleet.onAgentFinished();
+    expect(h.render(150).join("\n")).toContain("1 pending message");
+
+    record.completedAt = Date.now() - 60_000;
+    h.fleet.update();
+    expect(h.render(150)).toEqual([]);
+
+    record.status = "running";
+    h.fleet.update();
+    expect(h.render(150).join("\n")).toContain("1 pending message");
+  } finally {
+    h.fleet.dispose();
+  }
 });
 
 it("distinguishes an interrupted turn from shutdown in the retained Fleet row", () => {
