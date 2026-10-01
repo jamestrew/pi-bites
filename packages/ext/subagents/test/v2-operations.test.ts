@@ -319,6 +319,10 @@ it("reports the loaded root's terminal state to child list callers", async () =>
   const h = harness();
   await h.emit("agent_end", { messages: [] });
   expect((await h.call("list_agents", {})).value.agents).toEqual([
+    { agent_name: "/root", agent_status: "running" },
+  ]);
+  await h.emit("agent_settled");
+  expect((await h.call("list_agents", {})).value.agents).toEqual([
     { agent_name: "/root", agent_status: { completed: null } },
   ]);
   await h.emit("agent_start");

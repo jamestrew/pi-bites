@@ -199,50 +199,37 @@ function getToolCallName(value: unknown): string {
 }
 
 /**
- * Subscribe to a session and collect the last assistant message text.
- * Returns an object with a `getText()` getter and an `unsubscribe` function.
+ * Collect this invocation's terminal assistant response, even if compaction rewrites history.
  */
 function collectResponseText(session: AgentSession) {
   let text: string | undefined;
+  let terminal: AssistantMessage | undefined;
   const unsubscribe = session.subscribe((event: AgentSessionEvent) => {
     // Queue-only mail can start after the final assistant response, before prompt resolves.
-    if (event.type === "message_start" && event.message.role === "assistant") text = "";
+    if (event.type === "message_start" && event.message.role === "assistant") {
+      text = "";
+      terminal = undefined;
+    }
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       text = (text ?? "") + event.assistantMessageEvent.delta;
     }
     if (event.type === "message_end" && event.message.role === "assistant") {
+      terminal = event.message;
       text = extractText(event.message.content).trim();
     }
   });
-  return { getText: () => text, unsubscribe };
-}
-
-/** Get the terminal assistant message without falling back to earlier turns. */
-function getTerminalAssistantMessage(
-  session: AgentSession,
-  invocationStart: number,
-): AssistantMessage | undefined {
-  for (let index = session.messages.length - 1; index >= invocationStart; index--) {
-    const msg = session.messages[index];
-    if (msg?.role === "assistant") return msg;
-  }
-  return undefined;
-}
-
-function getTerminalAssistantText(
-  session: AgentSession,
-  invocationStart: number,
-): string | undefined {
-  const message = getTerminalAssistantMessage(session, invocationStart);
-  return message ? extractText(message.content).trim() : undefined;
-}
-
-/** Pi resolves session.prompt() after terminal provider errors; preserve their actual cause. */
-function throwTerminalAssistantError(session: AgentSession, invocationStart: number): void {
-  const message = getTerminalAssistantMessage(session, invocationStart);
-  if (message?.stopReason === "error") {
-    throw new Error(message.errorMessage?.trim() || "Agent failed without provider error details.");
-  }
+  return {
+    getText() {
+      // Pi resolves prompt() after provider errors; preserve their actual cause.
+      if (terminal?.stopReason === "error") {
+        throw new Error(
+          terminal.errorMessage?.trim() || "Agent failed without provider error details.",
+        );
+      }
+      return text ?? "";
+    },
+    unsubscribe,
+  };
 }
 
 /**
@@ -590,9 +577,7 @@ export async function runAgent(
     providerDiagnostics.dispose();
   }
 
-  throwTerminalAssistantError(session, invocationStart);
-  const responseText =
-    collector.getText() ?? getTerminalAssistantText(session, invocationStart) ?? "";
+  const responseText = collector.getText();
   return { responseText, session };
 }
 
@@ -696,8 +681,7 @@ export async function resumeAgent(
     providerDiagnostics.dispose();
   }
 
-  throwTerminalAssistantError(session, invocationStart);
-  return collector.getText() ?? getTerminalAssistantText(session, invocationStart) ?? "";
+  return collector.getText();
 }
 
 /**

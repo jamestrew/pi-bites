@@ -124,10 +124,12 @@ function createSession(finalText: string) {
       return () => {};
     }),
     prompt: vi.fn(async () => {
-      session.messages.push({
+      const message = {
         role: "assistant",
         content: [{ type: "text", text: finalText }],
-      });
+      };
+      session.messages.push(message);
+      for (const listener of listeners) listener({ type: "message_end", message });
     }),
     abort: vi.fn(),
     dispose: vi.fn(),

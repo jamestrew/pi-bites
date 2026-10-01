@@ -198,6 +198,10 @@ export function bindSubagentMessenger(
     return { action: "continue" };
   });
   pi.on("context", (event) => messenger.contextPrepared(event.messages));
+  pi.on("session_before_compact", () => {
+    // Summaries lose unread payloads' attribution and activity IDs. Compact after inference sees them.
+    if (messenger.observe().pending > 0) return { cancel: true };
+  });
   pi.on("agent_before_settle", () => {
     if (messenger.observe().pendingTasks > 0) return { continue: true };
   });

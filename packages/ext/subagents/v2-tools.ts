@@ -37,8 +37,11 @@ export function createV2Tools(
   },
 ) {
   const roots = new Map<string, WaitAgentStatus>();
+  const terminalRoots = new Map<string, WaitAgentStatus>();
   pi.on("agent_start", (_event, ctx) => {
-    roots.set(ctx.sessionManager.getSessionId(), "running");
+    const id = ctx.sessionManager.getSessionId();
+    roots.set(id, "running");
+    terminalRoots.delete(id);
   });
   pi.on("agent_end", (event, ctx) => {
     const last = [...event.messages].reverse().find((message) => message.role === "assistant");
@@ -48,10 +51,17 @@ export function createV2Tools(
         : last?.stopReason === "error"
           ? { errored: last.errorMessage ?? "unknown error" }
           : { completed: last ? extractText(last.content) || null : null };
-    roots.set(ctx.sessionManager.getSessionId(), status);
+    // agent_end precedes retries, compaction, and automatic continuation.
+    terminalRoots.set(ctx.sessionManager.getSessionId(), status);
+  });
+  pi.on("agent_settled", (_event, ctx) => {
+    const id = ctx.sessionManager.getSessionId();
+    roots.set(id, terminalRoots.get(id) ?? { completed: null });
+    terminalRoots.delete(id);
   });
   pi.on("session_shutdown", () => {
     roots.clear();
+    terminalRoots.clear();
   });
   const spawn = createSpawnExecution({ pi, ...deps }, (ctx, type, prompt, options, signal) =>
     spawnNamed(deps.manager, pi, ctx, type, prompt, options, signal),

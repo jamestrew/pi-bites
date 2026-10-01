@@ -23,7 +23,12 @@ import {
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
 import registerSubagents from "../index.js";
-import { createSubagentMessenger, type SubagentSender } from "../subagent-messages.js";
+import { resumeAgent } from "../agent-runner.js";
+import {
+  bindSubagentMessenger,
+  createSubagentMessenger,
+  type SubagentSender,
+} from "../subagent-messages.js";
 import { ShellAuthorizationTransactions } from "../../bash-gate/authorization.js";
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -46,8 +51,10 @@ function response(
   content: AssistantMessage["content"],
   stopReason: Extract<
     AssistantMessage["stopReason"],
-    "stop" | "length" | "toolUse" | "deferred"
+    "stop" | "length" | "toolUse" | "deferred" | "error"
   > = "stop",
+  input = 1,
+  errorMessage = "fatal provider rejection",
 ): ReturnType<StreamFunction> {
   const stream = createAssistantMessageEventStream();
   const message: AssistantMessage = {
@@ -57,19 +64,21 @@ function response(
     provider: model.provider,
     model: model.id,
     usage: {
-      input: 1,
+      input,
       output: 1,
       cacheRead: 0,
       cacheWrite: 0,
-      totalTokens: 2,
+      totalTokens: input + 1,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
     stopReason,
+    errorMessage: stopReason === "error" ? errorMessage : undefined,
     timestamp: Date.now(),
   };
   queueMicrotask(() => {
     stream.push({ type: "start", partial: message });
-    stream.push({ type: "done", reason: stopReason, message });
+    if (stopReason === "error") stream.push({ type: "error", reason: "error", error: message });
+    else stream.push({ type: "done", reason: stopReason, message });
     stream.end(message);
   });
   return stream;
@@ -336,6 +345,208 @@ it("real Pi queues completion mail while idle with zero unsolicited requests", a
       expect(requestText(requests[0]!).match(new RegExp(final, "g"))).toHaveLength(1);
   } finally {
     unsubscribe();
+    messenger.dispose();
+    session.dispose();
+  }
+});
+
+it("root stays running while automatic continuation is approved but not started", async () => {
+  let controller!: ReturnType<typeof registerSubagents>;
+  let requests = 0;
+  let observed: unknown;
+  let settledStatus: unknown;
+  let streaming = false;
+  const { session, model } = await makeSession(
+    [],
+    [
+      (pi) => {
+        controller = registerSubagents(pi);
+      },
+      (pi) => {
+        pi.on("agent_before_settle", async (_event, ctx) => {
+          if (requests !== 1) return;
+          pi.sendMessage(
+            { customType: "audit-continuation", content: "Continue work", display: false },
+            { triggerTurn: false },
+          );
+          streaming = session.isStreaming;
+          const operation = controller.capture(ctx, { forkContext: false });
+          const result = await operation.execute(
+            "list_agents",
+            {},
+            {
+              callerId: operation.callerId,
+              callId: "observe-continuing-root",
+            },
+          );
+          observed = JSON.parse((result.content[0] as { text: string }).text).agents[0]
+            .agent_status;
+          return { continue: true };
+        });
+        pi.on("agent_settled", async (_event, ctx) => {
+          const operation = controller.capture(ctx, { forkContext: false });
+          const result = await operation.execute(
+            "list_agents",
+            {},
+            {
+              callerId: operation.callerId,
+              callId: "observe-settled-root",
+            },
+          );
+          settledStatus = JSON.parse((result.content[0] as { text: string }).text).agents[0]
+            .agent_status;
+        });
+      },
+    ],
+    ["list_agents"],
+  );
+  session.agent.streamFunction = () => {
+    requests++;
+    return response(model, [{ type: "text", text: `answer ${requests}` }]);
+  };
+  try {
+    await session.prompt("go");
+    expect(requests).toBe(2);
+    expect(streaming).toBe(true);
+    expect(observed).toBe("running");
+    expect(settledStatus).toEqual({ completed: "answer 2" });
+  } finally {
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    session.dispose();
+  }
+});
+
+function compactFromExtension(pi: ExtensionAPI) {
+  pi.on("session_before_compact", (event) => ({
+    compaction: {
+      summary: "Checkpoint includes MAIL ONE.",
+      firstKeptEntryId: event.preparation.firstKeptEntryId,
+      tokensBefore: event.preparation.tokensBefore,
+    },
+  }));
+}
+
+it.each([false, true])(
+  "resume preserves a terminal provider error (compaction=%s)",
+  async (compact) => {
+    const { session, model } = await makeSession([], [compactFromExtension]);
+    session.agent.streamFunction = () =>
+      response(model, [{ type: "text", text: "old answer" }], "stop", 2000);
+    try {
+      for (let i = 0; i < 4; i++) await session.prompt(`old task ${i}`);
+      const oldLength = session.messages.length;
+      session.settingsManager.applyOverrides({
+        compaction: { enabled: compact, reserveTokens: 9000, keepRecentTokens: 0 },
+        retry: { enabled: false },
+      });
+      session.agent.streamFunction = () => response(model, [], "error");
+      let error: unknown;
+      try {
+        await resumeAgent(session, "new task");
+      } catch (e) {
+        error = e;
+      }
+      if (compact) expect(session.messages.length).toBeLessThan(oldLength);
+      expect(session.messages.some((m) => m.role === "compactionSummary")).toBe(compact);
+      const terminal = [...session.messages].reverse().find((m) => m.role === "assistant");
+      expect(terminal?.stopReason).toBe("error");
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe("fatal provider rejection");
+    } finally {
+      session.dispose();
+    }
+  },
+);
+
+it.each([false, true])(
+  "preserves unread attributed mail through compaction until inference (task=%s)",
+  async (task) => {
+    let messenger!: ReturnType<typeof createSubagentMessenger>;
+    const { session, model, sessionManager } = await makeSession(
+      [],
+      [
+        (pi) => {
+          messenger = createSubagentMessenger(pi);
+          const start = bindSubagentMessenger(pi, messenger);
+          pi.on("session_start", (_event, ctx) => start(ctx));
+        },
+        compactFromExtension,
+      ],
+    );
+    const requests: Context["messages"][] = [];
+    const compactions: boolean[] = [];
+    session.subscribe((event) => {
+      if (event.type === "compaction_end") compactions.push(event.aborted);
+    });
+    session.agent.streamFunction = (_model, context) => {
+      requests.push(structuredClone(context.messages));
+      return response(model, [{ type: "text", text: "answer" }], "stop", 2000);
+    };
+    try {
+      for (let i = 0; i < 4; i++) await session.prompt(`old task ${i}`);
+      for (const mail of ["MAIL ONE", "MAIL TWO"])
+        expect(messenger.queueOnly(sessionManager.getSessionId(), sender, mail, task)).toBe(true);
+      expect(messenger.observe().pending).toBe(2);
+      session.settingsManager.applyOverrides({
+        compaction: { enabled: true, reserveTokens: 9000, keepRecentTokens: 0 },
+        retry: { enabled: false },
+      });
+      await session.prompt("Read accepted information");
+      const sent = JSON.stringify(requests.at(-1));
+      for (const mail of ["MAIL ONE", "MAIL TWO"])
+        expect(sent.split(`<message>${mail}</message>`)).toHaveLength(2);
+      expect(sent.split("<sender_id>agent-1</sender_id>")).toHaveLength(3);
+      expect(messenger.observe()).toEqual({ revision: 2, pending: 0, pendingTasks: 0 });
+      expect(compactions).toEqual([true, false]);
+      expect(session.messages.some((m) => m.role === "compactionSummary")).toBe(true);
+      expect(await messenger.wait(1)).toBe("timeout");
+    } finally {
+      messenger.dispose();
+      session.dispose();
+    }
+  },
+);
+
+it("preserves a terminal overflow error when unread mail vetoes recovery compaction", async () => {
+  let messenger!: ReturnType<typeof createSubagentMessenger>;
+  const { session, model, sessionManager } = await makeSession(
+    [],
+    [
+      (pi) => {
+        messenger = createSubagentMessenger(pi);
+        const start = bindSubagentMessenger(pi, messenger);
+        pi.on("session_start", (_event, ctx) => start(ctx));
+      },
+      compactFromExtension,
+    ],
+  );
+  const overflow = "Your input exceeds the context window of this model";
+  session.agent.streamFunction = () => response(model, [{ type: "text", text: "old answer" }]);
+  try {
+    await session.prompt("old task");
+    session.settingsManager.applyOverrides({
+      compaction: { enabled: true, reserveTokens: 9000, keepRecentTokens: 0 },
+      retry: { enabled: false },
+    });
+    let requests = 0;
+    session.agent.streamFunction = () => {
+      requests++;
+      expect(messenger.queueOnly(sessionManager.getSessionId(), sender, "LATE INFO")).toBe(true);
+      return response(model, [], "error", 0, overflow);
+    };
+    await expect(resumeAgent(session, "new task")).rejects.toThrow(overflow);
+    expect(requests).toBe(1);
+    // Pi's overflow recovery omits the failed attempt before asking to compact.
+    expect(session.messages.some((m) => m.role === "assistant" && m.stopReason === "error")).toBe(
+      false,
+    );
+    expect(messenger.observe().pending).toBe(1);
+    expect(
+      session.messages.some(
+        (m) => m.role === "custom" && JSON.stringify(m.content).includes("LATE INFO"),
+      ),
+    ).toBe(true);
+  } finally {
     messenger.dispose();
     session.dispose();
   }
