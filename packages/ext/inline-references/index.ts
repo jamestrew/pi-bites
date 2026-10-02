@@ -316,7 +316,7 @@ function registerDollarAutocomplete(pi: ExtensionAPI) {
   });
 }
 
-export default function registerInlineReferences(pi: ExtensionAPI) {
+export default function registerSkillPromptReferences(pi: ExtensionAPI) {
   registerDollarAutocomplete(pi);
   registerInlineReferenceContext(pi);
 }

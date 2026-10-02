@@ -184,6 +184,16 @@ describe("extension entrypoint", () => {
     }
   });
 
+  test("can disable skill/prompt references independently of at-mention context", async () => {
+    const loaded = await loadExtension({ disable: ["skillPromptReferences"] });
+    try {
+      expect(loaded.registerSpies.get("./inline-references/index.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./at-mention-context/index.js")).toHaveBeenCalledTimes(1);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
   test.each(["--print", "-p"])("registers subagents in %s mode", async (flag) => {
     const loaded = await loadExtension({ argv: [flag] });
     try {

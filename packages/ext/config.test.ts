@@ -98,6 +98,64 @@ describe("loadConfig", () => {
 });
 
 describe("bites commands", () => {
+  test("lists one skill/prompt extension and re-enables legacy disables in both scopes", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
+    agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
+    const globalPath = join(agentDir, "pi-bites.json");
+    const projectPath = join(project, ".pi", "pi-bites.json");
+    mkdirSync(join(project, ".pi"));
+    writeFileSync(globalPath, JSON.stringify({ disable: ["inlineReferences", "notifications"] }));
+    writeFileSync(projectPath, JSON.stringify({ disable: ["slashSkillAutocomplete"] }));
+    const commands = new Map<
+      string,
+      {
+        handler(args: string, ctx: unknown): Promise<void>;
+        getArgumentCompletions?: (prefix: string) => Array<{ value: string }>;
+      }
+    >();
+    const notify = vi.fn();
+    const ctx = { cwd: project, ui: { notify } };
+    const { loadConfig, parseBitesConfig, registerBitesCommands } = await import("./config.js");
+    registerBitesCommands({
+      registerCommand: (name: string, command: Parameters<typeof commands.set>[1]) =>
+        commands.set(name, command),
+    } as never);
+
+    try {
+      expect(
+        parseBitesConfig({
+          disable: ["inlineReferences", "slashSkillAutocomplete", "skillPromptReferences"],
+        })?.disable,
+      ).toEqual(["skillPromptReferences"]);
+      expect(parseBitesConfig({ disable: ["inlineReferences", "unknown"] })).toBeUndefined();
+      expect(loadConfig(project).disable).toEqual(["skillPromptReferences", "notifications"]);
+      await commands.get("bites:list")!.handler("", ctx);
+      const listing = notify.mock.calls.at(-1)![0];
+      expect(listing).toContain(
+        "✗  skillPromptReferences  (global + project) — $skill:name / $prompt:name",
+      );
+      expect(listing).toContain("✓  atMentionContext — @path");
+      expect(listing).not.toMatch(/inlineReferences|slashSkillAutocomplete/);
+      const completions = commands.get("bites:off")!.getArgumentCompletions!("").map(
+        (item) => item.value,
+      );
+      expect(completions).toContain("skillPromptReferences");
+      expect(completions).not.toContain("inlineReferences");
+      expect(completions).not.toContain("slashSkillAutocomplete");
+
+      await commands.get("bites:on")!.handler("skillPromptReferences", ctx);
+      expect(loadConfig(project).disable).toEqual(["notifications"]);
+      expect(JSON.parse(readFileSync(globalPath, "utf8"))).toEqual({ disable: ["notifications"] });
+      expect(JSON.parse(readFileSync(projectPath, "utf8"))).toEqual({});
+      await commands.get("bites:off")!.handler("skillPromptReferences", ctx);
+      expect(JSON.parse(readFileSync(projectPath, "utf8"))).toEqual({
+        disable: ["skillPromptReferences"],
+      });
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
   test("list, disable, and enable codexAdapter across config reloads", async () => {
     const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));

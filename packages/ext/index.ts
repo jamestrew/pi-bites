@@ -12,7 +12,7 @@ import registerAutoCompaction, { DEFAULT_AUTO_COMPACTION_THRESHOLD } from "./aut
 import registerAutoMode from "./automode/index.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
-import registerInlineReferences from "./inline-references/index.js";
+import registerSkillPromptReferences from "./inline-references/index.js";
 import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
 import { createSubagents } from "./subagents/index.js";
@@ -84,8 +84,7 @@ export default async function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("notifications"))
     registerNotifications(pi, configRef, autoMode);
   if (!isNonInteractive && !disabled.has("spotme")) registerSpotme(pi);
-  if (!disabled.has("inlineReferences") && !disabled.has("slashSkillAutocomplete"))
-    registerInlineReferences(pi);
+  if (!disabled.has("skillPromptReferences")) registerSkillPromptReferences(pi);
   const previewPonytailPrompt = disabled.has("ponytail") ? undefined : registerPonytail(pi);
   const previewSystemPrompt: ContextPromptPreview = (prompt, ctx) => {
     const withCodex =

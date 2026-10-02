@@ -34,7 +34,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "autoMode" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "codexAdapter"
+ *   "bashGate" | "autoMode" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "skillPromptReferences" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "codexAdapter"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -119,8 +119,7 @@ export const EXTENSION_NAMES = [
   "autoCompaction",
   "autoMode",
   "spotme",
-  "inlineReferences",
-  "slashSkillAutocomplete",
+  "skillPromptReferences",
   "promptNormalization",
   "atMentionContext",
   "sessionTracker",
@@ -131,6 +130,11 @@ export const EXTENSION_NAMES = [
 ] as const;
 
 export type ExtensionName = (typeof EXTENSION_NAMES)[number];
+
+const EXTENSION_DESCRIPTIONS: Partial<Record<ExtensionName, string>> = {
+  skillPromptReferences: "$skill:name / $prompt:name completion and context loading",
+  atMentionContext: "@path file contents / directory listings",
+};
 
 export interface BitesConfig {
   smallModel?: SmallModelConfig;
@@ -252,6 +256,21 @@ function isBitesConfig(value: unknown): value is BitesConfig {
 }
 
 export function parseBitesConfig(value: unknown): BitesConfig | undefined {
+  // Keep old disable entries effective without exposing duplicate extension names.
+  if (isRecord(value) && Array.isArray(value.disable)) {
+    value = {
+      ...value,
+      disable: [
+        ...new Set(
+          value.disable.map((name: unknown) =>
+            name === "inlineReferences" || name === "slashSkillAutocomplete"
+              ? "skillPromptReferences"
+              : name,
+          ),
+        ),
+      ],
+    };
+  }
   return isBitesConfig(value) ? value : undefined;
 }
 
@@ -426,7 +445,8 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
         else if (inGlobal) scope = "  (global)";
         else if (inProject) scope = "  (project)";
 
-        return `  ${status}  ${name}${scope}`;
+        const description = EXTENSION_DESCRIPTIONS[name];
+        return `  ${status}  ${name}${scope}${description ? ` — ${description}` : ""}`;
       });
 
       ctx.ui.notify(lines.join("\n"), "info");

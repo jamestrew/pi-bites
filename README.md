@@ -167,7 +167,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, codexAdapter
+bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, skillPromptReferences, promptNormalization, atMentionContext, ponytail, view, codexAdapter
 ```
 
 You can also edit config directly:
@@ -206,9 +206,13 @@ bind-key -n M-s run-shell -b 'node "/path/to/pi-bites/bin/pi-sessions.mjs" next 
 
 Adjust the script path when pi-bites is installed from a local checkout. The helper only contacts an already-running tracker daemon; it does not start Pi or the daemon.
 
-## Inline references
+## Skill and prompt references (`skillPromptReferences`)
 
 Use `$skill:name` or `$prompt:name` anywhere in a message to attach the referenced skill or prompt template as hidden context without expanding it into the visible user prompt. Typing `$` in the TUI offers completions for available skills and prompt templates.
+
+This single extension controls both completion and context loading. Legacy `disable` entries named `inlineReferences` or `slashSkillAutocomplete` are read as `skillPromptReferences`.
+
+By contrast, `atMentionContext` preloads file contents or directory listings for `@path` mentions (including line ranges such as `@src/foo.ts:10-20`). These are independent extensions.
 
 ## SpotMe
 
