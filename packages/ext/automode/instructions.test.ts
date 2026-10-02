@@ -111,6 +111,7 @@ test("oversized instructions are omitted whole, with incompleteness, while the e
   const { controller, ctx, input } = sessionFixture();
   input(`APPARENT_GRANT ${"x".repeat(5000)} DO_NOT_DEPLOY ${"x".repeat(5000)} APPARENT_GRANT_END`);
   input("LATEST_RESTRICTION");
+  ctx.model = { ...ctx.model, contextWindow: 26_000 };
   const command = `rm ${"y".repeat(42000)} EXACT_END`;
   await controller.review(rmRequest(command), ctx as any);
   await controller.review(rmRequest(command), ctx as any);

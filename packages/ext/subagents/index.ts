@@ -355,8 +355,6 @@ export function createSubagents(
                 toolName: request.toolName,
                 execution: request.execution,
                 ...(request.nestedEvidence ? { nestedEvidence: request.nestedEvidence } : {}),
-                labels: request.labels,
-                reasons: request.reasons,
                 subagentContext: session
                   ? buildSubagentReviewerTranscript(
                       session.messages as ReviewerMessage[],

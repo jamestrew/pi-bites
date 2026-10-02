@@ -338,10 +338,6 @@ export default function registerBashGate(
                       ...(nestedEvidence ? { nestedEvidence } : {}),
                       toolName,
                       toolCallId,
-                      labels: matchedPatternLabels,
-                      reasons: matchedPatterns.flatMap((match) =>
-                        match.reason === undefined ? [] : [match.reason],
-                      ),
                     },
                     { ...reviewCtx, signal },
                   ),

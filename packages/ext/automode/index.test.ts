@@ -230,7 +230,7 @@ describe("automode reviewer model and completion", () => {
     expect(complete).toHaveBeenCalledWith(
       model,
       expect.anything(),
-      expect.objectContaining({ signal: ctx.signal, timeoutMs: 90_000 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal), timeoutMs: expect.any(Number) }),
     );
   });
 
@@ -341,7 +341,7 @@ describe("automode reviewer model and completion", () => {
     expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
   });
 
-  test.each(["aborted", "length", "toolUse", "pending", "deferred"])(
+  test.each(["aborted", "length", "pending", "deferred"])(
     "rejects non-success %s responses even when their output says allow",
     async (stopReason) => {
       const { controller, ctx } = createAutoModeHarness();
@@ -441,10 +441,7 @@ Complete task Y across the repository.
     ];
     vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
 
-    await controller.review(
-      { execution, command: "bun check", labels: [], reasons: [] },
-      ctx as any,
-    );
+    await controller.review({ execution, command: "bun check" }, ctx as any);
 
     const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
     const prompt = request.messages[0].content[0].text as string;
@@ -486,10 +483,7 @@ Complete task Y across the repository.
     ];
     vi.mocked(complete).mockResolvedValue(response('{"outcome":"allow"}'));
 
-    await controller.review(
-      { execution, command: "bun check", labels: [], reasons: [] },
-      ctx as any,
-    );
+    await controller.review({ execution, command: "bun check" }, ctx as any);
 
     const request = vi.mocked(complete).mock.calls[0]?.[1] as any;
     const prompt = request.messages[0].content[0].text as string;
@@ -582,8 +576,6 @@ Complete task Y across the repository.
       {
         execution,
         command: "git push origin next",
-        labels: ["git push"],
-        reasons: [],
       },
       ctx as any,
     );
@@ -735,7 +727,7 @@ describe("automode reviewer transcript safety", () => {
     const serialized = transcript.slice("shell authorization: ".length);
 
     expect(() => JSON.parse(serialized)).not.toThrow();
-    expect(transcript.length).toBeLessThanOrEqual(8_000);
+    expect(transcript.length).toBeLessThanOrEqual(20_200);
     expect(transcript).not.toContain("</AUTHORIZATION_TRANSCRIPT>");
   });
 
@@ -766,17 +758,17 @@ describe("automode reviewer transcript safety", () => {
     expect(transcript).toContain("NEWEST_SHELL");
     expect(transcript).toContain("FIRST USER");
     expect(transcript).toContain("LATEST USER");
-    expect(transcript.length).toBeLessThanOrEqual(40_000);
+    expect(Buffer.byteLength(transcript)).toBeLessThanOrEqual(81_000);
   });
 
   test("anchors first and latest real users, marks omissions, and enforces both bounds", () => {
-    const oversized = `OVERSIZED ${"z".repeat(10_000)}`;
+    const oversized = `OVERSIZED ${"z".repeat(30_000)}`;
     const messages = [
       { role: "user", content: "FIRST USER AUTHORIZATION" },
       { role: "assistant", content: oversized },
       ...Array.from({ length: 6 }, (_, index) => ({
         role: "assistant",
-        content: `old assistant ${index} ${"x".repeat(8_000)}`,
+        content: `old assistant ${index} ${"x".repeat(16_000)}`,
       })),
       { role: "user", content: "LATEST REAL USER AUTHORIZATION" },
       { role: "assistant", content: "most recent surfaced response" },
@@ -786,12 +778,12 @@ describe("automode reviewer transcript safety", () => {
 
     expect(
       buildReviewerTranscript([{ role: "assistant", content: oversized }]).length,
-    ).toBeLessThanOrEqual(8_000);
+    ).toBeLessThanOrEqual(20_200);
     expect(transcript).toContain("FIRST USER AUTHORIZATION");
     expect(transcript).toContain("LATEST REAL USER AUTHORIZATION");
     expect(transcript).toContain("most recent surfaced response");
     expect(transcript).toContain("<... transcript entries omitted ...>");
-    expect(transcript.length).toBeLessThanOrEqual(40_000);
+    expect(Buffer.byteLength(transcript)).toBeLessThanOrEqual(81_000);
   });
 
   test("preserves a structured assessment through the reviewer boundary", async () => {
@@ -804,10 +796,7 @@ describe("automode reviewer transcript safety", () => {
     };
     complete.mockResolvedValue(response(JSON.stringify(assessment)));
     await expect(
-      controller.review(
-        { execution, command: "restart service", labels: [], reasons: [] },
-        ctx as any,
-      ),
+      controller.review({ execution, command: "restart service" }, ctx as any),
     ).resolves.toEqual(assessment);
   });
 });
@@ -875,4 +864,22 @@ describe("Guardian assessment gate fixtures", () => {
     expect(ctx.ui.select).not.toHaveBeenCalled();
     expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
   });
+});
+
+test("reviewer assesses exact actions without host classification hints", async () => {
+  const { controller, ctx } = createAutoModeHarness();
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  await controller.review(
+    {
+      ...rmRequest("jj git push --bookmark feature/x"),
+      labels: ["unlisted: jj git push"],
+      reasons: ["jj is not on the bash-gate allowlist"],
+    } as any,
+    ctx as any,
+  );
+  const packet = JSON.stringify(complete.mock.calls[0]![1]);
+  expect(packet).toContain("jj git push --bookmark feature/x");
+  expect(packet).not.toContain("unlisted: jj");
+  expect(packet).not.toContain("is not on the bash-gate allowlist");
+  expect(packet).not.toContain('"labels"');
 });

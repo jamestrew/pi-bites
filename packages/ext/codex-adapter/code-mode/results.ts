@@ -9,6 +9,7 @@ export interface CodeModeDetails {
   state: RuntimeResponse["kind"];
   failed: boolean;
   traces: NestedTrace[];
+  reviewEvidence?: unknown[];
   displayVersion?: number;
   errorText?: string;
   output?: string;
@@ -21,6 +22,7 @@ export function codeModeResult(
   maxTokens: number,
   traces: NestedTrace[],
   displayVersion?: number,
+  reviewEvidence?: unknown[],
 ): AgentToolResult<CodeModeDetails> {
   const failed = response.errorText !== undefined;
   const status =
@@ -59,6 +61,7 @@ export function codeModeResult(
       state: response.kind,
       failed,
       traces,
+      reviewEvidence,
       displayVersion,
       errorText: response.errorText?.slice(0, 8192),
       output: output.length > 65536 ? `${output.slice(0, 65536)}\n[Display truncated]` : output,

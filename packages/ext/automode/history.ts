@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type { Message, Tool } from "@earendil-works/pi-ai";
+
+import { approximateTokens } from "./context-budget.js";
 
 interface Cursor {
   length: number;
@@ -33,10 +35,6 @@ interface History extends Snapshot {
   messages: Message[];
 }
 
-// Bound the entire serialized request, not just its transcript. One UTF-8 byte per
-// token plus framing is deliberately conservative without a provider tokenizer.
-// Reserve output separately; larger histories need provider-aware token counting.
-const MAX_INPUT_BYTES = 96_000;
 export const REVIEW_OUTPUT_TOKENS = 1_024;
 
 export class ReviewerHistory {
@@ -58,8 +56,9 @@ export class ReviewerHistory {
     systemPrompt: string;
     contextWindow: number;
     outputReserve: number;
+    tools?: Tool[];
     readOnly: boolean;
-    prompt: (contextOffset: number, branchOffset: number) => string;
+    prompt: (contextOffset: number, branchOffset: number, availableTokens: number) => string;
   }) {
     const compatible = (snapshot: Snapshot) =>
       snapshot.key === input.key &&
@@ -79,10 +78,16 @@ export class ReviewerHistory {
       this.committed?.scope === input.scope && compatible(this.committed)
         ? this.committed
         : undefined;
-    const limit = Math.min(MAX_INPUT_BYTES, input.contextWindow - input.outputReserve);
+    const limit = input.contextWindow - input.outputReserve - 256;
     const fits = (messages: Message[]) =>
-      Buffer.byteLength(JSON.stringify({ systemPrompt: input.systemPrompt, messages }), "utf8") +
-        256 * (messages.length + 1) <=
+      approximateTokens(
+        JSON.stringify({
+          systemPrompt: input.systemPrompt,
+          messages,
+          tools: input.tools,
+        }),
+      ) +
+        32 * (messages.length + 1) <=
       limit;
     const build = (): Message[] => [
       ...structuredClone(previous?.messages ?? []),
@@ -91,7 +96,19 @@ export class ReviewerHistory {
         content: [
           {
             type: "text",
-            text: input.prompt(previous?.context.length ?? 0, previous?.branch.length ?? 0),
+            text: input.prompt(
+              previous?.context.length ?? 0,
+              previous?.branch.length ?? 0,
+              limit -
+                approximateTokens(
+                  JSON.stringify({
+                    systemPrompt: input.systemPrompt,
+                    tools: input.tools,
+                    messages: previous?.messages ?? [],
+                  }),
+                ) -
+                32 * ((previous?.messages.length ?? 0) + 2),
+            ),
           },
         ],
         timestamp: Date.now(),
@@ -127,10 +144,13 @@ export class ReviewerHistory {
           throw new Error("Reviewer context changed before assessment completed");
         }
       },
-      commit: (response: AssistantMessage) => {
+      assertFits: (messages: Message[]) => {
+        if (!fits(messages)) throw new Error("Reviewer request exceeds the whole-request budget");
+      },
+      commit: (messages: Message[]) => {
         if (canCommit && generation === this.generation && this.pending === snapshot) {
           // Never mutate the array sent to an in-flight provider request.
-          const completed = structuredClone([...messages, response]);
+          const completed = structuredClone(messages);
           this.committed = fits(completed)
             ? { ...snapshot, scope: input.scope, sessionId, messages: completed }
             : undefined;

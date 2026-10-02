@@ -91,8 +91,8 @@ test("bounded outputs, nested traces and injection stay data in reusable payload
   complete.mockResolvedValue(response('{"outcome":"allow"}'));
   await controller.review(rmRequest("rm generated.txt"), ctx as any);
   const first = structuredClone(complete.mock.calls[0]![1].messages);
-  expect(prompt()).not.toContain("BULK_OUTPUT");
-  expect(prompt()).toContain("bulk field exceeds evidence limit");
+  expect(prompt()).toContain("omitted_approx_tokens");
+  expect(prompt().length).toBeLessThan(60_000);
   expect(prompt()).toContain("+generated artifact");
   expect(prompt()).toContain("nested tool");
   const text = (first[0]!.content as any)[0].text as string;
@@ -185,4 +185,154 @@ test("real nested gate delivers immutable live evidence to the provider", async 
   expect(launch).toHaveBeenCalledOnce();
   nestedEvidence[0]!.result.content[0]!.text = "MUTATED_LATER";
   expect(prompt()).not.toContain("MUTATED_LATER");
+});
+
+test("Guardian retains ordinary script reads and both ends of oversized tool evidence", async () => {
+  const { controller, ctx, branch } = createAutoModeHarness();
+  branch.push(
+    {
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "script",
+        toolName: "read",
+        content: [{ type: "text", text: "SCRIPT_START " + "x".repeat(1800) + " SCRIPT_END" }],
+      },
+    },
+    {
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "large",
+        toolName: "read",
+        content: [{ type: "text", text: "HEAD_MARKER " + "界".repeat(5000) + " TAIL_MARKER" }],
+      },
+    },
+  );
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  await controller.review(rmRequest("python script.py"), ctx as any);
+  expect(prompt()).toContain("SCRIPT_START");
+  expect(prompt()).toContain("SCRIPT_END");
+  expect(prompt()).toContain("HEAD_MARKER");
+  expect(prompt()).toContain("TAIL_MARKER");
+  expect(prompt()).toContain("omitted_approx_tokens");
+  expect(prompt()).not.toContain("�");
+});
+
+test("transcript budgets keep recent tools independently of conversation commentary", async () => {
+  const { controller, ctx, branch } = createAutoModeHarness();
+  for (let i = 0; i < 35; i++) {
+    branch.push({
+      type: "message",
+      message: { role: "assistant", content: "COMMENTARY_" + i + " " + "c".repeat(7000) },
+    });
+  }
+  for (let i = 0; i < 15; i++) {
+    branch.push({
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolCallId: "tool-" + i,
+        toolName: "read",
+        content: [{ type: "text", text: "RECENT_TOOL_" + i + " " + "r".repeat(1800) }],
+      },
+    });
+  }
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  await controller.review(rmRequest("python script.py"), ctx as any);
+  expect(prompt()).toContain("RECENT_TOOL_14");
+  expect(prompt()).toContain("RECENT_TOOL_0");
+  expect(prompt()).not.toContain("COMMENTARY_0 ");
+  expect(prompt()).toContain("COMMENTARY_25 ");
+});
+
+test("nested review evidence retains the original tail before display truncation", async () => {
+  const { NestedTraces } = await import("../codex-adapter/code-mode/nested-traces.js");
+  const traces = new NestedTraces();
+  traces.record({
+    cellId: "cell",
+    callId: "read",
+    name: "read",
+    state: "completed",
+    input: { path: "script.py" },
+    result: {
+      content: [{ type: "text", text: "REAL_HEAD " + "x".repeat(20_000) + " REAL_TAIL" }],
+      details: {},
+    },
+  });
+  expect(JSON.stringify(traces.forCell("cell"))).not.toContain("REAL_TAIL");
+  const { controller, ctx } = createAutoModeHarness();
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  await controller.review(
+    {
+      ...rmRequest("python script.py"),
+      nestedEvidence: traces.forReview("cell"),
+    },
+    ctx as any,
+  );
+  expect(prompt()).toContain("REAL_HEAD");
+  expect(prompt()).toContain("REAL_TAIL");
+  expect(prompt()).not.toContain("Display truncated");
+});
+
+test("whole-request admission evicts commentary before the newest five tool observations", async () => {
+  const { controller, ctx, branch } = createAutoModeHarness();
+  ctx.model = { ...ctx.model, contextWindow: 13_000 };
+  for (let i = 0; i < 8; i++) {
+    branch.push({
+      type: "message",
+      message: {
+        role: "assistant",
+        content: "OPTIONAL_COMMENT_" + i + " " + "c".repeat(7000),
+      },
+    });
+    branch.push({
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolName: "read",
+        toolCallId: "read-" + i,
+        content: [{ type: "text", text: "FACT_" + i + " " + "f".repeat(1400) }],
+      },
+    });
+  }
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  await controller.review(rmRequest("python script.py"), ctx as any);
+  for (let i = 3; i < 8; i++) expect(prompt()).toContain("FACT_" + i);
+  expect(prompt()).not.toContain("OPTIONAL_COMMENT_0 ");
+});
+
+test("selected factual observations remain in original conversation order", async () => {
+  const { controller, ctx, branch } = createAutoModeHarness();
+  branch.push(
+    {
+      type: "message",
+      message: {
+        role: "toolResult",
+        toolName: "read",
+        toolCallId: "old",
+        content: [{ type: "text", text: "TOOL_FIRST" }],
+      },
+    },
+    { type: "message", message: { role: "assistant", content: "COMMENT_LATER" } },
+  );
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  await controller.review(rmRequest("python script.py"), ctx as any);
+  expect(prompt().indexOf("TOOL_FIRST")).toBeLessThan(prompt().indexOf("COMMENT_LATER"));
+});
+
+test("retained nested evidence does not change with later mutation of tool arguments", async () => {
+  const { NestedTraces } = await import("../codex-adapter/code-mode/nested-traces.js");
+  const traces = new NestedTraces();
+  const input = { path: "ORIGINAL_PATH" };
+  traces.record({ cellId: "cell", callId: "read", name: "read", input, state: "completed" });
+  input.path = "MUTATED_PATH";
+  const { controller, ctx } = createAutoModeHarness();
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  await controller.review(
+    { ...rmRequest("python script.py"), nestedEvidence: traces.forReview("cell") },
+    ctx as any,
+  );
+  expect(prompt()).toContain("ORIGINAL_PATH");
+  expect(prompt()).not.toContain("MUTATED_PATH");
 });

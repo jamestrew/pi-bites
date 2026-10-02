@@ -149,6 +149,7 @@ function observeCodeMode(
         maxTokens,
         subscription ? traces.forCell(response.cellId) : [],
         subscription?.version,
+        subscription ? traces.forReview(response.cellId) : [],
       ),
     failure: (error: unknown, maxTokens: number) => {
       if (!cellId || !subscription) throw error;
@@ -180,6 +181,7 @@ function observeCodeMode(
         maxTokens,
         interrupted,
         subscription.version,
+        traces.forReview(cellId),
       );
     },
     dispose: () => subscription?.dispose(),

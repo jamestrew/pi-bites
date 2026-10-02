@@ -1,7 +1,5 @@
 import { buildSessionProjection, type SessionEntry } from "@earendil-works/pi-coding-agent";
 
-export const MAX_ENTRY_CHARS = 8_000;
-
 // Compaction hides messages from model context, not from the active branch.
 // Reuse Pi's edit projection over that branch without its compaction cutoffs.
 // Rewire copies only: removing a compaction must not break the parent chain.

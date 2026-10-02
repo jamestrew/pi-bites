@@ -397,8 +397,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     expect(review).toHaveBeenCalledWith(
       {
         command: "git commit -m test",
-        labels: ["git commit"],
-        reasons: [],
         subagentContext: "<subagent context unavailable>",
       },
       expect.objectContaining({

@@ -44,7 +44,7 @@ describe("concurrent reviewer forks", () => {
     entries.push({ type: "message", message: { role: "user", content: "NEW_INSTRUCTION" } });
     const fork = controller.review(rmRequest("rm fork"), ctx as any);
     deferred[0]!.resolve(response('{"outcome":"allow"}'));
-    await owner;
+    await expect(owner).rejects.toThrow("context changed");
     const newer = controller.review(rmRequest("rm newer"), ctx as any);
     deferred[2]!.resolve(response('{"outcome":"deny"}'));
     await newer;
@@ -55,7 +55,7 @@ describe("concurrent reviewer forks", () => {
     expect(payload(4)).toContain("rm newer");
     expect(payload(4)).not.toContain("rm fork");
     expect(payload(4).match(/NEW_INSTRUCTION/g)).toHaveLength(1);
-    expect(complete.mock.calls[4]![1].messages).toHaveLength(7);
+    expect(complete.mock.calls[4]![1].messages).toHaveLength(5);
   });
 
   test.each(["transport", "parse", "cancel"])(
@@ -89,6 +89,7 @@ describe("concurrent reviewer forks", () => {
 
   test("fork budget rebuilds and failures do not evict the committed prefix", async () => {
     const { controller, ctx } = createAutoModeHarness();
+    ctx.model = { ...ctx.model, contextWindow: 26_000 };
     complete.mockResolvedValueOnce(response('{"outcome":"allow"}'));
     await controller.review(rmRequest(`rm ${"x".repeat(42_000)}`), ctx as any);
     const deferred = deferReviews();

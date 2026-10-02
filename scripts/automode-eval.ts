@@ -27,13 +27,39 @@ interface Row {
   usage?: Usage;
   servedModel?: string;
   stopReason?: string;
+  responses?: { usage: Usage; servedModel: string; stopReason: string }[];
 }
+export function recordReviewResponse(row: Row, response: AssistantMessage): void {
+  row.servedModel = response.provider + "/" + (response.responseModel ?? response.model);
+  row.stopReason = response.stopReason;
+  (row.responses ??= []).push({
+    usage: structuredClone(response.usage),
+    servedModel: row.servedModel,
+    stopReason: response.stopReason,
+  });
+  if (!row.usage) {
+    row.usage = structuredClone(response.usage);
+    return;
+  }
+  for (const key of ["input", "cacheRead", "cacheWrite", "output", "totalTokens"] as const) {
+    row.usage[key] += response.usage[key];
+  }
+  for (const key of ["reasoning", "cacheWrite1h"] as const) {
+    if (response.usage[key] !== undefined)
+      row.usage[key] = (row.usage[key] ?? 0) + response.usage[key]!;
+  }
+  for (const key of ["input", "output", "cacheRead", "cacheWrite", "total"] as const) {
+    row.usage.cost[key] += response.usage.cost[key];
+  }
+}
+
 function summarize(rows: Row[]) {
   return Object.fromEntries(
     phases.map((phase) => {
       const phaseRows = rows.filter((row) => row.phase === phase);
       const group = phaseRows.filter((row) => row.latencyMs !== undefined);
       const measured = group.filter((row) => row.usage);
+      const providerResponses = group.flatMap((row) => row.responses ?? []);
       const sum = (key: "input" | "cacheRead" | "cacheWrite" | "output") =>
         measured.reduce((total, row) => total + row.usage![key], 0);
       const input = sum("input"),
@@ -61,9 +87,11 @@ function summarize(rows: Row[]) {
           reasoningReported: measured.filter((row) => row.usage!.reasoning !== undefined).length,
           cacheReadFraction:
             input + cacheRead + cacheWrite ? cacheRead / (input + cacheRead + cacheWrite) : null,
-          cacheHitFrequency: measured.length
-            ? measured.filter((row) => row.usage!.cacheRead > 0).length / measured.length
+          cacheHitFrequency: providerResponses.length
+            ? providerResponses.filter((row) => row.usage.cacheRead > 0).length /
+              providerResponses.length
             : null,
+          providerResponses: providerResponses.length,
           meanLatencyMs: group.length
             ? group.reduce((total, row) => total + (row.latencyMs ?? 0), 0) / group.length
             : null,
@@ -178,10 +206,11 @@ async function main() {
               : "transport";
           throw error;
         }
-        row.usage = response.usage;
-        row.servedModel = `${response.provider}/${response.responseModel ?? response.model}`;
-        row.stopReason = response.stopReason;
-        if (response.stopReason !== "stop" || response.errorMessage)
+        recordReviewResponse(row, response);
+        if (
+          (response.stopReason !== "stop" && response.stopReason !== "toolUse") ||
+          response.errorMessage
+        )
           row.failure = /timeout|timed out/i.test(response.errorMessage ?? "")
             ? "timeout"
             : `provider:${response.stopReason}`;
@@ -237,8 +266,6 @@ async function main() {
               {
                 execution: { cwd: "/repo" },
                 command: scenario.command,
-                labels: [],
-                reasons: [],
                 toolCallId: `${phase}-${ordinal}`,
                 ...(phase === "child"
                   ? {

@@ -269,7 +269,7 @@ describe("bash gate tool_call", () => {
     ).resolves.toEqual({ block: true, reason: "Automode review failed closed: timeout" });
 
     expect(review).toHaveBeenCalledWith(
-      expect.objectContaining({ command: "rm build.txt", labels: ["rm"] }),
+      expect.objectContaining({ command: "rm build.txt" }),
       expect.anything(),
     );
     expect(ui.select).not.toHaveBeenCalled();

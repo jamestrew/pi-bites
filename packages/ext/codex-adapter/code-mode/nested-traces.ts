@@ -1,3 +1,4 @@
+import { snapshotNestedEvidence } from "../../automode/tool-evidence.js";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 
 export interface NestedTrace {
@@ -10,12 +11,13 @@ export interface NestedTrace {
   result?: AgentToolResult<unknown>;
 }
 
-/** Presentation only: never appended to native/model result values. Oldest calls are evicted.
+/** Independent bounded display and review observations. Oldest calls are evicted.
  * Text is bounded structurally so renderer details remain objects. Oversized images are omitted,
  * never truncated into invalid base64. Explicit image() output uses the independent native path.
  */
 export class NestedTraces {
   private entries = new Map<string, { trace: NestedTrace; bytes: number }>();
+  private evidence = new Map<string, ReturnType<typeof snapshotNestedEvidence>>();
   private bytes = 0;
   private version = 0;
   private listeners = new Set<(cellId: string) => void>();
@@ -34,6 +36,7 @@ export class NestedTraces {
   }
   clear(): void {
     this.entries.clear();
+    this.evidence.clear();
     this.bytes = 0;
     this.listeners.clear();
   }
@@ -42,7 +45,13 @@ export class NestedTraces {
       .filter(({ trace }) => trace.cellId === cellId)
       .map(({ trace }) => structuredClone(trace));
   }
+  forReview(cellId: string): unknown[] {
+    return [...this.evidence.values()]
+      .filter((trace) => trace.cellId === cellId)
+      .map((trace) => structuredClone(trace));
+  }
   record(trace: NestedTrace): void {
+    this.evidence.set(trace.callId, snapshotNestedEvidence(trace));
     let remaining = 64 * 1024;
     let nodes = 4096;
     const bound = (value: unknown, depth = 0): unknown => {
@@ -90,6 +99,7 @@ export class NestedTraces {
       const [key, entry] = oldest;
       this.bytes -= entry.bytes;
       this.entries.delete(key);
+      this.evidence.delete(key);
     }
     for (const listener of this.listeners) {
       try {

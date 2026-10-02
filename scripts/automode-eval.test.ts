@@ -37,3 +37,27 @@ test("failed report replacement preserves completed paid measurements", () => {
   expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ reviews: 2 });
   expect(statSync(file).mode & 0o777).toBe(0o600);
 });
+
+test("evaluation totals all investigation responses rather than only the final assessment", async () => {
+  const { recordReviewResponse } = await import("./automode-eval.ts");
+  const row = { scenario: "inspection", phase: "cold" as const, expected: "allow" };
+  const reply = (input: number, cacheRead: number, cost: number) => ({
+    provider: "provider",
+    model: "model",
+    stopReason: "stop",
+    usage: {
+      input,
+      cacheRead,
+      cacheWrite: 0,
+      output: 2,
+      totalTokens: input + cacheRead + 2,
+      cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
+    },
+  });
+  recordReviewResponse(row, reply(100, 200, 0.01) as any);
+  recordReviewResponse(row, reply(50, 400, 0.02) as any);
+  expect(row).toMatchObject({
+    usage: { input: 150, cacheRead: 600, output: 4, totalTokens: 754, cost: { total: 0.03 } },
+    responses: [{ servedModel: "provider/model" }, { servedModel: "provider/model" }],
+  });
+});

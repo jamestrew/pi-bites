@@ -158,7 +158,7 @@ export class NestedToolBridge {
               return await snapshot.authorization.authorize(
                 {
                   ...request,
-                  nestedEvidence: this.traces.forCell(call.cellId),
+                  nestedEvidence: this.traces.forReview(call.cellId),
                 },
                 () => {
                   // Gate time blocks model responses; command execution must still yield.

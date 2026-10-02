@@ -635,7 +635,10 @@ test("nested authorization snapshots earlier same-cell tool results with stale c
         state: "completed",
         cwd,
         result: expect.objectContaining({
-          details: expect.objectContaining({ output: "generated-evidence", exit_code: 0 }),
+          details: expect.objectContaining({ exit_code: 0 }),
+          content: expect.arrayContaining([
+            expect.objectContaining({ text: expect.stringContaining("generated-evidence") }),
+          ]),
         }),
       }),
     ]),

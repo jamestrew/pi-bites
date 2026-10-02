@@ -3,7 +3,7 @@
 The production reviewer is `packages/ext/automode/index.ts`. Every gated command
 receives a fresh synchronous assessment. Conversation reuse saves potential context
 computation, never permission decisions. There is no background scorer, approval
-bypass, sandbox, or reviewer investigation tool. Configuration remains
+bypass or sandbox. Guardian may make bounded guarded local reads; no shell or general agent tools. Configuration remains
 `autoMode.model`, `autoMode.thinking`, and the full-replacement `autoMode.policy`.
 See [the upstream contract](../packages/ext/automode/UPSTREAM.md) for policy,
 provenance, lifecycle, concurrent ownership, budget ceilings, and Pi adaptations.
@@ -21,8 +21,8 @@ bun scripts/automode-eval.ts
 Paid evaluation requires explicit model, revision label, and a new output file.
 The runner uses Pi's configured models and stored credentials, including provider
 refresh; it does not load agent extensions, read session transcripts, or execute
-any command under review. Each full run makes 88 review attempts. Only two attempts
-are concurrent. The reviewer retains its 90-second per-call timeout; provider-level
+any command under review. Each full run makes 88 review attempts, not necessarily 88 provider calls. Only two attempts
+are concurrent. Investigations may make up to four provider calls per attempt under one 90-second deadline; provider-level
 retry behavior is unchanged. Budget for provider charges before invoking it.
 
 Use the same runner, installed dependencies, model, policy, low thinking, and
@@ -44,6 +44,13 @@ process and be shared across runs: **cold** denotes empty reviewer history, not 
 verified empty provider cache. Do not change prompts with random padding to force
 cache misses; that changes the workload. Record cache-retention settings, provider
 routing changes, configured model overrides, and trial order with results.
+
+Multi-response reviews sum all reported usage/cost, retain each response's served model
+and stop reason, and calculate cache-hit frequency per provider response. Report
+schema version 2 distinguishes this from the historical one-response pilot. Late
+provider responses may arrive after cancellation; saved partial reports are snapshots,
+not proof that every in-flight charge has arrived. No new paid evaluation was run
+for the investigation changes.
 
 ## Workloads and interpretation
 

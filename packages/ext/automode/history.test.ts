@@ -92,6 +92,7 @@ describe("bounded reviewer conversation lifecycle", () => {
   test("rebuilds deterministically at the whole-request bound without truncating the action", async () => {
     const { controller, ctx } = createAutoModeHarness();
     complete.mockResolvedValue(response('{"outcome":"allow"}'));
+    ctx.model = { ...model, contextWindow: 26_000 };
     const command = `rm ${"x".repeat(42_000)} END`;
     await controller.review(rmRequest(command), ctx as any);
     await controller.review(rmRequest(command), ctx as any);
@@ -109,7 +110,7 @@ describe("bounded reviewer conversation lifecycle", () => {
 
   test("reserves Pi's expanded thinking output within the whole model context", async () => {
     const { controller, ctx, configRef } = createAutoModeHarness();
-    ctx.model = { ...model, contextWindow: 40_000 };
+    ctx.model = { ...model, contextWindow: 22_000 };
     configRef.current.autoMode = { thinking: "high" };
     await expect(controller.review(rmRequest("x".repeat(12_000)), ctx as any)).rejects.toThrow(
       "whole-request budget",
@@ -123,7 +124,7 @@ describe("bounded reviewer conversation lifecycle", () => {
 
   test("respects the selected model's context window including policy and output reserve", async () => {
     const { controller, ctx } = createAutoModeHarness();
-    ctx.model = { ...model, contextWindow: 20_000 };
+    ctx.model = { ...model, contextWindow: 7_000 };
     await expect(controller.review(rmRequest("x".repeat(3_000)), ctx as any)).rejects.toThrow(
       "whole-request budget",
     );
@@ -274,4 +275,14 @@ describe("bounded reviewer conversation lifecycle", () => {
       expect(JSON.stringify(next)).not.toMatch(/rm sibling|rm child|CHILD_ONLY/);
     },
   );
+});
+
+test("token-aware admission reuses requests larger than the former serialized-byte ceiling", async () => {
+  const { controller, ctx } = createAutoModeHarness();
+  complete.mockResolvedValue(response('{"outcome":"allow"}'));
+  const request = rmRequest("python " + "x".repeat(65_000) + " EXACT_END");
+  await controller.review(request, ctx as any);
+  await controller.review(request, ctx as any);
+  expect(complete.mock.calls[1]![1].messages).toHaveLength(3);
+  expect(complete.mock.calls[1]![2]?.sessionId).toBe(complete.mock.calls[0]![2]?.sessionId);
 });
