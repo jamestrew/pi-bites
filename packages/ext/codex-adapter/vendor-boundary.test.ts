@@ -9,7 +9,8 @@ const root = resolve(import.meta.dirname);
 const retainedGroups = [
   /^(?:apply-patch|exec-command|vendor-boundary|view-image)\.test\.ts$/,
   /^web-run\.test\.ts$/,
-  /^native-registration(?:\.test)?\.ts$/,
+  /^native-(?:registration|rendering)(?:\.test)?\.ts$/,
+  /^test\/native-session\.ts$/,
   /^code-mode-activation\.test\.ts$/,
   /^(?:owned-tool-contracts\.generated\.json|contracts\/(?:LICENSE|NOTICE))$/,
   /^(?:activation|index|native-binary-error|tool-execution)\.ts$/,

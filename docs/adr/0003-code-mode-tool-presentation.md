@@ -35,3 +35,20 @@ operation previews/errors and expanded retained details; script-only output and
 explicit images remain visible. Concrete renderers still serve permitted direct
 declarations activated by tool search. Historical display does not restore shells,
 stores or workers. See [native presentation](../code-mode-contract/native-parent.md).
+
+## Native hybrid presentation amendment
+
+Native execution remains unchanged, but native-only nested presentation is superseded
+by a display-only decorator. Keep Pi's highlighted JavaScript call renderer and
+success/error indicators. Observe public nested execution events, retaining bounded
+arguments and owned result/renderer snapshots in the parent result's `details`.
+Reuse shell output and pre-mutation patch previews; explicit script emissions and
+return values remain a separate Output section rather than being suppressed.
+
+A thin decorator calls native execution once and forwards its partial updates with
+display details. Shell partial events additionally publish display-only updates;
+no second dispatcher, synthetic tool messages, authorization or usage contribution
+is introduced. Images remain Pi-owned and explicitly emitted. Saved display cannot
+restore resources. Aggregate input-token estimates cover emitted script text, not
+all nested tool output. The original native renderer handles historical results
+without hybrid snapshots.
