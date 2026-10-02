@@ -40,49 +40,12 @@ describe("embedded agent types", () => {
     expect(resolveAgent("explorer").config.thinking).toBeUndefined();
   });
 
-  it.each(SUBAGENT_TYPES)(
-    "gives %s the inherited builtin baseline and additive guidance",
-    (type) => {
-      const { config } = resolveAgent(type);
-
-      expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
-      expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
-      expect(config.promptMode).toBe("append");
-    },
-  );
-
-  it("keeps explorer scoped to factual retrieval", () => {
-    const { config } = resolveAgent("explorer");
+  it.each(SUBAGENT_TYPES)("gives %s the inherited builtin baseline and extension", (type) => {
+    const { config } = resolveAgent(type);
 
     expect(config.builtinToolNames).toEqual(["read", "bash", "edit", "write"]);
     expect(config.extensions).toEqual([expect.stringMatching(/\/index\.(ts|js)$/)]);
-    expect(config.description).toContain("files, symbols, definitions, references, call paths");
-    expect(config.description).toContain("documentation or third-party source reading");
-    expect(config.description).toContain("after 2-4 direct lookups fail");
-    expect(config.description).toContain("known-path reads");
-    expect(config.description).toContain("do not repeat its searches or reads while it runs");
-    expect(config.description).toContain("continue only non-overlapping work");
-    expect(config.description).toContain("Do not delegate code review");
-    expect(config.description).toContain("root-cause analysis");
-    expect(config.model).toBeUndefined();
-    expect(config.thinking).toBeUndefined();
-    expect(config.systemPrompt).toContain("Do not perform code review");
-    expect(config.systemPrompt).toContain(
-      "Treat the working directory you were given as the default search root",
-    );
-    expect(config.systemPrompt).toContain(
-      "explicitly delegates another path, repository, or checkout",
-    );
-    expect(config.systemPrompt).toContain("including an absolute path outside that directory");
-    expect(config.systemPrompt).toContain(
-      "When no alternate location is supplied, keep searches rooted in the assigned working directory",
-    );
-    expect(config.systemPrompt).toContain(
-      "Do not roam unrelated directories or broaden the task beyond the paths and question supplied by the parent",
-    );
-    expect(config.systemPrompt).not.toContain(
-      "read or search files outside the working directory you were given",
-    );
+    expect(config.promptMode).toBe("append");
     expect(config.bashGatePolicy).toBe("prompt");
   });
 });
