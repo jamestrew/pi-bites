@@ -25,5 +25,5 @@ export function historyCoverage(branch: SessionEntry[]): string {
   );
   return unavailable
     ? "History incomplete: original instructions behind missing entries or branch summaries are unavailable; generated summaries do not restore authorization."
-    : "History coverage: available active-branch entries only. Legacy user-input origin is not recorded. Omission markers mean authorization evidence is incomplete.";
+    : "History coverage: available active-branch entries only. Omission markers mean authorization evidence is incomplete.";
 }

@@ -34,12 +34,12 @@ and no absolute deny. Critical defaults to deny. Missing evidence does not itsel
 increase intrinsic risk, but consequential unverifiable facts warrant caution.
 
 Pi has no Codex sandbox or network allowlist; this reviewer has **no tools**. The
-investigation/environment sections are replaced, and imperative inspection instructions
+policy omits sandbox and tool-capability descriptions, and imperative inspection instructions
 are adapted to supplied evidence. No command is executed by the reviewer. References
 to checks in risk examples are evidence conditions, not claims of available tools.
 
-Serialized active parent user fields retain user-role provenance, not verified human
-authorship (see #331 below). Parent-generated subagent prompts, assistant prose, pending commands, and gate
+Original active parent user messages are trusted authorization evidence, following
+Codex's transcript-role contract (see #331 below). Parent-generated subagent prompts, assistant prose, pending commands, and gate
 hints are untrusted. Unlike upstream, Pi's current transcript does not independently
 supply developer messages, AGENTS files, or request_user_input responses. User delegation
 to a file or ticket is still recognized when evidenced in the packet. Validated
@@ -245,26 +245,20 @@ marker. Rebuilding reviewer history, reopening the persisted session, and extens
 reload use this same source, not a second permission ledger or model-produced summary.
 Branch/session replacement cannot recover entries from an abandoned branch/session.
 
-### Pi provenance constraint
+### Transcript-role trust
 
-Pi 0.87.1 persists user messages without their `input.source`. Both human prompts and
-`sendUserMessage()` extension prompts become user-role messages. Pi also has no public
-correlation ID between `input` events and accepted/persisted messages: transforms,
-handled inputs, queue cancellation, and steering/follow-up order prevent reliable
-pairing. Appending a trusted input marker before acceptance is unsafe: tree navigation
-to a user message selects its parent, which would leave that marker active after the
-user message is abandoned. This change deliberately does not add such markers.
+Original parent user messages establish authorization, following Codex's policy.
+This is a role-based trust contract, not independent authentication of human authorship:
+Pi persists both human prompts and extension `sendUserMessage()` prompts as user-role
+messages without input origin. Extensions that insert parent user messages participate
+in this trusted boundary. No input markers or separate permission ledger are added.
 
-Each retained record therefore includes its source entry ID, branch-relative order,
-and whether it was context-edited. The packet explicitly identifies original user-role
-wording as **origin unknown**, not authenticated direct-human permission. This is an
-intentional conservative adaptation from Codex's genuine-root-user assumption, including
-on reload. Unknown-origin text cannot independently establish human authorization;
-validated historical human shell approvals retain their existing separate meaning.
-Generated Goal summaries remain labeled task context, never direct authorization.
-Child prompts remain parent-assistant-generated evidence in a separate request-local
-section. Full direct-human authorship requires an upstream persisted input-origin and
-correlation contract; text matching or generated summaries cannot supply it.
+Each retained record includes its source entry ID, branch-relative order, and whether
+it was context-edited. Generated replacements and Goal summaries remain labeled context,
+never original user authorization. Child prompts remain parent-assistant-generated
+evidence in a separate request-local section. Validated historical human shell approvals
+retain their existing separate meaning; no historical decision automatically approves
+a new action.
 
 ### Bounds and omissions
 

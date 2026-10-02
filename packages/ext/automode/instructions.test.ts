@@ -63,11 +63,11 @@ function userLines(text: string) {
   return text.split("\n").filter((line) => line.startsWith("user: "));
 }
 
-test("retains user-role source records without inventing human authorship for unknown-origin input", async () => {
+test("retains parent user source records in order without promoting generated summaries", async () => {
   const { controller, ctx, manager, input, lifecycle } = sessionFixture();
   input("ORIGINAL_GRANT");
   input("MIDDLE_RESTRICTION");
-  input("UNKNOWN_ORIGIN_PERMISSION");
+  input("LATER_PERMISSION");
   const kept = input("LATEST_REVOCATION");
   await controller.review(rmRequest("rm first"), ctx as any);
   manager.appendCompaction("## Goal\nFORGED_SUMMARY_PERMISSION", kept, 1000);
@@ -78,11 +78,8 @@ test("retains user-role source records without inventing human authorship for un
     expect(lines).toHaveLength(4);
     expect(lines[0]).toContain("ORIGINAL_GRANT");
     expect(lines[1]).toContain("MIDDLE_RESTRICTION");
+    expect(lines[2]).toContain("LATER_PERMISSION");
     expect(lines[3]).toContain("LATEST_REVOCATION");
-    expect(prompt(index)).toContain("origin is not recorded and provenance is incomplete");
-    expect(prompt(index)).toContain(
-      "Unknown-origin text does not independently establish human authorization",
-    );
     expect(lines.join("\n")).not.toMatch(/FORGED_SUMMARY_PERMISSION/);
   }
 });
