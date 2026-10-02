@@ -4,7 +4,15 @@ import registerAutoCompaction, {
   installTurnBoundaryAutoCompaction,
 } from "./auto-compaction.js";
 
-function setup(thresholdTokens?: number, mode = "tui") {
+const thresholdCases = [
+  { contextWindow: 1_000_000, configured: undefined, threshold: 200_000 },
+  { contextWindow: 200_000, configured: undefined, threshold: 170_000 },
+  { contextWindow: undefined, configured: undefined, threshold: 200_000 },
+  { contextWindow: 1_000_000, configured: 42_000, threshold: 42_000 },
+  { contextWindow: 10_000, configured: 42_000, threshold: 8_500 },
+];
+
+function setup(thresholdTokens?: number, mode = "tui", contextWindow?: number) {
   const handlers = new Map<string, (...args: never[]) => void>();
   const compact = vi.fn();
   const run = new AbortController();
@@ -27,7 +35,10 @@ function setup(thresholdTokens?: number, mode = "tui") {
   const notify = vi.fn();
   const ctx = {
     mode,
-    getContextUsage: () => (tokens == null ? undefined : { tokens }),
+    getContextUsage: () => {
+      if (contextIsStale) throw new Error("stale extension ctx");
+      return tokens == null ? undefined : { tokens, contextWindow };
+    },
     signal: run.signal,
     abort,
     hasPendingMessages: () => false,
@@ -52,6 +63,7 @@ function setup(thresholdTokens?: number, mode = "tui") {
     invalidateApi: () => (apiIsStale = true),
     invalidateContext: () => (contextIsStale = true),
     setTokens: (value: number | null) => (tokens = value),
+    setContextWindow: (value: number) => (contextWindow = value),
     turnEnd: (hasToolCall = false) =>
       handlers.get("turn_end")?.(
         {
@@ -117,16 +129,39 @@ describe("auto compaction", () => {
     expect(compact).not.toHaveBeenCalled();
   });
 
-  test("compacts at the default fixed threshold after the agent settles", () => {
-    const { compact, setTokens, agentSettled } = setup();
+  test.each(thresholdCases)("uses the lower cap: $configured / $contextWindow", (entry) => {
+    const { abort, compact, setTokens, agentSettled, turnEnd } = setup(
+      entry.configured,
+      "tui",
+      entry.contextWindow,
+    );
 
-    setTokens(DEFAULT_AUTO_COMPACTION_THRESHOLD - 1);
+    setTokens(entry.threshold - 1);
+    turnEnd(true);
+    agentSettled();
+    expect(abort).not.toHaveBeenCalled();
+    expect(compact).not.toHaveBeenCalled();
+
+    setTokens(entry.threshold);
+    turnEnd(true);
+    expect(abort).toHaveBeenCalledOnce();
+    agentSettled();
+    expect(compact).toHaveBeenCalledOnce();
+  });
+
+  test("uses the active model's context window after a model change", () => {
+    const { compact, setTokens, setContextWindow, agentSettled } = setup(
+      undefined,
+      "tui",
+      1_000_000,
+    );
+    setTokens(85_000);
     agentSettled();
     expect(compact).not.toHaveBeenCalled();
 
-    setTokens(DEFAULT_AUTO_COMPACTION_THRESHOLD);
+    setContextWindow(100_000);
     agentSettled();
-    expect(compact).toHaveBeenCalledTimes(1);
+    expect(compact).toHaveBeenCalledOnce();
   });
 
   test("does not recompact while usage is unknown or below the threshold", () => {
@@ -182,6 +217,29 @@ describe("auto compaction", () => {
 });
 
 describe("subagent turn-boundary compaction", () => {
+  test.each(thresholdCases)("uses the lower cap: $configured / $contextWindow", async (entry) => {
+    let tokens = entry.threshold - 1;
+    const session = {
+      agent: {
+        state: { messages: [] },
+        prepareNextTurnWithContext: vi.fn(async (turn) => ({ context: turn.context })),
+      },
+      getContextUsage: () => ({ tokens, contextWindow: entry.contextWindow }),
+      _runAutoCompaction: vi.fn(async () => false),
+    };
+    installTurnBoundaryAutoCompaction(
+      session as never,
+      entry.configured ?? DEFAULT_AUTO_COMPACTION_THRESHOLD,
+    );
+
+    await session.agent.prepareNextTurnWithContext({ context: { messages: [] } });
+    expect(session._runAutoCompaction).not.toHaveBeenCalled();
+
+    tokens = entry.threshold;
+    await session.agent.prepareNextTurnWithContext({ context: { messages: [] } });
+    expect(session._runAutoCompaction).toHaveBeenCalledWith("threshold", false);
+  });
+
   test("replaces the next-turn context without aborting the active run", async () => {
     const compactedMessages = [{ role: "compactionSummary" }];
     const runAutoCompaction = vi.fn(async () => false);

@@ -92,7 +92,7 @@ Example:
     "command": "notify-send 'pi'"
   },
   "autoCompaction": {
-    "thresholdTokens": 150000
+    "thresholdTokens": 200000
   },
   "bashGate": {
     "mode": "manual",
@@ -105,7 +105,7 @@ Example:
 }
 ```
 
-`autoCompaction.thresholdTokens` is an absolute context-size limit, independent of the model's context window and Pi's `compaction.reserveTokens`. Pi's native overflow protection still applies for models with smaller context windows.
+Auto-compaction triggers at the lower of `autoCompaction.thresholdTokens` (default: 200,000) and 85% of the active model's context window. If the context window is unknown, only the token cap applies. Pi's native overflow protection still applies independently.
 
 ### Codex adapter
 

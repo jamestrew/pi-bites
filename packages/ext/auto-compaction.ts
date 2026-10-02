@@ -1,7 +1,13 @@
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BitesConfig } from "./config.js";
 
-export const DEFAULT_AUTO_COMPACTION_THRESHOLD = 150_000;
+export const DEFAULT_AUTO_COMPACTION_THRESHOLD = 200_000;
+
+function compactionThreshold(thresholdTokens: number, contextWindow: number | undefined): number {
+  return contextWindow != null && contextWindow > 0
+    ? Math.min(thresholdTokens, Math.floor(contextWindow * 0.85))
+    : thresholdTokens;
+}
 
 type AutoCompactingSession = {
   _runAutoCompaction?(reason: "threshold", willRetry: false): Promise<boolean>;
@@ -18,8 +24,10 @@ export function installTurnBoundaryAutoCompaction(
   const previousPrepare = session.agent.prepareNextTurnWithContext;
   session.agent.prepareNextTurnWithContext = async (turn, signal) => {
     const snapshot = await previousPrepare?.(turn, signal);
-    const tokens = session.getContextUsage()?.tokens;
-    if (signal?.aborted || tokens == null || tokens < thresholdTokens) return snapshot;
+    const usage = session.getContextUsage();
+    const tokens = usage?.tokens;
+    const threshold = compactionThreshold(thresholdTokens, usage?.contextWindow);
+    if (signal?.aborted || tokens == null || tokens < threshold) return snapshot;
     const autoSession = session as unknown as AutoCompactingSession;
     if (!autoSession._runAutoCompaction) return snapshot;
 
@@ -60,9 +68,12 @@ export default function registerAutoCompaction(
 
   const tokensAtThreshold = (ctx: ExtensionContext): number | undefined => {
     if (ctx.mode === "print" || ctx.mode === "json") return;
-    const threshold =
-      configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD;
-    const tokens = ctx.getContextUsage()?.tokens;
+    const usage = ctx.getContextUsage();
+    const threshold = compactionThreshold(
+      configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD,
+      usage?.contextWindow,
+    );
+    const tokens = usage?.tokens;
     return tokens != null && tokens >= threshold ? tokens : undefined;
   };
 

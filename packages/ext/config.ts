@@ -16,7 +16,7 @@
  *     "command": "python get_usage_limits.py"
  *   },
  *   "autoCompaction": {
- *     "thresholdTokens": 150000
+ *     "thresholdTokens": 200000
  *   },
  *   "bashGate": {
  *     "mode": "yolo",
@@ -59,7 +59,7 @@ export interface StatuslineConfig {
 }
 
 export interface AutoCompactionConfig {
-  /** Compact once the active context reaches this many tokens. Defaults to 150,000. */
+  /** Token cap (default 200,000); compacts sooner at 85% of the model's context window. */
   thresholdTokens?: number;
 }
 
