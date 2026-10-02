@@ -23,20 +23,22 @@ const sourceInfo = {
 
 describe("renderContextMarkdown", () => {
   it("renders the projected prompt and active tool definitions in registry order", () => {
-    const tools = [
+    const tools: ToolInfo[] = [
       {
         name: "read",
         description: "Read a file.",
+        exposure: "direct",
         parameters: { type: "object", properties: { path: { type: "string" } } },
         sourceInfo,
       },
       {
         name: "write",
         description: "Write a file.",
+        exposure: "direct",
         parameters: { type: "object", properties: {} },
         sourceInfo,
       },
-    ] as ToolInfo[];
+    ];
 
     expect(
       renderContextMarkdown({
@@ -228,6 +230,7 @@ it("inspector estimates projected messages without changing raw history", async 
       {
         name: "read",
         description: "Read a file.",
+        exposure: "direct",
         parameters: { type: "object", properties: {} },
         sourceInfo,
       },

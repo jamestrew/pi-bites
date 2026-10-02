@@ -47,7 +47,7 @@ test("Pi's renderer-less extension fallback previews, expands, and fits narrow t
     const component = new ToolExecutionComponent(
       tool.name,
       "checks-call",
-      { project: "private-project-argument" },
+      { project: "demo" },
       { showImages: false },
       tool,
       { requestRender() {} } as never,
@@ -61,14 +61,12 @@ test("Pi's renderer-less extension fallback previews, expands, and fits narrow t
         const rows = component.render(width);
         for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(width);
         const lines = rows.map((row) => stripVTControlCharacters(row).trim()).filter(Boolean);
-        expect(lines[0]).toBe("checks");
-        expect(lines.join("\n")).not.toContain("private-project-argument");
-        expect(lines.join("\n")).not.toContain('"project"');
         return lines;
       };
       component.updateResult(result);
       component.setExpanded(false);
       const collapsed = render();
+      expect(collapsed[0]).toBe('checks project="demo"');
       expect(collapsed.slice(1, 11)).toEqual(checks.slice(0, 10));
       // Ten short result lines plus heading and a possibly wrapped hint stay compact.
       expect(collapsed.length).toBeLessThanOrEqual(14);
@@ -76,14 +74,14 @@ test("Pi's renderer-less extension fallback previews, expands, and fits narrow t
       expect(collapsed.slice(11).join(" ")).toBe("... (10 more lines, alt+e to expand)");
 
       component.setExpanded(true);
-      expect(render()).toEqual(["checks", ...checks]);
+      expect(render()).toEqual(["checks", "project: demo", ...checks]);
 
       component.setExpanded(false);
       component.updateResult({
         ...result,
         content: [{ type: "text", text: checks.slice(0, 2).join("\n") }],
       });
-      expect(render()).toEqual(["checks", ...checks.slice(0, 2)]);
+      expect(render()).toEqual(['checks project="demo"', ...checks.slice(0, 2)]);
     }
   } finally {
     setKeybindings(previousKeys);
