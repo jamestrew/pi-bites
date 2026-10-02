@@ -374,6 +374,69 @@ test("hybrid redraws keep native output/error caches separate across partial, fi
   expect(draw({ ...end.result, details: legacyDetails })).toContain("unique explicit summary");
 });
 
+test("hybrid caches idle redraws but rerenders on resize and invalidation", async () => {
+  const h = await setup();
+  const child = {
+    render: vi.fn(() => ["nested preview"]),
+    invalidate: vi.fn(),
+  };
+  const output = {
+    render: vi.fn(() => ["script output"]),
+    invalidate: vi.fn(),
+  };
+  const rendering = createNativeRendering({ on() {} } as unknown as ExtensionAPI, {
+    web_run: { renderCall: () => child },
+  });
+  const tool = rendering.decorate({
+    ...h.session.getToolDefinition("codemode")!,
+    renderResult: () => output,
+  });
+  const component = tool.renderResult!(
+    {
+      content: [{ type: "text", text: "script output" }],
+      details: {
+        display: {
+          cwd: h.cwd,
+          omitted: 0,
+          calls: [{ id: "child", name: "web_run", args: {}, status: "completed", startedAt: 0 }],
+        },
+      },
+    },
+    { expanded: false, isPartial: false },
+    plainTheme as never,
+    {
+      args: { code: "" },
+      toolCallId: "restored",
+      state: {},
+      lastComponent: undefined,
+      invalidate() {},
+      cwd: h.cwd,
+      executionStarted: true,
+      argsComplete: true,
+      isPartial: false,
+      isError: false,
+      expanded: false,
+      showImages: false,
+    },
+  );
+  const first = component.render(80);
+  expect(component.render(80)).toBe(first);
+  expect(child.render).toHaveBeenCalledTimes(1);
+  expect(output.render).toHaveBeenCalledTimes(1);
+
+  const narrow = component.render(7);
+  expect(narrow.every((line) => visibleWidth(line) <= 7)).toBe(true);
+  expect(child.render).toHaveBeenCalledTimes(2);
+  expect(output.render).toHaveBeenCalledTimes(2);
+
+  component.invalidate();
+  expect(child.invalidate).toHaveBeenCalledTimes(1);
+  expect(output.invalidate).toHaveBeenCalledTimes(1);
+  expect(component.render(7)).toEqual(narrow);
+  expect(child.render).toHaveBeenCalledTimes(3);
+  expect(output.render).toHaveBeenCalledTimes(3);
+});
+
 test.each(["custom", "constructor", "toString", "__proto__"])(
   "unrelated %s errors retain only text, never arbitrary details or image payloads",
   async (name) => {
