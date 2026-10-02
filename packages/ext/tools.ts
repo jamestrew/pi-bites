@@ -7,7 +7,6 @@ import {
   type EditToolInput,
   type ExtensionAPI,
   type ReadToolDetails,
-  createReadTool,
   createReadToolDefinition,
   createBashToolDefinition,
   createEditTool,
@@ -114,7 +113,6 @@ async function prepareEdit(cwd: string, input: EditInput, writable: boolean) {
 
 export default function (pi: ExtensionAPI) {
   const cwd = process.cwd();
-  const originalRead = createReadTool(cwd);
   const originalReadDef = createReadToolDefinition(cwd);
   const originalBashDef = createBashToolDefinition(cwd);
   const originalEdit = createEditTool(cwd);
@@ -129,8 +127,8 @@ export default function (pi: ExtensionAPI) {
     throw new Error("Built-in tool renderers unavailable");
 
   pi.registerTool({
-    ...originalRead,
-    description: `${originalRead.description} ${readDescriptionSuffix}`,
+    ...originalReadDef,
+    description: `${originalReadDef.description} ${readDescriptionSuffix}`,
 
     renderResult(result: AgentToolResult<ReadToolDetails | undefined>, options, theme, context) {
       return stripReadExpandHint(
