@@ -16,6 +16,23 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
+  test("ignores the retired explore toggle without disabling subagents or losing config", async () => {
+    const { EXTENSION_NAMES, parseBitesConfig } = await import("./config.js");
+    expect(EXTENSION_NAMES).not.toContain("explore");
+    expect(EXTENSION_NAMES).toContain("subagents");
+    expect(
+      parseBitesConfig({
+        autoCompaction: { thresholdTokens: 120_000 },
+        disable: ["explore", "notifications"],
+      }),
+    ).toEqual({
+      autoCompaction: { thresholdTokens: 120_000 },
+      disable: ["notifications"],
+    });
+    expect(parseBitesConfig({ disable: ["explore", "subagents"] })?.disable).toEqual(["subagents"]);
+    expect(parseBitesConfig({ disable: ["explore", "unknown"] })).toBeUndefined();
+  });
+
   test("merges config from native pi-bites files", async () => {
     const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));

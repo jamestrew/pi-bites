@@ -30,7 +30,7 @@ test("formatUsageStats renders compact labels and cache hit percentage", () => {
   ).toBe("↑1.0k ↓250 R3.0k CH75.0% $0.123");
 });
 
-test("buildFooterLine combines main and explore token usage", () => {
+test("buildFooterLine combines main and subagent token usage", () => {
   const ctx: any = {
     cwd: "/repo",
     model: { provider: "openai-codex", id: "gpt-5.5", contextWindow: 272_000 },

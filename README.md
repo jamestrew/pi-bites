@@ -167,7 +167,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, skillPromptReferences, promptNormalization, atMentionContext, ponytail, view, codexAdapter
+bashGate, autoMode, footer, statusline, tokenCount, usageDashboard, context, tools, fzf, notifications, autoCompaction, spotme, skillPromptReferences, promptNormalization, atMentionContext, sessionTracker, ponytail, subagents, view, codexAdapter
 ```
 
 You can also edit config directly:

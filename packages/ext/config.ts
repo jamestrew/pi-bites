@@ -34,7 +34,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "autoMode" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "skillPromptReferences" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "codexAdapter"
+ *   "bashGate" | "autoMode" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "skillPromptReferences" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "subagents" | "view" | "codexAdapter"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -113,7 +113,6 @@ export const EXTENSION_NAMES = [
   "usageDashboard",
   "context",
   "tools",
-  "explore",
   "fzf",
   "notifications",
   "autoCompaction",
@@ -256,17 +255,19 @@ function isBitesConfig(value: unknown): value is BitesConfig {
 }
 
 export function parseBitesConfig(value: unknown): BitesConfig | undefined {
-  // Keep old disable entries effective without exposing duplicate extension names.
+  // Drop the retired explore toggle; preserve renamed disables without duplicate names.
   if (isRecord(value) && Array.isArray(value.disable)) {
     value = {
       ...value,
       disable: [
         ...new Set(
-          value.disable.map((name: unknown) =>
-            name === "inlineReferences" || name === "slashSkillAutocomplete"
-              ? "skillPromptReferences"
-              : name,
-          ),
+          value.disable
+            .filter((name: unknown) => name !== "explore")
+            .map((name: unknown) =>
+              name === "inlineReferences" || name === "slashSkillAutocomplete"
+                ? "skillPromptReferences"
+                : name,
+            ),
         ),
       ],
     };
