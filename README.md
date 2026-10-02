@@ -17,6 +17,28 @@ A small collection of personal extensions for the pi coding agent.
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
 - Inline `$skill:name` / `$prompt:name` references with hidden context injection
 
+## File completion
+
+FFF ranks workspace `@` mentions. Home/absolute paths (`@~/`, `@/`), explicit
+relative paths, directory browsing, and empty FFF results delegate to Pi.
+`/fff-rescan` refreshes the index; workspace lookups also request a refresh at most
+once every 30 seconds. Content indexing, mmap-cache warmup, and watching stay off.
+
+Database resolution is independent for frecency and query history:
+
+1. `--fff-frecency-db` / `--fff-history-db`
+2. `FFF_FRECENCY_DB` / `FFF_HISTORY_DB`
+3. Existing Neovim directories: `$XDG_CACHE_HOME/nvim/fff_nvim` and
+   `$XDG_DATA_HOME/nvim/fff_queries` (defaults: `~/.cache` and `~/.local/share`)
+4. Per-user, per-workspace directories under `XDG_RUNTIME_DIR`, `TMPDIR`, or OS tmp
+
+Human file-completion selections update FFF query history; agent searches do not.
+Existing Neovim databases are reused even on NFS, with normal LMDB locking.
+Disabling content caches does not guarantee that NFS database locking will work;
+use the overrides above for host-local storage if necessary. Database-open failure
+retries FFF without persistence and shows a warning; complete FFF failure falls back
+to Pi with a warning.
+
 ## Subagents
 
 The six direct tools are `spawn_agent`, `send_message`, `followup_task`, `wait_agent`,
