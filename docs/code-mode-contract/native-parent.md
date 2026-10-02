@@ -94,13 +94,28 @@ Pi contexts and assert their getters throw before releasing late approval.
 
 ## Presentation and context
 
-Pi owns nested hooks, parent IDs, bounded persistence, usage and native rendering.
-The adapter does not reproduce its old trace engine or error-result hook. Native
-rows show operation names/argument previews and errors; expanded views show retained
-details. Script-only output and explicit images remain visible. The native renderer
-bounds collapsed scripts/calls/output (10/8/5 lines), argument previews (200 chars)
-and errors (500 chars); it does not embed full owned tool renderers or restore their
-old layout. Owned renderers still serve direct declarations activated by search.
+Pi owns execution, nested hooks, parent IDs, native metadata persistence and usage.
+The adapter decorates presentation through public execution events: highlighted
+native JavaScript remains visible, and nested rows reuse owned shell output and
+pre-mutation patch render snapshots. Command output is visible without `text()`;
+explicit script output and return values appear separately under Output. Native
+error/image output behavior and full-output paths remain available. Historical
+results without hybrid details retain the original native renderer.
+
+Display snapshots live only in parent `details`, not model-visible content or
+script values. They retain at most 128 calls and 1 MiB per script, with structural
+limits and 8,192-character string previews. Collapsed views show the last eight
+calls, owned collapsible details and eight output display lines; expansion exposes
+available retained content. Omissions are explicit. Unrelated tools retain only
+call metadata unless they fail; hidden capabilities never become callable.
+
+A thin native execute decorator forwards partial updates and captures stable cwd
+before awaiting. Nested partial events publish additional UI updates, never tool
+messages or duplicate usage. Publishers deactivate on finalization or lifecycle
+invalidation and ignore late events. Saved snapshots restore presentation only,
+not shell sessions or stores. Aggregate approximate input-token counts measure
+actual emitted script text, not all nested results. Direct tool declarations keep
+their ordinary owned renderers.
 
 Skill loading uses native codemode and emits shell output. Prompt composition is
 additive; `/context` uses the same preview including browsing guidance. Native

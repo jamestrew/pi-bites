@@ -32,6 +32,7 @@ import { pinExecLaunch } from "./exec/launch-context.js";
 import { createViewImageTool } from "./view-image/tool.js";
 import { getBundledViewImagePath } from "./view-image/binary.js";
 import { createWebRunTool, isWebRunAvailable } from "./web-run/tool.js";
+import { createNativeRendering } from "./native-rendering.js";
 import contract from "./owned-tool-contracts.generated.json" with { type: "json" };
 
 /** Shared parent/SDK-child registration. Pi owns the sandbox, discovery, nested hooks, traces and usage. */
@@ -40,22 +41,6 @@ export default function registerNativeAdapter(
   configRef: { current: BitesConfig },
   gate?: BashGateController,
 ): CodexAdapterController {
-  // Pi supersedes its replaceable CLI builtin with this genuine native registration.
-  // Observe native preparation for /context; forward it unchanged and never wrap execution.
-  let preparedDescriptions: Readonly<Record<string, string>> = {};
-  void createCodemodeExtension({ mode: "on", models: false })({
-    ...pi,
-    registerTool(tool) {
-      pi.registerTool({
-        ...tool,
-        prepareLoadout(loadout) {
-          const prepared = tool.prepareLoadout?.(loadout);
-          preparedDescriptions = prepared?.descriptions ?? {};
-          return prepared;
-        },
-      });
-    },
-  });
   gate?.manageExecCommand();
   const state = createAdapterToolState();
   const sessions = createExecSessionManager();
@@ -66,6 +51,26 @@ export default function registerNativeAdapter(
     web_run: createWebRunTool({ getConfig: () => configRef.current.codexAdapter ?? {} }),
     view_image: createViewImageTool(),
   };
+  const rendering = createNativeRendering(
+    pi,
+    owned as unknown as Parameters<typeof createNativeRendering>[1],
+  );
+  // Pi supersedes its replaceable CLI builtin with this genuine native registration.
+  // Forward native /context preparation unchanged; decorate only presentation updates/results.
+  let preparedDescriptions: Readonly<Record<string, string>> = {};
+  void createCodemodeExtension({ mode: "on", models: false })({
+    ...pi,
+    registerTool(tool) {
+      pi.registerTool({
+        ...(rendering.decorate(tool as unknown as ToolDefinition) as typeof tool),
+        prepareLoadout(loadout) {
+          const prepared = tool.prepareLoadout?.(loadout);
+          preparedDescriptions = prepared?.descriptions ?? {};
+          return prepared;
+        },
+      });
+    },
+  });
   let owner = new AbortController();
   let callable = new Set<string>();
   let active = false;
@@ -108,6 +113,7 @@ export default function registerNativeAdapter(
       } satisfies CodemodeStoreEntryData);
   }
   function invalidate(ctx: ExtensionContext) {
+    rendering.reset();
     owner.abort(new Error("Adapter session invalidated"));
     owner = new AbortController();
     for (const script of scripts.values()) script.dispose();
@@ -442,6 +448,7 @@ export default function registerNativeAdapter(
       };
   });
   pi.on("agent_end", () => {
+    rendering.reset();
     for (const script of scripts.values()) script.dispose();
     scripts.clear();
     parents.clear();
