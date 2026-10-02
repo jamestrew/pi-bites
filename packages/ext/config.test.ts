@@ -48,7 +48,7 @@ describe("loadConfig", () => {
           webSearchProviders: ["trusted-responses-proxy"],
           allowOpenAICodexFallback: true,
         },
-        disable: ["notifications", "goal", "autoMode", "codexAdapter"],
+        disable: ["notifications", "autoMode", "codexAdapter"],
       }),
     ).toBeDefined();
     expect(parseBitesConfig({ disable: ["not-an-extension"] })).toBeUndefined();

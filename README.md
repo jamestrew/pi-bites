@@ -16,7 +16,6 @@ A small collection of personal extensions for the pi coding agent.
 - Optional notifications
 - `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
 - Inline `$skill:name` / `$prompt:name` references with hidden context injection
-- Codex-style `/goal` workflow with persisted goals and automatic continuation
 
 ## Subagents
 
@@ -168,7 +167,7 @@ Use slash commands inside pi:
 Changes take effect the next time pi starts. Valid extension names are:
 
 ```text
-bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, goal, codexAdapter
+bashGate, autoMode, statusline, tokenCount, usageDashboard, context, tools, explore, fzf, notifications, autoCompaction, spotme, inlineReferences, promptNormalization, atMentionContext, ponytail, view, codexAdapter
 ```
 
 You can also edit config directly:
@@ -178,16 +177,6 @@ You can also edit config directly:
   "disable": ["bashGate", "notifications"]
 }
 ```
-
-## Goal model smoke
-
-The real-model goal workflow is intentionally separate from `bun check`:
-
-```bash
-PI_GOAL_SMOKE_MODEL=provider/model bun run smoke:goal-model
-```
-
-It creates, works, inspects, verifies, completes, and reports usage for a temporary goal. It requires configured model/network access and leaves no repository files behind.
 
 ## Usage dashboard
 

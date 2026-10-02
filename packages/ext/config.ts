@@ -34,7 +34,7 @@
  * built-in destructive-command protections.
  *
  * Use `disable` to turn off individual extensions by name. Valid names:
- *   "bashGate" | "autoMode" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "goal" | "codexAdapter"
+ *   "bashGate" | "autoMode" | "footer" | "statusline" | "tokenCount" | "usageDashboard" | "context" | "tools" | "explore" | "fzf" | "notifications" | "autoCompaction" | "spotme" | "inlineReferences" | "slashSkillAutocomplete" | "promptNormalization" | "atMentionContext" | "sessionTracker" | "ponytail" | "view" | "codexAdapter"
  *
  * Global and project-local `disable` arrays are **unioned** — disabling something globally
  * suppresses it in every project.
@@ -127,7 +127,6 @@ export const EXTENSION_NAMES = [
   "ponytail",
   "subagents",
   "view",
-  "goal",
   "codexAdapter",
 ] as const;
 

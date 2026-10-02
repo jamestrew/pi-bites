@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 const registerModules = [
@@ -22,7 +20,6 @@ const registerModules = [
   "./subagents/index.js",
   "./ponytail/index.js",
   "./view/index.js",
-  "./goal/index.js",
   "./codex-adapter/index.js",
 ] as const;
 
@@ -33,7 +30,6 @@ async function loadExtension(
     disable?: string[];
     argv?: string[];
     subagent?: string;
-    realGoal?: boolean;
     realCodex?: boolean;
   } = {},
 ) {
@@ -44,10 +40,8 @@ async function loadExtension(
   const previewCodexPrompt = vi.fn((prompt: string) => `codex:${prompt}`);
   const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
   const bashGate = { isYolo: vi.fn(() => false), captureSession: vi.fn() };
-  if (options.realGoal) vi.doUnmock("./goal/index.js");
   if (options.realCodex) vi.doUnmock("./codex-adapter/index.js");
   for (const modulePath of registerModules) {
-    if (modulePath === "./goal/index.js" && options.realGoal) continue;
     if (modulePath === "./codex-adapter/index.js" && options.realCodex) continue;
     const spy = vi.fn();
     if (modulePath === "./bash-gate/index.js") spy.mockReturnValue(bashGate);
@@ -127,13 +121,6 @@ afterEach(() => {
 });
 
 describe("extension entrypoint", () => {
-  test("does not expose the goal prompt outside the runtime config gate", () => {
-    const manifest = JSON.parse(
-      readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-    ) as { pi?: { prompts?: string[] } };
-    expect(manifest.pi?.prompts).toBeUndefined();
-  });
-
   test("default registers in normal interactive sessions", async () => {
     const loaded = await loadExtension();
     try {
@@ -152,7 +139,6 @@ describe("extension entrypoint", () => {
         expect.any(Function),
       );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./goal/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./codex-adapter/index.js")).toHaveBeenCalledWith(
         loaded.pi,
         expect.any(Object),
@@ -290,38 +276,6 @@ describe("extension entrypoint", () => {
       expect(loaded.registerSpies.get("./footer/index.js")).not.toHaveBeenCalled();
     } finally {
       loaded.restoreArgv();
-    }
-  });
-
-  test("can disable goal mode without disabling unrelated extensions", async () => {
-    const loaded = await loadExtension({ disable: ["goal"] });
-    try {
-      expect(loaded.registerSpies.get("./goal/index.js")).not.toHaveBeenCalled();
-      expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
-    } finally {
-      loaded.restoreArgv();
-    }
-  });
-
-  test("complete registry exposes goal APIs only when enabled", async () => {
-    const enabled = await loadExtension({ realGoal: true });
-    try {
-      expect(enabled.pi.registerCommand.mock.calls.map(([name]) => name)).toContain("goal");
-      expect(enabled.pi.registerTool.mock.calls.map(([tool]) => tool.name)).toEqual([
-        "get_goal",
-        "create_goal",
-        "update_goal",
-      ]);
-    } finally {
-      enabled.restoreArgv();
-    }
-
-    const disabled = await loadExtension({ disable: ["goal"], realGoal: true });
-    try {
-      expect(disabled.pi.registerCommand).not.toHaveBeenCalled();
-      expect(disabled.pi.registerTool).not.toHaveBeenCalled();
-    } finally {
-      disabled.restoreArgv();
     }
   });
 });

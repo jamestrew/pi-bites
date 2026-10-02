@@ -18,7 +18,6 @@ import registerSessionTracker from "./session-tracker/index.js";
 import { createSubagents } from "./subagents/index.js";
 import { getActiveSubagent, getChildCollaboration } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
-import registerGoal from "./goal/index.js";
 import registerCodexAdapter, { type CodexAdapterController } from "./codex-adapter/index.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
@@ -72,7 +71,6 @@ export default async function (pi: ExtensionAPI) {
 
   if (isSubagent) return;
 
-  if (!disabled.has("goal")) registerGoal(pi);
   if (!disabled.has("view")) registerView(pi);
   if (!isNonInteractive && !disabled.has("sessionTracker"))
     registerSessionTracker(pi, configRef, autoMode);
