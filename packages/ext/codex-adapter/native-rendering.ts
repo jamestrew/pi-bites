@@ -463,8 +463,19 @@ function hint(theme: Theme) {
   return new Text(theme.fg("dim", `(${label})`), 0, 0);
 }
 function fit(component: Component): Component {
+  let renderedWidth: number | undefined;
+  let renderedLines: string[] | undefined;
   return {
-    render: (width) => component.render(width).map((line) => truncateToWidth(line, width, "…")),
-    invalidate: () => component.invalidate(),
+    render(width) {
+      if (!renderedLines || width !== renderedWidth) {
+        renderedLines = component.render(width).map((line) => truncateToWidth(line, width, "…"));
+        renderedWidth = width;
+      }
+      return renderedLines;
+    },
+    invalidate() {
+      component.invalidate();
+      renderedLines = undefined;
+    },
   };
 }
