@@ -169,6 +169,7 @@ export function createApplyPatchTool(
     executionMode: "sequential",
     parameters,
     prepareArguments(args: unknown) {
+      if (typeof args === "string") return { input: args };
       if (args && typeof args === "object") {
         if ("input" in args && typeof args.input === "string") return { input: args.input };
         if ("patchText" in args && typeof args.patchText === "string")

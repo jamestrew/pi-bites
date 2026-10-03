@@ -1,6 +1,6 @@
 # Authorize nested commands individually
 
-Status: Accepted (2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
+Status: Accepted historically; runtime-specific decisions superseded by #371 below (originally 2026-09-09), epic [#294](https://github.com/jamestrew/pi-bites/issues/294). Contract finalized by [#295](https://github.com/jamestrew/pi-bites/issues/295); implemented through #296–#302. See [cutover validation](../code-mode-contract/cutover.md) for evidence and live-route limitations.
 
 Source definitions and supported deviations: [Code Mode contract baseline](../code-mode-contract/README.md).
 
@@ -9,3 +9,32 @@ Apply the existing bash-gate policy to each actual nested command, with independ
 Preserve the existing policy scope of authorizing command launches; `write_stdin` polling and interactive input remain outside command classification. A denial rejects that nested call without directly revoking unrelated authorizations or cancelling sibling calls. Preserve Codex's native rejection and cleanup contract: if an unhandled rejection ends the cell, unfinished sibling delegates can be cancelled by runtime cleanup. Do not change denials into successful structured values or add bespoke batching instructions to promise stronger isolation than Codex provides.
 
 Extract one callable authorization path shared by the ordinary Pi hook and nested dispatcher. Validate constructed arguments, then authorize each actual command with a unique nested call ID before process creation. Preserve subagent broker behavior and reuse #286’s host escalation seam if available. Bash-gate is not Codex sandbox enforcement: omit unsupported permission-profile, justification, and prefix-rule arguments rather than accepting inert controls.
+
+## Native parent amendment (#369)
+
+For parent sessions, the accepted [native parent contract](../code-mode-contract/native-parent.md)
+supersedes runtime-specific statements above: use Pi 0.99.1 native `codemode`,
+registry discovery, one-shot finalization and native nested rendering/persistence.
+No parent V8 host, live cells or exec/wait facade remain. Keep the bounded model
+scope, concrete capabilities, shared per-launch authorization and route restrictions.
+The child path retains this historical host contract until its separate migration.
+
+## Native SDK child amendment (#370)
+
+The native amendment above also applies to SDK children. Parent and child sessions
+share native registration, one-shot execution, ownership cleanup and per-launch
+authorization. Explicit SDK builtin factories and the child's registry ceiling keep
+parent permissions separate from discovery. Direct V2 collaboration remains
+independent; see the [native adapter contract](../code-mode-contract/native-parent.md).
+The historical host code/tests await separate retirement, not a selectable fallback.
+
+## Host retirement and one-shot tradeoff (#371)
+
+Native execution replaces the cell/delegate dispatcher without changing command
+policy. Each validated launch still uses the shared gate once, with unique nested
+identity, pinned launch context, serialized dialogs, allowance rechecks, independent
+reviews and subagent escalation. Native finalization cancels pending calls and
+late approval cannot launch; do not promise sibling survival after script failure.
+Polling/input remain outside command classification. Returned shell sessions may
+outlive a successful script; explicit cancellation and lifecycle invalidation retain
+owned cleanup. See [native authorization](../code-mode-contract/native-parent.md).

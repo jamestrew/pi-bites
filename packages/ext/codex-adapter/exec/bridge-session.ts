@@ -17,6 +17,7 @@ export interface BridgeExecSession {
   processId: string;
   startup: Promise<void>;
   started: boolean;
+  failure?: Error;
   tty: boolean;
   command: string;
   buffer: string;
@@ -131,6 +132,7 @@ export function createBridgeSessionRuntime(
       try {
         await poll(session, hooks, 250);
       } catch (error) {
+        session.failure = error instanceof Error ? error : new Error(String(error));
         hooks.onOutput(
           session,
           `${error instanceof Error ? error.message : String(error)}\n`,
@@ -192,6 +194,7 @@ export function createBridgeSessionRuntime(
         }
         void pollLoop(session, hooks);
       } catch (error) {
+        session.failure = error instanceof Error ? error : new Error(String(error));
         hooks.onOutput(
           session,
           `${error instanceof Error ? error.message : String(error)}\n`,
@@ -205,7 +208,11 @@ export function createBridgeSessionRuntime(
   }
 
   async function waitForStartup(session: BridgeExecSession, signal?: AbortSignal): Promise<void> {
-    if (!signal) return session.startup;
+    if (!signal) {
+      await session.startup;
+      if (session.failure) throw session.failure;
+      return;
+    }
     if (signal.aborted) throw new Error("exec_command aborted");
     let removeAbortListener = () => {};
     const aborted = new Promise<never>((_, reject) => {
@@ -215,6 +222,7 @@ export function createBridgeSessionRuntime(
     });
     try {
       await Promise.race([session.startup, aborted]);
+      if (session.failure) throw session.failure;
     } finally {
       removeAbortListener();
     }

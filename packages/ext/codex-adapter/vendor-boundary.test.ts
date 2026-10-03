@@ -9,8 +9,10 @@ const root = resolve(import.meta.dirname);
 const retainedGroups = [
   /^(?:apply-patch|exec-command|vendor-boundary|view-image)\.test\.ts$/,
   /^web-run\.test\.ts$/,
-  /^code-mode(?:-(?:runtime|connection|nested|activation|registration|rendering|transport|subagents))?\.test\.ts$/,
-  /^code-mode\/(?:(?:contracts|registration|rendering|tools|results|output|binary|runtime|lifecycle|delegates|nested-adapters|nested-tools|nested-traces|exec-source|types|host-connection|host-process|host-protocol)\.ts|(?:vendor-inventory|contract.generated)\.json)$/,
+  /^native-(?:registration|rendering)(?:\.test)?\.ts$/,
+  /^test\/native-session\.ts$/,
+  /^code-mode-activation\.test\.ts$/,
+  /^(?:owned-tool-contracts\.generated\.json|contracts\/(?:LICENSE|NOTICE))$/,
   /^(?:activation|index|native-binary-error|tool-execution)\.ts$/,
   /^(?:LICENSE|UPSTREAM\.md)$/,
   /^apply-patch\/(?:binary|executor|rendering|render-state|tool)\.ts$/,
@@ -29,10 +31,6 @@ const retainedGroups = [
   /^vendor\/view-image\/view-image\/rust\/(?:Cargo\.toml|main\.rs)$/,
   /^vendor\/view-image\/rust\/crates\/codex-utils-image\/[^/]+$/,
 ];
-const codeModeVendor = JSON.parse(
-  readFileSync(resolve(root, "code-mode/vendor-inventory.json"), "utf8"),
-) as Record<string, string>;
-
 const nativeArtifacts = [
   "apply-patch/bin/linux-arm64/apply_patch",
   "apply-patch/bin/linux-x64/apply_patch",
@@ -71,12 +69,7 @@ describe("Codex adapter vendor boundary", () => {
     expect(
       files.filter(
         (path) =>
-          !nativeArtifacts.includes(path) &&
-          !(
-            path.startsWith("vendor/code-mode/") &&
-            Object.hasOwn(codeModeVendor, path.slice("vendor/code-mode/".length))
-          ) &&
-          !retainedGroups.some((group) => group.test(path)),
+          !nativeArtifacts.includes(path) && !retainedGroups.some((group) => group.test(path)),
       ),
     ).toEqual([]);
     expect(
@@ -95,6 +88,8 @@ describe("Codex adapter vendor boundary", () => {
       expect.arrayContaining([
         "LICENSE",
         "UPSTREAM.md",
+        "contracts/LICENSE",
+        "contracts/NOTICE",
         "vendor/apply-patch/LICENSE-APACHE-2.0",
         "vendor/apply-patch/LICENSE-path-absolutize",
         "vendor/apply-patch/NOTICE",
@@ -118,24 +113,6 @@ describe("Codex adapter vendor boundary", () => {
       createHash("sha256")
         .update(readFileSync(resolve(root, path)))
         .digest("hex");
-    expect(sha256("code-mode/vendor-inventory.json")).toBe(
-      "4d6fb5af77c7bf23b4f67ec691aeba7681850801a35c93f60316b03a2b92deab",
-    );
-    for (const [path, digest] of Object.entries(codeModeVendor)) {
-      expect(sha256(`vendor/code-mode/${path}`), path).toBe(digest);
-    }
-    const codeModeLockfile = readFileSync(resolve(root, "vendor/code-mode/Cargo.lock"), "utf8");
-    for (const dependency of [
-      "codex-core",
-      "codex-otel",
-      "reqwest",
-      "toml",
-      "opentelemetry",
-      "cpal",
-      "zeromq",
-    ]) {
-      expect(codeModeLockfile).not.toContain(`name = "${dependency}"`);
-    }
     expect(sha256("apply-patch/bin/linux-arm64/apply_patch")).toBe(
       "0ce6c0c12fcadaa41143aee1c0de2c8be86cee4b1e7655391815c18f048c9518",
     );

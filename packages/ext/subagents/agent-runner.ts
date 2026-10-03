@@ -1,11 +1,13 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import type { ExtensionContext, LoadExtensionsResult } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   type FileEntry,
   type AgentSession,
   type AgentSessionEvent,
   createAgentSession,
+  createCodemodeExtension,
+  createToolSearchExtension,
   DefaultResourceLoader,
   type ExtensionAPI,
   getAgentDir,
@@ -353,29 +355,34 @@ export async function openAgentSession(
   agentSession.assertAgentNotCancelled(options.signal);
 
   const noExtensions = options.isolated === true;
-  const extensionPaths = noExtensions ? [] : agentConfig.extensions.map((path) => resolve(path));
-  const allowedExtensionPaths = new Set(extensionPaths);
-  const extensionsOverride = noExtensions
-    ? undefined
-    : (base: LoadExtensionsResult): LoadExtensionsResult => ({
-        ...base,
-        extensions: base.extensions.filter((extension) =>
-          allowedExtensionPaths.has(resolve(extension.path)),
-        ),
-      });
   const toolNames = [...agentConfig.builtinToolNames];
   const systemPrompt = buildAgentPrompt(agentConfig, effectiveCwd, env, parent.systemPrompt);
 
   const agentDir = getAgentDir();
 
-  // Embedded roles load only this extension, which provides collaboration and
-  // the parent-mediated bash gate. Isolated RPC spawns load no extensions.
+  // Embedded roles explicitly load native builtins and this extension. The closure
+  // reapplies child identity on reload; no project/discovered extensions execute.
+  // Isolated RPC spawns load no extensions.
   const loader = new DefaultResourceLoader({
     cwd: configCwd,
     agentDir,
-    noExtensions,
-    additionalExtensionPaths: extensionPaths.length > 0 ? extensionPaths : undefined,
-    extensionsOverride,
+    noExtensions: true,
+    extensionFactories: noExtensions
+      ? []
+      : [
+          {
+            name: "codemode",
+            factory: createCodemodeExtension({ mode: "on", models: false }),
+            // The adapter replaces this default with its scoped native registration.
+            replaceable: true,
+          },
+          createToolSearchExtension(),
+          (pi) =>
+            runAsSubagent(
+              { type, registerCollaboration: options.registerCollaboration },
+              async () => (await import("../index.js")).default(pi),
+            ),
+        ],
     eventBus: createSubagentEventBus(options.pi.events),
     noSkills: options.isolated === true,
     noPromptTemplates: true,
@@ -385,9 +392,7 @@ export async function openAgentSession(
     appendSystemPromptOverride: () => [],
   });
 
-  await runAsSubagent({ type, registerCollaboration: options.registerCollaboration }, () =>
-    loader.reload(),
-  );
+  await loader.reload();
   agentSession.assertAgentNotCancelled(options.signal);
 
   // Resolve model: explicit option > config.model > parent model
@@ -435,6 +440,8 @@ export async function openAgentSession(
     settingsManager,
     modelRuntime,
     model,
+    // SDK tools is a persistent registry ceiling, not only the initial active list.
+    // Keep underlying cores and permitted owned tools, even when projection hides them.
     tools: options.allowedTools
       ? allowedTools.filter((name) => options.allowedTools?.includes(name))
       : allowedTools,
@@ -478,11 +485,6 @@ export async function openAgentSession(
     );
     if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
     options.onSessionCreated?.(session);
-    if (options.allowedTools) {
-      session.setActiveToolsByName(
-        session.getActiveToolNames().filter((name) => options.allowedTools?.includes(name)),
-      );
-    }
 
     return session;
   } catch (error) {

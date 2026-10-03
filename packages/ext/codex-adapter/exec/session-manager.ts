@@ -301,7 +301,7 @@ export function createExecSessionManager(
         await bridgeSessions.waitForStartup(session, signal);
         return finishResult(session, waitedMs, input.max_output_tokens);
       } catch (error) {
-        if (signal?.aborted) sessions.delete(session.id);
+        if (signal?.aborted || session.failure) sessions.delete(session.id);
         throw error;
       } finally {
         abortCleanup();

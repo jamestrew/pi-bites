@@ -5,7 +5,7 @@ export interface AdapterModel {
   input?: ("text" | "image")[];
 }
 
-const CODE_MODE_TOOLS = ["exec", "wait"] as const;
+const CODE_MODE_TOOLS = ["codemode"] as const;
 const CORE = new Set(["read", "bash", "edit", "write"]);
 export const NESTED_TOOLS = [
   "exec_command",
@@ -14,7 +14,7 @@ export const NESTED_TOOLS = [
   "web_run",
   "view_image",
 ] as const;
-const OWNED = new Set([...CORE, ...NESTED_TOOLS, "exec", "wait"]);
+const OWNED = new Set([...CORE, ...NESTED_TOOLS, "codemode"]);
 const PREFIXES = new Set([
   "openai",
   "openai-codex",
@@ -95,7 +95,7 @@ function restore(tools: string[], displaced: DisplacedTool[]): string[] {
 }
 
 /** Restore tools whenever their replacement disappears, including within supported scope.
- * Initial selection and explicit exec/wait disables survive projection changes.
+ * Initial selection and explicit codemode disables survive projection changes.
  */
 export function reconcileTools(
   active: string[],
@@ -123,7 +123,7 @@ export function reconcileTools(
   // A core removed after restoration must not survive in cached nested membership.
   const projection = activate(restored, selection);
   const replaces = (name: string) =>
-    projection.visible.has("exec") &&
+    projection.visible.has("codemode") &&
     (name === "read" || name === "bash"
       ? projection.nested.has("exec_command")
       : (name === "edit" || name === "write") && projection.nested.has("apply_patch"));

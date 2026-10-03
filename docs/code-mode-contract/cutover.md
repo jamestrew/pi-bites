@@ -1,6 +1,16 @@
 # Code Mode cutover validation (#302)
 
+> Historical V8 evidence. Both parent and SDK child sessions now use
+> [native codemode](native-parent.md); the host and its build/install/test assets
+> are removed by #371. Commands and paths below are historical, not current setup.
+
 The default adapter now selects Code Mode for GPT-5.6/GPT-6 families. The false integration gate, legacy registration/activation, structured prompt guidance and their obsolete tests are removed. `codexAdapter.providers` no longer selects models; unknown old config keys remain ignored under the existing config parser. Web-route configuration and independent disable remain supported. RTK removal is the prerequisite ancestor `6dc4c867`.
+
+## Native discovery baseline (#368)
+
+Pi-bites now targets the supported Pi 0.99.1 baseline for `@earendil-works/pi-coding-agent`, `@earendil-works/pi-server`, and `@earendil-works/pi-tui`. Isolated development loads `builtin:codemode` and `builtin:tool-search` explicitly next to the local extension; it does not load MCP, arbitrary configured extensions, or credentials-backed servers. Loading remains separate from activation: `codemode` and `tool_search` are only active when selected by settings or tools.
+
+The native foundation test uses public `createCodemodeExtension()` and `createToolSearchExtension()` factories through Pi's registered-extension/session seam. It proves script `searchTools`, `describeTool`, `ALL_TOOLS`, and safe tool execution; separately, `tool_search` activates an eligible deferred tool. The test also records exposure limits: direct active tools differ from registered codemode/deferred tools, `hidden` and `model-only` tools are not script-callable, and discovery is not an authorization grant. No live provider acceptance, MCP connection, or credential fallback is claimed by this local validation.
 
 ## Reproducible integration checks
 
@@ -63,7 +73,7 @@ For a manual terminal smoke, start `bun run dev` with the host installed, select
 
 ## Discovery follow-up #304 (2026-09-12)
 
-The initial exposure policy now defers detailed web help; see the [contract baseline](README.md#nested-discovery-policy-304-2026-09-12). The discovery and token-accounting research notes were already committed before this follow-up. The generator was reproduced from hash-verified pinned Git objects with locked offline Cargo; no retained native source or host pin changed.
+The initial exposure policy now defers detailed web help; see the [contract baseline](historical-baseline.md#nested-discovery-policy-304-2026-09-12). The discovery and token-accounting research notes were already committed before this follow-up. The generator was reproduced from hash-verified pinned Git objects with locked offline Cargo; no retained native source or host pin changed.
 
 Real-host integration checks retrieve all five complete declaration-bearing entries, verify one declaration per entry, and then use the bundled web binary against a local selected Responses route for search/open/click/find/image query. Lookup makes zero HTTP requests; revoking route configuration still rejects calls and removes web from new metadata without credential fallback. Lifecycle checks rediscover after supported model switches and branch replacement with stale throwing ctx getters, preserving existing cancellation/reload/restored-transcript checks. Discovery introduces no restoration state. Previously retrieved help is ordinary output; fresh lookup works without that output in the next cell's inputs.
 

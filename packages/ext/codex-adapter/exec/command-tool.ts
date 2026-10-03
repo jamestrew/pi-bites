@@ -60,10 +60,11 @@ function execStatus(
   isError: boolean,
   startedAt?: number,
   endedAt?: number,
+  showInputTokens = true,
 ): string | undefined {
   const details = result.details as ExecRenderDetails | undefined;
   if (isPartial) return details ? `Elapsed ${details.wall_time_seconds.toFixed(1)}s` : undefined;
-  const inputTokens = modelInputTokenCount(result);
+  const inputTokens = showInputTokens ? modelInputTokenCount(result) : 0;
   const tokenSuffix =
     inputTokens > 0 ? ` · ~${inputTokens.toLocaleString("en-US")} input tokens` : "";
   if (details?.session_id !== undefined)
@@ -91,7 +92,7 @@ export function throwForExecFailure(result: UnifiedExecResult): void {
 
 export function renderExecResult(
   result: AgentToolResult<ExecRenderDetails>,
-  options: { expanded: boolean; isPartial: boolean },
+  options: { expanded: boolean; isPartial: boolean; showInputTokens?: boolean },
   theme: RenderTheme,
   context: { isError: boolean; state: { startedAt?: number; endedAt?: number } },
 ) {
@@ -111,6 +112,7 @@ export function renderExecResult(
     context.isError,
     context.state.startedAt,
     context.state.endedAt,
+    options.showInputTokens,
   );
   const statusText = status ? new Text(theme.fg("dim", status), 0, 0) : undefined;
   return {
@@ -150,12 +152,18 @@ const parameters = Type.Object({
   ),
   tty: Type.Optional(Type.Boolean({ description: "Run in an interactive pseudo-terminal." })),
   yield_time_ms: Type.Optional(
-    Type.Number({
+    Type.Integer({
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
       description: "Wait before yielding output. Defaults to 10000 ms; clamps to 250–30000 ms.",
     }),
   ),
   max_output_tokens: Type.Optional(
-    Type.Number({ description: "Output token budget. Defaults to 10000 tokens." }),
+    Type.Integer({
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+      description: "Output token budget. Defaults to 10000 tokens.",
+    }),
   ),
   login: Type.Optional(
     Type.Boolean({ description: "Start the shell as a login shell. Defaults to true." }),

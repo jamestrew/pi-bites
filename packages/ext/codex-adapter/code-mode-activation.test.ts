@@ -7,11 +7,13 @@ import {
   getDelegationTools,
 } from "./activation.js";
 
-test("only GPT-5.6/GPT-6 families and recognized prefixes enter Code Mode", () => {
+test("only GPT-5.6/GPT-6/GPT-6.1 families and recognized prefixes enter Code Mode", () => {
   for (const id of [
     "gpt-5.6",
     "gpt-5.6-pro",
     "gpt-6",
+    "gpt-6.1",
+    "openai/gpt-6.1-sol",
     "gpt-6-astra",
     "openai/gpt-6-astra",
     "openai-codex/gpt-5.6",
@@ -51,13 +53,12 @@ test("hides owned direct tools, restores only displaced core tools, and retains 
       "apply_patch",
       "web_run",
       "view_image",
-      "exec",
-      "wait",
+      "codemode",
     ],
     true,
     state,
   );
-  expect(active).toEqual(["exec", "wait", "custom"]);
+  expect(active).toEqual(["codemode", "custom"]);
   expect([...getNestedTools(state)]).toEqual([
     "exec_command",
     "write_stdin",
@@ -67,7 +68,7 @@ test("hides owned direct tools, restores only displaced core tools, and retains 
   expect(reconcileTools(active, false, state)).toEqual(["read", "custom", "bash"]);
 });
 
-test("model switches preserve hidden availability and session-disabled exec stays disabled", () => {
+test("model switches preserve hidden availability and session-disabled codemode stays disabled", () => {
   const state = createAdapterToolState();
   const initial = [
     "read",
@@ -78,64 +79,61 @@ test("model switches preserve hidden availability and session-disabled exec stay
     "apply_patch",
     "web_run",
     "view_image",
-    "exec",
-    "wait",
+    "codemode",
   ];
   const outside = reconcileTools(initial, false, state);
   const active = reconcileTools(outside, true, state);
   expect(getNestedTools(state).has("web_run")).toBe(true);
   expect(
     reconcileTools(
-      active.filter((name) => name !== "exec"),
+      active.filter((name) => name !== "codemode"),
       true,
       state,
     ),
-  ).toEqual(["read", "bash", "edit", "custom", "wait"]);
-  expect(reconcileTools(["read", "bash", "edit", "custom", "wait"], true, state)).toEqual([
+  ).toEqual(["read", "bash", "edit", "custom"]);
+  expect(reconcileTools(["read", "bash", "edit", "custom"], true, state)).toEqual([
     "read",
     "bash",
     "edit",
     "custom",
-    "wait",
   ]);
 });
 
 test("session selection cannot recover disabled nested capabilities from core aliases", () => {
   const state = createAdapterToolState();
-  expect(reconcileTools(["read", "bash", "write", "custom", "exec", "wait"], true, state)).toEqual([
+  expect(reconcileTools(["read", "bash", "write", "custom", "codemode"], true, state)).toEqual([
     "read",
     "bash",
     "write",
     "custom",
-    "exec",
-    "wait",
+    "codemode",
   ]);
   expect([...getNestedTools(state)]).toEqual([]);
   const readonly = createAdapterToolState();
-  expect(reconcileTools(["read", "exec_command", "exec", "wait"], true, readonly)).toEqual([
+  expect(reconcileTools(["read", "exec_command", "codemode"], true, readonly)).toEqual([
     "read",
-    "exec",
-    "wait",
+    "codemode",
   ]);
   expect([...getNestedTools(readonly)]).toEqual([]);
 });
 
-test("a session-disabled exec remains disabled across unsupported and supported model switches", () => {
+test("a session-disabled codemode remains disabled across unsupported and supported model switches", () => {
   const state = createAdapterToolState();
-  const active = reconcileTools(["read", "bash", "exec_command", "exec", "wait"], true, state);
+  const active = reconcileTools(["read", "bash", "exec_command", "codemode"], true, state);
   const outside = reconcileTools(
-    active.filter((tool) => tool !== "exec"),
+    active.filter((tool) => tool !== "codemode"),
     false,
     state,
   );
   const again = reconcileTools(outside, true, state);
-  expect(again).toEqual(["read", "bash", "wait"]);
+  expect(again).toEqual(["read", "bash"]);
 });
 
-test.each(["exec", "wait"])("session can explicitly re-enable %s after disabling it", (name) => {
+test("session can explicitly re-enable codemode after disabling it", () => {
+  const name = "codemode";
   const state = createAdapterToolState();
   const active = reconcileTools(
-    ["read", "bash", "exec_command", "exec", "wait", "custom"],
+    ["read", "bash", "exec_command", "codemode", "custom"],
     true,
     state,
   );
@@ -145,14 +143,14 @@ test.each(["exec", "wait"])("session can explicitly re-enable %s after disabling
     state,
   );
   expect(disabled).not.toContain(name);
-  expect(reconcileTools([...disabled, name], true, state)).toEqual(["exec", "wait", "custom"]);
+  expect(reconcileTools([...disabled, name], true, state)).toEqual(["codemode", "custom"]);
 });
 
-test("re-enabling exec honors core capabilities removed while it was disabled", () => {
+test("re-enabling codemode honors core capabilities removed while it was disabled", () => {
   const state = createAdapterToolState();
-  const initial = reconcileTools(["read", "bash", "exec_command", "exec", "wait"], true, state);
+  const initial = reconcileTools(["read", "bash", "exec_command", "codemode"], true, state);
   const disabled = reconcileTools(
-    initial.filter((name) => name !== "exec"),
+    initial.filter((name) => name !== "codemode"),
     true,
     state,
   );
@@ -161,7 +159,7 @@ test("re-enabling exec honors core capabilities removed while it was disabled", 
     true,
     state,
   );
-  expect(reconcileTools([...readonly, "exec"], true, state)).toEqual(["read", "exec", "wait"]);
+  expect(reconcileTools([...readonly, "codemode"], true, state)).toEqual(["read", "codemode"]);
   expect([...getNestedTools(state)]).toEqual([]);
 });
 
@@ -171,26 +169,17 @@ test("delegation snapshots recover permitted capabilities without changing paren
     "read",
     "bash",
     "custom",
-    "exec",
-    "wait",
+    "codemode",
     "exec_command",
     "write_stdin",
     "apply_patch",
   ];
   const active = reconcileTools(selected, true, state);
-  expect(active).toEqual(["exec", "wait", "custom"]);
+  expect(active).toEqual(["codemode", "custom"]);
   const before = structuredClone(state);
   const allowed = getDelegationTools(active, state);
   expect(allowed).toEqual(
-    expect.arrayContaining([
-      "read",
-      "bash",
-      "custom",
-      "exec",
-      "wait",
-      "exec_command",
-      "write_stdin",
-    ]),
+    expect.arrayContaining(["read", "bash", "custom", "codemode", "exec_command", "write_stdin"]),
   );
   expect(allowed).not.toContain("edit");
   expect(allowed).not.toContain("write");
@@ -202,7 +191,7 @@ test("delegation snapshots recover permitted capabilities without changing paren
 
 test("selected collaboration remains direct across projection changes", () => {
   const state = createAdapterToolState();
-  const selected = ["custom", "spawn_agent", "wait_agent", "exec", "wait"];
+  const selected = ["custom", "spawn_agent", "wait_agent", "codemode"];
   const active = reconcileTools(selected, true, state);
   expect(active).toEqual(selected);
   expect([...getNestedTools(state)]).toEqual([]);
@@ -213,9 +202,9 @@ test("selected collaboration remains direct across projection changes", () => {
   expect(again).toEqual(selected);
   expect(
     reconcileTools(
-      again.filter((name) => name !== "spawn_agent" && name !== "wait"),
+      again.filter((name) => name !== "spawn_agent" && name !== "codemode"),
       true,
       state,
     ),
-  ).toEqual(["custom", "wait_agent", "exec"]);
+  ).toEqual(["custom", "wait_agent"]);
 });

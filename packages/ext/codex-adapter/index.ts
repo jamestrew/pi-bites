@@ -1,4 +1,4 @@
-import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
+import type { BuildSystemPromptOptions, ToolInfo } from "@earendil-works/pi-coding-agent";
 import type { AdapterModel } from "./activation.js";
 
 export type CodexPromptPreview = (
@@ -9,7 +9,8 @@ export type CodexPromptPreview = (
 
 export interface CodexAdapterController {
   previewPrompt: CodexPromptPreview;
+  previewTools?: (tools: ToolInfo[]) => ToolInfo[];
   getAllowedTools: () => string[];
 }
 
-export { default } from "./code-mode/registration.js";
+export { default } from "./native-registration.js";
