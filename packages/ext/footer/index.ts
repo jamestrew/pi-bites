@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
@@ -60,10 +60,132 @@ function formatPercent(percent: number | null | undefined): string {
   return typeof percent === "number" && Number.isFinite(percent) ? `${percent.toFixed(1)}%` : "?%";
 }
 
-function shortenCwd(cwd: string): string {
-  const home = process.env.HOME || process.env.USERPROFILE;
-  if (home && cwd.startsWith(home)) return `~${cwd.slice(home.length)}`;
-  return cwd;
+export type RepositoryStatus = { root?: string; jj?: string };
+
+const JJ_ARGS = ["--ignore-working-copy", "--color", "never"];
+
+async function runRepositoryCommand(
+  pi: Pick<ExtensionAPI, "exec">,
+  cwd: string,
+  command: string,
+  args: string[],
+): Promise<string> {
+  try {
+    const result = await pi.exec(command, args, { cwd, timeout: 2_000 });
+    return result.code === 0 ? result.stdout.trim() : "";
+  } catch {
+    return ""; // Missing executables and non-repository directories are fine.
+  }
+}
+
+async function discoverRepository(
+  pi: Pick<ExtensionAPI, "exec">,
+  cwd: string,
+): Promise<RepositoryStatus> {
+  const root = await runRepositoryCommand(pi, cwd, "jj", [...JJ_ARGS, "root"]);
+  if (root) return { root, jj: "jj" };
+  return {
+    root:
+      (await runRepositoryCommand(pi, cwd, "git", ["rev-parse", "--show-toplevel"])) || undefined,
+  };
+}
+
+export async function readRepositoryStatus(
+  pi: Pick<ExtensionAPI, "exec">,
+  cwd: string,
+  repository?: RepositoryStatus,
+): Promise<RepositoryStatus> {
+  repository ??= await discoverRepository(pi, cwd);
+  const { root } = repository;
+  if (!root || !repository.jj) return repository;
+  const run = (args: string[]) => runRepositoryCommand(pi, cwd, "jj", [...JJ_ARGS, ...args]);
+  // Read-only queries must not snapshot the working copy or update colocated Git HEAD.
+  const [change, bookmarks] = await Promise.all([
+    run(["log", "--no-graph", "-r", "@", "-T", "change_id.shortest()"]),
+    run([
+      "log",
+      "--no-graph",
+      "-r",
+      "heads(::@ & bookmarks())",
+      "-T",
+      'local_bookmarks.map(|b| b.name()).join(", ") ++ "\\n"',
+    ]),
+  ]);
+  // At merges, keep each nearest bookmarked ancestor rather than guessing a branch.
+  const names = bookmarks.split("\n").filter(Boolean).join(", ");
+  return { root, jj: `jj${change ? `: ${change}` : ""}${names ? ` · ${names}` : ""}` };
+}
+
+export function watchJjMetadata(root: string, onChange: () => void): () => void {
+  let repo = path.join(root, ".jj", "repo");
+  try {
+    if (statSync(repo).isFile()) {
+      // Additional workspaces store a relative path to the shared repository.
+      repo = path.resolve(root, ".jj", readFileSync(repo, "utf8").trim());
+    }
+  } catch {
+    // Metadata may disappear between root discovery and watcher setup.
+  }
+  let heads = path.join(repo, "op_heads");
+  try {
+    if (statSync(path.join(heads, "heads")).isDirectory()) heads = path.join(heads, "heads");
+  } catch {
+    // Older jj versions store head entries directly in op_heads.
+  }
+  const checkout = path.join(root, ".jj", "working_copy", "checkout");
+  const fingerprint = () => {
+    try {
+      const operations = readdirSync(heads)
+        .filter((name) => /^[0-9a-f]+$/.test(name))
+        .sort();
+      return operations.join(",") + ":" + readFileSync(checkout).toString("hex");
+    } catch {
+      return undefined; // Keep the cached status while metadata is temporarily unavailable.
+    }
+  };
+  let previous = fingerprint();
+  let disposed = false;
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  let fallback: ReturnType<typeof setInterval> | undefined;
+  const watchers: FSWatcher[] = [];
+  const check = () => {
+    if (disposed) return;
+    const next = fingerprint();
+    if (next === undefined || next === previous) return;
+    previous = next;
+    onChange();
+  };
+  const schedule = () => {
+    if (disposed) return;
+    clearTimeout(debounce);
+    debounce = setTimeout(check, 500);
+    debounce.unref();
+  };
+  const pollMetadata = () => {
+    // If native watching fails, poll only this small fingerprint—not jj commands.
+    fallback ??= setInterval(check, 5_000);
+    fallback.unref();
+  };
+  for (const directory of [heads, path.dirname(checkout)]) {
+    try {
+      const watcher = watch(directory, { persistent: false }, schedule);
+      watcher.on("error", () => {
+        watcher.close();
+        if (!disposed) pollMetadata();
+      });
+      watchers.push(watcher);
+    } catch {
+      pollMetadata();
+    }
+  }
+  // Cover changes between the first fingerprint and watcher installation.
+  schedule();
+  return () => {
+    disposed = true;
+    clearTimeout(debounce);
+    clearInterval(fallback);
+    for (const watcher of watchers) watcher.close();
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -180,6 +302,7 @@ export function buildFooterLine(
   exploreUsage: UsageTotals,
   width: number,
   colorContextUsage?: ContextUsageColorizer,
+  repository: RepositoryStatus = {},
 ): string {
   const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : "no-model";
   const thinking = getThinkingLevel(ctx);
@@ -197,8 +320,10 @@ export function buildFooterLine(
   const stats = formatUsageStats(sumUsage(getMainSessionUsage(ctx), exploreUsage));
   const left = `${model} ${thinking} · ${context} · ${stats}`;
 
-  let right = shortenCwd(ctx.cwd);
-  const branch = footerData.getGitBranch();
+  let right = repository.root
+    ? path.join(path.basename(repository.root), path.relative(repository.root, ctx.cwd))
+    : path.basename(ctx.cwd) || ctx.cwd;
+  const branch = repository.jj ?? footerData.getGitBranch();
   if (branch) right = `${right} (${branch})`;
 
   const leftWidth = visibleWidth(left);
@@ -249,6 +374,11 @@ export function buildExtensionStatusLines(
 
 class BitesFooter implements Component {
   private unsubscribe?: () => void;
+  private stopWatching?: () => void;
+  private repository: RepositoryStatus = {};
+  private pending = false;
+  private refreshAgain = false;
+  private disposed = false;
 
   constructor(
     private ctx: ExtensionContext,
@@ -256,8 +386,44 @@ class BitesFooter implements Component {
     private footerData: ReadonlyFooterDataProvider,
     private subagentUsageReader: SubagentUsageReader,
     private requestRender: () => void,
+    private pi: ExtensionAPI,
+    private cwd: string,
   ) {
     this.unsubscribe = footerData.onBranchChange(requestRender);
+    void this.initializeRepository();
+  }
+
+  private async initializeRepository(): Promise<void> {
+    const repository = await discoverRepository(this.pi, this.cwd);
+    if (this.disposed) return;
+    if (repository.root && repository.jj) {
+      this.stopWatching = watchJjMetadata(repository.root, () => void this.refreshRepository());
+    }
+    await this.refreshRepository(repository);
+  }
+
+  private async refreshRepository(repository = this.repository): Promise<void> {
+    if (this.disposed) return;
+    if (this.pending) {
+      this.refreshAgain = true;
+      return;
+    }
+    this.pending = true;
+    try {
+      const updated = await readRepositoryStatus(this.pi, this.cwd, repository);
+      // oxlint-disable-next-line typescript/no-unnecessary-condition -- dispose() can run during await.
+      if (this.disposed) return;
+      if (updated.root !== this.repository.root || updated.jj !== this.repository.jj) {
+        this.repository = updated;
+        this.requestRender();
+      }
+    } finally {
+      this.pending = false;
+      if (this.refreshAgain) {
+        this.refreshAgain = false;
+        void this.refreshRepository();
+      }
+    }
   }
 
   invalidate(): void {
@@ -265,16 +431,22 @@ class BitesFooter implements Component {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.stopWatching?.();
     this.unsubscribe?.();
   }
 
   render(width: number): string[] {
+    // Pi disposes the footer before invalidating its ctx; only live renders may use it.
+    if (this.disposed) return [];
     const line = buildFooterLine(
       this.ctx,
       this.footerData,
       this.subagentUsageReader.readNewUsage(),
       width,
       colorizeContextUsage(this.theme),
+      this.repository,
     );
     return [
       this.theme.fg("dim", line),
@@ -288,13 +460,28 @@ class BitesFooter implements Component {
 }
 
 export default function registerFooter(pi: ExtensionAPI): void {
-  pi.on("session_start", async (_event, ctx) => {
+  let footer: BitesFooter | undefined;
+  pi.on("session_shutdown", () => {
+    footer?.dispose();
+    footer = undefined;
+  });
+  pi.on("session_start", (_event, ctx) => {
+    footer?.dispose();
+    footer = undefined;
+    const cwd = ctx.cwd;
     const subagentUsageReader = new SubagentUsageReader(ctx.sessionManager.getSessionId());
 
     ctx.ui.setFooter((tui, theme, footerData) => {
-      return new BitesFooter(ctx, theme, footerData, subagentUsageReader, () => {
-        tui.requestRender();
-      });
+      footer = new BitesFooter(
+        ctx,
+        theme,
+        footerData,
+        subagentUsageReader,
+        () => tui.requestRender(),
+        pi,
+        cwd,
+      );
+      return footer;
     });
   });
 }
