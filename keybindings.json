@@ -2,8 +2,6 @@
   "app.model.select": ["alt+p"],
   "app.model.cycleForward": [],
   "app.session.togglePath": [],
-  "tui.altScreen.top": [],
-  "tui.altScreen.bottom": [],
   "tui.select.down": ["down", "ctrl+n"],
   "tui.select.up": ["up", "ctrl+p"],
   "tui.select.confirm": ["enter", "ctrl+y"],
