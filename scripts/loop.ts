@@ -129,6 +129,73 @@ const reviewApproved = (state: string, piOutput: string): boolean =>
 export const shouldMergePullRequest = (state: string, piOutput: string): boolean =>
   state === "OPEN" && reviewApproved(state, piOutput);
 
+export async function mergeReviewedPullRequest(
+  repo: string,
+  pullRequest: { readonly number: number; readonly state: string; readonly headRefOid: string },
+  piOutput: string,
+  command: (args: ReadonlyArray<string>) => Promise<string> = (args) => $`gh ${args}`.text(),
+): Promise<boolean> {
+  if (!shouldMergePullRequest(pullRequest.state, piOutput)) return false;
+
+  const pages = JSON.parse(
+    await command([
+      "api",
+      `repos/${repo}/actions/workflows/validation.yml/runs?head_sha=${pullRequest.headRefOid}&event=pull_request&per_page=100`,
+      "--paginate",
+      "--slurp",
+    ]),
+  ) as {
+    workflow_runs: ReadonlyArray<{
+      head_sha: string;
+      status: string;
+      conclusion: string | null;
+      pull_requests: ReadonlyArray<{ number: number }>;
+    }>;
+  }[];
+  const latest = pages
+    .flatMap((page) => page.workflow_runs)
+    .find((run) => run.pull_requests.some((pr) => pr.number === pullRequest.number));
+  if (
+    latest?.head_sha !== pullRequest.headRefOid ||
+    latest.status !== "completed" ||
+    latest.conclusion !== "success"
+  ) {
+    throw new Error(
+      `Pull request #${pullRequest.number} needs successful validation for ${pullRequest.headRefOid} (latest run: ${latest?.conclusion ?? latest?.status ?? "missing"})`,
+    );
+  }
+
+  await command([
+    "pr",
+    "merge",
+    String(pullRequest.number),
+    "-R",
+    repo,
+    "--rebase",
+    "--match-head-commit",
+    pullRequest.headRefOid,
+  ]);
+  const state = (
+    await command([
+      "pr",
+      "view",
+      String(pullRequest.number),
+      "-R",
+      repo,
+      "--json",
+      "state",
+      "--jq",
+      ".state",
+    ])
+  ).trim();
+  if (state !== "MERGED") {
+    throw new Error(
+      `Pull request #${pullRequest.number} is ${state.toLowerCase()} after the merge command`,
+    );
+  }
+  return true;
+}
+
 const FINDINGS_HEADING = "## Outstanding review findings";
 const FINDINGS_MARKER = "RALPH_FINDINGS";
 const VERDICT_LINE = /^RALPH_REVIEW: .*$/m;
@@ -482,16 +549,7 @@ async function main() {
           console.log(`Pull request #${pullRequest.number}: ${pullRequest.url}`);
           console.log(reviewReport(pullRequest.state, piOutput));
           let merged = pullRequest.state === "MERGED";
-          if (shouldMergePullRequest(pullRequest.state, piOutput)) {
-            await $`gh pr merge ${pullRequest.number} -R ${repo} --rebase --match-head-commit ${pullRequest.headRefOid}`.quiet();
-            const mergedState = (
-              await $`gh pr view ${pullRequest.number} -R ${repo} --json state --jq .state`.text()
-            ).trim();
-            if (mergedState !== "MERGED") {
-              throw new Error(
-                `Pull request #${pullRequest.number} is ${mergedState.toLowerCase()} after the merge command`,
-              );
-            }
+          if (await mergeReviewedPullRequest(repo, pullRequest, piOutput)) {
             console.log(`Merged pull request #${pullRequest.number}.`);
             merged = true;
           }

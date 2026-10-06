@@ -1,6 +1,5 @@
 /scratch/
 node_modules/
-bun.lock
 /packages/ext/codex-adapter/vendor/apply-patch/target/
 /packages/ext/codex-adapter/vendor/exec/target/
 
