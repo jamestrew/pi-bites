@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { parseArgs } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import {
   parseRunOptions,
+  piCommand,
   pullRequestBodyAfterReview,
   pullRequestReference,
   reviewFindings,
@@ -22,6 +24,44 @@ const issue = (
   state,
   blockedBy: { nodes: blockers },
   closedByPullRequestsReferences: pullRequests,
+});
+
+describe("Pi invocation", () => {
+  it("loads the isolated snapshot explicitly without turning its path into a prompt", () => {
+    const parsed = parseArgs(
+      piCommand(
+        "/tmp/pi-extension/packages/ext/index.ts",
+        "issue #55",
+        "Implement issue #55.",
+      ).slice(1),
+    );
+
+    expect(parsed).toMatchObject({
+      noExtensions: true,
+      extensions: ["/tmp/pi-extension/packages/ext/index.ts"],
+      messages: ["Implement issue #55."],
+      name: "issue #55",
+      print: true,
+      projectTrustOverride: true,
+      diagnostics: [],
+    });
+    expect(parsed.unknownFlags.get("yolo")).toBe(true);
+  });
+
+  it("keeps normal extension discovery when snapshotting is disabled", () => {
+    const command = piCommand(undefined, "issue #55", "Implement issue #55.");
+    const parsed = parseArgs(command.slice(1));
+
+    expect(parsed.noExtensions).toBeUndefined();
+    expect(parsed.extensions).toBeUndefined();
+    expect(parsed).toMatchObject({
+      messages: ["Implement issue #55."],
+      projectTrustOverride: true,
+      skills: ["/home/jt/.agents/skills/implement/SKILL.md"],
+      diagnostics: [],
+    });
+    expect(parsed.unknownFlags.get("yolo")).toBe(true);
+  });
 });
 
 describe("run options", () => {

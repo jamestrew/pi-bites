@@ -269,8 +269,8 @@ RALPH_REVIEW: APPROVED
 
 The last line reads exactly \`RALPH_REVIEW: APPROVED\` or exactly \`RALPH_REVIEW: CHANGES REQUESTED\`.`;
 
-async function prepareExtensionRuntime(options: RunOptions): Promise<ReadonlyArray<string>> {
-  if (!options.extensionSnapshot) return ["--approve", "--yolo"];
+async function prepareExtensionRuntime(options: RunOptions): Promise<string | undefined> {
+  if (!options.extensionSnapshot) return undefined;
 
   console.log(
     `Preparing stable pi extension runtime: ${options.extensionRuntime} (${options.extensionRef})`,
@@ -280,8 +280,22 @@ async function prepareExtensionRuntime(options: RunOptions): Promise<ReadonlyArr
   await $`jj workspace add --name ${EXTENSION_WORKSPACE} --revision ${options.extensionRef} ${options.extensionRuntime}`;
   await $`bun install --frozen-lockfile`.cwd(options.extensionRuntime);
   await $`bun check`.cwd(options.extensionRuntime);
-  const extension = join(options.extensionRuntime, "packages/ext/index.ts");
-  return ["-n", "-e", extension, "--approve", "--yolo"];
+  return join(options.extensionRuntime, "packages/ext/index.ts");
+}
+
+export function piCommand(extension: string | undefined, name: string, prompt: string): string[] {
+  return [
+    "pi",
+    ...(extension ? ["--no-extensions", "--extension", extension] : []),
+    "--approve",
+    "--yolo",
+    "--print",
+    "--name",
+    name,
+    "--skill",
+    IMPLEMENT_SKILL,
+    prompt,
+  ];
 }
 
 export async function runCaptured(
@@ -311,7 +325,7 @@ export async function runCaptured(
 
 async function runPi(
   cwd: string,
-  piArgs: ReadonlyArray<string>,
+  extension: string | undefined,
   name: string,
   prompt: string,
 ): Promise<string> {
@@ -321,10 +335,7 @@ async function runPi(
     exitCode,
     stdout: output,
     stderr: errors,
-  } = await runCaptured(
-    ["pi", ...piArgs, "--print", "--name", name, "--skill", IMPLEMENT_SKILL, prompt],
-    cwd,
-  );
+  } = await runCaptured(piCommand(extension, name, prompt), cwd);
   if (exitCode !== 0) {
     throw new Error(
       [errors.trim() || `Pi exited with status ${exitCode}`, output.trim()]
@@ -353,7 +364,7 @@ async function main() {
   const workBaseRef = options.workBaseRef ?? `${base}@origin`;
   const workBaseBookmark = workBaseRef.replace(/@origin$/, "");
   await $`jj git fetch --remote origin`.quiet();
-  const piArgs = await prepareExtensionRuntime(options);
+  const extension = await prepareExtensionRuntime(options);
   const repoRoot = (await $`jj workspace root`.text()).trim();
   const workspaceParent = join(dirname(repoRoot), `.${basename(repoRoot)}-workspaces`);
   const attempted = new Set<number>();
@@ -421,7 +432,7 @@ async function main() {
           }
           const piOutput = await runPi(
             workspacePath,
-            piArgs,
+            extension,
             `issue #${issue.number}`,
             implementPrompt(repo, workBaseRef, issue.number),
           );
