@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 
-import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
+import { defineTool, initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { describe, expect, test, vi } from "vitest";
 
 import { formatNativeBinaryError } from "./native-binary-error.js";
@@ -198,7 +198,7 @@ describe("view_image", () => {
       mimeType: "image/png",
       data: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGNkZGJmYGAAAAAqAAjaWO5EAAAAAElFTkSuQmCC",
     } as const;
-    const tool = createViewImageTool({ binaryPath: "/native/view_image" });
+    const tool = defineTool(createViewImageTool({ binaryPath: "/native/view_image" }));
     const render = () => {
       const component = new ToolExecutionComponent(
         "view_image",
