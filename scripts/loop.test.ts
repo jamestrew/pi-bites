@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseArgs } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import {
+  mergeReviewedPullRequest,
   parseRunOptions,
   piCommand,
   pullRequestBodyAfterReview,
@@ -148,6 +150,151 @@ describe("process capture", () => {
 
 const piOutput = (findings: string) =>
   `Implemented and pushed issue #55.\n\nRALPH_FINDINGS\n${findings}\nRALPH_REVIEW: CHANGES REQUESTED\n`;
+
+describe("validated merge", () => {
+  it("keeps CI validation on the immutable PR head even when the PR is retargeted", () => {
+    const workflow = readFileSync(
+      new URL("../.github/workflows/validation.yml", import.meta.url),
+      "utf8",
+    );
+    expect(workflow).toContain("ref: ${{ github.event.pull_request.head.sha || github.sha }}");
+  });
+
+  it("rejects validation for another PR sharing the same head", async () => {
+    const merges: ReadonlyArray<string>[] = [];
+    const command = async (args: ReadonlyArray<string>): Promise<string> => {
+      if (args[0] === "api") {
+        return JSON.stringify([
+          {
+            workflow_runs: [
+              {
+                head_sha: "head-55",
+                status: "completed",
+                conclusion: "success",
+                pull_requests: [{ number: 99 }],
+              },
+            ],
+          },
+        ]);
+      }
+      merges.push(args);
+      return "MERGED";
+    };
+    await expect(
+      mergeReviewedPullRequest(
+        "owner/repo",
+        { number: 55, state: "OPEN", headRefOid: "head-55" },
+        "RALPH_REVIEW: APPROVED",
+        command,
+      ),
+    ).rejects.toThrow("validation");
+    expect(merges).toEqual([]);
+  });
+
+  it("merges only the validated head and verifies that it actually merged", async () => {
+    const commands: ReadonlyArray<string>[] = [];
+    const command = async (args: ReadonlyArray<string>): Promise<string> => {
+      commands.push(args);
+      if (args[0] === "api") {
+        return JSON.stringify([
+          {
+            workflow_runs: [
+              {
+                head_sha: "head-55",
+                status: "completed",
+                conclusion: "failure",
+                pull_requests: [{ number: 99 }],
+              },
+            ],
+          },
+          {
+            workflow_runs: [
+              {
+                head_sha: "head-55",
+                status: "completed",
+                conclusion: "success",
+                pull_requests: [{ number: 55 }],
+              },
+            ],
+          },
+        ]);
+      }
+      return "MERGED\n";
+    };
+
+    expect(
+      await mergeReviewedPullRequest(
+        "owner/repo",
+        { number: 55, state: "OPEN", headRefOid: "head-55" },
+        "RALPH_REVIEW: APPROVED",
+        command,
+      ),
+    ).toBe(true);
+    expect(commands).toEqual([
+      [
+        "api",
+        "repos/owner/repo/actions/workflows/validation.yml/runs?head_sha=head-55&event=pull_request&per_page=100",
+        "--paginate",
+        "--slurp",
+      ],
+      ["pr", "merge", "55", "-R", "owner/repo", "--rebase", "--match-head-commit", "head-55"],
+      ["pr", "view", "55", "-R", "owner/repo", "--json", "state", "--jq", ".state"],
+    ]);
+  });
+
+  it("does not query validation or merge when review is unapproved or the PR is closed", async () => {
+    const command = async (): Promise<string> => {
+      throw new Error("GitHub should not be called");
+    };
+    for (const [state, output] of [
+      ["OPEN", "RALPH_REVIEW: CHANGES REQUESTED"],
+      ["MERGED", "RALPH_REVIEW: APPROVED"],
+      ["CLOSED", "RALPH_REVIEW: APPROVED"],
+    ] as const) {
+      expect(
+        await mergeReviewedPullRequest(
+          "owner/repo",
+          { number: 55, state, headRefOid: "head-55" },
+          output,
+          command,
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it.each([
+    [],
+    [{ head_sha: "head-55", status: "completed", conclusion: "failure" }],
+    [{ head_sha: "head-55", status: "in_progress", conclusion: null }],
+    [{ head_sha: "head-55", status: "completed", conclusion: "cancelled" }],
+    [{ head_sha: "head-55", status: "completed", conclusion: "skipped" }],
+    [{ head_sha: "old-head", status: "completed", conclusion: "success" }],
+    [
+      { head_sha: "head-55", status: "queued", conclusion: null },
+      { head_sha: "head-55", status: "completed", conclusion: "success" },
+    ],
+  ])("never merges an approved head without successful validation: %j", async (...runs) => {
+    const merges: string[][] = [];
+    const command = async (args: ReadonlyArray<string>): Promise<string> => {
+      if (args[0] === "api")
+        return JSON.stringify([
+          { workflow_runs: runs.map((run) => ({ ...run, pull_requests: [{ number: 55 }] })) },
+        ]);
+      merges.push([...args]);
+      return "MERGED";
+    };
+
+    await expect(
+      mergeReviewedPullRequest(
+        "owner/repo",
+        { number: 55, state: "OPEN", headRefOid: "head-55" },
+        "RALPH_REVIEW: APPROVED",
+        command,
+      ),
+    ).rejects.toThrow("validation");
+    expect(merges).toEqual([]);
+  });
+});
 
 describe("review findings", () => {
   it("keeps the marked block and drops the session chatter around it", () => {

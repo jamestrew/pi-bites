@@ -1,0 +1,32 @@
+name: Validation
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - name: Install jj for integration tests
+        run: |
+          curl -fsSL https://github.com/jj-vcs/jj/releases/download/v0.45.1/jj-v0.45.1-x86_64-unknown-linux-musl.tar.gz -o "$RUNNER_TEMP/jj.tar.gz"
+          echo "f35438350b5d61963aac5dd74ede510b31d6b9690769d1a6268cf058cc825f72  $RUNNER_TEMP/jj.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/jj.tar.gz" -C "$RUNNER_TEMP" ./jj
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: bun install --frozen-lockfile
+      - run: bun check
