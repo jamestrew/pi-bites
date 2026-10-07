@@ -188,8 +188,8 @@ text(JSON.stringify({
   allHasSafe: ALL_TOOLS.some((tool) => tool.name === "safe_echo"),
   allHasModelOnly: ALL_TOOLS.some((tool) => tool.name === "model_only_secret"),
   allHasHidden: ALL_TOOLS.some((tool) => tool.name === "hidden_secret"),
-  canCallModelOnly: typeof tools.model_only_secret === "function",
-  canCallHidden: typeof tools.hidden_secret === "function",
+  canCallModelOnly: "model_only_secret" in tools,
+  canCallHidden: "hidden_secret" in tools,
   echo,
 }));
 `;
