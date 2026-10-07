@@ -217,7 +217,30 @@ To make `Alt+S` focus the next tracked Pi pane even when Pi is not focused, add:
 bind-key -n M-s run-shell -b 'node "/path/to/pi-bites/bin/pi-sessions.mjs" next --from "#{pane_id}" --client "#{client_tty}"'
 ```
 
-Adjust the script path when pi-bites is installed from a local checkout. The helper only contacts an already-running tracker daemon; it does not start Pi or the daemon.
+For an fzf picker instead of cycling, use a popup (requires `fzf`, `node`, and tmux
+with `display-popup` support):
+
+```tmux
+bind-key -n M-s run-shell -b 'tmux display-popup -c "#{client_tty}" -E -w 90% -h 80% "node \"/path/to/pi-bites/bin/pi-sessions.mjs\" pick --client \"#{client_tty}\""'
+```
+
+The picker shows Pi state, tmux session/window/pane, working directory, and pane ID.
+Permission/input waits come first, followed by working and idle panes. Type to
+filter, press `Enter` to focus the selected pane, or `Esc` to cancel. The right side
+previews that pane's visible terminal contents with colors, starting at the bottom.
+Use `Ctrl-U` / `Ctrl-D` to scroll the preview up/down by half a page (mouse scrolling
+and `Shift-Up` / `Shift-Down` also work); `Ctrl-R` refreshes it. The `run-shell`
+wrapper expands the invoking client's tty before opening the popup; `display-popup`
+does not expand formats in its shell command. This is a pane text capture, not a screenshot of the entire split window.
+The picker ignores `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE` so its selection
+protocol and key bindings stay predictable.
+The pane list and Pi states are a snapshot taken when the picker opens; reopen it
+to update them. Only tracked panes present in the popup's tmux server are listed.
+
+Adjust the script path for your installation. The helper only contacts an
+already-running tracker daemon; it does not start Pi or the daemon. You can use
+`bind-key s` instead of `bind-key -n M-s` for a prefix-based binding like the other
+popup integrations.
 
 ## Skill and prompt references (`skillPromptReferences`)
 

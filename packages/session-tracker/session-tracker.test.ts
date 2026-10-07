@@ -100,7 +100,7 @@ test("parses valid tracker messages and rejects malformed ones", () => {
 test("pi-sessions helper sends a targeted focus-next request", async () => {
   const cli = (await import(new URL("../../bin/pi-sessions.mjs", import.meta.url).href)) as {
     parseArgs(args: string[]): unknown;
-    requestNext(socketPath: string, request: unknown): Promise<unknown>;
+    requestTracker(socketPath: string, request: unknown): Promise<unknown>;
   };
   const request = cli.parseArgs(["next", "--from", "%2", "--client", "/dev/pts/4"]);
   expect(request).toEqual({
@@ -112,17 +112,30 @@ test("pi-sessions helper sends a targeted focus-next request", async () => {
 
   const socketPath = join(tempDir(), "cli.sock");
   let received: unknown;
+  let reply: unknown = { ok: true };
   const server = createServer((socket) => {
     socket.setEncoding("utf8");
     socket.on("data", (data) => {
       received = JSON.parse(String(data).trim());
-      socket.end('{"ok":true}\n');
+      socket.end(`${JSON.stringify(reply)}\n`);
     });
   });
   await new Promise<void>((resolve) => server.listen(socketPath, resolve));
   try {
-    await expect(cli.requestNext(socketPath, request)).resolves.toEqual({ ok: true });
+    await expect(cli.requestTracker(socketPath, request)).resolves.toEqual({ ok: true });
     expect(received).toEqual(request);
+    reply = { ok: true, records: [record()] };
+    await expect(cli.requestTracker(socketPath, { type: "snapshot" })).resolves.toEqual(reply);
+    expect(received).toEqual({ type: "snapshot" });
+    for (const invalid of [
+      record({ state: "unknown" as PaneRecord["state"] }),
+      record({ paneId: "%1;echo bad" }),
+    ]) {
+      reply = { ok: true, records: [invalid] };
+      await expect(cli.requestTracker(socketPath, { type: "snapshot" })).rejects.toThrow(
+        /invalid session tracker response/,
+      );
+    }
   } finally {
     await closeServer(server);
   }
