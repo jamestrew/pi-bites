@@ -10,7 +10,7 @@
  */
 
 import type { AgentManager, SpawnOptions } from "./agent-manager.js";
-import { type ModelRegistry, resolveModel } from "./model-resolver.js";
+import { type ModelRegistry, resolveModel } from "../shared/model-resolver.js";
 import type { ThinkingLevel } from "./types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,7 +1,7 @@
 import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BitesConfig } from "./config.js";
-import { resolveModel } from "./subagents/model-resolver.js";
+import { resolveModel } from "./shared/model-resolver.js";
 
 export const DEFAULT_SMALL_MODEL = "github-copilot/claude-haiku-4.5";
 export const DEFAULT_SMALL_MODEL_THINKING: ThinkingLevel = "low";

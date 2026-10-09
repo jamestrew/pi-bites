@@ -14,7 +14,7 @@ import {
   getDisplayName,
 } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
-import { sanitizeText } from "./ui/text-lines.js";
+import { sanitizeText } from "../shared/terminal-text.js";
 
 type AgentToolUpdate = (update: {
   content: Array<{ type: "text"; text: string }>;

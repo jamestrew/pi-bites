@@ -6,7 +6,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { SubagentContext } from "./operation-context.js";
-import { modelKey, resolveExactModel } from "./model-resolver.js";
+import { modelKey, resolveExactModel } from "../shared/model-resolver.js";
 import type { SubagentsSettings } from "./settings.js";
 import { isThinkingLevel, type AgentConfig, type ThinkingLevel } from "./types.js";
 

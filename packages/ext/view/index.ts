@@ -8,7 +8,7 @@ import {
   type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Markdown, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { createViewerKeys } from "../subagents/ui/viewer-keys.js";
+import { createViewerKeys } from "../shared/viewer-keys.js";
 
 function dedent(lines: string[]): string[] {
   while (lines[0]?.trim() === "") lines.shift();

@@ -1,6 +1,6 @@
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { formatMs, formatTokens, formatTurns } from "./ui/agent-format.js";
-import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./ui/text-lines.js";
+import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "../shared/terminal-text.js";
 import {
   isMissingFinalResponse,
   MISSING_FINAL_RESPONSE_ERROR,

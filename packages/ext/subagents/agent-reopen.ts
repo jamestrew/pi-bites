@@ -2,7 +2,7 @@ import type { RegisterCollaboration } from "./subagent-context.js";
 import type { SubagentContext } from "./operation-context.js";
 import type { AgentSession, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
+import { waitForOperation } from "../shared/abortable-wait.js";
 import type { AgentCloser } from "./agent-close.js";
 import { openAgentSession } from "./agent-runner.js";
 import { shutdownAgentSession } from "./agent-session-shutdown.js";

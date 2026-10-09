@@ -2,8 +2,8 @@ import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentRecord } from "../types.js";
 import { ConversationViewer } from "../ui/conversation-viewer.js";
-import type { ViewerKeybindings } from "../ui/viewer-keys.js";
-import { createViewerKeys } from "../ui/viewer-keys.js";
+import type { ViewerKeybindings } from "../../shared/viewer-keys.js";
+import { createViewerKeys } from "../../shared/viewer-keys.js";
 
 const CTRL_P = "\x10";
 const CTRL_N = "\x0e";
@@ -57,12 +57,7 @@ function createViewer(keybindings?: ViewerKeybindings) {
     undefined,
     keybindings,
   );
-  viewer.render(80); // sets lastInnerW and scrolls to bottom (autoScroll)
   return viewer;
-}
-
-function scrollOffset(viewer: ConversationViewer): number {
-  return (viewer as any).scrollOffset;
 }
 
 describe("viewer-keys", () => {
@@ -116,35 +111,39 @@ describe("viewer-keys", () => {
 describe("ConversationViewer custom keybindings", () => {
   it("scrolls with ctrl+p/ctrl+n when bound to tui.select.up/down", () => {
     const viewer = createViewer(createEmacsKeybindings());
-    const bottom = scrollOffset(viewer);
-    expect(bottom).toBeGreaterThan(0);
+    const bottom = viewer.render(80);
+    expect(bottom.join("\n")).toContain("message 59");
+    expect(bottom.join("\n")).not.toContain("message 0");
 
     viewer.handleInput(CTRL_P);
-    expect(scrollOffset(viewer)).toBe(bottom - 1);
+    expect(viewer.render(80)).not.toEqual(bottom);
     viewer.handleInput(CTRL_N);
-    expect(scrollOffset(viewer)).toBe(bottom);
+    expect(viewer.render(80)).toEqual(bottom);
   });
 
   it("keeps arrows and k/j working alongside custom bindings", () => {
     const viewer = createViewer(createEmacsKeybindings());
-    const bottom = scrollOffset(viewer);
+    const bottom = viewer.render(80);
 
     viewer.handleInput(UP);
+    const previous = viewer.render(80);
+    expect(previous).not.toEqual(bottom);
     viewer.handleInput("k");
-    expect(scrollOffset(viewer)).toBe(bottom - 2);
+    expect(viewer.render(80)).not.toEqual(previous);
     viewer.handleInput(DOWN);
+    expect(viewer.render(80)).toEqual(previous);
     viewer.handleInput("j");
-    expect(scrollOffset(viewer)).toBe(bottom);
+    expect(viewer.render(80)).toEqual(bottom);
   });
 
   it("treats ctrl+p/ctrl+n as unbound without a keybindings manager", () => {
     const viewer = createViewer();
-    const bottom = scrollOffset(viewer);
+    const bottom = viewer.render(80);
 
     viewer.handleInput(CTRL_P);
     viewer.handleInput(CTRL_N);
-    expect(scrollOffset(viewer)).toBe(bottom);
+    expect(viewer.render(80)).toEqual(bottom);
     viewer.handleInput(UP);
-    expect(scrollOffset(viewer)).toBe(bottom - 1);
+    expect(viewer.render(80)).not.toEqual(bottom);
   });
 });

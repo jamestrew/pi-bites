@@ -1,7 +1,7 @@
 import { isAbsolute, relative } from "node:path";
 import { keyHint, renderDiff } from "@earendil-works/pi-coding-agent";
 
-import { sanitizeSingleLine, sanitizeText } from "../../subagents/ui/text-lines.js";
+import { sanitizeSingleLine, sanitizeText } from "../../shared/terminal-text.js";
 import { openFileAtPath } from "../patch/paths.js";
 import { parsePatchActions } from "../patch/parser.js";
 import type { ParsedPatchAction } from "../patch/types.js";

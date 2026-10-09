@@ -1,7 +1,7 @@
 import { extractText } from "../message-text.js";
 import { Container } from "@earendil-works/pi-tui";
 import { keyHint } from "@earendil-works/pi-coding-agent";
-import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
+import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "../../shared/terminal-text.js";
 
 type ReceiptName = "spawn_agent" | "send_message" | "followup_task";
 type ReceiptArgs = {

@@ -9,7 +9,7 @@ import { getAgentStatus } from "../agent-status.js";
 import { buildDoneStats } from "./tool-call-format.js";
 import type { LifetimeUsage } from "../usage.js";
 import type { AgentRecord, WaitAgentStatus } from "../types.js";
-import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "./text-lines.js";
+import { fitLine, sanitizeSingleLine, wrapDisplayLines } from "../../shared/terminal-text.js";
 
 export type AgentSnapshot = {
   path: string;

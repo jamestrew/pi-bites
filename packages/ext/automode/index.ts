@@ -3,13 +3,13 @@ import { readFileSync } from "node:fs";
 import { type Api, type Model, type ToolCall, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BitesConfig } from "../config.js";
-import { resolveModel } from "../subagents/model-resolver.js";
+import { resolveModel } from "../shared/model-resolver.js";
 import { appendAutoModeUsageRecord } from "./usage.js";
 import { ReviewerHistory, REVIEW_OUTPUT_TOKENS } from "./history.js";
 import { historyCoverage, reviewerEvidence } from "./evidence.js";
 import { createReviewerRead } from "./read-tool.js";
 import { approximateTokens, truncateTokens } from "./context-budget.js";
-import { waitForAuthorization } from "../bash-gate/pending.js";
+import { waitForOperation } from "../shared/abortable-wait.js";
 import {
   buildReviewerTranscript,
   compactedTaskGoal,
@@ -245,7 +245,7 @@ ${safeJson(approvalRequest)}
           assertCurrent();
           const canRead = round < 3 && reads < 6 && remainingBytes > 0;
           review.assertFits(messages);
-          const response = await waitForAuthorization(
+          const response = await waitForOperation(
             modelRegistry
               .streamSimple(
                 model,

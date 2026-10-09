@@ -2,7 +2,7 @@ import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parsePatchActions } from "../../codex-adapter/patch/parser.js";
 import { summarizeWebRunCall } from "../../codex-adapter/web-run/summary.js";
 import type { LifetimeUsage } from "../usage.js";
-import { sanitizeSingleLine, sanitizeText } from "./text-lines.js";
+import { sanitizeSingleLine, sanitizeText } from "../../shared/terminal-text.js";
 
 function formatApplyPatch(input: unknown): string {
   if (typeof input !== "string") return "ApplyPatch";

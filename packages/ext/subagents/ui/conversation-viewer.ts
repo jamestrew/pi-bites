@@ -16,7 +16,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { extractText } from "../message-text.js";
 import { formatToolCall } from "./tool-call-format.js";
-import { sanitizeText } from "./text-lines.js";
+import { sanitizeText } from "../../shared/terminal-text.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal, getSessionContextPercent } from "../usage.js";
 import type { Theme } from "./agent-format.js";
@@ -28,7 +28,11 @@ import {
   formatSessionTokens,
   getDisplayName,
 } from "./agent-format.js";
-import { createViewerKeys, type ViewerKeybindings, type ViewerKeys } from "./viewer-keys.js";
+import {
+  createViewerKeys,
+  type ViewerKeybindings,
+  type ViewerKeys,
+} from "../../shared/viewer-keys.js";
 
 /** Base lines consumed by chrome: header + two blank separators + footer. */
 const CHROME_LINES_BASE = 4;

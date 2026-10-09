@@ -2,7 +2,8 @@ import { getAgentSessionId } from "./agent-tree.js";
 import { applyAndEmitLoaded, type SubagentsSettings } from "./settings.js";
 import type { AgentRecord } from "./types.js";
 import { SubagentController } from "./operations.js";
-import { withApprovalDialog, waitForAuthorization } from "../bash-gate/pending.js";
+import { withApprovalDialog } from "../bash-gate/pending.js";
+import { waitForOperation } from "../shared/abortable-wait.js";
 import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAgentCompletionHandler } from "./agent-completion.js";
@@ -10,7 +11,7 @@ import { AgentManager } from "./agent-manager.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { registerNotificationRenderer } from "./notifications.js";
 import { registerAgentsCommand } from "./agents-command.js";
-import { getModelLabelFromConfig } from "./model-resolver.js";
+import { getModelLabelFromConfig } from "../shared/model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import {
   createSubagentMessenger,
@@ -347,7 +348,7 @@ export function createSubagents(
         const session = record?.session;
         let decision;
         try {
-          decision = await waitForAuthorization(
+          decision = await waitForOperation(
             autoMode.review(
               {
                 toolCallId: request.toolCallId,
@@ -392,7 +393,7 @@ export function createSubagents(
           };
         }
 
-        const escalation = await waitForAuthorization(
+        const escalation = await waitForOperation(
           promptAutoModeEscalation({
             pi,
             ui,
@@ -439,7 +440,7 @@ export function createSubagents(
       }
 
       if (!hasUI) return { outcome: "deny", source: "manual" };
-      return await waitForAuthorization(
+      return await waitForOperation(
         withApprovalDialog(pi.events, signal, async (): Promise<BashGateApprovalResult> => {
           const changedBeforePrompt = sessionChanged();
           if (changedBeforePrompt) return changedBeforePrompt;

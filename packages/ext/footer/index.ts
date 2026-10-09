@@ -4,6 +4,7 @@ import { readdirSync, readFileSync, statSync, watch, type FSWatcher } from "node
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { formatTokens } from "../shared/token-format.js";
 import { decodeSubagentUsageRecord, finiteNumberOrZero } from "../subagents/usage.js";
 
 type ReadonlyFooterDataProvider = {
@@ -46,14 +47,6 @@ function getUsageFiles(): string[] {
   walk(getUsageDir());
   files.sort();
   return files;
-}
-
-export function formatTokens(count: number): string {
-  if (count < 1_000) return count.toString();
-  if (count < 10_000) return `${(count / 1_000).toFixed(1)}k`;
-  if (count < 1_000_000) return `${Math.round(count / 1_000)}k`;
-  if (count < 10_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
-  return `${Math.round(count / 1_000_000)}M`;
 }
 
 function formatPercent(percent: number | null | undefined): string {

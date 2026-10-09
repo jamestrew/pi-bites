@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { OwnedToolDefinition } from "../tool-execution.js";
 import { Type } from "typebox";
 
-import { fitLine, sanitizeSingleLine } from "../../subagents/ui/text-lines.js";
+import { fitLine, sanitizeSingleLine } from "../../shared/terminal-text.js";
 import { runBundledTool, type RunBundledToolOptions } from "../native/runner.js";
 import { getBundledViewImagePath } from "./binary.js";
 

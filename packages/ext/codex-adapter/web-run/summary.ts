@@ -1,4 +1,4 @@
-import { sanitizeText } from "../../subagents/ui/text-lines.js";
+import { sanitizeText } from "../../shared/terminal-text.js";
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null

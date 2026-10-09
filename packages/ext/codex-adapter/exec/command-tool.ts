@@ -4,7 +4,7 @@ import { keyHint, type AgentToolResult, type ExtensionAPI } from "@earendil-work
 import type { OwnedToolDefinition, ToolExecutionContext } from "../tool-execution.js";
 import { Type, type Static } from "typebox";
 
-import { sanitizeText } from "../../subagents/ui/text-lines.js";
+import { sanitizeText } from "../../shared/terminal-text.js";
 import { formatUnifiedExecResult } from "./format.js";
 import type { ExecSessionManager, UnifiedExecResult } from "./session-manager.js";
 

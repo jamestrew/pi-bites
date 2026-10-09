@@ -8,7 +8,7 @@ import {
   type Theme,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { sanitizeText } from "../subagents/ui/text-lines.js";
+import { sanitizeText } from "../shared/terminal-text.js";
 import { renderExecResult } from "./exec/command-tool.js";
 import type { UnifiedExecResult } from "./exec/session-manager.js";
 

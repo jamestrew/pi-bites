@@ -11,7 +11,7 @@ import {
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { formatTokens } from "./footer/index.js";
+import { formatTokens } from "./shared/token-format.js";
 
 export type ContextPromptPreview = (systemPrompt: string, ctx: ExtensionCommandContext) => string;
 

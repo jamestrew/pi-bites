@@ -7,7 +7,7 @@ import {
 import { taskReceiptRenderers } from "./ui/task-receipt.js";
 import type { SubagentsSettings } from "./settings.js";
 import { recentTurnEntries } from "./fork-history.js";
-import { waitForAuthorization as waitForOperation } from "../bash-gate/pending.js";
+import { waitForOperation } from "../shared/abortable-wait.js";
 import { lifecycleStatusLabel } from "./ui/agent-lifecycle-render.js";
 import type { createSubagentMessenger } from "./subagent-messages.js";
 import { resolveAgent, resolveSpawnAgent } from "./agent-types.js";

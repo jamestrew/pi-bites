@@ -1,4 +1,5 @@
-import { waitForAuthorization, withApprovalDialog } from "./pending.js";
+import { withApprovalDialog } from "./pending.js";
+import { waitForOperation } from "../shared/abortable-wait.js";
 import type { ShellAuthorizationDecision } from "./authorization.js";
 import { pinExecLaunch } from "../codex-adapter/exec/launch-context.js";
 import { randomUUID } from "node:crypto";
@@ -216,7 +217,7 @@ export default function registerBashGate(
             (value): value is AbortSignal => value !== undefined,
           ),
         ]);
-        const wait = <T>(promise: Promise<T>) => waitForAuthorization(promise, signal);
+        const wait = <T>(promise: Promise<T>) => waitForOperation(promise, signal);
         const authorization = authorizations.begin({ version: 1, command, toolName, toolCallId });
         async function decide(): Promise<ShellAuthorizationDecision> {
           signal.throwIfAborted();
