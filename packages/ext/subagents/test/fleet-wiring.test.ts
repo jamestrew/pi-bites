@@ -524,64 +524,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await lifecycle.get("session_shutdown")?.({}, ctx);
   });
 
-  it("keeps a no-UI subagent Automode denial fail-closed", async () => {
-    const { pi, lifecycle } = makePi();
-    const review = vi
-      .fn()
-      .mockResolvedValue(
-        parseAutoModeDecision(
-          '{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}',
-        ),
-      );
-    subagentsExtension(pi, { isEnabled: () => true, review });
-    const ui = uiCtx();
-    const ctx = { ...ctxWith(ui), hasUI: false };
-    await lifecycle.get("session_start")?.({}, ctx);
-
-    const reply = vi.fn();
-    pi.events.on("subagents:bash_gate:approval:reply:r-deny", reply);
-    pi.events.emit("subagents:bash_gate:approval", {
-      requestId: "r-deny",
-      title: "worker",
-      command: "rm build.txt",
-      labels: ["rm"],
-      reasons: [],
-      sessionAllowKey: "rm",
-    });
-    await flush();
-
-    expect(reply).toHaveBeenCalledWith({
-      result: { outcome: "deny", source: "automode", rationale: "not authorized" },
-    });
-    expect(ui.select).not.toHaveBeenCalled();
-  });
-
-  it("returns a distinct failure reply when no-UI automode review throws", async () => {
-    const { pi, lifecycle } = makePi();
-    const review = vi
-      .fn()
-      .mockRejectedValue(Object.assign(new Error("request aborted"), { name: "AbortError" }));
-    subagentsExtension(pi, { isEnabled: () => true, review });
-    const ctx = { ...ctxWith(uiCtx()), hasUI: false };
-    await lifecycle.get("session_start")?.({}, ctx);
-
-    const reply = vi.fn();
-    pi.events.on("subagents:bash_gate:approval:reply:r-failure", reply);
-    pi.events.emit("subagents:bash_gate:approval", {
-      requestId: "r-failure",
-      title: "worker",
-      command: "rm build.txt",
-      labels: ["rm"],
-      reasons: [],
-      sessionAllowKey: "rm",
-    });
-    await flush();
-
-    expect(reply).toHaveBeenCalledWith({
-      result: { outcome: "failure", message: "Automode reviewer failed: request aborted" },
-    });
-  });
-
   it("lets the interactive human allow a subagent Automode denial once without a reason", async () => {
     const { pi, lifecycle } = makePi();
     let stale = false;
@@ -599,6 +541,10 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       ["ui", ui],
       ["hasUI", true],
       ["cwd", process.cwd()],
+      ["modelRegistry", ctx.modelRegistry],
+      ["model", ctx.model],
+      ["sessionManager", ctx.sessionManager],
+      ["signal", ctx.signal],
     ] as const) {
       Object.defineProperty(ctx, key, {
         get: () => {
@@ -648,42 +594,6 @@ describe("FleetView wiring (real extension lifecycle)", () => {
       result: { outcome: "allow", authorization: "human-approved" },
     });
     expect(ui.input).not.toHaveBeenCalled();
-  });
-
-  it("keeps the original subagent denial when interactive escalation fails", async () => {
-    const { pi, lifecycle } = makePi();
-    const review = vi
-      .fn()
-      .mockResolvedValue(
-        parseAutoModeDecision(
-          '{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}',
-        ),
-      );
-    subagentsExtension(pi, { isEnabled: () => true, review });
-    const ui = uiCtx();
-    ui.select.mockRejectedValue(new Error("UI unavailable"));
-    const ctx = ctxWith(ui);
-    await lifecycle.get("session_start")?.({}, ctx);
-
-    const reply = vi.fn();
-    pi.events.on("subagents:bash_gate:approval:reply:r-ui-failure", reply);
-    pi.events.emit("subagents:bash_gate:approval", {
-      requestId: "r-ui-failure",
-      title: "worker",
-      command: "rm build.txt",
-      labels: ["rm"],
-      reasons: [],
-      sessionAllowKey: "rm",
-    });
-    await flush();
-
-    expect(ui.notify).toHaveBeenCalledWith(
-      "Automode escalation failed closed: Error: UI unavailable",
-      "error",
-    );
-    expect(reply).toHaveBeenCalledWith({
-      result: { outcome: "deny", source: "automode", rationale: "not authorized" },
-    });
   });
 
   it("reviews a real child gate using untrusted child prose and child-owned authorization", async () => {

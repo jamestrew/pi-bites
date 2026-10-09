@@ -2,8 +2,7 @@ import { getAgentSessionId } from "./agent-tree.js";
 import { applyAndEmitLoaded, type SubagentsSettings } from "./settings.js";
 import type { AgentRecord } from "./types.js";
 import { SubagentController } from "./operations.js";
-import { withApprovalDialog } from "../bash-gate/pending.js";
-import { waitForOperation } from "../shared/abortable-wait.js";
+import { requestCommandApproval } from "../bash-gate/approval.js";
 import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAgentCompletionHandler } from "./agent-completion.js";
@@ -24,13 +23,8 @@ import { captureSubagentContext } from "./operation-context.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
-import {
-  onSubagentApprovalRequest,
-  type BashGateApprovalResult,
-  type BitesBashGatePayload,
-} from "../bash-gate/events.js";
+import { onSubagentApprovalRequest, type BitesBashGatePayload } from "../bash-gate/events.js";
 import type { BashGateController } from "../bash-gate/index.js";
-import { promptAutoModeEscalation } from "../bash-gate/automode-escalation.js";
 import {
   buildSubagentReviewerTranscript,
   type AutoModeController,
@@ -329,188 +323,89 @@ export function createSubagents(
       keys.add(request.sessionAllowKey);
       parentAllowances.set(request.agentId, { incarnation: request.agentSessionId, keys });
     };
-    const sessionChanged = (): BashGateApprovalResult | undefined =>
-      !signal.aborted &&
-      hasLiveIncarnation() &&
-      ownerSessionToken &&
-      ownerSessionToken === currentSessionToken
-        ? undefined
-        : { outcome: "failure", message: "parent approval session changed" };
+    const checkCurrent = () => {
+      if (
+        signal.aborted ||
+        !hasLiveIncarnation() ||
+        !ownerSessionToken ||
+        ownerSessionToken !== currentSessionToken
+      )
+        throw new Error("parent approval session changed");
+    };
     const ui = ctx.ui;
     const hasUI = ctx.hasUI;
     const cwd = ctx.cwd;
-
-    try {
-      signal.throwIfAborted();
-      if (isAllowed()) return { outcome: "allow-session", authorization: "human-approved" };
-      if (autoMode?.isEnabled()) {
-        const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
-        const session = record?.session;
-        let decision;
-        try {
-          decision = await waitForOperation(
-            autoMode.review(
-              {
-                toolCallId: request.toolCallId,
-                command: request.command,
-                toolName: request.toolName,
-                execution: request.execution,
-                ...(request.nestedEvidence ? { nestedEvidence: request.nestedEvidence } : {}),
-                subagentContext: session
-                  ? buildSubagentReviewerTranscript(
-                      session.messages as ReviewerMessage[],
-                      session.sessionManager.getBranch(),
-                    )
-                  : "<subagent context unavailable>",
-              },
-              {
-                modelRegistry: ctx.modelRegistry,
-                model: ctx.model,
-                sessionManager: ctx.sessionManager,
-                signal,
-              },
-            ),
-            signal,
+    // Snapshot the parent reviewer dependencies before any deferred callback runs.
+    const reviewCtx = {
+      modelRegistry: ctx.modelRegistry,
+      model: ctx.model,
+      sessionManager: ctx.sessionManager,
+      signal,
+    };
+    const review = autoMode?.isEnabled()
+      ? () => {
+          const session = request.agentId ? manager.getRecord(request.agentId)?.session : undefined;
+          return autoMode.review(
+            {
+              toolCallId: request.toolCallId,
+              command: request.command,
+              toolName: request.toolName,
+              execution: request.execution,
+              ...(request.nestedEvidence ? { nestedEvidence: request.nestedEvidence } : {}),
+              subagentContext: session
+                ? buildSubagentReviewerTranscript(
+                    session.messages as ReviewerMessage[],
+                    session.sessionManager.getBranch(),
+                  )
+                : "<subagent context unavailable>",
+            },
+            reviewCtx,
           );
-        } catch (error) {
-          const changed = sessionChanged();
-          if (changed) return changed;
-          return {
-            outcome: "failure",
-            message: `Automode reviewer failed: ${error instanceof Error ? error.message : String(error)}`,
-          };
         }
-        const changedAfterReview = sessionChanged();
-        if (changedAfterReview) return changedAfterReview;
-
-        if (decision.outcome === "allow")
-          return { outcome: "allow", authorization: "reviewer-approved" };
-        if (!hasUI) {
-          return {
-            outcome: "deny",
-            source: "automode",
-            ...(decision.rationale ? { rationale: decision.rationale } : {}),
-          };
-        }
-
-        const escalation = await waitForOperation(
-          promptAutoModeEscalation({
-            pi,
-            ui,
-            cwd,
-            command: request.command,
-            toolName: request.toolName,
-            signal,
-            isAllowed,
-            ...(decision.rationale ? { rationale: decision.rationale } : {}),
-            ...(record?.session
-              ? {
-                  viewConversation: async () => {
-                    const activeSession = record.session;
-                    if (!activeSession) return;
-                    await ui.custom<undefined>(
-                      (tui, theme, keybindings, done) =>
-                        new ConversationViewer(
-                          tui,
-                          activeSession,
-                          record,
-                          agentActivity.get(record.id),
-                          theme,
-                          done,
-                          undefined,
-                          keybindings,
-                        ),
-                      CONVERSATION_OVERLAY_OPTIONS,
-                    );
-                  },
-                }
-              : {}),
-          }),
-          signal,
+      : undefined;
+    const getConversation = () => {
+      const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
+      if (!record?.session) return undefined;
+      return async () => {
+        const session = record.session;
+        if (!session) return;
+        await ui.custom<undefined>(
+          (tui, theme, keybindings, done) =>
+            new ConversationViewer(
+              tui,
+              session,
+              record,
+              agentActivity.get(record.id),
+              theme,
+              done,
+              undefined,
+              keybindings,
+            ),
+          CONVERSATION_OVERLAY_OPTIONS,
         );
-        const changedAfterEscalation = sessionChanged();
-        if (changedAfterEscalation) return changedAfterEscalation;
-        return escalation === "allow"
-          ? { outcome: "allow", authorization: "human-approved" }
-          : {
-              outcome: "deny",
-              source: "automode",
-              ...(decision.rationale ? { rationale: decision.rationale } : {}),
-            };
-      }
-
-      if (!hasUI) return { outcome: "deny", source: "manual" };
-      return await waitForOperation(
-        withApprovalDialog(pi.events, signal, async (): Promise<BashGateApprovalResult> => {
-          const changedBeforePrompt = sessionChanged();
-          if (changedBeforePrompt) return changedBeforePrompt;
-          if (isAllowed()) return { outcome: "allow-session", authorization: "human-approved" };
-          const labels = request.labels.join(", ") || "unknown rule";
-          const reasons = request.reasons.filter(Boolean).join("; ");
-          const prompt = reasons
-            ? `🔒 ${request.title} requests bash approval: ${request.command}\n${reasons} (${labels})`
-            : `🔒 ${request.title} requests bash approval: ${request.command}\n${labels}`;
-          const allowSession = `Allow for session ("${request.sessionAllowKey}")`;
-          const manualGate = {
-            cwd,
-            command: request.command,
-            toolName: request.toolName,
-            requiresHuman: true,
-            waitId: randomUUID(),
-          } as const;
-          pi.events.emit("bites:bash_gate", manualGate);
-          try {
-            for (;;) {
-              const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
-              const viewConversation = record?.session ? "View conversation" : undefined;
-              const choice = await ui.select(
-                prompt,
-                ["Allow", allowSession, ...(viewConversation ? [viewConversation] : []), "Deny"],
-                { signal },
-              );
-              const changedAfterPrompt = sessionChanged();
-              if (changedAfterPrompt) return changedAfterPrompt;
-
-              if (choice === viewConversation && record?.session) {
-                const session = record.session;
-                await ui.custom<undefined>(
-                  (tui, theme, keybindings, done) =>
-                    new ConversationViewer(
-                      tui,
-                      session,
-                      record,
-                      agentActivity.get(record.id),
-                      theme,
-                      done,
-                      undefined,
-                      keybindings,
-                    ),
-                  CONVERSATION_OVERLAY_OPTIONS,
-                );
-                const changedAfterConversation = sessionChanged();
-                if (changedAfterConversation) return changedAfterConversation;
-                continue;
-              }
-
-              if (choice === allowSession) rememberAllowance();
-              return choice === allowSession
-                ? { outcome: "allow-session", authorization: "human-approved" }
-                : choice === "Allow"
-                  ? { outcome: "allow", authorization: "human-approved" }
-                  : { outcome: "deny", source: "manual" };
-            }
-          } finally {
-            pi.events.emit("bites:bash_gate_resolved", manualGate);
-          }
-        }),
-        signal,
-      );
-    } catch (error) {
-      return {
-        outcome: "failure",
-        message: error instanceof Error ? error.message : String(error),
       };
-    }
+    };
+    const labels = request.labels.join(", ") || "unknown rule";
+    const reasons = request.reasons.filter(Boolean).join("; ");
+    const prompt = reasons
+      ? `🔒 ${request.title} requests bash approval: ${request.command}\n${reasons} (${labels})`
+      : `🔒 ${request.title} requests bash approval: ${request.command}\n${labels}`;
+    return requestCommandApproval({
+      pi,
+      ui,
+      hasUI,
+      cwd,
+      command: request.command,
+      toolName: request.toolName,
+      signal,
+      prompt,
+      sessionAllowKey: request.sessionAllowKey,
+      isAllowed,
+      rememberAllowance,
+      checkCurrent,
+      review,
+      getConversation,
+    });
   });
 
   const {

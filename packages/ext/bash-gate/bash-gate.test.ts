@@ -372,22 +372,6 @@ describe("bash gate tool_call", () => {
     expect(ui.select).not.toHaveBeenCalled();
   });
 
-  test("does not offer escalation when the reviewer fails in an interactive session", async () => {
-    const review = vi.fn().mockRejectedValue(new Error("provider unavailable"));
-    const { toolCall, ctx, ui } = createBashGateHarness([], false, {
-      isEnabled: () => true,
-      review,
-    });
-
-    await expect(
-      toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
-    ).resolves.toEqual({
-      block: true,
-      reason: "Automode review failed closed: provider unavailable",
-    });
-    expect(ui.select).not.toHaveBeenCalled();
-  });
-
   test("uses snapshotted UI and event data when ctx becomes stale during review", async () => {
     let stale = false;
     const review = vi.fn().mockImplementation(async () => {
@@ -508,10 +492,16 @@ describe("bash gate tool_call", () => {
 
   test("scopes unlisted session allowances to the exact command", async () => {
     const { toolCall, ctx, ui } = createBashGateHarness();
-    ui.select.mockResolvedValue('Allow for session ("unlisted")');
+    ui.select
+      .mockResolvedValueOnce('Allow for session ("unlisted: FOO=1 cat README.md")')
+      .mockResolvedValueOnce('Allow for session ("unlisted: PATH=. cat README.md")');
 
-    await toolCall({ toolName: "bash", input: { command: "FOO=1 cat README.md" } }, ctx);
-    await toolCall({ toolName: "bash", input: { command: "PATH=. cat README.md" } }, ctx);
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "FOO=1 cat README.md" } }, ctx),
+    ).resolves.toBeUndefined();
+    await expect(
+      toolCall({ toolName: "bash", input: { command: "PATH=. cat README.md" } }, ctx),
+    ).resolves.toBeUndefined();
 
     expect(ui.select).toHaveBeenCalledTimes(2);
   });

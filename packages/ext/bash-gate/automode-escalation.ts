@@ -14,7 +14,7 @@ export async function exportBlockedCommand(command: string): Promise<string> {
 
 interface AutoModeEscalationOptions {
   pi: Pick<ExtensionAPI, "events">;
-  ui: ExtensionContext["ui"];
+  ui: Pick<ExtensionContext["ui"], "select" | "notify">;
   cwd: string;
   command: string;
   toolName?: "bash" | "exec_command";
@@ -22,6 +22,7 @@ interface AutoModeEscalationOptions {
   signal?: AbortSignal;
   isAllowed?: () => boolean;
   viewConversation?: () => Promise<void>;
+  checkCurrent?: () => void;
 }
 
 export async function promptAutoModeEscalation({
@@ -34,8 +35,10 @@ export async function promptAutoModeEscalation({
   viewConversation,
   signal,
   isAllowed,
+  checkCurrent,
 }: AutoModeEscalationOptions): Promise<"allow" | "deny"> {
   return withApprovalDialog(pi.events, signal, async () => {
+    checkCurrent?.();
     if (isAllowed?.()) return "allow";
     const waitId = randomUUID();
     pi.events.emit("bites:bash_gate", { cwd, command, toolName, requiresHuman: true, waitId });
@@ -54,6 +57,7 @@ export async function promptAutoModeEscalation({
           ...(signal ? [{ signal }] : []),
         );
         signal?.throwIfAborted();
+        checkCurrent?.();
 
         if (choice === "Allow once") return "allow";
         if (choice === "Export command") {
@@ -66,6 +70,7 @@ export async function promptAutoModeEscalation({
         }
         if (choice === "View conversation" && viewConversation) {
           await viewConversation();
+          checkCurrent?.();
           continue;
         }
         return "deny";

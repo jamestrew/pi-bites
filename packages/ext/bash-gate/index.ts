@@ -1,4 +1,4 @@
-import { withApprovalDialog } from "./pending.js";
+import { requestCommandApproval } from "./approval.js";
 import { waitForOperation } from "../shared/abortable-wait.js";
 import type { ShellAuthorizationDecision } from "./authorization.js";
 import { pinExecLaunch } from "../codex-adapter/exec/launch-context.js";
@@ -6,7 +6,6 @@ import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BashGateRule, BitesConfig } from "../config.js";
 import { requestSubagentApproval } from "./events.js";
-import { promptAutoModeEscalation } from "./automode-escalation.js";
 import type { AutoModeController } from "../automode/index.js";
 import { ShellAuthorizationTransactions } from "./authorization.js";
 import {
@@ -328,130 +327,70 @@ export default function registerBashGate(
             }
           }
 
-          if (autoMode?.isEnabled()) {
-            const autoGate = { cwd, command, toolName, requiresHuman: false } as const;
-            pi.events.emit("bites:bash_gate", autoGate);
-            try {
-              let decision;
-              try {
-                decision = await wait(
-                  autoMode.review(
-                    {
-                      command,
-                      execution,
-                      ...(nestedEvidence ? { nestedEvidence } : {}),
-                      toolName,
-                      toolCallId,
-                    },
-                    { ...reviewCtx, signal },
-                  ),
-                );
-              } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                return {
-                  outcome: "block",
-                  reason: `Automode review failed closed: ${message}`,
-                };
-              }
-
-              if (decision.outcome === "allow") {
-                return {
-                  outcome: "allow",
-                  authorization: "reviewer-approved",
-                };
-              }
-
-              const deniedReason = `Automode denied this command${decision.rationale ? `: ${decision.rationale}` : "."} Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.`;
-              if (!hasUI) return { outcome: "block", reason: deniedReason };
-
-              const escalation = await wait(
-                promptAutoModeEscalation({
-                  pi,
-                  ui,
-                  cwd,
-                  command,
-                  toolName,
-                  rationale: decision.rationale,
-                  signal,
-                  isAllowed: () => sessionAllowed.has(effectiveSessionAllowKey),
-                }),
-              );
-              if (escalation === "allow") {
-                return {
-                  outcome: "allow",
-                  authorization: "human-approved",
-                };
-              }
-              return { outcome: "block", reason: deniedReason };
-            } finally {
-              pi.events.emit("bites:bash_gate_resolved", autoGate);
-            }
-          }
-
-          if (!hasUI) {
-            // Non-interactive mode (e.g. `pi -p`) — block by default.
-            return {
-              outcome: "block",
-              reason: "Bash gate: no UI available for confirmation.",
-            };
-          }
-
-          return await wait(
-            withApprovalDialog(pi.events, signal, async (): Promise<ShellAuthorizationDecision> => {
-              if (sessionAllowed.has(effectiveSessionAllowKey))
-                return { outcome: "allow", authorization: "human-approved" };
-              const manualGate = {
+          const review = autoMode?.isEnabled()
+            ? () =>
+                autoMode.review(
+                  {
+                    command,
+                    execution,
+                    ...(nestedEvidence ? { nestedEvidence } : {}),
+                    toolName,
+                    toolCallId,
+                  },
+                  { ...reviewCtx, signal },
+                )
+            : undefined;
+          const autoGate = { cwd, command, toolName, requiresHuman: false } as const;
+          if (review) pi.events.emit("bites:bash_gate", autoGate);
+          const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
+          const prompt =
+            reasons.length > 0
+              ? `🔒 Bash gate — ${reasons.join("; ")} (${matchedPatternLabels.join(", ")})`
+              : `🔒 Bash gate — command requires approval (${matchedPatternLabels.join(", ")})`;
+          try {
+            const result = await wait(
+              requestCommandApproval({
+                pi,
+                ui,
                 cwd,
                 command,
                 toolName,
-                requiresHuman: true,
-                waitId: randomUUID(),
-              } as const;
-
-              pi.events.emit("bites:bash_gate", manualGate);
-
-              const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
-              const prompt =
-                reasons.length > 0
-                  ? `🔒 Bash gate — ${reasons.join("; ")} (${matchedPatternLabels.join(", ")})`
-                  : `🔒 Bash gate — command requires approval (${matchedPatternLabels.join(", ")})`;
-              try {
-                const choice = await ui.select(
-                  prompt,
-                  ["Allow", `Allow for session ("${sessionAllowKey}")`, "Deny"],
-                  { signal },
-                );
-
-                signal.throwIfAborted();
-                if (choice?.startsWith("Allow for session")) {
-                  sessionAllowed.add(sessionAllowKey);
-                  return {
-                    outcome: "allow",
-                    authorization: "human-approved",
-                  };
-                }
-
-                if (choice === "Allow") {
-                  return {
-                    outcome: "allow",
-                    authorization: "human-approved",
-                  };
-                }
-
-                return {
-                  outcome: "block",
-                  reason: "Bash gate: command was denied by the user.",
-                };
-              } catch (error) {
-                return {
-                  outcome: "block",
-                  reason: `Bash gate: approval failed closed: ${error instanceof Error ? error.message : String(error)}`,
-                };
-              } finally {
-                pi.events.emit("bites:bash_gate_resolved", manualGate);
-              }
-            }),
-          );
+                signal,
+                hasUI,
+                prompt,
+                sessionAllowKey,
+                review,
+                isAllowed: () => sessionAllowed.has(effectiveSessionAllowKey),
+                rememberAllowance: () => {
+                  sessionAllowed.add(effectiveSessionAllowKey);
+                },
+                failureMessage: (message, phase) =>
+                  phase === "review"
+                    ? `Automode review failed closed: ${message}`
+                    : phase === "manual"
+                      ? `Bash gate: approval failed closed: ${message}`
+                      : `Bash gate: authorization failed closed: ${message}`,
+              }),
+            );
+            signal.throwIfAborted();
+            if (result.outcome === "allow" || result.outcome === "allow-session")
+              return { outcome: "allow", authorization: result.authorization };
+            if (result.outcome === "failure") return { outcome: "block", reason: result.message };
+            if (result.source === "automode") {
+              return {
+                outcome: "block",
+                reason: `Automode denied this command${result.rationale ? `: ${result.rationale}` : "."} Do not pursue the same outcome through a workaround; use a materially safer alternative or ask the user.`,
+              };
+            }
+            return {
+              outcome: "block",
+              reason: hasUI
+                ? "Bash gate: command was denied by the user."
+                : "Bash gate: no UI available for confirmation.",
+            };
+          } finally {
+            if (review) pi.events.emit("bites:bash_gate_resolved", autoGate);
+          }
         }
         let decision: ShellAuthorizationDecision;
         try {
