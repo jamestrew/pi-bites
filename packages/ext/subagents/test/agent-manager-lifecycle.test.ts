@@ -904,7 +904,6 @@ describe("AgentManager runtime disposal", () => {
     vi.mocked(runAgent).mockResolvedValueOnce({ responseText: "done", session });
     const id = manager.spawn(mockPi, mockCtx, "worker", "task", { description: "task" });
     await manager.getRecord(id)!.promise;
-    manager.tree.setMaxDepth(2);
     vi.mocked(runAgent).mockImplementationOnce((_parent, _type, _prompt, options) =>
       waitForCancellation(options.signal),
     );

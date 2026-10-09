@@ -354,6 +354,31 @@ interrupt/follow-up, concurrent admission/reload, cancellation, failed reopen, s
 contexts, model/tool restrictions, approval reset and descendant routing. Live
 provider timing/authentication remains a final-cutover smoke-test responsibility.
 
+## Default nesting and opt-in depth policy (#384)
+
+With no `maxDepth` setting, the shared `AgentTree` imposes no maximum-depth ceiling,
+matching the pinned V2 spawn/availability behavior recorded in the lifecycle evidence.
+This replaces the historical V1 default of one; it does not change that record's provenance.
+No arbitrary numeric ceiling or provider/model-family eligibility gate is substituted.
+
+Explicit `maxDepth` integers from 0 through 1024 remain an intentional local policy,
+not upstream V2 parity. Root is depth zero: `0` disables spawn, `1` permits only root
+children, and `2` permits grandchildren. Global settings supply defaults and project
+fields override them. Settings load from the active root cwd on session start/reload;
+removing the effective setting restores uncapped nesting on the next load.
+
+Direct, internal/programmatic and RPC spawns, and internal reopen delegation checks,
+use the same tree policy before admission/initialization. Traversal still checks
+closing ancestors even when uncapped; child controllers reject retired/replaced owners.
+Descendants share one root manager, canonical paths, execution/residency budgets and
+inherited tool ceilings. `maxConcurrent` still defaults to six children. Explicit
+delegation permission, selected tools and extension disables remain authoritative.
+
+Offline regressions cover three descendant levels, immediate-parent completion mail,
+explicit 0/1 limits before side effects, settings precedence/reset, capacity rejection
+and path retry, inherited tools, owner invalidation and descendant reopen cancellation.
+These are canned-provider/lifecycle checks, not live provider verification.
+
 ## Model selection (#363)
 
 Fresh spawn follows the pinned `core/src/agent/child_config.rs:57-84,196-249`

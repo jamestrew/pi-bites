@@ -209,7 +209,7 @@ it("persists cancelled wait timing through Pi's error-result hook and removes th
 it("observes only direct children, retaining unloaded child counts and each agent's own stats", async () => {
   const h = await setupV2(cleanup);
   h.pi.getActiveTools = () => ["spawn_agent", "list_agents", "wait_agent", "send_message"];
-  saveSettings({ maxDepth: 3, maxConcurrent: 4 }, h.ctx.cwd);
+  saveSettings({ maxConcurrent: 4 }, h.ctx.cwd);
   await h.emit("session_start");
   h.faux.setResponses([fauxAssistantMessage("PARENT FINAL")]);
   const parent = await h.call("spawn_agent", {

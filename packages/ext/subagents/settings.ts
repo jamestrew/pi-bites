@@ -30,7 +30,7 @@ export interface SettingsAppliers {
   setModelDefaults?: (
     defaults: Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">,
   ) => void;
-  setMaxDepth?: (n: number) => void;
+  setMaxDepth?: (n: number | undefined) => void;
   setMaxConcurrent: (n: number) => void;
   setScopeModels: (enabled: boolean) => void;
   setFleetView: (b: boolean) => void;
@@ -134,7 +134,7 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
     defaultModel: s.defaultModel,
     defaultReasoningEffort: s.defaultReasoningEffort,
   });
-  if (typeof s.maxDepth === "number") appliers.setMaxDepth?.(s.maxDepth);
+  appliers.setMaxDepth?.(s.maxDepth);
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
   if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
   if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);

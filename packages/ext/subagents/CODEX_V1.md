@@ -189,7 +189,7 @@ as the existing parent delivery channel. Final notifications route to the owning
 parent node, independently of explicit waits, including across retained turns.
 Neither channel promises injection into active inference.
 
-The pinned defaults are six open slots shared across the whole root tree and maximum
+The historical V1 defaults are six open slots shared across the whole root tree and maximum
 depth one (root depth zero). Completed open agents retain slots. Set `maxDepth: 2`
 in `.pi/subagents.json` (or the global `subagents.json`) to permit grandchildren;
 `maxConcurrent` adjusts the same root budget. Settings load from the active root cwd,

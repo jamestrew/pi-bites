@@ -10,17 +10,18 @@ export function getAgentSessionId(record: AgentRecord): string | undefined {
 }
 
 export class AgentTree {
-  private maxDepth = 1;
+  private maxDepth: number | undefined;
   constructor(
     private agents: Map<string, AgentRecord>,
     private isClosing: (id: string) => boolean,
   ) {}
-  setMaxDepth(depth: number): void {
-    if (!Number.isInteger(depth) || depth < 0) throw new Error("Invalid agent depth limit");
+  setMaxDepth(depth: number | undefined): void {
+    if (depth !== undefined && (!Number.isInteger(depth) || depth < 0))
+      throw new Error("Invalid agent depth limit");
     this.maxDepth = depth;
   }
 
-  getMaxDepth(): number {
+  getMaxDepth(): number | undefined {
     return this.maxDepth;
   }
 
@@ -61,7 +62,7 @@ export class AgentTree {
         (record) => getAgentSessionId(record) === parentSessionId,
       );
     }
-    if (depth + 1 > this.maxDepth)
+    if (this.maxDepth !== undefined && depth + 1 > this.maxDepth)
       throw new Error("Agent depth limit reached. Solve the task yourself.");
   }
 

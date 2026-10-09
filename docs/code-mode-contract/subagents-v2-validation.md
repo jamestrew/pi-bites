@@ -30,8 +30,12 @@ collaboration, discovery prerequisite, custom provider or host upgrade. Extensio
 Operational settings belong in `.pi/subagents.json`, overriding
 `~/.pi/agent/subagents.json`, or use `/agents` → Settings. `maxConcurrent` defaults
 to six **children**, separately bounding execution and resident runtimes, not total
-threads including root. `maxDepth`, `scopeModels` and `fleetView` retain their existing
-meaning. Selected tools, model scope and additive delegation policies still apply.
+threads including root. Nesting is uncapped by default (#384); explicit `maxDepth`
+is opt-in local policy, not upstream V2 parity (`0` disables spawn, `1` permits only
+root children). Project values override global values; removing the effective setting
+restores uncapped nesting on the next settings load. `scopeModels` and `fleetView`
+retain their existing meaning. Selected tools, model scope and additive delegation
+policies still apply.
 
 Material adaptations remain explicit: flat Pi tool names; supported model/tool
 permissions rather than Codex infrastructure; Pi tool-batch delivery boundaries;
@@ -40,6 +44,12 @@ lists; bounded pending-input polling; recent forks from surviving task boundarie
 in-memory retained identities rather than application-restart recovery; and strict
 local child-capacity admission. Full/fresh/recent history and approval incarnation
 rules are described in the contract, not inferred from native prose.
+
+The #384 nesting change is verified offline by `v2-nesting-e2e.test.ts`,
+`v2-operations.test.ts`, `task-paths.test.ts`, `settings.test.ts` and existing nested
+messaging/residency/interrupt/close/reopen checks without depth overrides. It retains
+shared budgets, tool ceilings and live-owner checks. No new live provider requests
+are made for this change; the live evidence below predates it.
 
 ## Live stock-provider evidence
 

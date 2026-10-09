@@ -1,4 +1,3 @@
-import { saveSettings } from "../settings.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -369,8 +368,6 @@ it.each(["human", "automode"])(
 
 it("forks the latest attributed task without counting the idle continuation or queue-only mail", async () => {
   const h = await setup();
-  saveSettings({ maxDepth: 2 }, h.ctx.cwd);
-  await h.emit("session_start");
   const requests: TranscriptContext[] = [];
   h.faux.setResponses([
     fauxAssistantMessage("first done"),

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentTree } from "../agent-tree.js";
 import {
   applyAndEmitLoaded,
   applySettings,
@@ -52,6 +53,30 @@ describe("settings persistence", () => {
 
   it("returns {} when both files are missing", () => {
     expect(loadSettings(projectDir)).toEqual({});
+  });
+
+  it("applies opt-in depth limits with project precedence and resets to uncapped when absent", () => {
+    const tree = new AgentTree(new Map(), () => false);
+    const appliers: SettingsAppliers = {
+      setMaxDepth: (depth) => tree.setMaxDepth(depth),
+      setMaxConcurrent: vi.fn(),
+      setScopeModels: vi.fn(),
+      setFleetView: vi.fn(),
+    };
+    const load = () => applyAndEmitLoaded(appliers, vi.fn(), projectDir);
+    writeGlobal({ maxDepth: 1 });
+    load();
+    expect(tree.getMaxDepth()).toBe(1);
+    writeProject({ maxDepth: 0 });
+    load();
+    expect(() => tree.assertCanDelegate("root")).toThrow("depth limit");
+    writeProject({});
+    load();
+    expect(tree.getMaxDepth()).toBe(1);
+    writeGlobal({});
+    load();
+    expect(tree.getMaxDepth()).toBeUndefined();
+    expect(() => tree.assertCanDelegate("root")).not.toThrow();
   });
 
   it("returns {} when both files are malformed JSON", () => {
