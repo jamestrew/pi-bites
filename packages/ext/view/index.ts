@@ -1,14 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  getMarkdownTheme,
-  type ExtensionAPI,
-  type ExtensionCommandContext,
-  type SessionEntry,
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, matchesKey, truncateToWidth } from "@earendil-works/pi-tui";
-import { createViewerKeys } from "../shared/viewer-keys.js";
 
 function dedent(lines: string[]): string[] {
   while (lines[0]?.trim() === "") lines.shift();
@@ -72,14 +69,10 @@ function assistantTexts(entries: readonly SessionEntry[], count: number): string
   return texts;
 }
 
-function requestedMessages(
-  args: string,
-  ctx: ExtensionCommandContext,
-  command: "view" | "eview",
-): string[] | undefined {
+function requestedMessages(args: string, ctx: ExtensionCommandContext): string[] | undefined {
   const count = parseCount(args);
   if (!count) {
-    ctx.ui.notify(`Usage: /${command} [positive integer]`, "warning");
+    ctx.ui.notify("Usage: /eview [positive integer]", "warning");
     return;
   }
 
@@ -87,74 +80,17 @@ function requestedMessages(
     formatMarkdown(message).trimEnd(),
   );
   if (messages.length === 0) {
-    ctx.ui.notify(`No agent message to ${command === "view" ? "view" : "export"}`, "warning");
+    ctx.ui.notify("No agent message to export", "warning");
     return;
   }
   return messages;
 }
 
 export default function registerView(pi: ExtensionAPI): void {
-  pi.registerCommand("view", {
-    description: "Show recent agent messages as Markdown",
-    handler: async (args, ctx) => {
-      const messages = requestedMessages(args, ctx, "view");
-      if (!messages || ctx.mode !== "tui") return;
-
-      await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
-        const keys = createViewerKeys(keybindings);
-        const content = new Container();
-        for (const [index, message] of messages.entries()) {
-          if (index > 0) content.addChild(new Markdown("---", 0, 0, getMarkdownTheme()));
-          content.addChild(new Markdown(message, 0, 0, getMarkdownTheme()));
-        }
-        let offset = 0;
-        let width = 0;
-        const viewportHeight = () => Math.max(1, tui.terminal.rows - 1);
-        const maxOffset = () => Math.max(0, content.render(width).length - viewportHeight());
-        const scroll = (next: number) => {
-          offset = Math.max(0, Math.min(next, maxOffset()));
-          tui.requestRender();
-        };
-
-        return {
-          render: (availableWidth: number) => {
-            width = availableWidth;
-            offset = Math.min(offset, maxOffset());
-            return [
-              ...content.render(width).slice(offset, offset + viewportHeight()),
-              truncateToWidth(
-                theme.fg("dim", "↑↓ scroll · PgUp/PgDn · Home/End · q/esc/enter close"),
-                width,
-              ),
-            ];
-          },
-          invalidate: () => content.invalidate(),
-          handleInput: (data: string) => {
-            if (matchesKey(data, "q") || matchesKey(data, "escape") || matchesKey(data, "enter")) {
-              done();
-            } else if (keys.scrollUp(data)) {
-              scroll(offset - 1);
-            } else if (keys.scrollDown(data)) {
-              scroll(offset + 1);
-            } else if (keys.pageUp(data)) {
-              scroll(offset - viewportHeight());
-            } else if (keys.pageDown(data)) {
-              scroll(offset + viewportHeight());
-            } else if (matchesKey(data, "home")) {
-              scroll(0);
-            } else if (matchesKey(data, "end")) {
-              scroll(maxOffset());
-            }
-          },
-        };
-      });
-    },
-  });
-
   pi.registerCommand("eview", {
     description: "Export recent agent messages as unpadded Markdown",
     handler: async (args, ctx) => {
-      const messages = requestedMessages(args, ctx, "eview");
+      const messages = requestedMessages(args, ctx);
       if (!messages) return;
       const text = messages.join("\n\n---\n\n");
 
