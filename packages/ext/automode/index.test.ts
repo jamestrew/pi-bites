@@ -8,7 +8,7 @@ import registerAutoMode, {
   buildReviewerTranscript,
   buildSubagentReviewerTranscript,
 } from "./index.js";
-import { appendAutoModeUsageRecord } from "./usage.js";
+import { appendUsageRecord } from "../usage-files.js";
 
 import {
   complete,
@@ -22,7 +22,7 @@ import {
   tempDirs,
 } from "./test/support.js";
 
-vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
+vi.mock("../usage-files.js", () => ({ appendUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 describe("automode registration state", () => {
   test("loads config on session startup and allows the bash gate to change modes", () => {
@@ -262,7 +262,7 @@ describe("automode reviewer model and completion", () => {
 
       await controller.review(rmRequest("rm x"), ctx as any);
 
-      expect(appendAutoModeUsageRecord).toHaveBeenCalledWith({
+      expect(appendUsageRecord).toHaveBeenCalledWith({
         type: "automode_usage",
         version: 1,
         reviewer: "guardian",
@@ -283,7 +283,7 @@ describe("automode reviewer model and completion", () => {
 
     await controller.review(rmRequest("rm x"), ctx as any);
 
-    expect(appendAutoModeUsageRecord).toHaveBeenCalledWith(
+    expect(appendUsageRecord).toHaveBeenCalledWith(
       expect.objectContaining({ model: "requested-model" }),
     );
   });
@@ -323,7 +323,7 @@ describe("automode reviewer model and completion", () => {
     const review = controller.review(rmRequest("rm x"), ctx as any);
     if (message) await expect(review).rejects.toThrow(message);
     else await expect(review).rejects.toBeInstanceOf(SyntaxError);
-    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
+    expect(appendUsageRecord).toHaveBeenCalledOnce();
   });
 
   test("rejects provider error responses even if they contain an allow-shaped output", async () => {
@@ -338,7 +338,7 @@ describe("automode reviewer model and completion", () => {
     await expect(controller.review(rmRequest("rm x"), ctx as any)).rejects.toThrow(
       "provider unavailable",
     );
-    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
+    expect(appendUsageRecord).toHaveBeenCalledOnce();
   });
 
   test.each(["aborted", "length", "pending", "deferred"])(
@@ -350,7 +350,7 @@ describe("automode reviewer model and completion", () => {
       await expect(controller.review(rmRequest("rm x"), ctx as any)).rejects.toThrow(
         `reviewer stopped with ${stopReason}`,
       );
-      expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
+      expect(appendUsageRecord).toHaveBeenCalledOnce();
     },
   );
 
@@ -363,12 +363,12 @@ describe("automode reviewer model and completion", () => {
     vi.mocked(complete).mockRejectedValue(error);
 
     await expect(controller.review(rmRequest("rm x"), ctx as any)).rejects.toBe(error);
-    expect(appendAutoModeUsageRecord).not.toHaveBeenCalled();
+    expect(appendUsageRecord).not.toHaveBeenCalled();
   });
 
   test("ignores usage persistence failures without changing review results or errors", async () => {
     const { controller, ctx } = createAutoModeHarness();
-    vi.mocked(appendAutoModeUsageRecord).mockRejectedValue(new Error("disk full"));
+    vi.mocked(appendUsageRecord).mockRejectedValue(new Error("disk full"));
     vi.mocked(complete).mockResolvedValueOnce(response('{"outcome":"allow"}'));
 
     await expect(controller.review(rmRequest("rm x"), ctx as any)).resolves.toMatchObject({
@@ -840,7 +840,7 @@ describe("Guardian assessment gate fixtures", () => {
       }
     }
     expect(complete).toHaveBeenCalledOnce();
-    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
+    expect(appendUsageRecord).toHaveBeenCalledOnce();
     expect(branch.at(-1)?.data.status).toBe(
       assessment.outcome === "allow" ? "reviewer-approved" : "blocked",
     );
@@ -862,7 +862,7 @@ describe("Guardian assessment gate fixtures", () => {
       ),
     ).resolves.toMatchObject({ block: true, reason: expect.stringContaining("failed closed") });
     expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce();
+    expect(appendUsageRecord).toHaveBeenCalledOnce();
   });
 });
 

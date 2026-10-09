@@ -4,6 +4,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  renameSync,
+  truncateSync,
   watch,
   writeFileSync,
   type FSWatcher,
@@ -393,6 +395,96 @@ test("buildExtensionStatusLines gives session tracker its own line", () => {
       120,
     ),
   ).toEqual(["codex: 5h: 4%", "pi-sessions: 1 · 1 idle"]);
+});
+
+test("SubagentUsageReader counts a record completed after an earlier read exactly once", () => {
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-bites-footer-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const dir = join(agentDir, "pi-bites", "usage");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "subagents.jsonl");
+    const line =
+      JSON.stringify({
+        type: "subagent_usage",
+        subagent: "explore",
+        parentSessionId: "parent-1",
+        usage: { input: 7 },
+      }) + "\n";
+    const split = line.indexOf('"usage"');
+    writeFileSync(file, line.slice(0, split));
+    const reader = new SubagentUsageReader("parent-1");
+    expect(reader.readNewUsage().input).toBe(0);
+    appendFileSync(file, line.slice(split));
+    expect(reader.readNewUsage().input).toBe(7);
+    expect(reader.readNewUsage().input).toBe(7);
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  }
+});
+
+test("SubagentUsageReader counts appended usage after a Unicode record", () => {
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-bites-footer-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const dir = join(agentDir, "pi-bites", "usage");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "subagents.jsonl");
+    const line = (input: number) =>
+      JSON.stringify({
+        type: "subagent_usage",
+        subagent: "é",
+        parentSessionId: "parent-1",
+        usage: { input },
+      }) + "\n";
+    writeFileSync(file, line(3));
+    const reader = new SubagentUsageReader("parent-1");
+    expect(reader.readNewUsage().input).toBe(3);
+    appendFileSync(file, line(5));
+    expect(reader.readNewUsage().input).toBe(8);
+    expect(reader.readNewUsage().input).toBe(8);
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  }
+});
+
+test("SubagentUsageReader retains totals across replacement and observed truncation", () => {
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const agentDir = mkdtempSync(join(tmpdir(), "pi-bites-footer-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  try {
+    const dir = join(agentDir, "pi-bites", "usage");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "subagents.jsonl");
+    const line = (input: number) =>
+      JSON.stringify({
+        type: "subagent_usage",
+        subagent: "explore",
+        parentSessionId: "parent-1",
+        usage: { input },
+      }) + "\n";
+    writeFileSync(file, line(3));
+    const reader = new SubagentUsageReader("parent-1");
+    expect(reader.readNewUsage().input).toBe(3);
+    writeFileSync(join(dir, "replacement"), line(5));
+    renameSync(join(dir, "replacement"), file);
+    expect(reader.readNewUsage().input).toBe(8);
+    truncateSync(file);
+    expect(reader.readNewUsage().input).toBe(8);
+    appendFileSync(file, line(7));
+    expect(reader.readNewUsage().input).toBe(15);
+    expect(reader.readNewUsage().input).toBe(15);
+  } finally {
+    rmSync(agentDir, { recursive: true, force: true });
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  }
 });
 
 test("SubagentUsageReader includes existing usage for its parent session", () => {

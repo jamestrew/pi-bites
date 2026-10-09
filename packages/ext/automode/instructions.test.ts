@@ -6,7 +6,7 @@ import registerAutoMode, { buildSubagentReviewerTranscript } from "./index.js";
 import { expect, test, vi } from "vitest";
 import { complete, createAutoModeHarness, response, rmRequest, tempDirs } from "./test/support.js";
 
-vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
+vi.mock("../usage-files.js", () => ({ appendUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 function prompt(index: number) {
   const message = complete.mock.calls[index]![1].messages.at(-1)!;

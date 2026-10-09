@@ -11,7 +11,7 @@ import {
   rmRequest,
 } from "./test/support.js";
 
-vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
+vi.mock("../usage-files.js", () => ({ appendUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 describe("bounded reviewer conversation lifecycle", () => {
   test("a late real reviewer allow cannot launch a nested command after session replacement", async () => {

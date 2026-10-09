@@ -4,7 +4,7 @@ import { rmSync } from "node:fs";
 import { afterEach, beforeEach, vi } from "vitest";
 import registerBashGate from "../../bash-gate/index.js";
 import registerAutoMode from "../index.js";
-import { appendAutoModeUsageRecord } from "../usage.js";
+import { appendUsageRecord } from "../../usage-files.js";
 
 type Complete = (...args: Parameters<ModelRegistry["streamSimple"]>) => Promise<AssistantMessage>;
 const execution = { cwd: "/repo" };
@@ -181,7 +181,7 @@ function createAuthorizationIntegrationHarness() {
 
 beforeEach(() => {
   vi.mocked(complete).mockReset();
-  vi.mocked(appendAutoModeUsageRecord).mockReset().mockResolvedValue();
+  vi.mocked(appendUsageRecord).mockReset().mockResolvedValue();
 });
 
 export {

@@ -1,5 +1,4 @@
-import { decodeAutoModeUsageRecord } from "./automode/usage.js";
-import { decodeSubagentUsageRecord, finiteNumberOrZero } from "./subagents/usage.js";
+import { finiteNumberOrZero, type UsageRecord } from "./usage-files.js";
 
 export interface DashboardSessionMessage {
   provider: string;
@@ -45,29 +44,27 @@ export function formatAutoModeModelLabel(key: string): string {
   return key;
 }
 
-export function decodeAuxiliaryUsageEntry(
-  value: unknown,
+export function toDashboardUsageEntry(
+  entry: UsageRecord,
 ): DashboardAuxiliaryUsageEntry | undefined {
-  const autoModeEntry = decodeAutoModeUsageRecord(value);
-  if (autoModeEntry) {
-    const usage = autoModeEntry.usage;
+  if (entry.type === "automode_usage") {
+    const usage = entry.usage;
     return {
-      sessionId: autoModeEntry.parentSessionId,
+      sessionId: entry.parentSessionId,
       message: {
-        provider: autoModeEntry.reviewer === "guardian" ? GUARDIAN_PROVIDER : AUTO_MODE_PROVIDER,
-        model: JSON.stringify([autoModeEntry.provider, autoModeEntry.model]),
+        provider: entry.reviewer === "guardian" ? GUARDIAN_PROVIDER : AUTO_MODE_PROVIDER,
+        model: JSON.stringify([entry.provider, entry.model]),
         cost: usage.cost.total,
         input: usage.input,
         output: usage.output,
         cacheRead: usage.cacheRead,
         cacheWrite: usage.cacheWrite,
-        timestamp: autoModeEntry.timestamp,
+        timestamp: entry.timestamp,
       },
     };
   }
 
-  const entry = decodeSubagentUsageRecord(value);
-  if (!entry?.sessionId || entry.timestamp === undefined || !entry.provider || !entry.model) {
+  if (!entry.sessionId || entry.timestamp === undefined || !entry.provider || !entry.model) {
     return undefined;
   }
 

@@ -45,10 +45,11 @@ import {
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { readUsageRecords } from "./usage-files.js";
 import {
   AUTO_MODE_PROVIDER,
   GUARDIAN_PROVIDER,
-  decodeAuxiliaryUsageEntry,
+  toDashboardUsageEntry,
   decodeSessionUsageEntry,
   formatAutoModeModelLabel,
   type DashboardSessionMessage as SessionMessage,
@@ -247,10 +248,6 @@ function getSessionsDir(): string {
   return join(getAgentDir(), "sessions");
 }
 
-function getAuxiliaryUsageDir(): string {
-  return join(getAgentDir(), "pi-bites", "usage");
-}
-
 async function collectSessionFilesRecursively(
   dir: string,
   files: string[],
@@ -275,13 +272,6 @@ async function collectSessionFilesRecursively(
 async function getAllSessionFiles(signal?: AbortSignal): Promise<string[]> {
   const files: string[] = [];
   await collectSessionFilesRecursively(getSessionsDir(), files, signal);
-  files.sort();
-  return files;
-}
-
-async function getAllAuxiliaryUsageFiles(signal?: AbortSignal): Promise<string[]> {
-  const files: string[] = [];
-  await collectSessionFilesRecursively(getAuxiliaryUsageDir(), files, signal);
   files.sort();
   return files;
 }
@@ -335,43 +325,6 @@ async function parseSessionFile(
     return sessionId ? { sessionId, messages } : null;
   } catch {
     return null;
-  }
-}
-
-async function parseAuxiliaryUsageFile(
-  filePath: string,
-  signal?: AbortSignal,
-): Promise<ParsedSessionFile[]> {
-  try {
-    const content = await readFile(filePath, "utf8");
-    if (signal?.aborted) return [];
-    const lines = content.trim().split("\n");
-    const bySession = new Map<string, SessionMessage[]>();
-
-    for (let i = 0; i < lines.length; i++) {
-      if (signal?.aborted) return [];
-      if (i % 500 === 0) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
-      }
-      const line = lines[i];
-      if (!line?.trim()) continue;
-      try {
-        const entry = decodeAuxiliaryUsageEntry(JSON.parse(line));
-        if (!entry) continue;
-        const messages = bySession.get(entry.sessionId) ?? [];
-        messages.push(entry.message);
-        bySession.set(entry.sessionId, messages);
-      } catch {
-        // Skip malformed lines
-      }
-    }
-
-    return Array.from(bySession.entries()).map(([sessionId, messages]) => ({
-      sessionId,
-      messages,
-    }));
-  } catch {
-    return [];
   }
 }
 
@@ -572,29 +525,22 @@ export async function collectUsageData(signal?: AbortSignal): Promise<UsageData 
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
-  const auxiliaryUsageFiles = await getAllAuxiliaryUsageFiles(signal);
-  if (signal?.aborted) return null;
-  for (const filePath of auxiliaryUsageFiles) {
-    if (signal?.aborted) return null;
-    const parsedRuns = await parseAuxiliaryUsageFile(filePath, signal);
-    if (signal?.aborted) return null;
-
-    for (const parsed of parsedRuns) {
-      addMessagesToUsageData(
-        data,
-        parsed.sessionId,
-        parsed.messages,
-        todayMs,
-        weekStartMs,
-        lastWeekStartMs,
-        rawByPeriod,
-        globalSessionSpans,
-        sessionIdsByPeriod,
-      );
-    }
-
-    await new Promise<void>((resolve) => setImmediate(resolve));
+  for await (const record of readUsageRecords(signal)) {
+    const entry = toDashboardUsageEntry(record);
+    if (!entry) continue;
+    addMessagesToUsageData(
+      data,
+      entry.sessionId,
+      [entry.message],
+      todayMs,
+      weekStartMs,
+      lastWeekStartMs,
+      rawByPeriod,
+      globalSessionSpans,
+      sessionIdsByPeriod,
+    );
   }
+  if (signal?.aborted) return null;
 
   // Classify sessions that are globally long-running once, then reuse across periods.
   const longSessionIds = new Set<string>();

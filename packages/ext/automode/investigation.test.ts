@@ -2,10 +2,10 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, test, vi } from "vitest";
-import { appendAutoModeUsageRecord } from "./usage.js";
+import { appendUsageRecord } from "../usage-files.js";
 import { complete, createAutoModeHarness, response, rmRequest, tempDirs } from "./test/support.js";
 
-vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
+vi.mock("../usage-files.js", () => ({ appendUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 function toolResponse(path: string, id = "inspect") {
   return response("", {
@@ -34,7 +34,7 @@ test("Guardian can inspect the current script and retain the complete successful
     toolCallId: "inspect",
     isError: false,
   });
-  expect(appendAutoModeUsageRecord).toHaveBeenCalledTimes(2);
+  expect(appendUsageRecord).toHaveBeenCalledTimes(2);
   await controller.review(request, ctx as any);
   expect(complete.mock.calls[2]![1].messages).toHaveLength(5);
   expect(JSON.stringify(complete.mock.calls[2]![1])).toContain("HARMLESS_SCRIPT");
@@ -101,7 +101,7 @@ test("three investigation rounds reserve a final tools-disabled assessment", asy
   expect(complete.mock.calls[3]![1].messages.filter((m) => m.role === "toolResult")).toHaveLength(
     6,
   );
-  expect(appendAutoModeUsageRecord).toHaveBeenCalledTimes(4);
+  expect(appendUsageRecord).toHaveBeenCalledTimes(4);
 });
 
 test("unknown tool batches fail closed without committing partial investigation", async () => {
@@ -138,7 +138,7 @@ test("a cancelled ignored provider cannot start the next investigation step", as
   abort.abort(new Error("cancelled"));
   await rejected;
   finish(toolResponse("script.py"));
-  await vi.waitFor(() => expect(appendAutoModeUsageRecord).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(appendUsageRecord).toHaveBeenCalledOnce());
   expect(complete).toHaveBeenCalledOnce();
 });
 

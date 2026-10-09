@@ -1,11 +1,10 @@
-import * as os from "node:os";
 import * as path from "node:path";
 import { readdirSync, readFileSync, statSync, watch, type FSWatcher } from "node:fs";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { formatTokens } from "../shared/token-format.js";
-import { decodeSubagentUsageRecord, finiteNumberOrZero } from "../subagents/usage.js";
+import { UsageFileReader, finiteNumberOrZero } from "../usage-files.js";
 
 type ReadonlyFooterDataProvider = {
   getGitBranch(): string | null;
@@ -22,32 +21,6 @@ export type UsageTotals = {
 };
 
 const EMPTY_USAGE: UsageTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
-
-function getAgentDir(): string {
-  return process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
-}
-
-function getUsageDir(): string {
-  return path.join(getAgentDir(), "pi-bites", "usage");
-}
-
-function getUsageFiles(): string[] {
-  const files: string[] = [];
-  const walk = (dir: string) => {
-    try {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const entryPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(entryPath);
-        else if (entry.isFile() && entry.name.endsWith(".jsonl")) files.push(entryPath);
-      }
-    } catch {
-      // Missing/unreadable usage dirs are fine.
-    }
-  };
-  walk(getUsageDir());
-  files.sort();
-  return files;
-}
 
 function formatPercent(percent: number | null | undefined): string {
   return typeof percent === "number" && Number.isFinite(percent) ? `${percent.toFixed(1)}%` : "?%";
@@ -205,42 +178,17 @@ export function getMainSessionUsage(ctx: ExtensionContext): UsageTotals {
 }
 
 export class SubagentUsageReader {
-  private files = new Map<string, { offset: number; inode: number }>();
+  private reader = new UsageFileReader();
   private totals: UsageTotals = { ...EMPTY_USAGE };
 
   constructor(private parentSessionId: string) {}
 
   readNewUsage(): UsageTotals {
-    for (const file of getUsageFiles()) {
-      let stat;
-      try {
-        stat = statSync(file);
-      } catch {
-        continue;
-      }
-
-      let state = this.files.get(file);
-      if (!state || state.inode !== stat.ino || stat.size < state.offset) {
-        state = { inode: stat.ino, offset: 0 };
-        this.files.set(file, state);
-      }
-      if (stat.size === state.offset) continue;
-
-      const chunk = readFileSync(file, "utf8").slice(state.offset);
-      state.offset = stat.size;
-      for (const line of chunk.split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const record = decodeSubagentUsageRecord(JSON.parse(line));
-          if (record?.parentSessionId === this.parentSessionId) {
-            addUsage(this.totals, record.usage);
-          }
-        } catch {
-          // Ignore partially written or malformed records.
-        }
+    for (const record of this.reader.readNewRecords()) {
+      if (record.type === "subagent_usage" && record.parentSessionId === this.parentSessionId) {
+        addUsage(this.totals, record.usage);
       }
     }
-
     return { ...this.totals };
   }
 }

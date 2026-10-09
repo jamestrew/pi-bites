@@ -4,7 +4,7 @@ import { type Api, type Model, type ToolCall, type Message } from "@earendil-wor
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BitesConfig } from "../config.js";
 import { resolveModel } from "../shared/model-resolver.js";
-import { appendAutoModeUsageRecord } from "./usage.js";
+import { appendUsageRecord } from "../usage-files.js";
 import { ReviewerHistory, REVIEW_OUTPUT_TOKENS } from "./history.js";
 import { historyCoverage, reviewerEvidence } from "./evidence.js";
 import { createReviewerRead } from "./read-tool.js";
@@ -267,7 +267,7 @@ ${safeJson(approvalRequest)}
               .then(async (response) => {
                 // A provider ignoring cancellation can still incur cost. This continuation
                 // owns stable snapshots only and cannot authorize or commit a late reply.
-                await appendAutoModeUsageRecord({
+                await appendUsageRecord({
                   type: "automode_usage",
                   version: 1,
                   reviewer: "guardian",

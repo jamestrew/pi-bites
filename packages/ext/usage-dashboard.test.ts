@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +12,30 @@ afterEach(async () => {
   agentDir = undefined;
   if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+});
+
+it("defers an unterminated auxiliary record until its newline arrives", async () => {
+  agentDir = await mkdtemp(join(tmpdir(), "pi-bites-usage-dashboard-"));
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const dir = join(agentDir, "pi-bites", "usage");
+  await mkdir(dir, { recursive: true });
+  const file = join(dir, "subagents.jsonl");
+  await writeFile(
+    file,
+    JSON.stringify({
+      type: "subagent_usage",
+      subagent: "é",
+      sessionId: "child",
+      parentSessionId: "parent",
+      provider: "test",
+      model: "test",
+      timestamp: Date.now(),
+      usage: { input: 7 },
+    }),
+  );
+  expect((await collectUsageData())?.allTime.totals.tokens.input).toBe(0);
+  await appendFile(file, "\n");
+  expect((await collectUsageData())?.allTime.totals.tokens.input).toBe(7);
 });
 
 describe("usage dashboard auxiliary records", () => {

@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { complete, createAutoModeHarness, response, rmRequest } from "./test/support.js";
 import { snapshotNestedEvidence } from "./tool-evidence.js";
 
-vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
+vi.mock("../usage-files.js", () => ({ appendUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 function prompt(index = 0) {
   return JSON.stringify(complete.mock.calls[index]![1]);

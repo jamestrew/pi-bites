@@ -1,9 +1,7 @@
 /** usage.ts — Token usage: shapes, accumulator operators, session-stats readers. */
 
 import type { AgentRecord } from "./types.js";
-import { appendFile, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { appendUsageRecord } from "../usage-files.js";
 
 /**
  * Lifetime usage components, accumulated via `message_end` events. Survives
@@ -26,87 +24,6 @@ export type AssistantUsage = LifetimeUsage & {
   timestamp?: number;
 };
 
-export type SubagentUsageRecord = {
-  type: "subagent_usage";
-  subagent: string;
-  sessionId: string;
-  parentSessionId: string;
-  timestamp: number;
-  provider: string;
-  model: string;
-  usage: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-    cost: { total: number };
-  };
-};
-
-export type DecodedSubagentUsageRecord = Pick<SubagentUsageRecord, "type" | "subagent" | "usage"> &
-  Partial<
-    Pick<SubagentUsageRecord, "sessionId" | "parentSessionId" | "timestamp" | "provider" | "model">
-  >;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-export function finiteNumberOrZero(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-/** Decode persisted usage, including legacy records without model/session metadata. */
-export function decodeSubagentUsageRecord(value: unknown): DecodedSubagentUsageRecord | undefined {
-  if (
-    !isRecord(value) ||
-    value.type !== "subagent_usage" ||
-    typeof value.subagent !== "string" ||
-    !isRecord(value.usage) ||
-    (value.sessionId !== undefined && typeof value.sessionId !== "string") ||
-    (value.parentSessionId !== undefined && typeof value.parentSessionId !== "string") ||
-    (value.timestamp !== undefined && typeof value.timestamp !== "number") ||
-    (value.provider !== undefined && typeof value.provider !== "string") ||
-    (value.model !== undefined && typeof value.model !== "string")
-  ) {
-    return undefined;
-  }
-
-  const usage = value.usage;
-  return {
-    type: "subagent_usage",
-    subagent: value.subagent,
-    ...(value.sessionId === undefined ? {} : { sessionId: value.sessionId }),
-    ...(value.parentSessionId === undefined ? {} : { parentSessionId: value.parentSessionId }),
-    ...(value.timestamp === undefined ? {} : { timestamp: finiteNumberOrZero(value.timestamp) }),
-    ...(value.provider === undefined ? {} : { provider: value.provider }),
-    ...(value.model === undefined ? {} : { model: value.model }),
-    usage: {
-      input: finiteNumberOrZero(usage.input),
-      output: finiteNumberOrZero(usage.output),
-      cacheRead: finiteNumberOrZero(usage.cacheRead),
-      cacheWrite: finiteNumberOrZero(usage.cacheWrite),
-      cost: {
-        total: finiteNumberOrZero(isRecord(usage.cost) ? usage.cost.total : usage.cost),
-      },
-    },
-  };
-}
-
-function getAgentDir(): string {
-  return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
-}
-
-function getSubagentUsageFile(): string {
-  return join(getAgentDir(), "pi-bites", "usage", "subagents.jsonl");
-}
-
-export async function appendSubagentUsageRecord(record: SubagentUsageRecord): Promise<void> {
-  const file = getSubagentUsageFile();
-  await mkdir(dirname(file), { recursive: true });
-  await appendFile(file, JSON.stringify(record) + "\n", "utf8");
-}
-
 /** Accumulate accepted usage synchronously; persistence failure never invalidates a turn. */
 export function recordAssistantUsage(
   record: Pick<AgentRecord, "lifetimeUsage" | "type" | "id" | "parentSessionId">,
@@ -114,7 +31,7 @@ export function recordAssistantUsage(
   model?: { provider: string; id: string },
 ): void {
   addUsage(record.lifetimeUsage, usage);
-  appendSubagentUsageRecord({
+  appendUsageRecord({
     type: "subagent_usage",
     subagent: record.type,
     sessionId: record.id,

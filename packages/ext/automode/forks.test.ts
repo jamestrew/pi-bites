@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, test, vi } from "vitest";
-import { appendAutoModeUsageRecord } from "./usage.js";
+import { appendUsageRecord } from "../usage-files.js";
 import {
   complete,
   createAutoModeHarness,
@@ -10,7 +10,7 @@ import {
   rmRequest,
 } from "./test/support.js";
 
-vi.mock("./usage.js", () => ({ appendAutoModeUsageRecord: vi.fn(() => Promise.resolve()) }));
+vi.mock("../usage-files.js", () => ({ appendUsageRecord: vi.fn(() => Promise.resolve()) }));
 
 function deferReviews() {
   const pending: {
@@ -83,7 +83,7 @@ describe("concurrent reviewer forks", () => {
       expect(complete.mock.calls[3]![1].messages).toHaveLength(3);
       expect(payload(3)).not.toMatch(/rm failed|rm sibling/);
       expect(complete.mock.calls[3]![2]?.sessionId).toBe(complete.mock.calls[0]![2]?.sessionId);
-      expect(appendAutoModeUsageRecord).toHaveBeenCalledTimes(failure === "transport" ? 3 : 4);
+      expect(appendUsageRecord).toHaveBeenCalledTimes(failure === "transport" ? 3 : 4);
     },
   );
 
@@ -245,6 +245,6 @@ describe("concurrent reviewer forks", () => {
       "rejected",
     ]);
     expect(launches.map((launch) => launch.mock.calls.length)).toEqual([0, 1, 0, 0]);
-    expect(appendAutoModeUsageRecord).toHaveBeenCalledTimes(4);
+    expect(appendUsageRecord).toHaveBeenCalledTimes(4);
   });
 });
