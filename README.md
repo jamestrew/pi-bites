@@ -4,79 +4,25 @@ A small collection of personal extensions for the pi coding agent.
 
 ## What's included
 
-- Direct V2 subagents (`default`, `worker`, and `explorer` roles)
-- Configurable bash command gate
-- Optional model-reviewed automode for bash-gate approvals
-- Better fuzzy finding for `@` file mentions powered by `fff`
-- Script-driven statusline
-- Token-count/status helpers
-- Fixed-token auto-compaction (150k tokens by default)
-- `/usage` dashboard for session cost/token statistics
-- `/context [all]` breakdown of the active context window
-- Optional notifications
-- `spotme` gym mode that periodically makes the agent scaffold a coding exercise for you to implement
-- Inline `$skill:name` / `$prompt:name` references with hidden context injection
-
-## File completion
-
-FFF ranks workspace `@` mentions. Home/absolute paths (`@~/`, `@/`), explicit
-relative paths, directory browsing, and empty FFF results delegate to Pi.
-`/fff-rescan` refreshes the index; workspace lookups also request a refresh at most
-once every 30 seconds. Content indexing, mmap-cache warmup, and watching stay off.
-
-Database resolution is independent for frecency and query history:
-
-1. `--fff-frecency-db` / `--fff-history-db`
-2. `FFF_FRECENCY_DB` / `FFF_HISTORY_DB`
-3. Existing Neovim directories: `$XDG_CACHE_HOME/nvim/fff_nvim` and
-   `$XDG_DATA_HOME/nvim/fff_queries` (defaults: `~/.cache` and `~/.local/share`)
-4. Per-user, per-workspace directories under `XDG_RUNTIME_DIR`, `TMPDIR`, or OS tmp
-
-Human file-completion selections update FFF query history; agent searches do not.
-Existing Neovim databases are reused even on NFS, with normal LMDB locking.
-Disabling content caches does not guarantee that NFS database locking will work;
-use the overrides above for host-local storage if necessary. Database-open failure
-retries FFF without persistence and shows a warning; complete FFF failure falls back
-to Pi with a warning.
-
-## Subagents
-
-The six direct tools are `spawn_agent`, `send_message`, `followup_task`, `wait_agent`,
-`interrupt_agent`, and `list_agents`, on every tool-calling model. They stay direct
-with Code Mode active and with `disable: ["codexAdapter"]`. Disable them with
-`disable: ["subagents"]` and reload; selected tools and inherited parent permissions
-still restrict children, including across provider switches.
-
-Spawn requires `task_name` and `message`; `fork_turns` defaults to `all` (`none` or a
-positive integer string selects fresh/recent history). Use canonical `/root/...`
-paths for parent/sibling messages. `send_message` queues information without waking
-idle work; `followup_task` assigns another task. `wait_agent` observes mailbox activity,
-not selected agent IDs. Completion releases execution capacity; retained identities
-remain addressable even when idle runtimes unload. `/agents` and Fleet show live and
-retained conversations. Saved displays do not restore live agents.
-
-Nesting has no default depth ceiling. Children share the root's capacity and permitted
-tools; delegation still requires explicit permission in user or project/skill instructions.
-`maxConcurrent` defaults to three children (four total including root), shared
-across descendants. Execution admission checks capacity without reserving a slot;
-requests accepted together can start above the execution limit. Resident capacity
-separately counts loaded children and pending initialization/reload claims.
-Configured `maxConcurrent` values still count children, not root. An optional `maxDepth` in
-`~/.pi/agent/subagents.json` or project `.pi/subagents.json` limits depth (root is zero):
-`0` disables spawn and `1` allows only root children. Project values override global
-values. Explicit depth limits are local policy, not Codex V2 parity.
-
-Subagents inherit the caller's model unless `model` is supplied or `defaultModel`
-is configured in `~/.pi/agent/subagents.json` or project `.pi/subagents.json`.
-`defaultReasoningEffort` sets the corresponding effort default; explicit spawn fields
-win over these defaults. Use exact `provider/modelId` values (or an unambiguous exact
-model ID), not fuzzy names. Selecting a model without an effort override resets effort
-to Pi's default for that model; otherwise effort is inherited. Applied role settings
-win last, but the built-in roles currently have no model/effort overrides.
-
-See [the V2 contract](packages/ext/subagents/CODEX_V2.md) and
-[cutover verification](docs/code-mode-contract/subagents-v2-cutover.md) and
-[release validation and remaining live gaps](docs/code-mode-contract/subagents-v2-validation.md).
+- **Codex V2-style subagents** — `default`, `worker`, and `explorer` roles with
+  direct tools for spawning, messaging, follow-up tasks, waiting, and interruption.
+  Children inherit parent permissions and work with or without Code Mode.
+- **Codex-shaped tools for GPT models** — shell sessions, patches, web browsing,
+  and local image viewing inside Pi's native `codemode`.
+- **Automode** — model-reviewed bash-gate approvals for the main agent and
+  subagents, using a Codex Guardian-style policy. `Alt+Y` cycles manual, YOLO,
+  and Auto modes.
+- **Fixed-token auto-compaction** — defaults to 200,000 tokens, or 85% of the
+  model's context window if that's lower.
+- **Inline context** — `$` completion for `$skill:name` and `$prompt:name`;
+  `@path` inlines file contents or directory listings. Context loads without
+  expanding the visible prompt.
+- **`/usage` and `/context`** — session cost/token statistics and a breakdown of
+  the active context window.
+- **FFF-powered `@` file search** — fuzzy workspace file ranking, with Pi's
+  normal completion as a fallback.
+- **Session tracker** — track Pi panes across tmux sessions, with a status-line
+  summary and a fuzzy pane picker.
 
 ## Installation
 
@@ -84,285 +30,58 @@ See [the V2 contract](packages/ext/subagents/CODEX_V2.md) and
 pi install git:github.com/jamestrew/pi-bites
 ```
 
-For exact release pins and the compatibility policy, see [Releases](RELEASES.md).
-
-Code Mode requires Pi 0.99.1 or newer in parent and SDK child sessions. No
-standalone V8 host or additional runtime installation is required. The bundled
-Linux x64/arm64 shell, patch, web and image helpers remain separate native tools.
-To use normal Pi tools instead, add `"codexAdapter"` to the `disable` list.
-
-## Development
-
-Pi-bites builds and tests against Pi 0.99.1. `bun run dev` keeps extension discovery
-isolated with `--no-extensions`, then explicitly loads only `builtin:codemode`,
-`builtin:tool-search`, and the local pi-bites extension. Eligible parent GPT sessions
-select native `codemode`; `tool_search` remains separately enabled, for example
-with `defaultTools: ["+tool_search"]`. Loading search does not grant capabilities.
+Code Mode requires Pi 0.99.1 or newer.
 
 ## Configuration
 
-`pi-bites` reads JSON config from two places:
-
-- Global: `~/.pi/agent/pi-bites.json`
-- Project-local: `<project>/.pi/pi-bites.json`
-
-Project-local settings override global settings for each config section. `disable` lists are unioned, so a globally disabled extension is disabled in every project. `smallModel` provides a shared cheap model selection for lightweight tasks and defaults to GitHub Copilot's Claude Haiku 4.5 with low thinking.
-
-Add `$schema` to either config file for editor completion and validation against
-[`pi-bites.schema.json`](pi-bites.schema.json). The schema flags unknown keys,
-invalid values, and retired extension names, including inside sections and bash-gate rules.
-For a local checkout, use an absolute path to its schema file instead of the URL.
-To match an installed release, replace `master` in the URL with a release tag containing the schema.
-Runtime loading remains backward-compatible: unknown keys are still ignored and
-legacy disable names are still migrated. Schema defaults are documentation, not writes to your config.
-
-The schema is generated from the TypeBox definitions in `packages/ext/config.ts`,
-which also define the TypeScript types and runtime validation. After editing config
-definitions, run `bun run schema:generate` and commit `pi-bites.schema.json`.
-`bun check` (including CI) regenerates the schema in memory and fails if the file is stale;
-there is no separately maintained schema or validator.
-
-Example:
+All settings are optional. Configure globally in `~/.pi/agent/pi-bites.json` or
+per project in `.pi/pi-bites.json`. Project values override global values within
+each section; `disable` lists are unioned.
 
 ```json
 {
   "$schema": "https://raw.githubusercontent.com/jamestrew/pi-bites/master/pi-bites.schema.json",
-  "smallModel": {
-    "model": "github-copilot/claude-haiku-4.5",
-    "thinking": "low"
-  },
-  "statusline": {
-    "command": "python get_usage_limits.py"
-  },
-  "notifications": {
-    "command": "notify-send 'pi'"
-  },
-  "autoCompaction": {
-    "thresholdTokens": 200000
-  },
   "bashGate": {
-    "mode": "manual",
-    "rules": [{ "cmd": "bun", "subcommands": ["check", "test"] }, { "cmd": "pytest" }]
+    "mode": "auto"
   },
   "autoMode": {
     "thinking": "low"
   },
-  "disable": ["tokenCount"]
+  "autoCompaction": {
+    "thresholdTokens": 200000
+  },
+  "disable": ["notifications", "spotme"]
 }
 ```
 
-Auto-compaction triggers at the lower of `autoCompaction.thresholdTokens` (default: 200,000) and 85% of the active model's context window. If the context window is unknown, only the token cap applies. Pi's native overflow protection still applies independently.
+Automode uses the active model unless `autoMode.model` is set to a
+`provider/model-id`. To use normal Pi tools instead of Codex-shaped tools, add
+`"codexAdapter"` to `disable`.
 
-### Codex adapter
+See the [configuration schema](pi-bites.schema.json) for all options and extension
+names. `/bites:list`, `/bites:off <name>`, and `/bites:on <name>` manage extensions;
+changes take effect on the next launch.
 
-`codexAdapter` exposes native Code Mode through `codemode` in parent and SDK child sessions for GPT-5.6 and GPT-6 base IDs and hyphenated variants, plus GPT-6.1 base and Sol IDs. The five owned capabilities—`exec_command`, `write_stdin`, `apply_patch`, `web_run`, and `view_image`—are callable inside native JavaScript, subject to session selection and availability. Unrelated direct tools remain available. Other model families use normal Pi core tools, with no standalone adapter web tool.
+## Tmux integration
 
-Native discovery exposes permitted tools through `searchTools`, `describeTool`, and `ALL_TOOLS`. Web help is loaded on demand through `text(await describeTool("web_run"));` before browsing, including after compaction removes previously loaded help. Initial guidance retains browsing triggers. Discovery is documentation only and does not enable unavailable web routes or credential fallback. It leaves tool definitions and the system prompt stable; it does not guarantee provider cache savings.
-
-Recognized model-ID prefixes are `openai/`, `openai-codex/`, `azure/`, `azure-openai/`, `github-copilot/`, and `openrouter/`. A provider name alone never enables the adapter. The obsolete `codexAdapter.providers` option has been removed; existing unknown configuration keys are ignored, so it no longer selects models.
-
-Commands still pass through bash-gate and Auto Mode individually, after validation and before launch. Pi owns native nested operation/error rows and expansion. Scripts complete once; there are no yielded cells or outer `wait` calls. A returned shell session can still be polled with `tools.write_stdin` in a later script. Normal completion preserves these shells; explicit cancellation cleans up only shells launched by that script. Unhandled script errors cancel pending calls, not already-returned shell launches. Leaving scope, navigation, replacement, reload and shutdown clear owned state. Saved transcripts restore display only. See [native parent behavior and verification](docs/code-mode-contract/native-parent.md).
-
-Vision-capable models can use local-only `view_image({ path })`, accepting PNG, JPEG, WebP and non-animated GIF up to 32 MiB and 4096 pixels per dimension. Text-only models never receive it. Image viewing makes no hidden provider request; emit the returned image explicitly with `image(...)` to send it to the model.
-
-Legacy `openai-codex` Responses models get nested `web_run` through their existing Pi login. Other providers are hidden by default. Trust a verified Responses provider's own `/alpha/search` endpoint by exact provider ID, or independently opt in to stock OpenAI Codex fallback:
-
-```json
-{
-  "codexAdapter": {
-    "webSearchProviders": ["your-verified-responses-provider"],
-    "allowOpenAICodexFallback": false
-  }
-}
-```
-
-Pi's new `/login openai` ChatGPT subscription uses the direct OpenAI Responses grant, not the legacy Codex backend. Code Mode works with GPT-6.1 Sol on either login. Direct OpenAI subscription usage and `web_run` remain unverified. When using the new subscription login, `/login openai-codex` enables a `codex:` usage display using that separately authenticated legacy account; inference stays on `openai`. Without legacy OAuth, the status links to <https://chatgpt.com/settings/usage>. Repeating `/login openai` does not enable direct usage or web search. Existing `/login openai-codex` credentials remain usable; no migration is required. The `openai` provider cannot opt into `webSearchProviders`; configure a verified proxy under its own provider ID. Explicit web-search fallback uses the separately authenticated legacy account, never the direct OpenAI token. See [route verification and limits](docs/code-mode-contract/openai-compatibility.md).
-
-`allowOpenAICodexFallback` defaults to `false`. Set it to `true` only where sending explicit search/navigation arguments through personal stock Codex authentication is permitted. A selected route never retries through another provider after auth, compatibility, HTTP, or native failure. `web_run` sends no Pi conversation or project context.
-
-Linux x86-64 and arm64 native helpers, including `view_image`, are bundled. On a missing, incompatible, or non-executable helper, rebuild it with the commands in [`packages/ext/codex-adapter/UPSTREAM.md`](packages/ext/codex-adapter/UPSTREAM.md), replace the corresponding bundled executable, and run `/reload`. Disable the adapter with `"disable": ["codexAdapter"]` when using another platform.
-
-### SDK children
-
-SDK children explicitly load Pi's native codemode and tool-search factories and the
-pi-bites extension. Their registry ceiling inherits only permitted parent capabilities;
-discovery cannot recover forbidden tools. Direct V2 collaboration remains independent.
-Stock Pi sends raw JavaScript where grammar tools are supported and `{code:string}`
-otherwise. Both paths use the same one-shot script contract, not `exec`/`wait`.
-See the [native adapter contract](docs/code-mode-contract/native-parent.md) for
-lifecycle, presentation and host-free verification, and the
-[owned-tool provenance](docs/code-mode-contract/README.md) for contract reproduction.
-
-## Disabling extensions
-
-Use slash commands inside pi:
-
-```text
-/bites:list
-/bites:off statusline
-/bites:on statusline
-```
-
-Changes take effect the next time pi starts. Valid extension names are:
-
-```text
-bashGate, autoMode, footer, statusline, tokenCount, usageDashboard, context, tools, fzf, notifications, autoCompaction, spotme, skillPromptReferences, promptNormalization, atMentionContext, sessionTracker, ponytail, subagents, view, codexAdapter
-```
-
-You can also edit config directly:
-
-```json
-{
-  "disable": ["bashGate", "notifications"]
-}
-```
-
-## Usage dashboard
-
-Run `/usage` inside pi to open an interactive dashboard of local session usage. It reads session JSONL files from `~/.pi/agent/sessions` (or `PI_CODING_AGENT_DIR/sessions`) and summarizes cost, messages, sessions, and token counts by provider/model.
-
-Controls: `Tab`/arrow keys switch periods, `↑`/`↓` selects providers, `Enter` expands models, `v` toggles insights, and `q` closes.
-
-## Tmux status segment
-
-To show a host-wide summary of tracked Pi panes, append this read-only segment to your existing tmux status line in `.tmux.conf`:
+Add this to `.tmux.conf` after any theme or plugin that sets `status-right`:
 
 ```tmux
 set -ag status-right ' #(dir=/tmp/pi-session-tracker-$(id -u); read -r pid < "$dir/session-tracker.pid" 2>/dev/null && kill -0 "$pid" 2>/dev/null && cat "$dir/session-tracker.status" 2>/dev/null) '
 ```
 
-Place the line after any tmux theme or plugin initialization that sets `status-right`; a later plugin setup can replace it. If the tracker daemon was already running when you upgraded pi-bites, run `/pi-sessions-restart-daemon` once from Pi to load the new projection support.
+The segment shows `π` total Pi panes, `!` permission waits, `?` input waits, and
+`▶` working panes. It stays empty when the tracker daemon is not running.
 
-The output is `π N · !P · ?I · ▶W`: `π` counts all tracked panes, `!` counts panes waiting for permission, `?` counts panes waiting for input, and `▶` counts working panes. Zero state counters are omitted, and idle panes appear only in the `π` total. The segment stays empty when there are no tracked panes or the recorded daemon is not alive. It summarizes the host-local tracker, including panes in other tmux servers.
-
-The shell command inside the segment only reads daemon-maintained files; it does not start Pi or the tracker daemon or change tmux options itself. It uses your existing `status-interval`. For faster refreshes, you may optionally add `set -g status-interval 5` yourself.
-
-To make `Alt+S` focus the next tracked Pi pane even when Pi is not focused, add:
-
-```tmux
-bind-key -n M-s run-shell -b 'node "/path/to/pi-bites/bin/pi-sessions.mjs" next --from "#{pane_id}" --client "#{client_tty}"'
-```
-
-For an fzf picker instead of cycling, use a popup (requires `fzf`, `node`, and tmux
-with `display-popup` support):
+For an `Alt+S` pane picker with a terminal preview (requires `fzf`, `node`, and tmux popup support):
 
 ```tmux
 bind-key -n M-s run-shell -b 'tmux display-popup -c "#{client_tty}" -E -w 90% -h 80% "node \"/path/to/pi-bites/bin/pi-sessions.mjs\" pick --client \"#{client_tty}\""'
 ```
 
-The picker shows Pi state, tmux session/window/pane, working directory, and pane ID.
-Permission/input waits come first, followed by working and idle panes. Type to
-filter, press `Enter` to focus the selected pane, or `Esc` to cancel. The right side
-previews that pane's visible terminal contents with colors, starting at the bottom.
-Use `Ctrl-U` / `Ctrl-D` to scroll the preview up/down by half a page (mouse scrolling
-and `Shift-Up` / `Shift-Down` also work); `Ctrl-R` refreshes it. The `run-shell`
-wrapper expands the invoking client's tty before opening the popup; `display-popup`
-does not expand formats in its shell command. This is a pane text capture, not a screenshot of the entire split window.
-The picker ignores `FZF_DEFAULT_OPTS` and `FZF_DEFAULT_OPTS_FILE` so its selection
-protocol and key bindings stay predictable.
-The pane list and Pi states are a snapshot taken when the picker opens; reopen it
-to update them. Only tracked panes present in the popup's tmux server are listed.
+Replace `/path/to/pi-bites` with your installation path. Type to filter, `Enter`
+to focus a pane, or `Esc` to cancel. These integrations use an already-running
+tracker; they do not start Pi or the daemon.
 
-Adjust the script path for your installation. The helper only contacts an
-already-running tracker daemon; it does not start Pi or the daemon. You can use
-`bind-key s` instead of `bind-key -n M-s` for a prefix-based binding like the other
-popup integrations.
-
-## Skill and prompt references (`skillPromptReferences`)
-
-Use `$skill:name` or `$prompt:name` anywhere in a message to attach the referenced skill or prompt template as hidden context without expanding it into the visible user prompt. Typing `$` in the TUI offers completions for available skills and prompt templates.
-
-This single extension controls both completion and context loading. Legacy `disable` entries named `inlineReferences` or `slashSkillAutocomplete` are read as `skillPromptReferences`.
-
-By contrast, `atMentionContext` preloads file contents or directory listings for `@path` mentions (including line ranges such as `@src/foo.ts:10-20`). These are independent extensions.
-
-## SpotMe
-
-SpotMe is a coding gym mode: every N code-writing actions, the agent scaffolds the next logical unit with a `SPOTME` marker, waits while you implement it, then reviews your work.
-
-```text
-/spotme:on [lite|medium|hard] [--every N]
-/spotme:status
-/spotme:rep
-/spotme:done
-/spotme:hint
-/spotme:solve
-/spotme:skip
-/spotme:off
-```
-
-Default difficulty is `medium`, every 2 code writes.
-
-## Automode
-
-Press `Alt+Y` to cycle from Bash gate mode to YOLO mode, then Auto mode. Auto mode reviews gated commands with a separate model. This covers the main agent and approval requests forwarded by prompt-policy subagents, including when no UI is available. The reviewer receives a bounded authorization transcript containing active parent-session user messages, assistant prose, and prior `bash`/`exec_command` commands. Subagent prompts and prose are explicitly untrusted agent-generated context, not human authorization. Shell commands are marked `not-reviewed`, `reviewer-approved`, `human-approved`, or `blocked`; these describe permission decisions, not process success. Tool output, non-shell calls, hidden reasoning, and generated context are omitted. A prior human approval is evidence only and never approves a later command automatically.
-
-The bundled reviewer policy adopts synchronous Codex Guardian: low/medium risk defaults to allow even with weak authorization, except explicit security-policy denials and affirmative malicious prompt injection. High risk requires at least medium authorization, narrow scope, and no absolute deny; critical risk defaults to deny. Assessments include intrinsic risk, user authorization, outcome, and rationale. Pi Bites supplies no sandbox: Guardian can investigate only through bounded, guarded local text reads, never shell or general agent tools. See the [upstream contract and adaptations](packages/ext/automode/UPSTREAM.md).
-
-With an interactive UI, an explicit denial shows the rationale and lets the human allow once, export the exact command to a private temporary file, view a subagent conversation where available, or keep it denied. Without UI, denials remain blocked, and reviewer failures always fail closed without an override prompt.
-
-Automode uses the active model by default. Select it as the initial bash permission mode and optionally give it a separate model, thinking level, or policy:
-
-```json
-{
-  "bashGate": {
-    "mode": "auto"
-  },
-  "autoMode": {
-    "model": "anthropic/claude-sonnet-4-5",
-    "thinking": "low",
-    "policy": "Approve only actions authorized by the user and deny secret exposure or destructive actions."
-  }
-}
-```
-
-The reviewer reuses bounded conversation history and incremental evidence, with isolated concurrent forks and resets on incompatible session, model, policy, or context changes. Provider cache hits are not guaranteed. See [repeatable live evaluation and results](docs/automode-evaluation.md); ordinary tests never make paid review calls.
-
-`autoMode.policy` still replaces the bundled policy in full (it is not an additive rule); omit it to adopt Guardian defaults. Existing model and thinking settings need no migration. Custom policies use the same validated JSON assessment contract, including compatibility with outcome-only replies.
-
-Automode reviews only commands that already reach an approval-producing bash gate; it does not expand Pi's permissions, override deny-policy subagents, or gate routine allowed tools. Without UI, gated commands fail closed unless `bashGate.mode` is `"auto"`.
-
-## Bash gate
-
-The bash gate allows a conservative set of read-only and easily reversible command patterns without prompting. Everything else requires approval, as does any allowlisted command that matches a built-in destructive rule or one of your configured structured rules. Common searches such as `grep`, `rg`, and non-mutating `find` expressions are allowed; execution and write variants such as `rg --pre`, `find -exec`, `find -delete`, and `find -fprint` require approval. Read-only GitHub CLI paths and routine local Git/Jujutsu operations are also allowed, including `git add`, `git commit`, `git pull`, `git rebase`, and their Jujutsu workflow equivalents. Commands with destructive, command-execution, or external impact, such as `git reset`, `git checkout`, `git push`, `git rebase --exec`, and `jj bookmark delete`, remain gated. Language runtimes, package scripts, and other network clients intentionally fall through to approval.
-
-```json
-{
-  "bashGate": {
-    "mode": "yolo",
-    "rules": [
-      { "cmd": "bun", "subcommands": ["check", "test"] },
-      { "cmd": "sed", "flagAny": ["-i"] },
-      { "cmd": "find", "flagAny": ["-delete"], "reason": "find -delete mutates files" },
-      { "redirects": "any-write" }
-    ]
-  }
-}
-```
-
-Configured rules extend the built-in destructive-command gate; they do not replace it.
-`bashGate.mode` sets the initial permission mode to `"manual"` (the default), `"auto"`, or
-`"yolo"`. Unlike the `--yolo` CLI flag, configured YOLO mode does not lock the mode, so
-`Alt+Y` can still change it.
-
-Supported rule fields:
-
-- `cmd`: match a command name like `git` or `rm`
-- `subcommands`: match a subcommand like `push` in `git push`
-- `flagAny`: match when any listed flag is present, like `-i` or `-delete`
-- `redirects`: one of `"any-write"`, `"append"`, or `"truncate"`
-- `reason`: optional explanation shown in the prompt
-
-When a command matches, pi asks whether to:
-
-- allow it once
-- allow matching commands for the rest of the session
-- deny it
-
-Press `Alt+Y` to cycle through YOLO, Auto, and Bash gate modes. The footer shows `🔥 YOLO` or `🤖 AUTO` for the active bypass/review mode, and default subagents inherit it.
-
-For non-interactive runs, matching commands are blocked by default because there is no UI prompt. Use `--yolo` to bypass every gate:
-
-```bash
-pi --yolo -p "run the checks"
-```
+See [session-tracker details](docs/session-tracker.md) for cycling instead of picking,
+preview controls, and refresh options.

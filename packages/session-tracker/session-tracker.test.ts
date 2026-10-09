@@ -57,9 +57,9 @@ function record(overrides: Partial<PaneRecord> = {}): PaneRecord {
 }
 
 function documentedTmuxStatusCommand(): string {
-  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
-  const command = readme.match(/^set -ag status-right ' #\((.*)\) '$/m)?.[1];
-  if (!command) throw new Error("README tmux status command not found");
+  const docs = readFileSync(join(process.cwd(), "docs/session-tracker.md"), "utf8");
+  const command = docs.match(/^set -ag status-right ' #\((.*)\) '$/m)?.[1];
+  if (!command) throw new Error("Session tracker tmux status command not found");
   return command;
 }
 
@@ -372,9 +372,9 @@ test("tmux projection command prints only for a live daemon", () => {
   expect(render()).toBe("");
 });
 
-test("README documents the opt-in liveness-checked tmux segment", () => {
-  const readme = readFileSync(join(process.cwd(), "README.md"), "utf8");
-  const section = readme.split("## Tmux status segment")[1] ?? "";
+test("Session tracker guide documents the opt-in liveness-checked tmux segment", () => {
+  const docs = readFileSync(join(process.cwd(), "docs/session-tracker.md"), "utf8");
+  const section = docs.split("## Tmux status segment")[1] ?? "";
 
   expect(section).toContain("session-tracker.pid");
   expect(section).toContain("session-tracker.status");

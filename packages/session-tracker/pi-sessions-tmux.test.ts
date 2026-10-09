@@ -32,8 +32,8 @@ const command = parseArgs(process.argv.slice(2));
 pickPane([{paneId: "%1", cwd: "/target", state: "idle"}], command.targetClient);
 `,
     );
-    const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8");
-    const binding = readme.split("\n").find((line) => line.includes('pick --client \\"'));
+    const docs = readFileSync(new URL("../../docs/session-tracker.md", import.meta.url), "utf8");
+    const binding = docs.split("\n").find((line) => line.includes('pick --client \\"'));
     expect(binding).toBeDefined();
     writeFileSync(
       join(dir, "tmux.conf"),
