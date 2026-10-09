@@ -55,6 +55,13 @@ not selected agent IDs. Completion releases execution capacity; retained identit
 remain addressable even when idle runtimes unload. `/agents` and Fleet show live and
 retained conversations. Saved displays do not restore live agents.
 
+Nesting has no default depth ceiling. Children share the root's capacity and permitted
+tools; delegation still requires explicit permission in user or project/skill instructions.
+`maxConcurrent` defaults to six children. An optional `maxDepth` in
+`~/.pi/agent/subagents.json` or project `.pi/subagents.json` limits depth (root is zero):
+`0` disables spawn and `1` allows only root children. Project values override global
+values. Explicit depth limits are local policy, not Codex V2 parity.
+
 Subagents inherit the caller's model unless `model` is supplied or `defaultModel`
 is configured in `~/.pi/agent/subagents.json` or project `.pi/subagents.json`.
 `defaultReasoningEffort` sets the corresponding effort default; explicit spawn fields

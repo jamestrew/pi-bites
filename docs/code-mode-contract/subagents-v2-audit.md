@@ -280,6 +280,8 @@ Proposed conservative choices, to record explicitly rather than call upstream pa
 
 - Preserve configured delegation-depth and cost controls until a deliberate change
   is requested; do not silently weaken an existing user/project restriction.
+  #384 later deliberately removes the default depth-one ceiling while preserving
+  explicit `maxDepth` as opt-in local policy; see the current V2 contract.
 - Keep the three existing roles and additive Pi/project/skill prompts. Allow V2
   full-fork role overrides without granting tools forbidden by the parent.
 - Translate inter-agent content through stock Pi message conversion. Do not fake

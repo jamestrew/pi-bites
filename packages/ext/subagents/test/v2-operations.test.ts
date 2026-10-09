@@ -86,6 +86,43 @@ function readyChild() {
   });
 }
 
+it.each([0, 1])(
+  "rejects beyond explicit maxDepth %s before initialization or admission",
+  async (maxDepth) => {
+    readyChild();
+    const h = harness();
+    const cwd = mkdtempSync(join(tmpdir(), "v2-depth-"));
+    h.ctx.cwd = cwd;
+    cleanup.push(async () => rmSync(cwd, { recursive: true, force: true }));
+    saveSettings({ maxDepth, maxConcurrent: 1 }, cwd);
+    await h.emit("session_start");
+    let ctx = h.ctx;
+    let parent: any;
+    if (maxDepth === 1) {
+      const spawned = await h.call("spawn_agent", { task_name: "parent", message: "x" });
+      parent = Reflect.get(globalThis, Symbol.for("pi-subagents:manager")).getRecord(
+        spawned.details.agentId,
+      );
+      ctx = { ...h.ctx, sessionManager: parent.session.sessionManager };
+    }
+    const callsBefore = vi.mocked(runAgent).mock.calls.length;
+    const operation = h.controller.capture(ctx);
+    await expect(
+      operation.execute(
+        "spawn_agent",
+        { task_name: "leaf", message: "x" },
+        {
+          callerId: operation.callerId,
+          callId: "limited",
+        },
+      ),
+    ).rejects.toThrow("depth limit");
+    expect(runAgent).toHaveBeenCalledTimes(callsBefore);
+    expect((await h.call("list_agents", {})).value.agents).toHaveLength(maxDepth + 1);
+    if (parent) expect(parent.session.dispose).not.toHaveBeenCalled();
+  },
+);
+
 it("reserves duplicate paths atomically, while prefixes match whole segments", async () => {
   readyChild();
   const h = harness();

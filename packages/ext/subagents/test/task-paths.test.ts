@@ -24,7 +24,7 @@ it("addresses canonical and caller-relative paths within one root, never by pars
   });
   const manager = new AgentManager();
   managers.push(manager);
-  manager.tree.setMaxDepth(3);
+  expect(manager.tree.getMaxDepth()).toBeUndefined();
   const root = { ...mockCtx, sessionManager: SessionManager.inMemory("/tmp", { id: "root" }) };
   const spawn = (ctx: typeof root, name: string) =>
     spawnNamed(manager, mockPi, ctx, "default", "x", { taskName: name, description: name });
@@ -34,6 +34,10 @@ it("addresses canonical and caller-relative paths within one root, never by pars
   const childB = { ...root, sessionManager: manager.getRecord(b)!.session!.sessionManager };
   const aa = await spawn(childA, "task");
   const ba = await spawn(childB, "task");
+  const grandchild = { ...root, sessionManager: manager.getRecord(aa)!.session!.sessionManager };
+  const descendant = await spawn(grandchild, "leaf");
+  expect(manager.taskPaths.lookup("root", "a/task/leaf").id).toBe(descendant);
+  expect(manager.getRecord(descendant)!.parentSessionId).toBe(aa);
   expect(manager.taskPaths.lookup("root", "a/task").id).toBe(aa);
   expect(manager.taskPaths.lookup(a, "task").id).toBe(aa);
   expect(manager.taskPaths.lookup(a, "/root/b/task").id).toBe(ba);

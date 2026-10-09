@@ -301,7 +301,6 @@ it.each(["interrupt", "redirect"])(
 
 it("closing an owning subtree cancels a sibling-initiated descendant reopen before publication", async () => {
   manager.setMaxConcurrent(3);
-  manager.tree.setMaxDepth(2);
   const parentSession = SessionManager.inMemory("/tmp", { id: "owner-session" });
   vi.mocked(runAgent).mockResolvedValueOnce({
     session: { ...mockSession(), sessionManager: parentSession },

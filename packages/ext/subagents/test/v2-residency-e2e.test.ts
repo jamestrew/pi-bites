@@ -176,7 +176,7 @@ it("keeps descendants running and queues their completion for an unloaded parent
     "followup_task",
     "wait_agent",
   ];
-  saveSettings({ maxConcurrent: 2, maxDepth: 2 }, h.ctx.cwd);
+  saveSettings({ maxConcurrent: 2 }, h.ctx.cwd);
   await h.emit("session_start");
   const requests: TranscriptContext[] = [];
   const tool = (name: string, args: Record<string, string | number>) => ({

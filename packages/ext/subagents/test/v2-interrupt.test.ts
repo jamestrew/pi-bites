@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -98,8 +98,6 @@ async function treeHarness() {
   });
   const h = harness(cleanup);
   const cwd = mkdtempSync(join(tmpdir(), "v2-interrupt-"));
-  mkdirSync(join(cwd, ".pi"));
-  writeFileSync(join(cwd, ".pi/subagents.json"), JSON.stringify({ maxDepth: 2 }));
   h.ctx.cwd = cwd;
   cleanup.push(async () => {
     rmSync(cwd, { recursive: true, force: true });
