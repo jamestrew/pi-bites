@@ -642,6 +642,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
         timestamp: Date.now(),
       });
       const session = {
+        subscribe: () => () => {},
         get messages() {
           return childManager.buildSessionContext().messages;
         },
@@ -841,7 +842,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
 
   it("registers the aboveEditor widget once a spawned agent has a session, then clears it on shutdown", async () => {
     vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
-      const session = { dispose: vi.fn() } as any;
+      const session = { dispose: vi.fn(), subscribe: () => () => {} } as any;
       options.onSessionCreated?.(session);
       return { responseText: "done", session };
     });

@@ -88,7 +88,7 @@ describe("print mode completion notifications", () => {
 
   it("delivers completion without capturing the tool context", async () => {
     vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
-      const session = { dispose: vi.fn() } as any;
+      const session = { dispose: vi.fn(), subscribe: () => () => {} } as any;
       options.onSessionCreated?.(session);
       return { responseText: "done", session };
     });

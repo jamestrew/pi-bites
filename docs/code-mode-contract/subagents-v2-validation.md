@@ -29,8 +29,11 @@ collaboration, discovery prerequisite, custom provider or host upgrade. Extensio
 `subagents` and `codexAdapter` remain independently disableable after reload.
 Operational settings belong in `.pi/subagents.json`, overriding
 `~/.pi/agent/subagents.json`, or use `/agents` → Settings. `maxConcurrent` defaults
-to six **children**, separately bounding execution and resident runtimes, not total
-threads including root. Nesting is uncapped by default (#384); explicit `maxDepth`
+to three **children** (four total including root), shared across descendants.
+Execution admission is advisory and counts native active work, not initialization
+or queue-only reload. Accepted concurrent work can start above that execution limit;
+resident runtimes and pending residency claims remain separately bounded.
+Configured values continue to count children. Nesting is uncapped by default (#384); explicit `maxDepth`
 is opt-in local policy, not upstream V2 parity (`0` disables spawn, `1` permits only
 root children). Project values override global values; removing the effective setting
 restores uncapped nesting on the next settings load. `scopeModels` and `fleetView`
@@ -41,8 +44,8 @@ Material adaptations remain explicit: flat Pi tool names; supported model/tool
 permissions rather than Codex infrastructure; Pi tool-batch delivery boundaries;
 queue-only completion; generic mailbox wait results rather than updating-agent
 lists; bounded pending-input polling; recent forks from surviving task boundaries;
-in-memory retained identities rather than application-restart recovery; and strict
-local child-capacity admission. Full/fresh/recent history and approval incarnation
+in-memory retained identities rather than application-restart recovery; and Pi's
+native logical-run settlement timing. Full/fresh/recent history and approval incarnation
 rules are described in the contract, not inferred from native prose.
 
 The #384 nesting change is verified offline by `v2-nesting-e2e.test.ts`,

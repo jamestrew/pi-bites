@@ -176,9 +176,10 @@ The [upstream lifecycle evidence](subagents-v2-upstream-lifecycle.md) establishe
 - Both queue-only sends and follow-up can reload a known unloaded identity. Reload
   precedes trigger-turn execution admission, so a failed follow-up can have already
   changed residency. Do not promise whole-operation atomic rollback.
-- Upstream execution admission is advisory, not an atomic semaphore; preserve our
-  reliable reservation/cost controls rather than reproducing an oversubscription
-  race for alleged parity.
+- Upstream execution admission is advisory, not an atomic semaphore. The original
+  migration retained strict local reservations; the later capacity-parity decision
+  replaces them with advisory checks and the three-child default. See
+  [capacity review](subagents-v2-capacity-review.md) for the source evidence and decision.
 - Spawn commits after accepted initial input; cancellation after that commit can
   lose the result without undoing the child. It must remain discoverable/manageable.
   Uncommitted cleanup is asynchronous, not a synchronous transactional rollback.

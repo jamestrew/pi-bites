@@ -29,8 +29,6 @@ export class AgentReopener {
     private hooks: {
       assertOwnerAvailable: (parentSessionId: string, rootSessionId: string) => void;
       admitRuntime: (signal?: AbortSignal) => Promise<() => void>;
-      reserve: (record: AgentRecord) => boolean;
-      release: (record: AgentRecord) => void;
       invalidate: (record: AgentRecord) => void;
       commit: (record: AgentRecord) => void;
       registerCollaboration?: (record: AgentRecord) => RegisterCollaboration;
@@ -169,13 +167,11 @@ export class AgentReopener {
       failureHistory: [],
       invocation: { modelName: `${model.provider}/${model.id}`, thinking: thinkingLevel },
     };
-    if (!active && !this.hooks.reserve(record))
-      throw new Error("No concurrency slot is available. Close an agent before resuming another.");
     const reopen = async () => {
       let session: AgentSession | undefined;
       let releaseRuntime: (() => void) | undefined;
       try {
-        if (active) releaseRuntime = await this.hooks.admitRuntime(signal);
+        releaseRuntime = await this.hooks.admitRuntime(signal);
         signal.throwIfAborted();
         this.hooks.invalidate(record);
         record.incarnation = randomUUID();
@@ -196,11 +192,12 @@ export class AgentReopener {
         signal.throwIfAborted();
         this.hooks.assertOwnerAvailable(record.parentSessionId, rootSessionId);
         record.session = session;
-        releaseRuntime?.();
+        // Transfer the counted claim to a visible resident before callbacks can reenter admission.
+        this.agents.set(id, record);
+        releaseRuntime();
         record.retainedConversation = undefined;
         record.allowedTools = allowedTools;
         this.hooks.commit(record);
-        this.agents.set(id, record);
         this.closer.forget(id);
         return getAgentStatus(record);
       } catch (error) {
@@ -208,7 +205,7 @@ export class AgentReopener {
           if (session) await shutdownAgentSession(session);
         } finally {
           if (active) record.incarnation = undefined;
-          else this.hooks.release(record);
+          else this.agents.delete(id);
         }
         throw error;
       } finally {

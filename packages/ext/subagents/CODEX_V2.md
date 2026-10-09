@@ -303,12 +303,27 @@ These checks are offline conversion evidence, not live provider acceptance.
 
 ## Execution capacity and retained residency (#351)
 
-Named tasks release their execution reservation when a turn settles, while their
-Pi runtime may remain loaded. The local `maxConcurrent` setting still counts **child
-agents**, not root plus children. It independently bounds executing tasks and loaded
-child runtimes (including initialization/reload claims). No additional setting or
-waiting queue is introduced. Unlike the upstream four-total-thread default and
-advisory execution admission, local reservations enforce the configured ceiling.
+The local `maxConcurrent` setting counts **child agents**, not root plus children,
+and defaults to three: the pinned V2 four-total-thread default minus root. Existing
+configured values keep their child-count meaning. Descendants share one manager's
+execution count and resident capacity; no per-parent budget or new setting is added.
+
+Execution admission is advisory, like upstream: spawn checks before residency
+admission; idle follow-up checks before accepting input; native task start increments
+without checking again. Initializing/reloading runtimes and queue-only mail do not
+consume execution. Requests accepted together can start above the execution limit.
+Already-running follow-up bypasses admission, and failed idle admission rejects
+before delivery. Reload still precedes follow-up's execution check.
+
+Pi's native `agent_start` and `agent_settled` define execution lifetime, independently
+of manager status and completion callbacks. Repeated starts during retries/compaction
+count once; intermediate `agent_end` does not release execution. Success, error and
+abort settlement release it; teardown also removes subscriptions and stale counts.
+This uses Pi's logical-run lifecycle, not Codex's exact task-hook timing.
+
+Resident capacity remains separately reserved, including initialization/reload claims,
+and terminal Pi runtimes can remain loaded after execution settles. No model-facing
+waiting queue is introduced.
 Role tool intersections, model scope and delegation-depth restrictions still apply.
 
 When a new runtime needs a slot, admission unloads the least-recently-touched eligible
@@ -371,7 +386,7 @@ Direct, internal/programmatic and RPC spawns, and internal reopen delegation che
 use the same tree policy before admission/initialization. Traversal still checks
 closing ancestors even when uncapped; child controllers reject retired/replaced owners.
 Descendants share one root manager, canonical paths, execution/residency budgets and
-inherited tool ceilings. `maxConcurrent` still defaults to six children. Explicit
+inherited tool ceilings. `maxConcurrent` defaults to three children (four with root). Explicit
 delegation permission, selected tools and extension disables remain authoritative.
 
 Offline regressions cover three descendant levels, immediate-parent completion mail,

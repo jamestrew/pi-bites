@@ -68,6 +68,7 @@ export async function spawnNamed(
   signal?.throwIfAborted();
   manager.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
   manager.taskPaths.available(ctx.sessionManager.getSessionId(), options.taskName ?? "");
+  manager.assertExecutionAvailable();
   const release = await manager.runtimes.admit(signal);
   try {
     return await spawnAdmitted(
@@ -106,15 +107,22 @@ async function spawnAdmitted(
   const initialized = new Promise<void>((resolve) => {
     ready = resolve;
   });
-  const id = manager.spawn(pi, ctx, type, prompt, {
-    ...options,
-    onSessionCreated: (session) => {
-      signal?.throwIfAborted();
-      committed = true;
-      options.onSessionCreated?.(session);
-      ready();
+  const id = manager.spawn(
+    pi,
+    ctx,
+    type,
+    prompt,
+    {
+      ...options,
+      onSessionCreated: (session) => {
+        signal?.throwIfAborted();
+        committed = true;
+        options.onSessionCreated?.(session);
+        ready();
+      },
     },
-  });
+    true,
+  );
   const record = manager.getRecord(id);
   if (!record) throw new Error("Spawned agent is unavailable");
   const cancel = () => {

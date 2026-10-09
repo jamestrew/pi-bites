@@ -30,7 +30,7 @@ describe("AgentManager.close", () => {
     await manager.dispose();
   });
 
-  it("releases a completed agent's retained slot when it is closed", async () => {
+  it("closes a completed conversation without holding execution capacity", async () => {
     manager = new AgentManager(undefined, 1);
     const completedSession = mockSession();
     vi.mocked(runAgent)
@@ -46,7 +46,7 @@ describe("AgentManager.close", () => {
       queueIfBusy: true,
     });
 
-    expect(manager.getRecord(queued)?.status).toBe("queued");
+    expect(manager.getRecord(queued)?.status).toBe("running");
     const closing = manager.close(completed);
     await expect(manager.sendInput(completed, "too late")).resolves.toBe(false);
     await expect(closing).resolves.toEqual({ completed: "finished" });
@@ -249,6 +249,7 @@ describe("AgentManager.close", () => {
     vi.mocked(runAgent)
       .mockImplementationOnce(async (_parent, _type, _prompt, options) => {
         options.onSessionCreated?.(session);
+        session.emitEvent({ type: "agent_start" });
         await new Promise<void>((_resolve, reject) => {
           options.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
             once: true,
@@ -258,6 +259,7 @@ describe("AgentManager.close", () => {
       })
       .mockImplementationOnce(async (_parent, _type, _prompt, options) => {
         options.onSessionCreated?.(followerSession);
+        followerSession.emitEvent({ type: "agent_start" });
         await new Promise<void>((_resolve, reject) => {
           options.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
             once: true,
@@ -284,9 +286,7 @@ describe("AgentManager.close", () => {
     expect(completed).toHaveBeenCalledOnce();
     expect(session.extensionRunner.emit).toHaveBeenCalledOnce();
     expect(session.dispose).toHaveBeenCalledOnce();
-    expect(session.dispose.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(runAgent).mock.invocationCallOrder[1]!,
-    );
+    // Execution is free before runtime teardown finishes.
     expect(manager.getRecord(follower)?.status).toBe("running");
     const queued = manager.spawn(mockPi, mockCtx, "worker", "queued", {
       description: "queued",
@@ -321,6 +321,9 @@ describe("AgentManager.close", () => {
     const completed = vi.fn();
     manager = new AgentManager(completed, 1);
     vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+      const session = mockSession();
+      options.onSessionCreated?.(session);
+      session.emitEvent({ type: "agent_start" });
       await new Promise<void>((_resolve, reject) => {
         options.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
           once: true,
@@ -355,6 +358,7 @@ describe("AgentManager.close", () => {
     };
     vi.mocked(runAgent).mockImplementationOnce(async (_parent, _type, _prompt, options) => {
       options.onSessionCreated?.(parentSession);
+      parentSession.emitEvent({ type: "agent_start" });
       await new Promise<void>((_resolve, reject) => {
         options.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
           once: true,
