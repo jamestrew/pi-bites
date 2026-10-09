@@ -12,8 +12,10 @@
     "fmt": "oxfmt --write .",
     "fmt:check": "oxfmt --check .",
     "typecheck": "tsc --noEmit",
+    "schema:generate": "bun scripts/generate-config-schema.ts",
+    "schema:check": "bun scripts/generate-config-schema.ts --check",
     "test": "vitest run packages && bun --bun vitest run scripts",
-    "check": "bun run lint && bun run fmt:check && bun run typecheck && bun run test",
+    "check": "bun run schema:check && bun run lint && bun run fmt:check && bun run typecheck && bun run test",
     "loop": "bun scripts/loop.ts",
     "update:pi": "./scripts/update-pi.sh",
     "release": "bun scripts/release.ts"

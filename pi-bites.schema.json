@@ -1,0 +1,194 @@
+{
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor JSON Schema location. Does not affect runtime settings."
+    },
+    "smallModel": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Cheap model for lightweight internal tasks, as provider/model-id.",
+          "default": "github-copilot/gpt-6-luna"
+        },
+        "thinking": {
+          "enum": ["minimal", "low", "medium", "high", "xhigh", "max"],
+          "description": "Thinking level for lightweight internal tasks.",
+          "default": "low"
+        }
+      },
+      "additionalProperties": false
+    },
+    "statusline": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command whose trimmed stdout is shown in the statusline."
+        }
+      },
+      "additionalProperties": false
+    },
+    "bashGate": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "enum": ["manual", "auto", "yolo"],
+          "description": "Initial permission mode for each session.",
+          "default": "manual"
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "cmd": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "subcommands": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "flagAny": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                ]
+              },
+              "redirects": {
+                "enum": ["any-write", "append", "truncate"]
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Extra gated rules added to the built-in destructive-command protections."
+        }
+      },
+      "additionalProperties": false
+    },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command for notifications; receives { cwd, message } JSON on stdin. An empty string disables notifications."
+        }
+      },
+      "additionalProperties": false
+    },
+    "autoCompaction": {
+      "type": "object",
+      "properties": {
+        "thresholdTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200000,
+          "description": "Token cap; compacts sooner at 85% of the active model's context window."
+        }
+      },
+      "additionalProperties": false
+    },
+    "autoMode": {
+      "type": "object",
+      "properties": {
+        "model": {
+          "type": "string",
+          "description": "Reviewer model as provider/model-id. Defaults to the active model."
+        },
+        "thinking": {
+          "enum": ["minimal", "low", "medium", "high", "xhigh", "max"],
+          "description": "Reviewer thinking level.",
+          "default": "low"
+        },
+        "policy": {
+          "type": "string",
+          "description": "Reviewer policy text. Defaults to the bundled safety policy."
+        }
+      },
+      "additionalProperties": false
+    },
+    "codexAdapter": {
+      "type": "object",
+      "properties": {
+        "webSearchProviders": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "description": "Responses provider IDs explicitly trusted to implement Codex /alpha/search."
+        },
+        "allowOpenAICodexFallback": {
+          "type": "boolean",
+          "default": false,
+          "description": "Permit web_run to use stock openai-codex auth when the active provider cannot search."
+        }
+      },
+      "additionalProperties": false
+    },
+    "disable": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "bashGate",
+          "footer",
+          "statusline",
+          "tokenCount",
+          "usageDashboard",
+          "context",
+          "tools",
+          "fzf",
+          "notifications",
+          "autoCompaction",
+          "autoMode",
+          "spotme",
+          "skillPromptReferences",
+          "promptNormalization",
+          "atMentionContext",
+          "sessionTracker",
+          "ponytail",
+          "subagents",
+          "view",
+          "codexAdapter"
+        ]
+      },
+      "description": "Extensions disabled globally or for this project. Global and project lists are unioned. Use current names; retired aliases are flagged by this schema."
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Pi-bites configuration",
+  "description": "Global ~/.pi/agent/pi-bites.json or project-local .pi/pi-bites.json. Project values override global values within each section; disable lists are unioned. All settings are optional.",
+  "$comment": "Generated from packages/ext/config.ts by bun run schema:generate. Do not edit directly.",
+  "additionalProperties": false
+}

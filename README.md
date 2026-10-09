@@ -108,10 +108,25 @@ with `defaultTools: ["+tool_search"]`. Loading search does not grant capabilitie
 
 Project-local settings override global settings for each config section. `disable` lists are unioned, so a globally disabled extension is disabled in every project. `smallModel` provides a shared cheap model selection for lightweight tasks and defaults to GitHub Copilot's Claude Haiku 4.5 with low thinking.
 
+Add `$schema` to either config file for editor completion and validation against
+[`pi-bites.schema.json`](pi-bites.schema.json). The schema flags unknown keys,
+invalid values, and retired extension names, including inside sections and bash-gate rules.
+For a local checkout, use an absolute path to its schema file instead of the URL.
+To match an installed release, replace `master` in the URL with a release tag containing the schema.
+Runtime loading remains backward-compatible: unknown keys are still ignored and
+legacy disable names are still migrated. Schema defaults are documentation, not writes to your config.
+
+The schema is generated from the TypeBox definitions in `packages/ext/config.ts`,
+which also define the TypeScript types and runtime validation. After editing config
+definitions, run `bun run schema:generate` and commit `pi-bites.schema.json`.
+`bun check` (including CI) regenerates the schema in memory and fails if the file is stale;
+there is no separately maintained schema or validator.
+
 Example:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/jamestrew/pi-bites/master/pi-bites.schema.json",
   "smallModel": {
     "model": "github-copilot/claude-haiku-4.5",
     "thinking": "low"

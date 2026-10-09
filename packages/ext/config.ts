@@ -8,6 +8,7 @@
  * Example pi-bites.json:
  * ```json
  * {
+ *   "$schema": "https://raw.githubusercontent.com/jamestrew/pi-bites/master/pi-bites.schema.json",
  *   "smallModel": {
  *     "model": "github-copilot/claude-haiku-4.5",
  *     "thinking": "low"
@@ -42,68 +43,17 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-
-export interface SmallModelConfig {
-  /** Cheap model for lightweight internal tasks. */
-  model?: string;
-  /** Thinking level for lightweight internal tasks. */
-  thinking?: ThinkingLevel;
-}
-
-export interface StatuslineConfig {
-  /** Shell command whose trimmed stdout is shown in the statusline. */
-  command?: string;
-}
-
-export interface AutoCompactionConfig {
-  /** Token cap (default 200,000); compacts sooner at 85% of the model's context window. */
-  thresholdTokens?: number;
-}
-
-export interface AutoModeConfig {
-  /** Reviewer model. Defaults to the active model. */
-  model?: string;
-  /** Reviewer thinking level. Defaults to low. */
-  thinking?: ThinkingLevel;
-  /** Reviewer policy. Defaults to the bundled safety policy. */
-  policy?: string;
-}
-
-export interface CodexAdapterConfig {
-  /** Responses provider IDs explicitly trusted to implement Codex `/alpha/search`. */
-  webSearchProviders?: string[];
-  /** Permit web_run to use stock openai-codex auth when the active provider cannot search. */
-  allowOpenAICodexFallback?: boolean;
-}
-
-export interface NotificationsConfig {
-  /** Shell command run when the agent loop ends; receives { cwd, message } on stdin. */
-  command?: string;
-}
 
 export type OneOrMany<T> = T | T[];
 export const BASH_GATE_MODES = ["manual", "auto", "yolo"] as const;
 export type BashGateMode = (typeof BASH_GATE_MODES)[number];
 export const BASH_GATE_REDIRECT_RULES = ["any-write", "append", "truncate"] as const;
 export type BashGateRedirectRule = (typeof BASH_GATE_REDIRECT_RULES)[number];
-
-export interface BashGateRule {
-  cmd?: OneOrMany<string>;
-  subcommands?: OneOrMany<string>;
-  flagAny?: OneOrMany<string>;
-  redirects?: BashGateRedirectRule;
-  reason?: string;
-}
-
-export interface BashGateConfig {
-  /** Initial permission mode for each session. Defaults to manual. */
-  mode?: BashGateMode;
-  /** Extra rules added to the built-in destructive-command rules. */
-  rules?: BashGateRule[];
-}
 
 export const EXTENSION_NAMES = [
   "bashGate",
@@ -135,123 +85,158 @@ const EXTENSION_DESCRIPTIONS: Partial<Record<ExtensionName, string>> = {
   atMentionContext: "@path file contents / directory listings",
 };
 
-export interface BitesConfig {
-  smallModel?: SmallModelConfig;
-  statusline?: StatuslineConfig;
-  bashGate?: BashGateConfig;
-  notifications?: NotificationsConfig;
-  autoCompaction?: AutoCompactionConfig;
-  autoMode?: AutoModeConfig;
-  codexAdapter?: CodexAdapterConfig;
-  /** Extension names disabled globally or for this project. */
-  disable?: ExtensionName[];
-}
+const THINKING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const satisfies readonly ThinkingLevel[];
+const StringOrListSchema = Type.Union([Type.String(), Type.Array(Type.String())]);
 
-const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const SmallModelSchema = Type.Object({
+  model: Type.Optional(
+    Type.String({
+      description: "Cheap model for lightweight internal tasks, as provider/model-id.",
+      default: "github-copilot/gpt-6-luna",
+    }),
+  ),
+  thinking: Type.Optional(
+    Type.Enum(THINKING_LEVELS, {
+      description: "Thinking level for lightweight internal tasks.",
+      default: "low",
+    }),
+  ),
+});
+export type SmallModelConfig = Static<typeof SmallModelSchema>;
+
+const StatuslineSchema = Type.Object({
+  command: Type.Optional(
+    Type.String({
+      description: "Shell command whose trimmed stdout is shown in the statusline.",
+    }),
+  ),
+});
+export type StatuslineConfig = Static<typeof StatuslineSchema>;
+
+const BashGateRuleSchema = Type.Object({
+  cmd: Type.Optional(StringOrListSchema),
+  subcommands: Type.Optional(StringOrListSchema),
+  flagAny: Type.Optional(StringOrListSchema),
+  redirects: Type.Optional(Type.Enum(BASH_GATE_REDIRECT_RULES)),
+  reason: Type.Optional(Type.String()),
+});
+export type BashGateRule = Static<typeof BashGateRuleSchema>;
+
+const BashGateSchema = Type.Object({
+  mode: Type.Optional(
+    Type.Enum(BASH_GATE_MODES, {
+      description: "Initial permission mode for each session.",
+      default: "manual",
+    }),
+  ),
+  rules: Type.Optional(
+    Type.Array(BashGateRuleSchema, {
+      description: "Extra gated rules added to the built-in destructive-command protections.",
+    }),
+  ),
+});
+export type BashGateConfig = Static<typeof BashGateSchema>;
+
+const NotificationsSchema = Type.Object({
+  command: Type.Optional(
+    Type.String({
+      description:
+        "Shell command for notifications; receives { cwd, message } JSON on stdin. An empty string disables notifications.",
+    }),
+  ),
+});
+export type NotificationsConfig = Static<typeof NotificationsSchema>;
+
+const AutoCompactionSchema = Type.Object({
+  thresholdTokens: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      default: 200000,
+      description: "Token cap; compacts sooner at 85% of the active model's context window.",
+    }),
+  ),
+});
+export type AutoCompactionConfig = Static<typeof AutoCompactionSchema>;
+
+const AutoModeSchema = Type.Object({
+  model: Type.Optional(
+    Type.String({
+      description: "Reviewer model as provider/model-id. Defaults to the active model.",
+    }),
+  ),
+  thinking: Type.Optional(
+    Type.Enum(THINKING_LEVELS, {
+      description: "Reviewer thinking level.",
+      default: "low",
+    }),
+  ),
+  policy: Type.Optional(
+    Type.String({
+      description: "Reviewer policy text. Defaults to the bundled safety policy.",
+    }),
+  ),
+});
+export type AutoModeConfig = Static<typeof AutoModeSchema>;
+
+const CodexAdapterSchema = Type.Object({
+  webSearchProviders: Type.Optional(
+    Type.Array(Type.String({ pattern: "\\S" }), {
+      description: "Responses provider IDs explicitly trusted to implement Codex /alpha/search.",
+    }),
+  ),
+  allowOpenAICodexFallback: Type.Optional(
+    Type.Boolean({
+      default: false,
+      description:
+        "Permit web_run to use stock openai-codex auth when the active provider cannot search.",
+    }),
+  ),
+});
+export type CodexAdapterConfig = Static<typeof CodexAdapterSchema>;
+
+// Runtime accepts unknown keys to preserve existing configs during reads and writes.
+// The generator closes all objects in the editor schema to flag stale settings.
+export const BitesConfigSchema = Type.Object(
+  {
+    $schema: Type.Optional(
+      Type.String({
+        description: "Editor JSON Schema location. Does not affect runtime settings.",
+      }),
+    ),
+    smallModel: Type.Optional(SmallModelSchema),
+    statusline: Type.Optional(StatuslineSchema),
+    bashGate: Type.Optional(BashGateSchema),
+    notifications: Type.Optional(NotificationsSchema),
+    autoCompaction: Type.Optional(AutoCompactionSchema),
+    autoMode: Type.Optional(AutoModeSchema),
+    codexAdapter: Type.Optional(CodexAdapterSchema),
+    disable: Type.Optional(
+      Type.Array(Type.Enum(EXTENSION_NAMES), {
+        description:
+          "Extensions disabled globally or for this project. Global and project lists are unioned. Use current names; retired aliases are flagged by this schema.",
+      }),
+    ),
+  },
+  {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "Pi-bites configuration",
+    description:
+      "Global ~/.pi/agent/pi-bites.json or project-local .pi/pi-bites.json. Project values override global values within each section; disable lists are unioned. All settings are optional.",
+    $comment:
+      "Generated from packages/ext/config.ts by bun run schema:generate. Do not edit directly.",
+  },
+);
+export type BitesConfig = Static<typeof BitesConfigSchema>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isOptional(
-  value: Record<string, unknown>,
-  key: string,
-  check: (field: unknown) => boolean,
-): boolean {
-  return !(key in value) || check(value[key]);
-}
-
-function isStringList(value: unknown): boolean {
-  return (
-    typeof value === "string" ||
-    (Array.isArray(value) && value.every((item) => typeof item === "string"))
-  );
-}
-
-function isSmallModelConfig(value: unknown): value is SmallModelConfig {
-  return (
-    isRecord(value) &&
-    isOptional(value, "model", (field) => typeof field === "string") &&
-    isOptional(value, "thinking", (field) => THINKING_LEVELS.some((level) => level === field))
-  );
-}
-
-function isStatuslineConfig(value: unknown): value is StatuslineConfig {
-  return isRecord(value) && isOptional(value, "command", (field) => typeof field === "string");
-}
-
-function isAutoCompactionConfig(value: unknown): value is AutoCompactionConfig {
-  return (
-    isRecord(value) &&
-    isOptional(
-      value,
-      "thresholdTokens",
-      (field) => typeof field === "number" && Number.isInteger(field) && field > 0,
-    )
-  );
-}
-
-function isAutoModeConfig(value: unknown): value is AutoModeConfig {
-  return (
-    isRecord(value) &&
-    isOptional(value, "model", (field) => typeof field === "string") &&
-    isOptional(value, "thinking", (field) => THINKING_LEVELS.some((level) => level === field)) &&
-    isOptional(value, "policy", (field) => typeof field === "string")
-  );
-}
-
-function isCodexAdapterConfig(value: unknown): value is CodexAdapterConfig {
-  const isProviderList = (field: unknown) =>
-    Array.isArray(field) &&
-    field.every((provider) => typeof provider === "string" && provider.trim().length > 0);
-  return (
-    isRecord(value) &&
-    isOptional(value, "webSearchProviders", isProviderList) &&
-    isOptional(value, "allowOpenAICodexFallback", (field) => typeof field === "boolean")
-  );
-}
-
-function isNotificationsConfig(value: unknown): value is NotificationsConfig {
-  return isRecord(value) && isOptional(value, "command", (field) => typeof field === "string");
-}
-
-function isBashGateRule(value: unknown): value is BashGateRule {
-  return (
-    isRecord(value) &&
-    isOptional(value, "cmd", isStringList) &&
-    isOptional(value, "subcommands", isStringList) &&
-    isOptional(value, "flagAny", isStringList) &&
-    isOptional(value, "redirects", (field) =>
-      BASH_GATE_REDIRECT_RULES.some((rule) => rule === field),
-    ) &&
-    isOptional(value, "reason", (field) => typeof field === "string")
-  );
-}
-
-function isBashGateConfig(value: unknown): value is BashGateConfig {
-  return (
-    isRecord(value) &&
-    isOptional(value, "mode", (field) => BASH_GATE_MODES.some((mode) => mode === field)) &&
-    isOptional(value, "rules", (rules) => Array.isArray(rules) && rules.every(isBashGateRule))
-  );
-}
-
-function isExtensionName(value: unknown): value is ExtensionName {
-  return EXTENSION_NAMES.some((name) => name === value);
-}
-
-function isBitesConfig(value: unknown): value is BitesConfig {
-  return (
-    isRecord(value) &&
-    isOptional(value, "smallModel", isSmallModelConfig) &&
-    isOptional(value, "statusline", isStatuslineConfig) &&
-    isOptional(value, "bashGate", isBashGateConfig) &&
-    isOptional(value, "notifications", isNotificationsConfig) &&
-    isOptional(value, "autoCompaction", isAutoCompactionConfig) &&
-    isOptional(value, "autoMode", isAutoModeConfig) &&
-    isOptional(value, "codexAdapter", isCodexAdapterConfig) &&
-    isOptional(value, "disable", (field) => Array.isArray(field) && field.every(isExtensionName))
-  );
 }
 
 export function parseBitesConfig(value: unknown): BitesConfig | undefined {
@@ -272,7 +257,7 @@ export function parseBitesConfig(value: unknown): BitesConfig | undefined {
       ],
     };
   }
-  return isBitesConfig(value) ? value : undefined;
+  return Value.Check(BitesConfigSchema, value) ? value : undefined;
 }
 
 function readConfigFile(filePath: string): BitesConfig {

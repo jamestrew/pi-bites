@@ -10,6 +10,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { Value } from "typebox/value";
+import type { BashGateRule, BitesConfig } from "./config.js";
 
 let agentDir = "";
 
@@ -21,6 +23,85 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 afterEach(() => {
   if (agentDir) rmSync(agentDir, { recursive: true, force: true });
   agentDir = "";
+});
+
+describe("config JSON schema", () => {
+  const schema = JSON.parse(
+    readFileSync(new URL("../../pi-bites.schema.json", import.meta.url), "utf8"),
+  );
+  const rule = {
+    cmd: ["bun"],
+    subcommands: "test",
+    flagAny: ["--force"],
+    redirects: "any-write",
+    reason: "Ask before running",
+  } satisfies Required<BashGateRule>;
+  const config = {
+    smallModel: { model: "provider/model", thinking: "low" },
+    statusline: { command: "echo status" },
+    bashGate: { mode: "manual", rules: [rule] },
+    notifications: { command: "" },
+    autoCompaction: { thresholdTokens: 200_000 },
+    autoMode: { model: "provider/model", thinking: "max", policy: "Review safely" },
+    codexAdapter: { webSearchProviders: ["trusted-proxy"], allowOpenAICodexFallback: false },
+    disable: ["notifications"],
+  } satisfies {
+    [K in Exclude<keyof BitesConfig, "$schema">]-?: Required<NonNullable<BitesConfig[K]>>;
+  };
+
+  test.each([
+    {},
+    config,
+    { $schema: "file:///tmp/pi-bites.schema.json", ...config },
+    { bashGate: { rules: [{}, { cmd: "bun", subcommands: [], flagAny: "--force" }] } },
+    { codexAdapter: { webSearchProviders: [] } },
+  ])("accepts valid config %j in both schema and loader", async (value) => {
+    const { parseBitesConfig } = await import("./config.js");
+    expect(Value.Check(schema, value)).toBe(true);
+    expect(parseBitesConfig(value)).toEqual(value);
+  });
+
+  test.each([
+    [],
+    null,
+    { smallModel: { model: 42 } },
+    { smallModel: { thinking: "invalid" } },
+    { statusline: { command: false } },
+    { notifications: { command: null } },
+    { autoCompaction: { thresholdTokens: 0 } },
+    { autoCompaction: { thresholdTokens: 1.5 } },
+    { autoMode: { policy: [] } },
+    { bashGate: { mode: "automatic" } },
+    { bashGate: { rules: [{ cmd: [42] }] } },
+    { bashGate: { rules: [{ subcommands: false }] } },
+    { bashGate: { rules: [{ flagAny: 42 }] } },
+    { bashGate: { rules: [{ redirects: "write" }] } },
+    { bashGate: { rules: [{ reason: false }] } },
+    { codexAdapter: { webSearchProviders: [""] } },
+    { codexAdapter: { webSearchProviders: [" \t\n"] } },
+    { codexAdapter: { allowOpenAICodexFallback: "yes" } },
+    { disable: ["unknown"] },
+  ])("rejects invalid values %j in both schema and loader", async (value) => {
+    const { parseBitesConfig } = await import("./config.js");
+    expect(Value.Check(schema, value)).toBe(false);
+    expect(parseBitesConfig(value)).toBeUndefined();
+  });
+
+  test.each([
+    { smallModle: {} },
+    ...Object.keys(config)
+      .filter((key) => key !== "disable")
+      .map((key) => ({ [key]: { staleSetting: true } })),
+    { codexAdapter: { providers: ["openai"] } },
+    { bashGate: { rules: [{ flagsAny: "--force" }] } },
+    { disable: ["explore"] },
+    { disable: ["inlineReferences"] },
+    { disable: ["slashSkillAutocomplete"] },
+  ])("flags stale/unknown settings %j without changing runtime compatibility", async (value) => {
+    const { parseBitesConfig } = await import("./config.js");
+    expect(Value.Check(schema, value)).toBe(false);
+    expect(parseBitesConfig(value)).toBeDefined();
+  });
 });
 
 describe("loadConfig", () => {
