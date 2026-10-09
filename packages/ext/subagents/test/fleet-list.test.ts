@@ -1,4 +1,13 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import {
+  getKeybindings,
+  type KeybindingsConfig,
+  KeybindingsManager,
+  setKeybindings,
+  type Terminal,
+  TUI_KEYBINDINGS,
+  TuiAltScreen,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
@@ -84,7 +93,7 @@ interface Harness {
   closeOverlay: () => Promise<void>;
 }
 
-function harness(agents: AgentRecord[]): Harness {
+function harness(agents: AgentRecord[], tui?: TuiAltScreen): Harness {
   let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined;
   let widgetFactory: ((tui: any, theme: any) => { render(w: number): string[] }) | undefined;
   let editorText = "";
@@ -93,13 +102,14 @@ function harness(agents: AgentRecord[]): Harness {
   let overlayDone: ((r: undefined) => void) | undefined;
   let overlayComponent: { handleInput(data: string): void } | undefined;
   let overlayOptions: unknown;
-  const fakeTui = { requestRender: () => {}, terminal: { columns: 120, rows: 40 } };
+  const fakeTui = tui ?? { requestRender: () => {}, terminal: { columns: 120, rows: 40 } };
 
   const ui: FleetUICtx = {
     setWidget: (_key, content) => {
       widgetFactory = content as any;
     },
     onTerminalInput: (h) => {
+      if (tui) return tui.addInputListener(h);
       inputHandler = h;
       return () => {
         inputHandler = undefined;
@@ -171,6 +181,85 @@ describe("formatFleetTokens", () => {
 });
 
 describe("FleetList navigation", () => {
+  it.each([
+    {},
+    {
+      "tui.altScreen.previousPrompt": ["ctrl+up", "ctrl+shift+up", "alt+up"],
+      "tui.altScreen.nextPrompt": ["ctrl+down", "ctrl+shift+down", "alt+down"],
+    },
+  ] satisfies KeybindingsConfig[])(
+    "reserves fullscreen Ctrl+↑/↓ regardless of FleetView visibility %j",
+    (bindings) => {
+      const previousKeybindings = getKeybindings();
+      const keybindings = new KeybindingsManager(TUI_KEYBINDINGS, bindings);
+      setKeybindings(keybindings);
+      let input!: (data: string) => void;
+      const noop = () => {};
+      const terminal: Terminal = {
+        columns: 120,
+        rows: 40,
+        kittyProtocolActive: false,
+        start: (handler) => {
+          input = handler;
+        },
+        stop: noop,
+        drainInput: async () => {},
+        write: noop,
+        moveBy: noop,
+        hideCursor: noop,
+        showCursor: noop,
+        clearLine: noop,
+        clearFromCursor: noop,
+        clearScreen: noop,
+        setTitle: noop,
+        setProgress: noop,
+      };
+      const tui = new TuiAltScreen(terminal);
+      vi.spyOn(tui, "requestRender").mockImplementation(noop);
+      const h = harness(
+        [
+          makeRecord({ id: "a1", description: "one" }),
+          makeRecord({ id: "a2", description: "two" }),
+        ],
+        tui,
+      );
+      const reservedBindings = keybindings.getUserBindings();
+      try {
+        expect(keybindings.getKeys("tui.altScreen.previousPrompt")).not.toContain("ctrl+up");
+        expect(keybindings.getKeys("tui.altScreen.nextPrompt")).not.toContain("ctrl+down");
+        tui.start();
+        input(CTRL_UP);
+        expect(h.render().find((line) => line.includes("two"))).toContain("▶");
+        input(CTRL_UP);
+        expect(h.render().find((line) => line.includes("one"))).toContain("▶");
+        input(CTRL_DOWN);
+        expect(h.render().find((line) => line.includes("two"))).toContain("▶");
+        expect(keybindings.getKeys("tui.altScreen.previousPrompt")).toContain("ctrl+shift+up");
+        expect(keybindings.getKeys("tui.altScreen.nextPrompt")).toContain("ctrl+shift+down");
+        h.fleet.setEnabled(false);
+        expect(keybindings.getUserBindings()).toEqual(reservedBindings);
+        h.fleet.setEnabled(true);
+        h.render();
+        input(CTRL_UP);
+        expect(h.render().some((line) => line.includes("FleetView focused"))).toBe(true);
+        keybindings.setUserBindings({
+          ...keybindings.getUserBindings(),
+          "tui.altScreen.nextPrompt": ["alt+down"],
+          "tui.input.newLine": "ctrl+j",
+        });
+      } finally {
+        h.fleet.dispose();
+        tui.stop();
+        setKeybindings(previousKeybindings);
+      }
+      expect(keybindings.getUserBindings()).toEqual({
+        ...reservedBindings,
+        "tui.altScreen.nextPrompt": ["alt+down"],
+        "tui.input.newLine": "ctrl+j",
+      });
+    },
+  );
+
   it("does not register a widget when there are no agents", () => {
     const h = harness([]);
     expect(h.render()).toEqual([]);

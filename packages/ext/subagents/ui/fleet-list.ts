@@ -15,6 +15,7 @@ import { getAgentStatus } from "../agent-status.js";
 
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import {
+  getKeybindings,
   isKeyRelease,
   Key,
   matchesKey,
@@ -116,6 +117,18 @@ export class FleetList {
   setUICtx(ui: FleetUICtx): void {
     if (ui === this.ui) return;
     this.inputUnsub?.();
+    // Pi 1.0.4 fullscreen consumes these before extension listeners. Reserve
+    // Ctrl+↑/↓ for FleetView; keep all other transcript navigation bindings.
+    const keybindings = getKeybindings();
+    keybindings.setUserBindings({
+      ...keybindings.getUserBindings(),
+      "tui.altScreen.previousPrompt": keybindings
+        .getKeys("tui.altScreen.previousPrompt")
+        .filter((key) => key !== "ctrl+up"),
+      "tui.altScreen.nextPrompt": keybindings
+        .getKeys("tui.altScreen.nextPrompt")
+        .filter((key) => key !== "ctrl+down"),
+    });
     this.ui = ui;
     this.widgetRegistered = false;
     this.tui = undefined;
