@@ -423,12 +423,17 @@ describe("AgentManager — abort() state machine", () => {
     manager = new AgentManager(onComplete, 1);
     let resolveRun!: (v: unknown) => void;
     vi.mocked(runAgent)
-      .mockImplementationOnce(
-        () =>
-          new Promise((res) => {
-            resolveRun = res as (v: unknown) => void;
-          }),
-      )
+      .mockImplementationOnce((_parent, _type, _prompt, options) => {
+        const session = mockSession();
+        options.onSessionCreated?.(session);
+        session.emitEvent({ type: "agent_start" });
+        return new Promise((res) => {
+          resolveRun = (value) => {
+            session.emitEvent({ type: "agent_settled" });
+            res(value as Awaited<ReturnType<typeof runAgent>>);
+          };
+        });
+      })
       .mockResolvedValueOnce({ responseText: "queued result", session: mockSession() });
 
     const id = manager.spawn(mockPi, mockCtx, "worker", "p", { description: "r" });
@@ -457,7 +462,8 @@ describe("AgentManager — abort() state machine", () => {
     expect(record.status).toBe("stopped"); // not overwritten to "completed"
     expect(record.result).toBe("partial output"); // partial result still captured
     expect(onComplete.mock.calls.filter(([completed]) => completed === record)).toHaveLength(1);
-    expect(manager.getRecord(queuedId)?.status).toBe("queued");
+    await manager.getRecord(queuedId)!.promise;
+    expect(manager.getRecord(queuedId)?.status).toBe("completed");
     expect((manager as any).runningCount).toBe(0);
 
     await manager.close(id);
@@ -485,7 +491,7 @@ describe("AgentManager — steer()", () => {
     });
     const id = manager.spawn(mockPi, mockCtx, "worker", "p", { description: "r" });
     // Simulate the session becoming ready.
-    captured?.({ steer, dispose: vi.fn(), isStreaming: true });
+    captured?.({ ...mockSession(), steer, isStreaming: true });
 
     expect(manager.steer(id, "go left")).toBe(true);
     expect(steer).toHaveBeenCalledWith("go left");

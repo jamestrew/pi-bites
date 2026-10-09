@@ -57,7 +57,11 @@ retained conversations. Saved displays do not restore live agents.
 
 Nesting has no default depth ceiling. Children share the root's capacity and permitted
 tools; delegation still requires explicit permission in user or project/skill instructions.
-`maxConcurrent` defaults to six children. An optional `maxDepth` in
+`maxConcurrent` defaults to three children (four total including root), shared
+across descendants. Execution admission checks capacity without reserving a slot;
+requests accepted together can start above the execution limit. Resident capacity
+separately counts loaded children and pending initialization/reload claims.
+Configured `maxConcurrent` values still count children, not root. An optional `maxDepth` in
 `~/.pi/agent/subagents.json` or project `.pi/subagents.json` limits depth (root is zero):
 `0` disables spawn and `1` allows only root children. Project values override global
 values. Explicit depth limits are local policy, not Codex V2 parity.

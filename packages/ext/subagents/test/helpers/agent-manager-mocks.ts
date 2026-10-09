@@ -18,8 +18,9 @@ export const mockCtx = {
   sessionManager: { getSessionId: () => "parent-session", getBranch: () => [] },
 } as any;
 
-export const mockSession = () =>
-  ({
+export const mockSession = () => {
+  const subscribers = new Set<(event: any) => void>();
+  return {
     sessionManager: { getSessionId: () => "child-session" },
     abort: vi.fn(async () => {}),
     clearQueue: vi.fn(() => ({ steering: [], followUp: [] })),
@@ -27,7 +28,15 @@ export const mockSession = () =>
     extensionRunner: { emit: vi.fn(async () => {}) },
     followUp: vi.fn(async () => {}),
     steer: vi.fn(async () => {}),
-  }) as any;
+    subscribe: (fn: (event: any) => void) => {
+      subscribers.add(fn);
+      return () => subscribers.delete(fn);
+    },
+    emitEvent: (event: { type: string }) => {
+      for (const fn of subscribers) fn(event);
+    },
+  } as any;
+};
 
 export const resolvedRun = () =>
   vi.mocked(runAgent).mockResolvedValue({
@@ -44,7 +53,12 @@ export function waitForCancellation(signal?: AbortSignal): Promise<never> {
 }
 
 export function mockPendingRun(): void {
-  vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) =>
-    waitForCancellation(options.signal),
-  );
+  vi.mocked(runAgent).mockImplementation((_parent, _type, _prompt, options) => {
+    const session = mockSession();
+    options.onSessionCreated?.(session);
+    session.emitEvent({ type: "agent_start" });
+    return waitForCancellation(options.signal).finally(() =>
+      session.emitEvent({ type: "agent_settled" }),
+    );
+  });
 }

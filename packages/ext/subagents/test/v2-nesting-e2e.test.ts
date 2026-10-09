@@ -14,6 +14,33 @@ const tool = (name: string, args: Record<string, string | number>) => ({
   content: [{ type: "toolCall" as const, id: crypto.randomUUID(), name, arguments: args }],
 });
 
+it("defaults to three shared child slots in addition to root", async () => {
+  const h = await setupV2(cleanup);
+  h.pi.getActiveTools = () => ["spawn_agent", "list_agents", "wait_agent", "interrupt_agent"];
+  h.faux.setResponses(
+    Array.from({ length: 4 }, () => tool("wait_agent", { timeout_ms: 3_600_000 })),
+  );
+  let lastId = "";
+  let firstId = "";
+  for (const task_name of ["a", "b", "c"]) {
+    lastId = (await h.call("spawn_agent", { task_name, message: "wait", fork_turns: "none" }))
+      .details.agentId;
+    firstId ||= lastId;
+  }
+  await vi.waitFor(async () => {
+    expect((await h.call("list_agents", {})).value.agents).toHaveLength(4);
+    expect(h.manager.getRecord(lastId).toolCalls).toHaveLength(1);
+  });
+  await expect(
+    h.call("spawn_agent", { task_name: "d", message: "wait", fork_turns: "none" }),
+  ).rejects.toThrow(/slot/);
+  await h.call("interrupt_agent", { target: "a" });
+  await h.manager.getRecord(firstId).promise;
+  await expect(
+    h.call("spawn_agent", { task_name: "d", message: "wait", fork_turns: "none" }),
+  ).resolves.toMatchObject({ value: { task_name: "/root/d" } });
+}, 30_000);
+
 it("spawns three descendant levels by default with canonical paths and immediate-parent finals", async () => {
   const h = await setupV2(cleanup);
   const requests: TranscriptContext[] = [];

@@ -78,7 +78,7 @@ export class AgentRuntimes {
       !this.protections.has(record.id) &&
       record.status !== "running" &&
       record.status !== "queued" &&
-      (record.status === "idle" || this.hooks.isSettled(record)) &&
+      this.hooks.isSettled(record) &&
       !record.session.pendingMessageCount &&
       !this.hasPendingMail(record) &&
       !record.pendingSteers?.length &&

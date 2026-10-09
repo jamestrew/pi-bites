@@ -55,7 +55,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-it("reopens the owned identity without a task, retains capacity and completes selected input", async () => {
+it("reopens the owned identity without consuming execution and completes selected input", async () => {
   const completion = createAgentCompletionHandler({
     pi,
     getRecord: (id) => manager.getRecord(id),
@@ -86,9 +86,7 @@ it("reopens the owned identity without a task, retains capacity and completes se
   );
   expect(resumeAgent).not.toHaveBeenCalled();
   expect(manager.getClosedRecord(id)).toBeUndefined();
-  expect(() => manager.spawn(pi, ctx, "worker", "another", { description: "another" })).toThrow(
-    "concurrency",
-  );
+  expect(() => manager.assertExecutionAvailable()).not.toThrow();
   expect(await manager.reopen(pi, ctx, id)).toBe("pending_init");
   expect(openAgentSession).toHaveBeenCalledOnce();
   vi.mocked(resumeAgent).mockResolvedValueOnce("blue door remembered");
@@ -101,17 +99,14 @@ it("reopens the owned identity without a task, retains capacity and completes se
   completion.dispose();
 });
 
-it("claims capacity before loading and serializes concurrent resumes", async () => {
+it("claims residency before loading without reserving execution and serializes concurrent resumes", async () => {
   const id = await closedAgent();
   const loading = deferred<any>();
   vi.mocked(openAgentSession).mockReturnValue(loading.promise);
   const first = manager.reopen(pi, ctx, id);
   const second = manager.reopen(pi, ctx, id);
-  expect(() => manager.spawn(pi, ctx, "worker", "another", { description: "another" })).toThrow(
-    "concurrency",
-  );
-  await Promise.resolve();
-  expect(openAgentSession).toHaveBeenCalledOnce();
+  expect(() => manager.assertExecutionAvailable()).not.toThrow();
+  await vi.waitFor(() => expect(openAgentSession).toHaveBeenCalledOnce());
   loading.resolve(mockSession());
   expect(await first).toBe("pending_init");
   expect(await second).toBe("pending_init");
@@ -129,11 +124,12 @@ it("invalidates approvals when closing and reopening a conversation", async () =
   expect(invalidated).toHaveBeenCalledTimes(2);
 });
 
-it("fails at capacity before loading, and failed reopen can retry without leaking slots", async () => {
+it("fails at resident capacity before loading, and failed reopen can retry without leaking slots", async () => {
   const id = await closedAgent();
   vi.mocked(runAgent).mockResolvedValueOnce({ session: mockSession(), responseText: "done" });
   const blocker = manager.spawn(pi, ctx, "worker", "blocker", { description: "blocker" });
-  await expect(manager.reopen(pi, ctx, id)).rejects.toThrow("concurrency");
+  await manager.getRecord(blocker)!.promise;
+  await expect(manager.reopen(pi, ctx, id)).rejects.toThrow("runtime slot");
   expect(openAgentSession).not.toHaveBeenCalled();
   await manager.getRecord(blocker)!.promise;
   await manager.close(blocker);
@@ -211,9 +207,7 @@ it("cancels before and during reopening, tears down once, and preserves committe
   await manager.reopen(pi, ctx, id, { signal: committed.signal });
   committed.abort();
   expect(manager.getRecord(id)?.session).toBeDefined();
-  expect(() => manager.spawn(pi, ctx, "worker", "full", { description: "full" })).toThrow(
-    "concurrency",
-  );
+  expect(() => manager.assertExecutionAvailable()).not.toThrow();
 });
 
 it("uses stable snapshots when ctx getters throw after entry and cancels on shutdown", async () => {
@@ -330,7 +324,7 @@ it("closing an owning subtree cancels a sibling-initiated descendant reopen befo
   );
   const reopening = manager.reopen(pi, ctx, descendant);
   const rejected = expect(reopening).rejects.toThrow("owner closed");
-  await Promise.resolve();
+  await vi.waitFor(() => expect(openAgentSession).toHaveBeenCalledOnce());
   await manager.close(owner);
   await rejected;
   expect(manager.getRecord(descendant)).toBeUndefined();

@@ -28,7 +28,7 @@ type CloseHooks = {
   invalidate: (record: AgentRecord) => void;
   abort: (id: string) => void;
   teardown: (record: AgentRecord) => Promise<void>;
-  releaseReservation: (record: AgentRecord) => void;
+  releaseExecution: (record: AgentRecord) => void;
 };
 
 /** Owns subtree claims, teardown, and the minimal tombstones used by internal recovery. */
@@ -129,7 +129,7 @@ export class AgentCloser {
       record.session = undefined;
       this.agents.delete(record.id);
       this.closed.set(record.id, tombstone);
-      this.hooks.releaseReservation(record);
+      this.hooks.releaseExecution(record);
     }
   }
 

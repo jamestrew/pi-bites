@@ -27,7 +27,8 @@ export type OnAgentStart = (record: AgentRecord) => void;
 export type OnAgentCompact = (record: AgentRecord, info: CompactionInfo) => void;
 export type CompactionInfo = { reason: "manual" | "threshold" | "overflow"; tokensBefore: number };
 
-const DEFAULT_MAX_CONCURRENT = 6;
+// Codex V2 defaults to four total threads: root plus three shared child slots.
+const DEFAULT_MAX_CONCURRENT = 3;
 export const MAX_RETAINED_TOOL_CALLS = 200;
 
 interface SpawnArgs {
@@ -64,9 +65,8 @@ export class AgentManager {
   private maxConcurrent: number;
   /** Queue of agents waiting to start. */
   private queue: QueuedTurn[] = [];
-  /** Execution reservations; unnamed internal agents retain theirs until close. */
-  private reservedCount = 0;
-  private reservations = new WeakSet<AgentRecord>();
+  private executing = new Set<AgentRecord>();
+  private executionSubscriptions = new Map<AgentRecord, () => void>();
   private closer: AgentCloser;
   private completedGeneration = new WeakMap<AgentRecord, number>();
   private settledGeneration = new WeakMap<AgentRecord, number>();
@@ -81,9 +81,14 @@ export class AgentManager {
     limit: () => this.maxConcurrent,
     getRecord: (id) => this.agents.get(id),
     isClosing: (id) => this.isClosing(id),
-    isSettled: (record) => (this.settledGeneration.get(record) ?? 0) >= record.generation,
+    isSettled: (record) =>
+      !this.executing.has(record) &&
+      (record.status === "idle" || (this.settledGeneration.get(record) ?? 0) >= record.generation),
     retain: (record) => this.closer.retain(record),
-    invalidate: (record) => this.onAgentInvalidated?.(record),
+    invalidate: (record) => {
+      this.stopObservingExecution(record);
+      this.onAgentInvalidated?.(record);
+    },
   });
   private reopener: AgentReopener;
   private closing = false;
@@ -125,15 +130,14 @@ export class AgentManager {
         await this.runtimes.pending(record.id);
         if (record.session) await this.runtimes.teardown(record.session);
       },
-      releaseReservation: (record) => this.releaseReservation(record),
+      releaseExecution: (record) => this.stopObservingExecution(record),
     });
     this.reopener = new AgentReopener(this.agents, this.closer, {
       assertOwnerAvailable: (parentId, rootId) => this.tree.assertOwnerAvailable(parentId, rootId),
-      reserve: (record) => this.reserve(record),
       admitRuntime: (signal) => this.runtimes.admit(signal),
-      release: (record) => this.releaseReservation(record),
       invalidate: (record) => this.onAgentInvalidated?.(record),
       commit: (record) => {
+        if (record.session) this.observeExecution(record, record.session);
         this.options.set(record, {
           ...this.options.get(record),
           description: record.description,
@@ -179,18 +183,34 @@ export class AgentManager {
     (session as Partial<AgentSession> | undefined)?.clearQueue?.();
   }
 
-  private reserve(record: AgentRecord): boolean {
-    if (this.reservations.has(record)) return true;
-    if (this.reservedCount >= this.maxConcurrent) return false;
-    this.reservations.add(record);
-    this.reservedCount++;
-    return true;
+  /** Advisory admission, separate from native task start, as in Codex V2. */
+  assertExecutionAvailable(): void {
+    if (this.closing) throw new Error("AgentManager is shutting down.");
+    if (this.executing.size >= this.maxConcurrent)
+      throw new Error(
+        "No concurrency slot is available. Wait for running work to finish or interrupt a task.",
+      );
   }
 
-  private releaseReservation(record: AgentRecord): void {
-    if (!this.reservations.delete(record)) return;
-    this.reservedCount--;
-    this.drainQueue();
+  private observeExecution(record: AgentRecord, session: AgentSession): void {
+    this.stopObservingExecution(record);
+    this.executionSubscriptions.set(
+      record,
+      session.subscribe((event) => {
+        if (record.session !== session) return;
+        if (event.type === "agent_start") this.executing.add(record);
+        if (event.type === "agent_settled") {
+          this.executing.delete(record);
+          this.drainQueue();
+        }
+      }),
+    );
+  }
+
+  private stopObservingExecution(record: AgentRecord): void {
+    this.executionSubscriptions.get(record)?.();
+    this.executionSubscriptions.delete(record);
+    if (this.executing.delete(record)) this.drainQueue();
   }
 
   private recordDiagnostic(
@@ -225,6 +245,7 @@ export class AgentManager {
     requestedType: string,
     prompt: string,
     options: SpawnOptions,
+    capacityChecked = false,
   ): string {
     if (this.closing) throw new Error("AgentManager is shutting down.");
     this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
@@ -236,11 +257,7 @@ export class AgentManager {
     // call, not minutes later at drain. Throw (not warn): programmatic callers
     // can fix and retry; the RPC layer converts throws into error envelopes.
     assertValidSpawnCwd(options.cwd);
-    if (!options.queueIfBusy && this.reservedCount >= this.maxConcurrent) {
-      throw new Error(
-        "No concurrency slot is available. Wait for running work to finish or interrupt a task.",
-      );
-    }
+    if (!options.queueIfBusy && !capacityChecked) this.assertExecutionAvailable();
 
     const taskName =
       options.taskName === undefined
@@ -286,8 +303,8 @@ export class AgentManager {
     const args: SpawnArgs = { pi, parent, parentEntries, type, prompt, options };
 
     const start = () => this.startAgent(id, record, args);
-    if (this.reservedCount >= this.maxConcurrent) {
-      // Queue it — will be started when a retained agent releases its slot.
+    if (!capacityChecked && this.executing.size >= this.maxConcurrent) {
+      // Explicit internal queuing waits for native execution to settle, not runtime close.
       this.queue.push({ id, generation: record.generation, start });
     } else {
       // startAgent can throw — clean up the record so callers don't see an
@@ -306,7 +323,7 @@ export class AgentManager {
         this.recordDiagnostic(record, "start_rejected", {
           error: serializeDiagnosticError(err),
         });
-        this.releaseReservation(record);
+        this.stopObservingExecution(record);
         this.agents.delete(id);
         throw err;
       }
@@ -463,8 +480,8 @@ export class AgentManager {
       failure_count: record.failureHistory.length,
       abort: record.abort,
     });
-    if (record.taskName) this.releaseReservation(record);
     this.notifyComplete(record, generation);
+    this.drainQueue();
   }
 
   private manageGeneration(
@@ -530,7 +547,6 @@ export class AgentManager {
     assertValidSpawnCwd(options.cwd);
     const customCwd = options.cwd ?? undefined; // null (RPC "unset") → undefined
 
-    if (!this.reserve(record)) throw new Error("No concurrency slot is available.");
     record.status = "running";
     const queuedAt = record.startedAt;
     record.startedAt = Date.now();
@@ -564,6 +580,7 @@ export class AgentManager {
       ...initialHooks,
       onSessionCreated: (session) => {
         record.session = session;
+        this.observeExecution(record, session);
         getAgentSessionId(record);
         if (abortController.signal.aborted) {
           void this.runtimes.teardown(session);
@@ -586,7 +603,7 @@ export class AgentManager {
   /** Start queued agents up to the concurrency limit. */
   private drainQueue() {
     if (this.closing) return;
-    while (this.queue.length > 0 && this.reservedCount < this.maxConcurrent) {
+    while (this.queue.length > 0 && this.executing.size < this.maxConcurrent) {
       const next = this.queue.shift();
       if (!next) break;
       const record = this.agents.get(next.id);
@@ -621,7 +638,7 @@ export class AgentManager {
           failure_count: record.failureHistory.length,
         });
         this.notifyComplete(record);
-        this.releaseReservation(record);
+        this.stopObservingExecution(record);
       }
     }
   }
@@ -667,7 +684,7 @@ export class AgentManager {
     return this.steer(id, message);
   }
 
-  /** Commit native input and turn ownership together, with no await/admission race. */
+  /** Check before accepting idle work; native execution starts later without rechecking. */
   followup(id: string, deliver: () => boolean, pending: () => boolean): boolean {
     const record = this.agents.get(id);
     if (!record?.session || this.isClosing(id) || this.isRuntimeDisposing(id)) return false;
@@ -677,18 +694,22 @@ export class AgentManager {
         !this.options.has(record)
       )
         return false;
-      if (this.reservedCount >= this.maxConcurrent)
-        throw new Error("No concurrency slot is available.");
+      this.assertExecutionAvailable();
     }
     if (!deliver()) return false;
     this.followupPending.set(record, pending);
     if (record.status !== "running" && record.status !== "queued")
-      return this.startTurn(id, "Continue with the queued follow-up task.", true);
+      return this.startTurn(id, "Continue with the queued follow-up task.", true, true);
     return true;
   }
 
   /** Start another turn on a retained, settled session. */
-  startTurn(id: string, prompt: string, taskContinuation = false): boolean {
+  startTurn(
+    id: string,
+    prompt: string,
+    taskContinuation = false,
+    capacityChecked = false,
+  ): boolean {
     if (this.closing) return false;
     const record = this.agents.get(id);
     if (
@@ -704,12 +725,7 @@ export class AgentManager {
 
     const options = this.options.get(record);
     if (!options) return false;
-    if (
-      record.taskName &&
-      !this.reservations.has(record) &&
-      this.reservedCount >= this.maxConcurrent
-    )
-      throw new Error("No concurrency slot is available.");
+    if (!capacityChecked) this.assertExecutionAvailable();
     this.runtimes.touch(id);
     const session = record.session;
 
@@ -736,11 +752,7 @@ export class AgentManager {
         generation,
         taskContinuation,
       );
-    if (!this.reservations.has(record) && this.reservedCount >= this.maxConcurrent) {
-      this.queue.push({ id, generation, start });
-    } else {
-      start();
-    }
+    start();
     return true;
   }
 
@@ -754,7 +766,6 @@ export class AgentManager {
     taskContinuation: boolean,
   ): void {
     if (record.generation !== generation || record.status !== "queued") return;
-    if (!this.reserve(record)) return;
     record.status = "running";
     const queuedAt = record.startedAt;
     record.startedAt = Date.now();
@@ -966,7 +977,7 @@ export class AgentManager {
     await this.runtimes.waitForAll();
     for (const record of this.agents.values()) {
       if (record.session) void this.runtimes.teardown(record.session);
-      this.releaseReservation(record);
+      this.stopObservingExecution(record);
     }
     await this.runtimes.waitForAll();
     this.agents.clear();

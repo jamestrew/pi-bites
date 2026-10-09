@@ -154,7 +154,8 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
         {
           id: "maxConcurrent",
           label: "Max concurrency",
-          description: "Max concurrent agents (Enter to type)",
+          description:
+            "Child execution admission and resident capacity; root excluded (Enter to type)",
           currentValue: String(maxConcurrent),
           values: [String(maxConcurrent)],
         },

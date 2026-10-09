@@ -211,47 +211,39 @@ describe("AgentManager — detached lifecycle", () => {
     expect((manager as any).runningCount).toBe(0);
   });
 
-  it("reuses a retained session's slot and holds queued work until close", async () => {
+  it("releases execution after a retained turn without waiting for conversation close", async () => {
     manager = new AgentManager(undefined, 1);
-    vi.mocked(resumeAgent).mockClear();
     const retainedSession = mockSession();
-    vi.mocked(runAgent).mockResolvedValueOnce({
-      responseText: "first result",
-      session: retainedSession,
+    vi.mocked(runAgent).mockImplementationOnce(async (_parent, _type, _prompt, options) => {
+      options.onSessionCreated?.(retainedSession);
+      return { responseText: "first result", session: retainedSession };
     });
-
-    const retained = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "retained",
-    });
+    const retained = manager.spawn(mockPi, mockCtx, "worker", "first", { description: "retained" });
     await manager.getRecord(retained)!.promise;
-
-    let finishBlocker!: (value: { responseText: string; session: any }) => void;
-    vi.mocked(runAgent).mockImplementationOnce(
-      () => new Promise((resolve) => (finishBlocker = resolve)),
-    );
+    let finish!: (value: string) => void;
+    vi.mocked(resumeAgent).mockImplementationOnce(() => {
+      retainedSession.emitEvent({ type: "agent_start" });
+      return new Promise<string>((resolve) => {
+        finish = resolve;
+      });
+    });
+    expect(manager.startTurn(retained, "second")).toBe(true);
+    expect(manager.steer(retained, "queued guidance")).toBe(true);
+    vi.mocked(runAgent).mockResolvedValueOnce({
+      responseText: "block done",
+      session: mockSession(),
+    });
     const blocker = manager.spawn(mockPi, mockCtx, "worker", "block", {
       queueIfBusy: true,
       description: "blocker",
     });
-    vi.mocked(resumeAgent).mockResolvedValue("second result");
-
     expect(manager.getRecord(blocker)?.status).toBe("queued");
-    expect(manager.startTurn(retained, "second")).toBe(true);
-    expect(manager.steer(retained, "queued guidance")).toBe(true);
-    await manager.getRecord(retained)!.promise;
-
-    expect(resumeAgent).toHaveBeenCalledWith(
-      retainedSession,
-      "second",
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    retainedSession.emitEvent({ type: "agent_settled" });
+    finish("second result");
+    await manager.waitForAll();
     expect(retainedSession.steer).toHaveBeenCalledWith("queued guidance");
-    expect(manager.getRecord(blocker)?.status).toBe("queued");
-
-    await manager.close(retained);
-    finishBlocker({ responseText: "block done", session: mockSession() });
-    await manager.getRecord(blocker)!.promise;
-    expect((manager as any).runningCount).toBe(0);
+    expect(manager.getRecord(blocker)?.result).toBe("block done");
+    expect(manager.getRecord(retained)?.session).toBe(retainedSession);
   });
 
   it("interrupts only the current turn and leaves its retained session reusable", async () => {
@@ -615,73 +607,41 @@ describe("AgentManager — detached lifecycle", () => {
     });
   });
 
-  it("retains the slot after retained-turn session setup throws until close", async () => {
+  it("does not consume execution when retained-turn session setup fails", async () => {
     manager = new AgentManager(undefined, 1);
     const retainedSession = mockSession();
     vi.mocked(runAgent).mockResolvedValueOnce({
       responseText: "first result",
       session: retainedSession,
     });
-    const retained = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "retained",
-    });
+    const retained = manager.spawn(mockPi, mockCtx, "worker", "first", { description: "retained" });
     await manager.getRecord(retained)!.promise;
-
-    let finishBlocker!: (value: { responseText: string; session: any }) => void;
-    vi.mocked(runAgent)
-      .mockImplementationOnce(() => new Promise((resolve) => (finishBlocker = resolve)))
-      .mockResolvedValueOnce({ responseText: "follower result", session: mockSession() });
-    const blocker = manager.spawn(mockPi, mockCtx, "worker", "block", {
-      queueIfBusy: true,
-      description: "blocker",
-    });
     retainedSession.clearQueue.mockImplementationOnce(() => {
       throw new Error("session setup failed");
     });
     expect(manager.startTurn(retained, "second")).toBe(true);
-    const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
-      queueIfBusy: true,
-      description: "follower",
-    });
-
-    expect(manager.getRecord(blocker)?.status).toBe("queued");
-    expect(manager.getRecord(follower)?.status).toBe("queued");
     expect(manager.getRecord(retained)).toMatchObject({
       status: "error",
       error: "session setup failed",
     });
+    mockPendingRun();
+    const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
+      description: "follower",
+    });
+    expect(manager.getRecord(follower)?.status).toBe("running");
     await manager.close(retained);
-    finishBlocker({ responseText: "block done", session: mockSession() });
-    await manager.getRecord(blocker)!.promise;
-    expect(manager.getRecord(follower)?.status).toBe("queued");
-    await manager.close(blocker);
-    await vi.waitFor(() => expect(manager.getRecord(follower)?.status).toBe("completed"));
-
     expect(manager.getClosedRecord(retained)).toEqual({ id: retained, recoverable: false });
-    expect(manager.getRecord(follower)?.result).toBe("follower result");
-    expect((manager as any).runningCount).toBe(0);
   });
 
-  it("retains the slot after retained-turn start diagnostics throw until close", async () => {
+  it("does not consume execution when retained-turn diagnostics fails", async () => {
     manager = new AgentManager(undefined, 1);
     const retainedSession = mockSession();
     vi.mocked(runAgent).mockResolvedValueOnce({
       responseText: "first result",
       session: retainedSession,
     });
-    const retained = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "retained",
-    });
+    const retained = manager.spawn(mockPi, mockCtx, "worker", "first", { description: "retained" });
     await manager.getRecord(retained)!.promise;
-
-    let finishBlocker!: (value: { responseText: string; session: any }) => void;
-    vi.mocked(runAgent)
-      .mockImplementationOnce(() => new Promise((resolve) => (finishBlocker = resolve)))
-      .mockResolvedValueOnce({ responseText: "follower result", session: mockSession() });
-    const blocker = manager.spawn(mockPi, mockCtx, "worker", "block", {
-      queueIfBusy: true,
-      description: "blocker",
-    });
     const recordDiagnostic = (manager as any).recordDiagnostic.bind(manager);
     (manager as any).recordDiagnostic = (
       record: any,
@@ -692,25 +652,17 @@ describe("AgentManager — detached lifecycle", () => {
       return recordDiagnostic(record, event, details);
     };
     expect(manager.startTurn(retained, "second")).toBe(true);
-    const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
-      queueIfBusy: true,
-      description: "follower",
-    });
-
-    expect(manager.getRecord(blocker)?.status).toBe("queued");
-    expect(manager.getRecord(follower)?.status).toBe("queued");
     expect(manager.getRecord(retained)).toMatchObject({
       status: "error",
       error: "diagnostic failed",
     });
+    mockPendingRun();
+    const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
+      description: "follower",
+    });
+    expect(manager.getRecord(follower)?.status).toBe("running");
     await manager.close(retained);
-    finishBlocker({ responseText: "block done", session: mockSession() });
-    await manager.getRecord(blocker)!.promise;
-    await manager.close(blocker);
-    await vi.waitFor(() => expect(manager.getRecord(follower)?.status).toBe("completed"));
-
     expect(manager.getClosedRecord(retained)).toEqual({ id: retained, recoverable: false });
-    expect((manager as any).runningCount).toBe(0);
   });
 
   it("tracks a turn before start-callback reentrancy can wait for it", async () => {
@@ -722,7 +674,12 @@ describe("AgentManager — detached lifecycle", () => {
       });
     });
     let finish!: (value: { responseText: string; session: any }) => void;
-    vi.mocked(runAgent).mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    vi.mocked(runAgent).mockImplementationOnce((_parent, _type, _prompt, options) => {
+      const session = mockSession();
+      options.onSessionCreated?.(session);
+      session.emitEvent({ type: "agent_start" });
+      return new Promise((resolve) => (finish = resolve));
+    });
 
     manager.spawn(mockPi, mockCtx, "worker", "first", { description: "tracked" });
     await Promise.resolve();
@@ -740,7 +697,12 @@ describe("AgentManager — detached lifecycle", () => {
       if (record.description === "first") shutdown = manager.shutdown();
     }, 1);
     let finish!: (value: { responseText: string; session: any }) => void;
-    vi.mocked(runAgent).mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    vi.mocked(runAgent).mockImplementationOnce((_parent, _type, _prompt, options) => {
+      const session = mockSession();
+      options.onSessionCreated?.(session);
+      session.emitEvent({ type: "agent_start" });
+      return new Promise((resolve) => (finish = resolve));
+    });
     const first = manager.spawn(mockPi, mockCtx, "worker", "first", {
       description: "first",
     });
