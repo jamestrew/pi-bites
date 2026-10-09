@@ -275,12 +275,21 @@ export function parseBitesConfig(value: unknown): BitesConfig | undefined {
   return isBitesConfig(value) ? value : undefined;
 }
 
-function tryReadJson(filePath: string, label: string): BitesConfig {
-  if (!existsSync(filePath)) return {};
+function readConfigFile(filePath: string): BitesConfig {
   try {
     const config = parseBitesConfig(JSON.parse(readFileSync(filePath, "utf-8")));
     if (!config) throw new Error("config does not match the pi-bites schema");
     return config;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to read config at ${filePath}: ${message}`);
+  }
+}
+
+function tryReadJson(filePath: string, label: string): BitesConfig {
+  try {
+    return readConfigFile(filePath);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`pi-bites: failed to parse ${label} config at ${filePath}: ${message}`);
@@ -316,26 +325,41 @@ export function loadConfig(cwd: string): BitesConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Config-file write helpers
+// Scope-aware config mutation
 // ---------------------------------------------------------------------------
-
-/**
- * Resolve which config file to write to:
- * project-local (.pi/pi-bites.json) if it already exists, otherwise global.
- */
-function resolveWritePath(cwd: string): string {
-  const projectPath = join(cwd, CONFIG_DIR_NAME, "pi-bites.json");
-  if (existsSync(projectPath)) return projectPath;
-  return join(getAgentDir(), "pi-bites.json");
-}
-
-function readConfigFile(filePath: string): BitesConfig {
-  return tryReadJson(filePath, filePath);
-}
 
 function writeConfigFile(filePath: string, config: BitesConfig): void {
   mkdirSync(dirname(filePath), { recursive: true });
   writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+}
+
+function setExtensionDisabled(cwd: string, name: ExtensionName, disabled: boolean) {
+  const globalPath = join(getAgentDir(), "pi-bites.json");
+  const projectPath = join(cwd, CONFIG_DIR_NAME, "pi-bites.json");
+  // Validate both scopes before any write. Later write failures are not rolled back.
+  const files = [
+    { path: globalPath, scope: "global", config: readConfigFile(globalPath) },
+    { path: projectPath, scope: "project", config: readConfigFile(projectPath) },
+  ] as const;
+  const disablingFiles = files.filter((file) => file.config.disable?.includes(name));
+  const scope = disablingFiles.map((file) => file.scope).join(" + ");
+  const alreadyDisabled = disablingFiles.length > 0;
+  if (disabled === alreadyDisabled) return { changed: false, scope };
+
+  if (disabled) {
+    const target = existsSync(projectPath) ? files[1] : files[0];
+    target.config.disable = [...(target.config.disable ?? []), name];
+    writeConfigFile(target.path, target.config);
+    return { changed: true, scope: target.scope };
+  }
+
+  // Disable arrays are unioned, so enabling must remove the name from both scopes.
+  for (const file of disablingFiles) {
+    file.config.disable = (file.config.disable ?? []).filter((n) => n !== name);
+    if (file.config.disable.length === 0) delete file.config.disable;
+    writeConfigFile(file.path, file.config);
+  }
+  return { changed: true, scope };
 }
 
 // ---------------------------------------------------------------------------
@@ -362,76 +386,48 @@ export function registerBitesCommands(pi: ExtensionAPI): void {
     return true;
   }
 
-  // /bites:off ---------------------------------------------------------------
-  pi.registerCommand("bites:off", {
-    description: "Disable an extension by name (takes effect on next launch)",
-    getArgumentCompletions: completions,
-    handler: async (args, ctx) => {
-      const name = args.trim();
-      if (!validateName(name, ctx)) return;
+  for (const disabled of [true, false]) {
+    pi.registerCommand(disabled ? "bites:off" : "bites:on", {
+      description: disabled
+        ? "Disable an extension by name (takes effect on next launch)"
+        : "Re-enable a disabled extension by name (takes effect on next launch)",
+      getArgumentCompletions: completions,
+      handler: async (args, ctx) => {
+        const name = args.trim();
+        if (!validateName(name, ctx)) return;
 
-      // Check effective (merged) state so we catch disables from either file.
-      const effective = loadConfig(ctx.cwd);
-      if (effective.disable?.includes(name)) {
-        const globalCfg = readConfigFile(globalPath);
-        const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "pi-bites.json");
-        const projectCfg = readConfigFile(projectPath);
-        const inGlobal = globalCfg.disable?.includes(name);
-        const inProject = projectCfg.disable?.includes(name);
-        const scope = inGlobal && inProject ? "global + project" : inGlobal ? "global" : "project";
-        ctx.ui.notify(`"${name}" is already disabled (${scope}).`, "warning");
-        return;
-      }
-
-      const targetPath = resolveWritePath(ctx.cwd);
-      const config = readConfigFile(targetPath);
-      config.disable = [...(config.disable ?? []), name];
-      writeConfigFile(targetPath, config);
-
-      const isProject = targetPath !== globalPath;
-      ctx.ui.notify(
-        `"${name}" disabled in ${isProject ? "project" : "global"} config.\nRestart pi to apply.`,
-        "info",
-      );
-    },
-  });
-
-  // /bites:on ----------------------------------------------------------------
-  pi.registerCommand("bites:on", {
-    description: "Re-enable a disabled extension by name (takes effect on next launch)",
-    getArgumentCompletions: completions,
-    handler: async (args, ctx) => {
-      const name = args.trim();
-      if (!validateName(name, ctx)) return;
-
-      const effective = loadConfig(ctx.cwd);
-      if (!effective.disable?.includes(name)) {
-        ctx.ui.notify(`"${name}" is already enabled.`, "warning");
-        return;
-      }
-
-      // Since disable arrays are unioned, remove from BOTH files to truly enable.
-      const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "pi-bites.json");
-      for (const filePath of [globalPath, projectPath]) {
-        const config = readConfigFile(filePath);
-        if (config.disable?.includes(name)) {
-          config.disable = config.disable.filter((n) => n !== name);
-          if (config.disable.length === 0) delete config.disable;
-          writeConfigFile(filePath, config);
+        try {
+          const result = setExtensionDisabled(ctx.cwd, name, disabled);
+          if (!result.changed) {
+            ctx.ui.notify(
+              disabled
+                ? `"${name}" is already disabled (${result.scope}).`
+                : `"${name}" is already enabled.`,
+              "warning",
+            );
+            return;
+          }
+          ctx.ui.notify(
+            disabled
+              ? `"${name}" disabled in ${result.scope} config.\nRestart pi to apply.`
+              : `"${name}" enabled.\nRestart pi to apply.`,
+            "info",
+          );
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          ctx.ui.notify(`Failed to update config: ${message}`, "error");
         }
-      }
-
-      ctx.ui.notify(`"${name}" enabled.\nRestart pi to apply.`, "info");
-    },
-  });
+      },
+    });
+  }
 
   // /bites:list --------------------------------------------------------------
   pi.registerCommand("bites:list", {
     description: "List all extensions with their enabled/disabled status and config scope",
     handler: async (_args, ctx) => {
       const projectPath = join(ctx.cwd, CONFIG_DIR_NAME, "pi-bites.json");
-      const globalCfg = readConfigFile(globalPath);
-      const projectCfg = readConfigFile(projectPath);
+      const globalCfg = tryReadJson(globalPath, "global");
+      const projectCfg = tryReadJson(projectPath, "project-local");
       const globalDisabled = new Set(globalCfg.disable ?? []);
       const projectDisabled = new Set(projectCfg.disable ?? []);
 

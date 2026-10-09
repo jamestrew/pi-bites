@@ -1,7 +1,15 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 let agentDir = "";
 
@@ -115,6 +123,162 @@ describe("loadConfig", () => {
 });
 
 describe("bites commands", () => {
+  describe("safe mutation", () => {
+    let project: string;
+    let globalPath: string;
+    let projectPath: string;
+    let commands: Map<string, { handler(args: string, ctx: unknown): Promise<void> }>;
+    let notify: ReturnType<typeof vi.fn>;
+
+    beforeEach(async () => {
+      project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
+      agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
+      globalPath = join(agentDir, "pi-bites.json");
+      projectPath = join(project, ".pi", "pi-bites.json");
+      mkdirSync(join(project, ".pi"));
+      commands = new Map();
+      notify = vi.fn();
+      const { registerBitesCommands } = await import("./config.js");
+      registerBitesCommands({
+        registerCommand: (name: string, command: Parameters<typeof commands.set>[1]) =>
+          commands.set(name, command),
+      } as never);
+    });
+
+    afterEach(() => {
+      rmSync(project, { recursive: true, force: true });
+    });
+
+    test("refuses to overwrite malformed global config when no project config exists", async () => {
+      const bytes = "{ invalid JSON containing user settings";
+      writeFileSync(globalPath, bytes);
+
+      await commands.get("bites:off")!.handler("view", { cwd: project, ui: { notify } });
+
+      expect(readFileSync(globalPath, "utf8")).toBe(bytes);
+      expect(existsSync(projectPath)).toBe(false);
+      expect(notify).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(globalPath), "error");
+    });
+
+    for (const command of ["bites:off", "bites:on"]) {
+      for (const scope of ["global", "project"]) {
+        test.each([
+          ["malformed JSON", "{ invalid JSON containing user settings"],
+          ["invalid schema", '{"smallModel":{"thinking":"invalid"},"disable":["view"]}'],
+          ["non-object JSON", "[]"],
+        ])(`${command} refuses ${scope} %s without writing either scope`, async (_label, bytes) => {
+          const invalidPath = scope === "global" ? globalPath : projectPath;
+          const otherPath = scope === "global" ? projectPath : globalPath;
+          const otherBytes = command === "bites:on" ? '{"disable":["view"]}' : '{"custom":true}';
+          writeFileSync(invalidPath, bytes);
+          writeFileSync(otherPath, otherBytes);
+
+          await commands.get(command)!.handler("view", { cwd: project, ui: { notify } });
+
+          expect(readFileSync(invalidPath, "utf8")).toBe(bytes);
+          expect(readFileSync(otherPath, "utf8")).toBe(otherBytes);
+          expect(notify).toHaveBeenCalledExactlyOnceWith(
+            expect.stringContaining(invalidPath),
+            "error",
+          );
+        });
+      }
+    }
+
+    test("refuses unreadable config before enabling in either scope", async () => {
+      const bytes = '{"disable":["view"]}';
+      writeFileSync(globalPath, bytes);
+      mkdirSync(projectPath);
+
+      await commands.get("bites:on")!.handler("view", { cwd: project, ui: { notify } });
+
+      expect(readFileSync(globalPath, "utf8")).toBe(bytes);
+      expect(notify).toHaveBeenCalledExactlyOnceWith(expect.stringContaining(projectPath), "error");
+    });
+
+    test("keeps scope union and unrelated settings through no-op and two-file enable", async () => {
+      const global = {
+        disable: ["view", "notifications"],
+        smallModel: { model: "provider/model", custom: 42 },
+        custom: { keep: true },
+      };
+      const local = { disable: ["view"], statusline: { command: "echo status" }, extra: [1, 2] };
+      const globalBytes = JSON.stringify(global);
+      const projectBytes = JSON.stringify(local);
+      writeFileSync(globalPath, globalBytes);
+      writeFileSync(projectPath, projectBytes);
+
+      await commands.get("bites:off")!.handler("view", { cwd: project, ui: { notify } });
+
+      expect(notify).toHaveBeenLastCalledWith(
+        '"view" is already disabled (global + project).',
+        "warning",
+      );
+      expect(readFileSync(globalPath, "utf8")).toBe(globalBytes);
+      expect(readFileSync(projectPath, "utf8")).toBe(projectBytes);
+
+      await commands.get("bites:on")!.handler("view", { cwd: project, ui: { notify } });
+
+      expect(JSON.parse(readFileSync(globalPath, "utf8"))).toEqual({
+        ...global,
+        disable: ["notifications"],
+      });
+      expect(JSON.parse(readFileSync(projectPath, "utf8"))).toEqual({
+        statusline: { command: "echo status" },
+        extra: [1, 2],
+      });
+      expect(notify).toHaveBeenLastCalledWith('"view" enabled.\nRestart pi to apply.', "info");
+    });
+
+    test("does not create missing files for an already enabled extension", async () => {
+      await commands.get("bites:on")!.handler("view", { cwd: project, ui: { notify } });
+
+      expect(existsSync(globalPath)).toBe(false);
+      expect(existsSync(projectPath)).toBe(false);
+      expect(notify).toHaveBeenCalledExactlyOnceWith('"view" is already enabled.', "warning");
+    });
+
+    test("disables in an existing project config without changing other settings or global config", async () => {
+      const globalBytes = '{"disable":["notifications"],"custom":true}';
+      writeFileSync(globalPath, globalBytes);
+      writeFileSync(projectPath, '{"statusline":{"command":"echo status"},"custom":42}');
+
+      await commands.get("bites:off")!.handler("view", { cwd: project, ui: { notify } });
+
+      expect(readFileSync(globalPath, "utf8")).toBe(globalBytes);
+      expect(JSON.parse(readFileSync(projectPath, "utf8"))).toEqual({
+        statusline: { command: "echo status" },
+        custom: 42,
+        disable: ["view"],
+      });
+      expect(notify).toHaveBeenCalledExactlyOnceWith(
+        '"view" disabled in project config.\nRestart pi to apply.',
+        "info",
+      );
+    });
+
+    test.skipIf(process.getuid?.() === 0)(
+      "reports write failure without reporting enable success",
+      async () => {
+        const bytes = '{"disable":["view"]}';
+        writeFileSync(globalPath, bytes);
+        writeFileSync(projectPath, bytes);
+        chmodSync(projectPath, 0o400);
+        try {
+          await commands.get("bites:on")!.handler("view", { cwd: project, ui: { notify } });
+
+          expect(readFileSync(projectPath, "utf8")).toBe(bytes);
+          expect(notify).toHaveBeenCalledExactlyOnceWith(
+            expect.stringContaining(projectPath),
+            "error",
+          );
+        } finally {
+          chmodSync(projectPath, 0o600);
+        }
+      },
+    );
+  });
+
   test("lists one skill/prompt extension and re-enables legacy disables in both scopes", async () => {
     const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
