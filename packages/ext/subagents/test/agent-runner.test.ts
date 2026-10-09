@@ -23,7 +23,7 @@ const {
   getAgentDir: vi.fn(() => "/mock/agent-dir"),
   sessionManagerInMemory: vi.fn(() => ({
     kind: "memory-session-manager",
-    appendCustomEntry: vi.fn(),
+    appendCustomEntry: vi.fn<(customType: string, data: unknown) => void>(),
   })),
   settingsManagerCreate: vi.fn(() => ({ kind: "settings-manager" })),
   modelRuntimeRegisterProvider: vi.fn(),
@@ -82,12 +82,10 @@ vi.mock("../prompts.js", () => ({
   buildAgentPrompt: vi.fn(() => "system prompt"),
 }));
 
-import {
-  getAgentConversation,
-  parseSubagentMetadata,
-  resumeAgent,
-  runAgent,
-} from "../agent-runner.js";
+import { getAgentConversation, resumeAgent, runAgent } from "../agent-runner.js";
+import { parseSubagentMetadata } from "../metadata.js";
+import { subagentBashGatePolicy } from "../../bash-gate/policy.js";
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
 function createSession(finalText: string) {
   const listeners: Array<(event: any) => void> = [];
@@ -878,6 +876,49 @@ function lastLoaderOpts(): Record<string, unknown> {
 }
 
 describe("embedded agent runner configuration", () => {
+  it.each([
+    [undefined, "prompt"],
+    ["prompt", "prompt"],
+    ["deny", "deny"],
+  ] as const)(
+    "writes child metadata consumed by the Bash gate (%s → %s)",
+    async (policy, expected) => {
+      vi.mocked(resolveAgent).mockReturnValueOnce({
+        type: "worker",
+        matched: true,
+        config: makeAgentConfig({ bashGatePolicy: policy }),
+      });
+      const { session } = createSession("OK");
+      createAgentSession.mockResolvedValue({ session });
+
+      await runAgent(ctx, "worker", "go", {
+        pi,
+        agentId: "agent-1",
+        agentSessionId: "conversation-1",
+      });
+
+      const manager = sessionManagerInMemory.mock.results[0]!.value;
+      const [customType, data] = manager.appendCustomEntry.mock.calls[0]!;
+      expect(customType).toBe("pi-bites:subagent");
+      expect(data).toEqual({
+        agentId: "agent-1",
+        agentSessionId: "conversation-1",
+        type: "worker",
+        title: "worker",
+        bashGatePolicy: policy,
+      });
+      const entry: SessionEntry = {
+        type: "custom",
+        id: "child-metadata",
+        parentId: null,
+        timestamp: "now",
+        customType,
+        data,
+      };
+      expect(subagentBashGatePolicy([entry])).toBe(expected);
+    },
+  );
+
   it("lets Pi discover skills for ordinary spawns", async () => {
     const { session } = createSession("OK");
     createAgentSession.mockResolvedValue({ session });

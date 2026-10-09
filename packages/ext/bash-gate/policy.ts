@@ -11,7 +11,7 @@ import {
   SUBAGENT_METADATA_ENTRY,
   parseSubagentMetadata,
   type SubagentMetadata,
-} from "../subagents/agent-runner.js";
+} from "../subagents/metadata.js";
 type BashGatePolicy = "deny" | "prompt";
 export function subagentMetadata(entries: SessionEntry[]): SubagentMetadata | null | undefined {
   const entry = [...entries]

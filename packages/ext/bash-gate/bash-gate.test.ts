@@ -44,6 +44,10 @@ describe("subagentBashGatePolicy", () => {
     );
     expect(subagentBashGatePolicy([entry({ ...metadata, bashGatePolicy: "wat" })])).toBe("deny");
     expect(subagentBashGatePolicy([entry(metadata)])).toBe("prompt");
+    expect(subagentBashGatePolicy([])).toBeUndefined();
+    expect(subagentBashGatePolicy([entry(null)])).toBe("deny");
+    expect(subagentBashGatePolicy([entry({ title: "Explore" })])).toBe("deny");
+    expect(subagentBashGatePolicy([entry({ type: "Explore" })])).toBe("deny");
   });
 });
 
