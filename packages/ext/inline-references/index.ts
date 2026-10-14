@@ -131,20 +131,6 @@ function formatPromptBlock(prompt: LoadedPromptTemplate): string {
   return `<prompt name="${prompt.name}" location="${prompt.filePath}">\n${prompt.content.trim()}\n</prompt>`;
 }
 
-function patchLoadedReferencePrompt(systemPrompt: string): string {
-  const readInstruction =
-    "Use the read tool to load a skill's file when the task matches its description.";
-  const loadedInstruction =
-    "Use the read tool to load a skill's file when the task matches its description, unless hidden inline-reference-context has already provided that skill. Treat provided inline-reference-context as already loaded; only read referenced files when needed.";
-
-  if (systemPrompt.includes(loadedInstruction)) return systemPrompt;
-  if (systemPrompt.includes(readInstruction)) {
-    return systemPrompt.replace(readInstruction, loadedInstruction);
-  }
-
-  return `${systemPrompt}\n\nInline reference note: when hidden skill-context or prompt-context is provided, treat it as already loaded; do not read the referenced source file again unless you need to inspect referenced files.`;
-}
-
 function registerInlineReferenceContext(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     const refs = parseInlineReferences(event.prompt);
@@ -162,17 +148,18 @@ function registerInlineReferenceContext(pi: ExtensionAPI) {
       .filter((prompt) => prompt !== undefined);
 
     const blocks = [...skills.map(formatSkillBlock), ...prompts.map(formatPromptBlock)];
-    if (blocks.length === 0)
-      return { systemPrompt: patchLoadedReferencePrompt(event.systemPrompt) };
+    if (blocks.length === 0) return;
 
     return {
       message: {
         customType: "inline-reference-context",
-        content: blocks.join("\n\n"),
+        content: [
+          "The following skill and prompt content is already loaded; do not read the referenced source files again unless you need to inspect referenced files.",
+          ...blocks,
+        ].join("\n\n"),
         display: false,
         details: refs.map((ref) => ref.raw).join(", "),
       },
-      systemPrompt: patchLoadedReferencePrompt(event.systemPrompt),
     };
   });
 }
