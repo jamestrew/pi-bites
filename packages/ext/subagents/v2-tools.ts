@@ -7,9 +7,8 @@ import {
 import { taskReceiptRenderers } from "./ui/task-receipt.js";
 import type { SubagentsSettings } from "./settings.js";
 import { recentTurnEntries } from "./fork-history.js";
-import { waitForOperation } from "../shared/abortable-wait.js";
 import { lifecycleStatusLabel } from "./ui/agent-lifecycle-render.js";
-import type { createSubagentMessenger } from "./subagent-messages.js";
+import type { TaskDelivery } from "./agent-delivery.js";
 import { resolveAgent, resolveSpawnAgent } from "./agent-types.js";
 import { spawnNamed } from "./task-paths.js";
 import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -22,21 +21,17 @@ import { getAgentStatus } from "./agent-status.js";
 import { CODEX_V2_CONTRACT } from "./codex-v2-contract.js";
 import { defineSubagentTool } from "./operation-context.js";
 import { SubagentOperationError, textResult } from "./tool-result.js";
-import { getAgentSessionId } from "./agent-tree.js";
 import type { SubagentMessageDetails } from "./subagent-messages.js";
-import { allowedSubagentModels, assertAgentModel } from "./model-scope.js";
 import type { AgentActivity } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
 
 export function createV2Tools(
   pi: ExtensionAPI,
-  deps: {
+  deps: TaskDelivery & {
     manager: AgentManager;
     agentActivity: Map<string, AgentActivity>;
     fleet: FleetList;
     getModelDefaults?: () => Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">;
-    getMessenger: (sessionId: string) => ReturnType<typeof createSubagentMessenger> | undefined;
-    queueMail: (sessionId: string, details: SubagentMessageDetails) => boolean;
   },
 ) {
   const roots = new Map<string, WaitAgentStatus>();
@@ -197,75 +192,31 @@ export function createV2Tools(
         if (root && name === "followup_task")
           throw new Error("Cannot send a follow-up task to root");
         const record = root ? undefined : deps.manager.taskPaths.lookup(sessionId, args.target);
-        if (record && name === "followup_task")
-          assertAgentModel(record, allowedSubagentModels(ctx));
-        const release = record ? deps.manager.runtimes.protect(record.id) : undefined;
-        try {
-          // Out-of-scope conversations still receive mail, without an unauthorized reload.
-          const mayReload =
-            name === "followup_task" ||
-            !record?.invocation?.modelName ||
-            allowedSubagentModels(ctx).some(
-              (model) => `${model.provider}/${model.id}` === record.invocation?.modelName,
-            );
-          if (
-            mayReload &&
-            record &&
-            (!record.session || deps.manager.isRuntimeDisposing(record.id))
-          ) {
-            await deps.manager.reload(pi, ctx, record.id, signal);
-            signal?.throwIfAborted();
-          }
-          if (record && deps.manager.isClosing(record.id))
-            throw new Error("Target agent is closing");
-          const targetSessionId = (record && getAgentSessionId(record)) ?? caller.rootId;
-          const messenger = deps.getMessenger(targetSessionId);
-          const sender = {
+        const details: SubagentMessageDetails = {
+          sender: {
             id: caller.path,
             type: resolveAgent(ctx.parentRole ?? "default").type,
             title: caller.path,
-          };
-          const deliver = () =>
-            deps.queueMail(targetSessionId, {
-              sender,
-              message: args.message,
-              task: name === "followup_task",
-            });
-          // An interrupt acknowledges submission before Pi finishes unwinding tools.
-          // Wait for that turn before committing fresh work to the retained session.
-          if (
-            name === "followup_task" &&
-            record?.status === "stopped" &&
-            record.abort?.source === "interrupt"
-          ) {
-            if (record.promise)
-              await (signal ? waitForOperation(record.promise, signal) : record.promise);
-            signal?.throwIfAborted();
-          }
-          const accepted =
-            name === "followup_task" && record
-              ? deps.manager.followup(
-                  record.id,
-                  deliver,
-                  () => (messenger?.observe().pendingTasks ?? 0) > 0,
-                )
-              : deliver();
-          if (!accepted) throw new Error("Input was not submitted to target agent");
-          if (record) {
-            deps.fleet.ensureTimer();
-            deps.fleet.update();
-            pi.events.emit("subagents:steered", { id: record.id, message: args.message });
-          }
-          return {
-            ...textResult("", {
-              target: record?.taskName ?? "/root",
-              status: name === "send_message" ? "queued" : "submitted",
-            }),
-            value: "" as const,
-          };
-        } finally {
-          release?.();
+          },
+          message: args.message,
+          task: name === "followup_task",
+        };
+        const accepted = record
+          ? await deps.manager.deliverTask(pi, ctx, record.id, details, signal)
+          : deps.queueMail(caller.rootId, details);
+        if (!accepted) throw new Error("Input was not submitted to target agent");
+        if (record) {
+          deps.fleet.ensureTimer();
+          deps.fleet.update();
+          pi.events.emit("subagents:steered", { id: record.id, message: args.message });
         }
+        return {
+          ...textResult("", {
+            target: record?.taskName ?? "/root",
+            status: name === "send_message" ? "queued" : "submitted",
+          }),
+          value: "" as const,
+        };
       },
     });
   const interrupt_agent = defineSubagentTool({

@@ -185,6 +185,11 @@ export function createSubagents(
       },
   );
 
+  manager.taskDelivery = {
+    getMessenger: (id) => deliveries.get(id)?.messenger,
+    queueMail,
+  };
+
   manager.onRuntimeLoaded = (record) => {
     const id = getAgentSessionId(record);
     const messenger = id && deliveries.get(id)?.messenger;
@@ -488,8 +493,7 @@ export function createSubagents(
       manager,
       agentActivity,
       fleet,
-      getMessenger: (id) => deliveries.get(id)?.messenger,
-      queueMail,
+      ...manager.taskDelivery,
     }),
     manager,
     getAllowedTools,
