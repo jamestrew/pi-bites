@@ -1,3 +1,4 @@
+import registerCacheDebug from "./cache-debug/index.js";
 import registerBashGate from "./bash-gate/index.js";
 import registerStatusline from "./statusline.js";
 import registerFooter from "./footer/index.js";
@@ -68,6 +69,8 @@ export default async function (pi: ExtensionAPI) {
     ? undefined
     : registerCodexAdapter(pi, configRef, bashGate);
   const previewCodexPrompt = codexAdapter?.previewPrompt;
+
+  registerCacheDebug(pi);
 
   if (isSubagent) return;
 
