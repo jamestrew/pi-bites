@@ -28,8 +28,8 @@ export function snapshotAgent(record: AgentRecord, now: number): AgentSnapshot {
   return {
     path: record.taskName ?? record.id,
     status: lifecycleStatusLabel(getAgentStatus(record, false), "pending_init"),
-    model: record.invocation?.modelName,
-    thinking: record.invocation?.thinking,
+    model: record.invocation.modelName,
+    thinking: record.invocation.thinking,
     durationMs: Math.max(0, (record.completedAt ?? now) - record.startedAt),
     toolUses: record.toolUses,
     usage: { ...record.lifetimeUsage },

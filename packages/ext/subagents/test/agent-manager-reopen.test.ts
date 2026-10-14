@@ -113,6 +113,28 @@ it("claims residency before loading without reserving execution and serializes c
   expect(await second).toBe("pending_init");
 });
 
+it("retains the selected model in close tombstones instead of substituting the caller's model", async () => {
+  const id = await closedAgent();
+  const other = { ...model, id: "other" };
+  const fresh = {
+    ...ctx,
+    model: other,
+    modelRegistry: { ...ctx.modelRegistry, getAvailable: () => [model, other] },
+  };
+  await expect(
+    manager.reopen(pi, { ...fresh, scopedModels: [{ model: other }] }, id),
+  ).rejects.toThrow("Model not in scope");
+  expect(openAgentSession).not.toHaveBeenCalled();
+  vi.mocked(openAgentSession).mockResolvedValueOnce({ ...mockSession(), model });
+  await manager.reopen(pi, fresh, id);
+  expect(openAgentSession).toHaveBeenCalledWith(
+    expect.anything(),
+    "worker",
+    expect.objectContaining({ model }),
+  );
+  expect(manager.getRecord(id)?.invocation.modelName).toBe("test/current");
+});
+
 it("invalidates approvals when closing and reopening a conversation", async () => {
   const invalidated = vi.fn();
   await manager.dispose();

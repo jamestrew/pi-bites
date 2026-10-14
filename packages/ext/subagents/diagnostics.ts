@@ -98,7 +98,7 @@ export function agentDiagnostic(
     parentSessionId: record.parentSessionId,
     subagent: record.type,
     pid: process.pid,
-    ...(record.invocation?.modelName
+    ...(record.invocation.modelName
       ? {
           provider: record.invocation.modelName.split("/", 1)[0],
           model: record.invocation.modelName.includes("/")
@@ -106,7 +106,7 @@ export function agentDiagnostic(
             : record.invocation.modelName,
         }
       : {}),
-    ...(record.invocation?.thinking ? { thinking: record.invocation.thinking } : {}),
+    ...(record.invocation.thinking ? { thinking: record.invocation.thinking } : {}),
     details: { generation: record.generation, ...details },
   };
 }

@@ -128,14 +128,11 @@ export class AgentReopener {
     )
       throw new Error(`agent with id ${id} has a corrupt compaction boundary`);
     assertValidSpawnCwd(conversation.cwd);
-    const model = active?.invocation?.modelName
-      ? parent.availableModels.find((m) => `${m.provider}/${m.id}` === active.invocation?.modelName)
-      : parent.model;
-    if (
-      !model ||
-      !parent.availableModels.some((m) => m.provider === model.provider && m.id === model.id)
-    )
-      throw new Error("No currently authorized model is available for resume.");
+    const invocation = active?.invocation ?? closed.invocation;
+    const model = parent.availableModels.find(
+      (m) => `${m.provider}/${m.id}` === invocation.modelName,
+    );
+    if (!model) throw new Error("No currently authorized model is available for resume.");
     assertSubagentModel(model, allowedSubagentModels(ctx));
     if (pending) return waitForOperation(pending, signal);
     const currentTools = ctx.allowedTools ?? pi.getActiveTools();
@@ -146,7 +143,7 @@ export class AgentReopener {
     const thinkingLevel =
       model.reasoning === false
         ? "off"
-        : (active?.invocation?.thinking ?? ctx.thinking ?? pi.getThinkingLevel());
+        : (invocation.thinking ?? ctx.thinking ?? pi.getThinkingLevel());
     const record: AgentRecord = active ?? {
       id,
       sessionId: conversation.sessionId,

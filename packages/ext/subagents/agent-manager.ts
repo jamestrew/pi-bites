@@ -152,7 +152,7 @@ export class AgentManager {
           ...this.options.get(record),
           description: record.description,
           model: record.session?.model,
-          thinkingLevel: record.invocation?.thinking,
+          thinkingLevel: record.invocation.thinking,
           allowedTools: record.allowedTools,
         });
         this.runtimes.touch(record.id);
@@ -255,18 +255,14 @@ export class AgentManager {
     capacityChecked = false,
   ): string {
     if (this.closing) throw new Error("AgentManager is shutting down.");
-    assertSubagentModel(
-      options.model ?? ctx.model,
-      this.getAllowedModels?.() ?? allowedSubagentModels(ctx),
-    );
+    const model = options.model ?? ctx.model;
+    assertSubagentModel(model, this.getAllowedModels?.() ?? allowedSubagentModels(ctx));
     this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
     const resolved = resolveAgent(requestedType);
     if (!requestedType.trim() || !resolved.matched)
       throw new Error(`Unknown agent type '${requestedType}'.`);
     const { type } = resolved;
-    // Validate before the queue branch — a queued spawn should fail at the
-    // call, not minutes later at drain. Throw (not warn): programmatic callers
-    // can fix and retry; the RPC layer converts throws into error envelopes.
+    // Validate cwd before queuing, not minutes later at drain.
     assertValidSpawnCwd(options.cwd);
     if (!options.queueIfBusy && !capacityChecked) this.assertExecutionAvailable();
 
@@ -299,7 +295,11 @@ export class AgentManager {
       abortController,
       lifetimeUsage: { input: 0, output: 0, cacheWrite: 0 },
       compactionCount: 0,
-      invocation: options.invocation,
+      invocation: {
+        ...options.invocation,
+        modelName: model ? `${model.provider}/${model.id}` : undefined,
+        thinking: options.thinkingLevel ?? options.invocation?.thinking,
+      },
       failureHistory: [],
     };
     this.agents.set(id, record);
@@ -552,9 +552,7 @@ export class AgentManager {
     { pi, parent, parentEntries, type, prompt, options }: SpawnArgs,
   ) {
     const generation = record.generation;
-    // Re-validate a caller-supplied cwd: queued spawns can start minutes after
-    // spawn()'s check, and the directory may be gone by then (TOCTOU). Same
-    // curated errors; drainQueue parks a throw on the record as an error.
+    // Queued spawns revalidate cwd: the directory may have disappeared.
     assertValidSpawnCwd(options.cwd);
     const customCwd = options.cwd ?? undefined; // null (RPC "unset") → undefined
 
@@ -591,6 +589,9 @@ export class AgentManager {
       ...initialHooks,
       onSessionCreated: (session) => {
         record.session = session;
+        const { model, thinkingLevel } = session;
+        if (model) record.invocation.modelName = `${model.provider}/${model.id}`;
+        record.invocation.thinking = thinkingLevel;
         this.observeExecution(record, session);
         getAgentSessionId(record);
         if (abortController.signal.aborted) {

@@ -103,8 +103,8 @@ export interface AgentRecord {
   lifetimeUsage: LifetimeUsage;
   /** Number of times this agent's session has compacted. Initialized to 0 at spawn. */
   compactionCount: number;
-  /** Resolved spawn params, captured for UI display. Fixed at spawn time. */
-  invocation?: AgentInvocation;
+  /** Manager-owned selection, finalized at session creation and retained across unload/close. */
+  invocation: AgentInvocation;
   /** Chronological provider/runner failures, retained so a later abort cannot hide an earlier cause. */
   failureHistory: AgentFailure[];
   /** Explicit cancellation initiated by the subagent manager, if any. */

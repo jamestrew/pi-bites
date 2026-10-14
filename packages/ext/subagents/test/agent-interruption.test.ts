@@ -14,6 +14,7 @@ test("late abort rejection cannot roll back a settled interrupt", async () => {
   const clearQueue = vi.fn(() => ({ steering: ["steer"], followUp: ["follow-up"] }));
   const session = { abort, clearQueue, steer, followUp } as unknown as AgentSession;
   const record: AgentRecord = {
+    invocation: {},
     id: "agent-1",
     generation: 1,
     type: "worker",
