@@ -39,15 +39,19 @@ it("checks execution before accepting follow-up without reserving or rechecking 
     }),
   );
   try {
+    manager.taskDelivery = {
+      getMessenger: () => undefined,
+      queueMail: () => {
+        expect(manager.startTurn(ids[1]!, "another accepted task")).toBe(true);
+        return true;
+      },
+    };
     expect(
-      manager.followup(
-        ids[0]!,
-        () => {
-          expect(manager.startTurn(ids[1]!, "another accepted task")).toBe(true);
-          return true;
-        },
-        () => false,
-      ),
+      await manager.deliverTask(h.pi, h.ctx, ids[0]!, {
+        sender: { id: "/root", type: "default", title: "/root" },
+        message: "accepted task",
+        task: true,
+      }),
     ).toBe(true);
     await vi.waitFor(() => expect(h.faux.state.callCount).toBe(5));
     expect(() => manager.startTurn(ids[2]!, "too late")).toThrow(/slot/);
@@ -137,3 +141,55 @@ it("keeps a newer native run counted while the previous prompt finishes unwindin
   }
   expect(() => manager.assertExecutionAvailable()).not.toThrow();
 }, 30_000);
+
+it("rejects follow-up when scope tightens during reload without rolling back the published runtime", async () => {
+  const h = await setupV2(cleanup);
+  const manager = new AgentManager(undefined, 1);
+  managers.push(manager);
+  manager.getAllowedModels = () => h.controller.getAllowedModels();
+  const queueMail = vi.fn(() => true);
+  manager.taskDelivery = { getMessenger: () => undefined, queueMail };
+  const model = h.ctx.model;
+  const inside = { ...model, id: "inside" };
+  h.ctx.modelRegistry.getAvailable = () => [model, inside];
+  h.faux.setResponses([fauxAssistantMessage("saved")]);
+  const id = await spawnNamed(manager, h.pi, h.ctx, "worker", "A", {
+    taskName: "a",
+    description: "a",
+    isolated: true,
+  });
+  await manager.waitForAll();
+  const record = manager.getRecord(id)!;
+  await manager.disposeRuntime(id);
+  const snapshot = h.controller.captureContext(h.ctx);
+  manager.onRuntimeLoaded = () => {
+    // Publication commits the runtime, but the awaiting delivery has not accepted work yet.
+    h.ctx.scopedModels = [{ model: inside }];
+    h.controller.captureContext(h.ctx);
+  };
+  const sending = manager.deliverTask(h.pi, snapshot, id, {
+    sender: { id: "/root", type: "default", title: "/root" },
+    message: "REJECTED TASK",
+    task: true,
+  });
+  for (const key of Object.keys(snapshot))
+    Object.defineProperty(snapshot, key, {
+      get() {
+        throw new Error("stale ctx");
+      },
+    });
+  await expect(sending).rejects.toThrow("Model not in scope");
+  expect(queueMail).not.toHaveBeenCalled();
+  expect(record.generation).toBe(1);
+  expect(record.session).toBeDefined();
+  expect(record.retainedConversation).toBeUndefined();
+  expect(JSON.stringify(record.session!.messages)).not.toContain("REJECTED TASK");
+  expect(manager.isRuntimeReopening(id)).toBe(false);
+  expect(h.faux.state.callCount).toBe(1);
+
+  // A published runtime stays owned; disposal proves rejection released its protection.
+  await manager.disposeRuntime(id);
+  expect(record.session).toBeUndefined();
+  expect(record.retainedConversation).toBeDefined();
+  expect(() => manager.assertExecutionAvailable()).not.toThrow();
+});

@@ -1,3 +1,5 @@
+import { AgentDelivery, type TaskDelivery } from "./agent-delivery.js";
+import type { SubagentMessageDetails } from "./subagent-messages.js";
 import { TaskPaths } from "./task-paths.js";
 import { AgentTree, getAgentSessionId } from "./agent-tree.js";
 import type { RegisterCollaboration } from "./subagent-context.js";
@@ -62,6 +64,7 @@ export type { SpawnOptions } from "./types.js";
 
 export class AgentManager {
   getAllowedModels?: () => Model<Api>[];
+  taskDelivery?: TaskDelivery;
   private agents = new Map<string, AgentRecord>();
   readonly taskPaths = new TaskPaths(() => this.listAgents());
   readonly tree = new AgentTree(this.agents, (id) => this.isClosing(id));
@@ -76,7 +79,11 @@ export class AgentManager {
   private interruptions: AgentInterrupter;
   private options = new WeakMap<AgentRecord, SpawnOptions>();
   private turnCounts = new WeakMap<AgentRecord, number>();
-  private followupPending = new WeakMap<AgentRecord, () => boolean>();
+  private delivery = new AgentDelivery(
+    this,
+    (record) =>
+      (this.settledGeneration.get(record) ?? 0) >= record.generation && this.options.has(record),
+  );
   private pendingAgents = new Set<Promise<string>>();
   onRuntimeLoaded?: (record: AgentRecord) => void;
   readonly runtimes = new AgentRuntimes({
@@ -512,7 +519,7 @@ export class AgentManager {
           record.generation === generation &&
           record.status === "running" &&
           !this.isClosing(record.id) &&
-          this.followupPending.get(record)?.()
+          this.delivery.hasPending(record)
         ) {
           responseText = await resumeAgent(session, "Continue with the queued follow-up task.", {
             taskContinuation: true,
@@ -688,24 +695,16 @@ export class AgentManager {
     return this.steer(id, message);
   }
 
-  /** Check before accepting idle work; native execution starts later without rechecking. */
-  followup(id: string, deliver: () => boolean, pending: () => boolean): boolean {
-    const record = this.agents.get(id);
-    if (!record?.session || this.isClosing(id) || this.isRuntimeDisposing(id)) return false;
-    assertAgentModel(record, this.getAllowedModels?.());
-    if (record.status !== "running" && record.status !== "queued") {
-      if (
-        (this.settledGeneration.get(record) ?? 0) < record.generation ||
-        !this.options.has(record)
-      )
-        return false;
-      this.assertExecutionAvailable();
-    }
-    if (!deliver()) return false;
-    this.followupPending.set(record, pending);
-    if (record.status !== "running" && record.status !== "queued")
-      return this.startTurn(id, "Continue with the queued follow-up task.", true, true);
-    return true;
+  /** Deliver retained-task mail or work without exposing reload/acceptance ordering. */
+  deliverTask(
+    pi: ExtensionAPI,
+    ctx: SubagentContext,
+    id: string,
+    details: SubagentMessageDetails,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (!this.taskDelivery) throw new Error("Task delivery is unavailable");
+    return this.delivery.deliver(pi, ctx, id, details, this.taskDelivery, signal);
   }
 
   /** Start another turn on a retained, settled session. */
