@@ -4,6 +4,14 @@ Pi Bites extends Pi with small interaction and context-management features.
 
 ## Language
 
+**Subagent model scope**:
+The set of models permitted for subagent use in a session. A nonempty Pi model scope restricts this set; an empty scope permits all authenticated models.
+_Avoid_: Scope toggle
+
+**Fleet**:
+A compact, read-only overview of subagents and their status.
+_Avoid_: Agent manager, conversation viewer
+
 **At-mention expansion**:
 Model context produced from one successfully resolved `@path`, identified by its resolved path and optional line range. A directory listing is also an at-mention expansion.
 _Avoid_: File dump, context dump
