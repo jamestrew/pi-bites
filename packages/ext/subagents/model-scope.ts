@@ -32,11 +32,12 @@ export function assertSubagentModel(model: ModelIdentity | undefined, allowed: M
 
 export function assertAgentModel(record: AgentRecord, allowed: Model<Api>[] | undefined): void {
   if (!allowed) return;
-  const name = record.invocation?.modelName;
+  const name = record.invocation.modelName;
   const model =
     record.session?.model ??
     (name
       ? { provider: name.slice(0, name.indexOf("/")), id: name.slice(name.indexOf("/") + 1) }
       : undefined);
+  if (!model) throw new Error("No retained model is available for this agent.");
   assertSubagentModel(model, allowed);
 }

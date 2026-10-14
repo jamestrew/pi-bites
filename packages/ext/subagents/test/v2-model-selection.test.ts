@@ -258,6 +258,70 @@ it("passes the authenticated root scope into SDK children and forbids descendant
   ]);
 });
 
+it.each(["rpc", "programmatic"] as const)(
+  "%s spawns retain their model through scope tightening, unload, and later follow-up",
+  async (source) => {
+    const h = await setupV2(cleanup);
+    const outside = h.ctx.model;
+    const inside = { ...outside, id: "inside" };
+    const provider = h.ctx.modelRegistry.getRegisteredProviderConfig(outside.provider);
+    h.ctx.modelRegistry.getAvailable = () => [outside, inside];
+    h.ctx.modelRegistry.getAll = () => [outside, inside];
+    h.ctx.modelRegistry.find = (provider: string, id: string) =>
+      [outside, inside].find((model) => model.provider === provider && model.id === id);
+    h.ctx.modelRegistry.getRegisteredProviderConfig = () => ({
+      ...provider,
+      models: [outside, inside],
+    });
+    h.faux.setResponses([fauxAssistantMessage("saved"), fauxAssistantMessage("continued")]);
+    let id: string;
+    if (source === "rpc") {
+      const reply = Promise.withResolvers<{ success: boolean; data: { id: string } }>();
+      h.pi.events.on("subagents:rpc:spawn:reply:retained", reply.resolve);
+      h.pi.events.emit("subagents:rpc:spawn", {
+        requestId: "retained",
+        type: "worker",
+        prompt: "first",
+        options: { model: `${outside.provider}/${outside.id}` },
+      });
+      const result = await reply.promise;
+      expect(result).toMatchObject({ success: true });
+      id = result.data.id;
+    } else {
+      // No UI invocation metadata; inherit the root model through the programmatic seam.
+      id = await h.manager.spawn(h.pi, h.ctx, "worker", "first", { description: "retained" });
+    }
+    await h.manager.waitForAll();
+    const record = h.manager.getRecord(id);
+    expect(record.session.model.id).toBe(outside.id);
+    await h.manager.disposeRuntime(id);
+
+    h.ctx.scopedModels = [{ model: inside }];
+    // Queue-only mail must not try to reload the excluded selected model.
+    await expect(
+      h.call("send_message", { target: id, message: "queued info" }),
+    ).resolves.toMatchObject({
+      value: "",
+    });
+    expect(record.session).toBeUndefined();
+    h.ctx.model = inside;
+    await expect(h.call("followup_task", { target: id, message: "rejected work" })).rejects.toThrow(
+      "Model not in scope",
+    );
+    expect(record.session).toBeUndefined();
+    expect(record.generation).toBe(1);
+    expect(h.faux.state.callCount).toBe(1);
+
+    h.ctx.scopedModels = [];
+    await h.call("followup_task", { target: id, message: "accepted work" });
+    await h.manager.waitForAll();
+    expect(record.session.model.id).toBe(outside.id);
+    expect(JSON.stringify(record.session.messages)).toContain("queued info");
+    expect(JSON.stringify(record.session.messages)).not.toContain("rejected work");
+    expect(record.result).toBe("continued");
+  },
+);
+
 it("tightens root scope without aborting a turn, and rejects later work even through old captures", async () => {
   const nativeSetter = AgentSession.prototype.setScopedModels;
   const h = await setupV2(cleanup);

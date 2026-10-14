@@ -46,9 +46,8 @@ export class AgentDelivery {
       // Out-of-scope conversations still receive mail, without an unauthorized reload.
       const mayReload =
         details.task ||
-        !record.invocation?.modelName ||
         getAllowedModels().some(
-          (model) => `${model.provider}/${model.id}` === record.invocation?.modelName,
+          (model) => `${model.provider}/${model.id}` === record.invocation.modelName,
         );
       if (mayReload && (!record.session || manager.isRuntimeDisposing(id))) {
         await manager.reload(pi, ctx, id, signal);

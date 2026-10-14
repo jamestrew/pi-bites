@@ -1,7 +1,7 @@
 import { getAgentSessionId } from "./agent-tree.js";
 import type { FileEntry } from "@earendil-works/pi-coding-agent";
 import { getAgentStatus } from "./agent-status.js";
-import type { AgentRecord, SubagentType, WaitAgentStatus } from "./types.js";
+import type { AgentInvocation, AgentRecord, SubagentType, WaitAgentStatus } from "./types.js";
 
 export type ClosedAgentRecord =
   | { id: string; recoverable: false }
@@ -13,6 +13,7 @@ export type ClosedAgentRecord =
       parentSessionId: string;
       rootSessionId?: string;
       description: string;
+      invocation: AgentInvocation;
     }
   | {
       id: string;
@@ -22,6 +23,7 @@ export type ClosedAgentRecord =
       parentSessionId: string;
       rootSessionId?: string;
       description: string;
+      invocation: AgentInvocation;
     };
 
 type CloseHooks = {
@@ -145,6 +147,7 @@ export class AgentCloser {
       parentSessionId: record.parentSessionId,
       ...(record.rootSessionId ? { rootSessionId: record.rootSessionId } : {}),
       description: record.description,
+      invocation: { ...record.invocation },
     };
     if (record.retainedConversation)
       return { ...metadata, conversation: structuredClone(record.retainedConversation) };
