@@ -1,39 +1,16 @@
-import { lifecycleStatusLabel } from "./agent-lifecycle-render.js";
-import { getAgentStatus } from "../agent-status.js";
-/**
- * fleet-list.ts — Claude Code-style "FleetView" list rendered above the editor.
- *
- * Shows `main` + each running/queued subagent as a navigable list. Pressing
- * Ctrl+↑ activates the list; ↑/↓ move the selection, Enter opens the selected agent's
- * live conversation overlay, Esc returns to the prompt. A viewer stays open when its
- * agent finishes; finished agents linger briefly in the list.
- *
- * Mechanics (see plan): the list is an `aboveEditor` widget (render-only), and ALL key
- * handling goes through `onTerminalInput` — which fires before the focused editor and
- * can `consume` keys. Activation uses Ctrl+↑ so normal typing is untouched.
- */
+/** Compact, read-only subagent status rendered above the editor. */
 
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import {
-  getKeybindings,
-  isKeyRelease,
-  Key,
-  matchesKey,
-  type TUI,
-  truncateToWidth,
-  visibleWidth,
-} from "@earendil-works/pi-tui";
+import { type TUI, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { sanitizeSingleLine } from "../../shared/terminal-text.js";
+import { lifecycleStatusLabel } from "./agent-lifecycle-render.js";
+import { getAgentStatus } from "../agent-status.js";
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
 import { getLifetimeTotal } from "../usage.js";
-import { type AgentActivity, getDisplayName, type Theme } from "./agent-format.js";
-import {
-  CONVERSATION_OVERLAY_OPTIONS,
-  ConversationViewer,
-  getConversationSource,
-} from "./conversation-viewer.js";
+import { getDisplayName, type Theme } from "./agent-format.js";
 
-/** Widget key for the FleetView list. */
+/** Widget key for the Fleet list. */
 const FLEET_KEY = "fleet";
 /** Max agent rows shown at once; extras collapse into a "↓ N more" indicator. */
 const MAX_AGENT_ROWS = 5;
@@ -42,15 +19,8 @@ const TICK_MS = 200;
 /** How long a finished agent lingers in the list before it drops out. */
 const FINISHED_LINGER_MS = 500;
 
-/** Minimal UI surface the FleetView needs from `ctx.ui`. */
-export type FleetUICtx = Pick<
-  ExtensionUIContext,
-  "setWidget" | "onTerminalInput" | "getEditorText" | "notify" | "custom"
->;
-
-type MainEntry = { kind: "main" };
-type AgentEntry = { kind: "agent"; record: AgentRecord };
-type FleetEntry = MainEntry | AgentEntry;
+/** Minimal UI surface the Fleet needs from `ctx.ui`. */
+export type FleetUICtx = Pick<ExtensionUIContext, "setWidget">;
 
 /** `11s` — integer seconds, no decimal/suffix (matches Claude Code, unlike formatMs). */
 export function formatFleetElapsed(ms: number): string {
@@ -82,75 +52,34 @@ function rightAlign(left: string, right: string, width: number): string {
 export class FleetList {
   private ui: FleetUICtx | undefined;
   private tui: TUI | undefined;
-  private inputUnsub: (() => void) | undefined;
   private widgetRegistered = false;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   private enabled = true;
-  /** Whether arrow keys currently navigate the list (vs. flow to the editor). */
-  private active = false;
-  /** 0 = `main`, 1..N = subagents. */
-  private selectedIndex = 0;
-  /** Bash-gate dialogs currently waiting for input. */
-  private pendingBashGates = new Set<string>();
-  /** Set while a conversation overlay is open; calling it closes the overlay. */
-  private viewerClose: (() => void) | undefined;
-  private viewingAgentId: string | undefined;
   /** Unread mail counts for visible agents; mail does not keep a finished row alive. */
   private pendingMail = new Map<string, number>();
 
-  constructor(
-    private manager: AgentManager,
-    private agentActivity: Map<string, AgentActivity>,
-  ) {}
+  constructor(private manager: AgentManager) {}
 
   // ---- Lifecycle ----
 
   setEnabled(enabled: boolean): void {
     if (enabled === this.enabled) return;
     this.enabled = enabled;
-    if (!enabled) this.active = false;
     this.update();
   }
 
-  /** Capture the UI context and (re)register the global input handler. */
+  /** Capture a stable UI dependency while the owning context is active. */
   setUICtx(ui: FleetUICtx): void {
     if (ui === this.ui) return;
-    this.inputUnsub?.();
-    // Pi 1.0.4 fullscreen consumes these before extension listeners. Reserve
-    // Ctrl+↑/↓ for FleetView; keep all other transcript navigation bindings.
-    const keybindings = getKeybindings();
-    keybindings.setUserBindings({
-      ...keybindings.getUserBindings(),
-      "tui.altScreen.previousPrompt": keybindings
-        .getKeys("tui.altScreen.previousPrompt")
-        .filter((key) => key !== "ctrl+up"),
-      "tui.altScreen.nextPrompt": keybindings
-        .getKeys("tui.altScreen.nextPrompt")
-        .filter((key) => key !== "ctrl+down"),
-    });
     this.ui = ui;
     this.widgetRegistered = false;
     this.tui = undefined;
-    this.inputUnsub = ui.onTerminalInput((data) => this.handleKey(data));
   }
 
   /** Ensure the re-render timer is running (called when an agent spawns). */
   ensureTimer(): void {
     if (!this.timer) this.timer = setInterval(() => this.update(), TICK_MS);
-  }
-
-  bashGateStarted(waitId: string): void {
-    if (this.pendingBashGates.has(waitId)) return;
-    this.pendingBashGates.add(waitId);
-    this.viewerClose?.();
-    this.viewerClose = undefined;
-    this.viewingAgentId = undefined;
-    this.deactivate();
-  }
-
-  bashGateResolved(waitId: string): void {
-    this.pendingBashGates.delete(waitId);
   }
 
   setPendingMail(id: string, count: number): void {
@@ -161,7 +90,7 @@ export class FleetList {
     this.update();
   }
 
-  /** Keep an open viewer readable and let the finished row linger briefly. */
+  /** Let finished agents linger briefly before their rows drop out. */
   onAgentFinished(): void {
     this.update();
   }
@@ -171,20 +100,10 @@ export class FleetList {
       clearInterval(this.timer);
       this.timer = undefined;
     }
-    this.inputUnsub?.();
-    this.inputUnsub = undefined;
-    if (this.viewerClose) {
-      this.viewerClose();
-      this.viewerClose = undefined;
-    }
-    this.viewingAgentId = undefined;
     if (this.ui && this.widgetRegistered) this.ui.setWidget(FLEET_KEY, undefined);
     this.widgetRegistered = false;
     this.tui = undefined;
-    this.active = false;
-    this.pendingBashGates.clear();
     this.pendingMail.clear();
-    // Null last so a `viewerClose()` microtask above can't re-register the widget.
     this.ui = undefined;
   }
 
@@ -203,12 +122,9 @@ export class FleetList {
         clearInterval(this.timer);
         this.timer = undefined;
       }
-      this.active = false;
-      this.selectedIndex = 0;
       return;
     }
 
-    this.clampSelection();
     this.ensureTimer(); // keep stats ticking whenever the list is shown (e.g. after a re-enable)
 
     if (!this.widgetRegistered) {
@@ -234,13 +150,7 @@ export class FleetList {
 
   // ---- Roster ----
 
-  /**
-   * Agents shown in the list, ordered earliest-launched first so the ones you
-   * started sooner sit at the top. Every row is openable (has a session), so Enter
-   * never dead-ends. Included: idle/running/queued, plus the agent currently being
-   * viewed and recently-finished ones (they linger briefly before dropping out).
-   * (`listAgents()` is newest-first, so we re-sort.)
-   */
+  /** Live/idle agents plus recently finished ones, earliest-launched first. */
   private agentRecords(): AgentRecord[] {
     const now = Date.now();
     const records = this.manager.listAgents();
@@ -250,7 +160,6 @@ export class FleetList {
           a.status === "idle" ||
           a.status === "running" ||
           a.status === "queued" ||
-          a.id === this.viewingAgentId ||
           Boolean(
             (a.session || a.retainedConversation) &&
             a.completedAt != null &&
@@ -260,213 +169,27 @@ export class FleetList {
       .sort((a, b) => a.startedAt - b.startedAt);
   }
 
-  private roster(): FleetEntry[] {
-    return [
-      { kind: "main" },
-      ...this.agentRecords().map((record) => ({ kind: "agent" as const, record })),
-    ];
-  }
-
-  private clampSelection(): void {
-    const max = this.roster().length - 1;
-    if (this.selectedIndex > max) this.selectedIndex = Math.max(0, max);
-    if (this.selectedIndex < 0) this.selectedIndex = 0;
-  }
-
-  // ---- Key handling ----
-
-  /** Returns `{consume:true}` to swallow a key, or undefined to let it through. */
-  handleKey(data: string): { consume?: boolean; data?: string } | undefined {
-    if (!this.enabled || !this.ui || this.pendingBashGates.size > 0) return undefined;
-    // Input listeners receive BOTH key-press and key-release (the kitty protocol
-    // emits both, and matchesKey matches either) — act on press only, or every
-    // tap would move/fire twice. Repeats still pass through for held-key nav.
-    if (isKeyRelease(data)) return undefined;
-    // While an overlay is open, let it own all input.
-    if (this.viewerClose) return undefined;
-
-    if (!this.active) {
-      // Activate: Ctrl+↑ moves focus into the list.
-      const isActivator = matchesKey(data, "ctrl+up");
-      if (isActivator && this.agentRecords().length > 0) {
-        this.active = true;
-        this.selectedIndex = this.roster().length - 1;
-        this.update();
-        return { consume: true };
-      }
-      return undefined;
-    }
-
-    // Active — arrows navigate, Enter opens, Esc / Up-past-top exits.
-    if (matchesKey(data, "down") || matchesKey(data, "ctrl+down")) {
-      const max = this.roster().length - 1;
-      if (this.selectedIndex === max) {
-        this.deactivate();
-        return { consume: true };
-      }
-      this.selectedIndex = Math.min(max, this.selectedIndex + 1);
-      this.update();
-      return { consume: true };
-    }
-    if (matchesKey(data, "up") || matchesKey(data, "ctrl+up")) {
-      if (this.selectedIndex === 0) {
-        this.deactivate();
-        return { consume: true };
-      }
-      this.selectedIndex -= 1;
-      this.update();
-      return { consume: true };
-    }
-    if (matchesKey(data, "escape")) {
-      this.deactivate();
-      return { consume: true };
-    }
-    if (matchesKey(data, Key.enter)) {
-      this.openSelected();
-      return { consume: true };
-    }
-
-    // Any other key cancels navigation and flows to the editor.
-    this.deactivate();
-    return undefined;
-  }
-
-  private deactivate(): void {
-    this.active = false;
-    this.selectedIndex = 0;
-    this.update();
-  }
-
-  private openSelected(): void {
-    const entry = this.roster()[this.selectedIndex];
-    if (!entry) return;
-    if (entry.kind === "main") {
-      // `main` = return to the prompt; the native transcript is already shown.
-      this.deactivate();
-      return;
-    }
-    const record = entry.record;
-    if (!this.ui) return;
-    if (this.manager.isRuntimeDisposing(record.id)) {
-      this.ui.notify("Agent runtime is unloading; retry to view retained history.", "info");
-      return;
-    }
-    const session = getConversationSource(record);
-    if (!session) {
-      this.ui.notify(`Agent is ${record.status} — no session available.`, "info");
-      return;
-    }
-    const activity = this.agentActivity.get(record.id);
-    this.viewingAgentId = record.id;
-
-    const release = this.manager.runtimes.protect(record.id);
-    void this.ui
-      .custom<undefined>((tui, theme, keybindings, done) => {
-        this.viewerClose = () => done(undefined);
-        return new ConversationViewer(
-          tui,
-          session,
-          record,
-          activity,
-          theme,
-          done,
-          () => {
-            if (this.manager.abort(record.id))
-              this.ui?.notify(`Stopped "${record.description}".`, "info");
-          },
-          keybindings,
-          (message: string) => this.manager.steer(record.id, message),
-          (message: string) => {
-            void this.manager.cancelAndSteer(record.id, message).then((interrupted) => {
-              if (interrupted)
-                this.ui?.notify(`Canceled current operation for "${record.description}".`, "info");
-            });
-          },
-        );
-      }, CONVERSATION_OVERLAY_OPTIONS)
-      .then(
-        () => {
-          release();
-          this.clearViewer();
-        },
-        () => {
-          release();
-          this.clearViewer();
-        },
-      );
-  }
-
-  /** Reset overlay state and return to the list (on close, auto-close, or error). */
-  private clearViewer(): void {
-    // Keep the cursor on the agent we were viewing — re-resolve by id so it
-    // still feels natural if the list reordered (an earlier agent finished)
-    // while the overlay was open. If that agent is gone, leave the index for
-    // update()'s clamp to settle.
-    if (this.viewingAgentId) {
-      const idx = this.roster().findIndex(
-        (e) => e.kind === "agent" && e.record.id === this.viewingAgentId,
-      );
-      if (idx >= 0) this.selectedIndex = idx;
-    }
-    this.viewerClose = undefined;
-    this.viewingAgentId = undefined;
-    this.update();
-  }
-
   // ---- Rendering ----
 
   private renderBar(width: number, theme: Theme): string[] {
-    const agents = this.roster().filter((entry): entry is AgentEntry => entry.kind === "agent");
+    const agents = this.agentRecords();
     if (agents.length === 0) return [];
-    // Clamp locally so a render between a roster shrink and the next update()
-    // (e.g. on terminal resize) never loses the selection marker.
-    const sel = Math.min(this.selectedIndex, agents.length);
-
-    const hint = this.active
-      ? "FleetView focused · ↑↓ select · enter view · esc back"
-      : "ctrl+↑ focus agents";
-    const lines: string[] = [];
-    lines.push(truncateToWidth("  " + theme.fg("dim", hint), width));
-    lines.push(truncateToWidth(`${this.cursor(0, sel)}${theme.fg("success", "•")} main`, width));
-
-    // Window the agent rows so the selected one stays visible.
-    const visible = Math.min(MAX_AGENT_ROWS, agents.length);
-    const selAgent = Math.max(0, sel - 1);
-    const start = selAgent < visible ? 0 : selAgent - visible + 1;
-    const hiddenBelow = agents.length - (start + visible);
-
-    if (start > 0) lines.push(rightAlign("", theme.fg("dim", `↑ ${start} more`), width));
-    for (const [offset, agent] of agents.slice(start, start + visible).entries()) {
-      lines.push(this.renderAgentRow(start + offset + 1, sel, agent.record, width, theme));
+    const lines = [truncateToWidth(`  ${theme.fg("success", "•")} main`, width)];
+    for (const record of agents.slice(0, MAX_AGENT_ROWS)) {
+      lines.push(this.renderAgentRow(record, width, theme));
     }
-    if (hiddenBelow > 0)
-      lines.push(rightAlign("", theme.fg("dim", `↓ ${hiddenBelow} more`), width));
-
+    const hidden = agents.length - MAX_AGENT_ROWS;
+    if (hidden > 0) lines.push(rightAlign("", theme.fg("dim", `↓ ${hidden} more`), width));
     return lines;
   }
 
-  private cursor(rosterIndex: number, sel: number): string {
-    return `  ${this.active && rosterIndex === sel ? "▶" : " "} `;
-  }
-
-  private renderAgentRow(
-    rosterIndex: number,
-    sel: number,
-    record: AgentRecord,
-    width: number,
-    theme: Theme,
-  ): string {
+  private renderAgentRow(record: AgentRecord, width: number, theme: Theme): string {
     const pending = this.pendingMail.get(record.id);
-    const terminal =
-      record.status === "stopped"
-        ? ` · ${lifecycleStatusLabel(getAgentStatus(record), "pending_init")}`
-        : "";
+    const lifecycle = lifecycleStatusLabel(getAgentStatus(record, false), record.status);
     const residency = !record.session && record.retainedConversation ? " · unloaded" : "";
     const interaction = pending ? ` · ${pending} pending message${pending === 1 ? "" : "s"}` : "";
-    const left = `${this.cursor(rosterIndex, sel)}  ${theme.fg("muted", getDisplayName(record.type))}  ${record.description}${theme.fg("dim", terminal + residency + interaction)}`;
-    const tokens = getLifetimeTotal(
-      this.agentActivity.get(record.id)?.lifetimeUsage ?? record.lifetimeUsage,
-    );
+    const left = `    ${theme.fg("muted", sanitizeSingleLine(getDisplayName(record.type)))}  ${sanitizeSingleLine(record.description)}${theme.fg("dim", ` · ${lifecycle}${residency}${interaction}`)}`;
+    const tokens = getLifetimeTotal(record.lifetimeUsage);
     const elapsedMs = (record.completedAt ?? Date.now()) - record.startedAt; // freezes once finished
     const right = theme.fg(
       "dim",

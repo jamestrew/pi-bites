@@ -40,7 +40,7 @@ test("late abort rejection cannot roll back a settled interrupt", async () => {
     onFailure,
   });
 
-  const interrupted = interrupter.interrupt(record, session, "interrupt");
+  const interrupted = interrupter.interrupt(record, session);
   await Promise.resolve();
   expect(abort).toHaveBeenCalledOnce();
   expect(clearQueue).toHaveBeenCalledOnce();

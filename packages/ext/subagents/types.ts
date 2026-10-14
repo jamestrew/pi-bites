@@ -87,12 +87,6 @@ export interface AgentRecord {
   promise?: Promise<string>;
   /** Steering messages queued before the session was ready. */
   pendingSteers?: string[];
-  /** Messages to resume with after cancelling the current operation. */
-  pendingCancelSteers?: Array<{
-    message: string;
-    accepted?: boolean;
-    settled: Promise<void>;
-  }>;
   /** The tool_use_id from the original spawn_agent tool call. */
   toolCallId?: string;
   /**
@@ -127,7 +121,7 @@ export interface AgentFailure {
 
 export interface AgentAbort {
   timestamp: number;
-  source: "stop" | "interrupt" | "cancel_and_steer" | "shutdown";
+  source: "stop" | "interrupt" | "shutdown";
   reason?: string;
 }
 

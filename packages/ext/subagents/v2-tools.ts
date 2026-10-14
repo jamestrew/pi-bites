@@ -22,14 +22,12 @@ import { CODEX_V2_CONTRACT } from "./codex-v2-contract.js";
 import { defineSubagentTool } from "./operation-context.js";
 import { SubagentOperationError, textResult } from "./tool-result.js";
 import type { SubagentMessageDetails } from "./subagent-messages.js";
-import type { AgentActivity } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
 
 export function createV2Tools(
   pi: ExtensionAPI,
   deps: TaskDelivery & {
     manager: AgentManager;
-    agentActivity: Map<string, AgentActivity>;
     fleet: FleetList;
     getModelDefaults?: () => Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">;
   },

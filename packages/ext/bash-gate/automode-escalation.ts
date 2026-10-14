@@ -21,7 +21,6 @@ interface AutoModeEscalationOptions {
   rationale?: string;
   signal?: AbortSignal;
   isAllowed?: () => boolean;
-  viewConversation?: () => Promise<void>;
   checkCurrent?: () => void;
 }
 
@@ -32,7 +31,6 @@ export async function promptAutoModeEscalation({
   command,
   toolName,
   rationale,
-  viewConversation,
   signal,
   isAllowed,
   checkCurrent,
@@ -45,36 +43,23 @@ export async function promptAutoModeEscalation({
     try {
       const prompt = `🤖 Automode denied this command${rationale ? `: ${rationale}` : "."}\n${command}`;
 
-      for (;;) {
-        const choice = await ui.select(
-          prompt,
-          [
-            "Allow once",
-            "Export command",
-            ...(viewConversation ? ["View conversation"] : []),
-            "Deny",
-          ],
-          ...(signal ? [{ signal }] : []),
-        );
-        signal?.throwIfAborted();
-        checkCurrent?.();
+      const choice = await ui.select(
+        prompt,
+        ["Allow once", "Export command", "Deny"],
+        ...(signal ? [{ signal }] : []),
+      );
+      signal?.throwIfAborted();
+      checkCurrent?.();
 
-        if (choice === "Allow once") return "allow";
-        if (choice === "Export command") {
-          try {
-            ui.notify(await exportBlockedCommand(command), "info");
-          } catch (error) {
-            ui.notify(`Could not export command: ${String(error)}`, "error");
-          }
-          return "deny";
+      if (choice === "Allow once") return "allow";
+      if (choice === "Export command") {
+        try {
+          ui.notify(await exportBlockedCommand(command), "info");
+        } catch (error) {
+          ui.notify(`Could not export command: ${String(error)}`, "error");
         }
-        if (choice === "View conversation" && viewConversation) {
-          await viewConversation();
-          checkCurrent?.();
-          continue;
-        }
-        return "deny";
       }
+      return "deny";
     } catch (error) {
       try {
         ui.notify(`Automode escalation failed closed: ${String(error)}`, "error");

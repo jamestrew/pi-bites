@@ -14,12 +14,6 @@ export function modelKey(model: Pick<ModelEntry, "provider" | "id">): string {
   return `${model.provider}/${model.id}`.toLowerCase();
 }
 
-/** Derive a short display label from a configured model string. */
-export function getModelLabelFromConfig(model: string): string {
-  const name = model.slice(model.lastIndexOf("/") + 1);
-  return name.replace(/-\d{8}$/, "");
-}
-
 /**
  * Resolve a model string to a Model instance.
  * Tries exact match first ("provider/modelId"), then fuzzy match against all available models.

@@ -7,9 +7,7 @@ import {
   applyAndEmitLoaded,
   applySettings,
   loadSettings,
-  persistToastFor,
   type SettingsAppliers,
-  saveAndEmitChanged,
   saveSettings,
 } from "../settings.js";
 
@@ -132,7 +130,7 @@ describe("settings persistence", () => {
   it("operational saves preserve project model defaults without pinning global defaults", () => {
     writeGlobal({ defaultModel: "global-model", defaultReasoningEffort: "high" });
     writeProject({ defaultModel: "project-model", maxDepth: 4 });
-    saveAndEmitChanged({ maxConcurrent: 2 }, "Saved", vi.fn(), projectDir);
+    saveSettings({ maxConcurrent: 2 }, projectDir);
     expect(loadSettings(projectDir)).toEqual({
       defaultModel: "project-model",
       defaultReasoningEffort: "high",
@@ -145,7 +143,7 @@ describe("settings persistence", () => {
       maxConcurrent: 2,
     });
     expect(saveSettings({ defaultReasoningEffort: "off" }, projectDir)).toBe(true);
-    saveAndEmitChanged({ fleetView: false }, "Saved", vi.fn(), projectDir);
+    saveSettings({ fleetView: false }, projectDir);
     expect(loadSettings(projectDir)).toEqual({
       defaultModel: "project-model",
       defaultReasoningEffort: "off",
@@ -378,22 +376,6 @@ describe("settings persistence", () => {
     });
   });
 
-  describe("persistToastFor", () => {
-    it("returns info-level toast with the plain message on success", () => {
-      expect(persistToastFor("Max concurrency set to 7", true)).toEqual({
-        message: "Max concurrency set to 7",
-        level: "info",
-      });
-    });
-
-    it("returns warning-level toast with session-only suffix on failure", () => {
-      expect(persistToastFor("Max concurrency set to 7", false)).toEqual({
-        message: "Max concurrency set to 7 (session only; failed to persist)",
-        level: "warning",
-      });
-    });
-  });
-
   describe("applyAndEmitLoaded", () => {
     let appliers: SettingsAppliers;
 
@@ -447,48 +429,6 @@ describe("settings persistence", () => {
       expect(result).toEqual({});
       // No setters fired — defaults preserved
       expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("saveAndEmitChanged", () => {
-    it("persists, emits with persisted=true, and returns info toast on success", () => {
-      const emit = vi.fn();
-      const snapshot = { maxConcurrent: 5, maxDepth: 2 };
-
-      const toast = saveAndEmitChanged(snapshot, "Max concurrency set to 5", emit, projectDir);
-
-      expect(emit).toHaveBeenCalledTimes(1);
-      expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
-        settings: snapshot,
-        persisted: true,
-      });
-      expect(toast).toEqual({ message: "Max concurrency set to 5", level: "info" });
-      // File actually written
-      expect(JSON.parse(readFileSync(projectFile(), "utf-8"))).toEqual(snapshot);
-    });
-
-    it("emits with persisted=false and returns warning toast on save failure", () => {
-      const filePosingAsCwd = join(tmpdir(), `pi-settings-notdir-${Date.now()}`);
-      writeFileSync(filePosingAsCwd, "");
-      const emit = vi.fn();
-      try {
-        const toast = saveAndEmitChanged(
-          { maxConcurrent: 5 },
-          "Max concurrency set to 5",
-          emit,
-          filePosingAsCwd,
-        );
-        expect(emit).toHaveBeenCalledWith("subagents:settings_changed", {
-          settings: { maxConcurrent: 5 },
-          persisted: false,
-        });
-        expect(toast).toEqual({
-          message: "Max concurrency set to 5 (session only; failed to persist)",
-          level: "warning",
-        });
-      } finally {
-        rmSync(filePosingAsCwd, { force: true });
-      }
     });
   });
 });

@@ -1,4 +1,3 @@
-import { wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { parsePatchActions } from "../../codex-adapter/patch/parser.js";
 import { summarizeWebRunCall } from "../../codex-adapter/web-run/summary.js";
 import type { LifetimeUsage } from "../usage.js";
@@ -48,10 +47,6 @@ export function summarizeToolArg(value: unknown, maxLength = 120): string {
   const singleLine = sanitizeText(normalizeToolArg(value)).replace(/\s+/g, " ").trim();
   if (singleLine.length <= maxLength) return singleLine;
   return `${singleLine.slice(0, maxLength)}...`;
-}
-
-export function wrapMultilineText(text: string, width: number): string[] {
-  return text.split("\n").flatMap((line) => wrapTextWithAnsi(line, width));
 }
 
 export function formatToolCall(name: string, args: Record<string, unknown>): string {

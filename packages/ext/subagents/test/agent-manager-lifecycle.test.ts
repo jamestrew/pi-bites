@@ -322,77 +322,10 @@ describe("AgentManager — detached lifecycle", () => {
     });
   });
 
-  it("rejects cancel-and-steer and drops its redirect when session abort fails", async () => {
+  it("restores queues when serialized interrupt attempts both fail", async () => {
     manager = new AgentManager();
-    const session = {
-      ...mockSession(),
-      abort: vi.fn(async () => Promise.reject(new Error("busy"))),
-    };
-    session.clearQueue.mockReturnValue({ steering: ["keep steering"], followUp: ["later"] });
-    let finishTurn!: () => void;
-    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
-      options.onSessionCreated?.(session);
-      await new Promise<void>((resolve) => (finishTurn = resolve));
-      return { responseText: "original result", session };
-    });
-
-    const id = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "interruptible",
-    });
-    const resumesBefore = vi.mocked(resumeAgent).mock.calls.length;
-
-    await expect(manager.cancelAndSteer(id, "change course")).resolves.toBe(false);
-    expect(manager.getRecord(id)).toMatchObject({
-      status: "running",
-      abort: undefined,
-      pendingCancelSteers: undefined,
-    });
-    expect(session.steer).toHaveBeenCalledWith("keep steering");
-    expect(session.followUp).toHaveBeenCalledWith("later");
-
-    finishTurn();
-    await manager.getRecord(id)!.promise;
-    expect(resumeAgent).toHaveBeenCalledTimes(resumesBefore);
-    expect(manager.getRecord(id)).toMatchObject({
-      status: "completed",
-      result: "original result",
-    });
-  });
-
-  it("does not resume a redirect after a later stop wins", async () => {
-    manager = new AgentManager();
-    let finishAbort!: () => void;
-    const session = {
-      ...mockSession(),
-      abort: vi.fn(() => new Promise<void>((resolve) => (finishAbort = resolve))),
-    };
-    let finishTurn!: () => void;
-    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
-      options.onSessionCreated?.(session);
-      await new Promise<void>((resolve) => (finishTurn = resolve));
-      return { responseText: "partial", session };
-    });
-    const resumesBefore = vi.mocked(resumeAgent).mock.calls.length;
-    const id = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "interruptible",
-    });
-
-    const redirect = manager.cancelAndSteer(id, "change course");
-    await vi.waitFor(() => expect(session.abort).toHaveBeenCalledOnce());
-    expect(manager.abort(id)).toBe(true);
-    finishAbort();
-    await expect(redirect).resolves.toBe(false);
-    finishTurn();
-    await manager.getRecord(id)!.promise;
-
-    expect(resumeAgent).toHaveBeenCalledTimes(resumesBefore);
-    expect(manager.getRecord(id)?.status).toBe("stopped");
-  });
-
-  it("serializes cancel attempts so an older failure cannot undo a newer success", async () => {
-    manager = new AgentManager();
-    const steering = ["old steering"];
-    const followUp = ["old follow-up"];
+    const steering = ["keep steering"];
+    const followUp = ["keep follow-up"];
     let rejectFirst!: (error: Error) => void;
     const session = {
       ...mockSession(),
@@ -400,66 +333,6 @@ describe("AgentManager — detached lifecycle", () => {
         .fn()
         .mockImplementationOnce(
           () => new Promise<void>((_resolve, reject) => (rejectFirst = reject)),
-        )
-        .mockResolvedValueOnce(undefined),
-      clearQueue: vi.fn(() => ({
-        steering: steering.splice(0),
-        followUp: followUp.splice(0),
-      })),
-      steer: vi.fn(async (message: string) => {
-        steering.push(message);
-      }),
-      followUp: vi.fn(async (message: string) => {
-        followUp.push(message);
-      }),
-    };
-    let finishTurn!: () => void;
-    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
-      options.onSessionCreated?.(session);
-      await new Promise<void>((resolve) => (finishTurn = resolve));
-      return { responseText: "partial", session };
-    });
-    vi.mocked(resumeAgent).mockResolvedValue("redirected");
-    const resumesBefore = vi.mocked(resumeAgent).mock.calls.length;
-    const id = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "interruptible",
-    });
-
-    const older = manager.cancelAndSteer(id, "old redirect");
-    await vi.waitFor(() => expect(session.abort).toHaveBeenCalledOnce());
-    const newer = manager.cancelAndSteer(id, "new redirect");
-    expect(session.abort).toHaveBeenCalledOnce();
-    rejectFirst(new Error("busy"));
-
-    await expect(older).resolves.toBe(false);
-    await expect(newer).resolves.toBe(true);
-    finishTurn();
-    await manager.getRecord(id)!.promise;
-
-    expect(session.abort).toHaveBeenCalledTimes(2);
-    expect(session.clearQueue).toHaveBeenCalledTimes(2);
-    expect(steering).toEqual([]);
-    expect(followUp).toEqual([]);
-    expect(
-      vi
-        .mocked(resumeAgent)
-        .mock.calls.slice(resumesBefore)
-        .map((call) => call[1]),
-    ).toEqual(["new redirect"]);
-    expect(manager.getRecord(id)).toMatchObject({ status: "completed", result: "redirected" });
-  });
-
-  it("restores queues when serialized cancel and interrupt attempts both fail", async () => {
-    manager = new AgentManager();
-    const steering = ["keep steering"];
-    const followUp = ["keep follow-up"];
-    let rejectCancel!: (error: Error) => void;
-    const session = {
-      ...mockSession(),
-      abort: vi
-        .fn()
-        .mockImplementationOnce(
-          () => new Promise<void>((_resolve, reject) => (rejectCancel = reject)),
         )
         .mockRejectedValueOnce(new Error("still busy")),
       clearQueue: vi.fn(() => ({
@@ -483,13 +356,13 @@ describe("AgentManager — detached lifecycle", () => {
       description: "interruptible",
     });
 
-    const cancel = manager.cancelAndSteer(id, "redirect");
+    const first = manager.interruptTurn(id);
     await vi.waitFor(() => expect(session.abort).toHaveBeenCalledOnce());
     const interrupt = manager.interruptTurn(id);
-    expect(manager.getRecord(id)?.status).toBe("running");
-    rejectCancel(new Error("busy"));
+    expect(manager.getRecord(id)?.status).toBe("stopped");
+    rejectFirst(new Error("busy"));
 
-    await expect(cancel).resolves.toBe(false);
+    await expect(first).resolves.toBe(false);
     await expect(interrupt).resolves.toBe(false);
     expect(steering).toEqual(["keep steering"]);
     expect(followUp).toEqual(["keep follow-up"]);
@@ -524,91 +397,18 @@ describe("AgentManager — detached lifecycle", () => {
       description: "interruptible",
     });
 
-    const cancel = manager.cancelAndSteer(id, "redirect");
+    const first = manager.interruptTurn(id);
     await vi.waitFor(() => expect(session.abort).toHaveBeenCalledOnce());
     rejectAbort(new Error("busy"));
     await vi.waitFor(() => expect(session.steer).toHaveBeenCalledWith("restore steering"));
     expect(manager.abort(id)).toBe(true);
     finishSteer();
 
-    await expect(cancel).resolves.toBe(false);
+    await expect(first).resolves.toBe(false);
     expect(session.followUp).not.toHaveBeenCalled();
     finishTurn();
     await manager.getRecord(id)!.promise;
     expect(manager.getRecord(id)?.status).toBe("stopped");
-  });
-
-  it("applies cancel-and-steer during a retained turn", async () => {
-    manager = new AgentManager();
-    const session = { ...mockSession(), abort: vi.fn(async () => {}) };
-    vi.mocked(runAgent).mockResolvedValue({ responseText: "first", session });
-    let finishRetained!: () => void;
-    let finishRedirect!: () => void;
-    vi.mocked(resumeAgent)
-      .mockImplementationOnce(async () => {
-        await new Promise<void>((resolve) => (finishRetained = resolve));
-        return "partial";
-      })
-      .mockImplementationOnce(async () => {
-        await new Promise<void>((resolve) => (finishRedirect = resolve));
-        return "first redirect";
-      })
-      .mockResolvedValueOnce("redirected");
-
-    const id = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "retained",
-    });
-    await manager.getRecord(id)!.promise;
-    expect(manager.startTurn(id, "continue")).toBe(true);
-    await expect(manager.cancelAndSteer(id, "change course")).resolves.toBe(true);
-    finishRetained();
-    await vi.waitFor(() =>
-      expect(vi.mocked(resumeAgent).mock.calls.at(-1)?.[1]).toBe("change course"),
-    );
-    await expect(manager.cancelAndSteer(id, "change again")).resolves.toBe(true);
-    finishRedirect();
-    await manager.getRecord(id)!.promise;
-
-    expect(
-      vi
-        .mocked(resumeAgent)
-        .mock.calls.slice(-3)
-        .map((call) => call[1]),
-    ).toEqual(["continue", "change course", "change again"]);
-    expect(manager.getRecord(id)).toMatchObject({ status: "completed", result: "redirected" });
-  });
-
-  it("retains every accepted redirect when interrupts arrive before cancellation settles", async () => {
-    manager = new AgentManager();
-    const session = { ...mockSession(), abort: vi.fn(async () => {}) };
-    let finishInitial!: () => void;
-    vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
-      options.onSessionCreated?.(session);
-      await new Promise<void>((resolve) => (finishInitial = resolve));
-      return { responseText: "partial", session };
-    });
-    vi.mocked(resumeAgent)
-      .mockResolvedValueOnce("first redirect")
-      .mockResolvedValueOnce("second redirect");
-
-    const id = manager.spawn(mockPi, mockCtx, "worker", "first", {
-      description: "retained",
-    });
-    await expect(manager.cancelAndSteer(id, "change once")).resolves.toBe(true);
-    await expect(manager.cancelAndSteer(id, "change twice")).resolves.toBe(true);
-    finishInitial();
-    await manager.getRecord(id)!.promise;
-
-    expect(
-      vi
-        .mocked(resumeAgent)
-        .mock.calls.slice(-2)
-        .map((call) => call[1]),
-    ).toEqual(["change once", "change twice"]);
-    expect(manager.getRecord(id)).toMatchObject({
-      status: "completed",
-      result: "second redirect",
-    });
   });
 
   it("does not consume execution when retained-turn session setup fails", async () => {

@@ -19,7 +19,6 @@ interface CommandApprovalOptions {
   rememberAllowance: () => void;
   review?: () => Promise<{ outcome: "allow" | "deny"; rationale?: string }>;
   checkCurrent?: () => void;
-  getConversation?: () => (() => Promise<void>) | undefined;
   failureMessage?: (message: string, phase: "review" | "manual" | "authorization") => string;
 }
 
@@ -81,7 +80,6 @@ export async function requestCommandApproval(
             isAllowed,
             rationale: decision.rationale,
             checkCurrent: check,
-            viewConversation: options.getConversation?.(),
           }),
           signal,
         );
@@ -103,27 +101,15 @@ export async function requestCommandApproval(
         const allowSession = `Allow for session ("${sessionAllowKey}")`;
         pi.events.emit("bites:bash_gate", gate);
         try {
-          for (;;) {
-            const viewConversation = options.getConversation?.();
-            const choice = await ui.select(
-              prompt,
-              ["Allow", allowSession, ...(viewConversation ? ["View conversation"] : []), "Deny"],
-              { signal },
-            );
-            check();
-            if (choice === "View conversation" && viewConversation) {
-              await viewConversation();
-              check();
-              continue;
-            }
-            if (choice === allowSession) {
-              rememberAllowance();
-              return { outcome: "allow-session", authorization: "human-approved" };
-            }
-            return choice === "Allow"
-              ? { outcome: "allow", authorization: "human-approved" }
-              : { outcome: "deny", source: "manual" };
+          const choice = await ui.select(prompt, ["Allow", allowSession, "Deny"], { signal });
+          check();
+          if (choice === allowSession) {
+            rememberAllowance();
+            return { outcome: "allow-session", authorization: "human-approved" };
           }
+          return choice === "Allow"
+            ? { outcome: "allow", authorization: "human-approved" }
+            : { outcome: "deny", source: "manual" };
         } catch (error) {
           return failure(error, "manual");
         } finally {

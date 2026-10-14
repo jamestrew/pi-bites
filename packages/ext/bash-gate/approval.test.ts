@@ -70,21 +70,6 @@ describe("command approval workflow", () => {
       "bites:bash_gate_resolved",
     ]);
   });
-  test("viewing a conversation returns to the manual decision without granting permission", async () => {
-    const options = approvalOptions();
-    options.ui.select.mockResolvedValueOnce("View conversation").mockResolvedValueOnce("Allow");
-    let viewed = false;
-    await expect(
-      requestCommandApproval({
-        ...options,
-        getConversation: () => async () => {
-          viewed = true;
-        },
-      }),
-    ).resolves.toEqual({ outcome: "allow", authorization: "human-approved" });
-    expect(viewed).toBe(true);
-    expect(options.isAllowed()).toBe(false);
-  });
   test("ownership invalidation during review cannot approve a replaced child", async () => {
     const options = approvalOptions();
     let current = true;
@@ -222,24 +207,6 @@ describe("command approval workflow", () => {
     ]);
   });
 
-  test("closing a conversation invalidates the subsequent manual decision", async () => {
-    const options = approvalOptions();
-    let current = true;
-    options.ui.select.mockResolvedValueOnce("View conversation").mockResolvedValueOnce("Allow");
-    await expect(
-      requestCommandApproval({
-        ...options,
-        checkCurrent: () => {
-          if (!current) throw new Error("owner replaced");
-        },
-        getConversation: () => async () => {
-          current = false;
-        },
-      }),
-    ).resolves.toEqual({ outcome: "failure", message: "owner replaced" });
-    expect(options.ui.select.mock.calls).toHaveLength(1);
-  });
-
   test.each(["Deny", undefined, "unknown selection"])(
     "manual choice %s fails closed",
     async (choice) => {
@@ -282,6 +249,11 @@ describe("command approval workflow", () => {
       authorization: "human-approved",
     });
     expect(options.isAllowed()).toBe(false);
+    expect(options.ui.select).toHaveBeenCalledWith(
+      options.prompt,
+      ["Allow", 'Allow for session ("rm")', "Deny"],
+      { signal: options.signal },
+    );
     expect(options.pi.events.emit.mock.calls).toEqual([
       [
         "bites:bash_gate",

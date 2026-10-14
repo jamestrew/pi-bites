@@ -1,18 +1,12 @@
 import type { SubagentsSettings } from "./settings.js";
 import type { SubagentContext } from "./operation-context.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createActivityTracker } from "./activity-tracker.js";
 import type { AgentManager } from "./agent-manager.js";
 import { type ResolvedAgent } from "./agent-types.js";
 import { resolveAgentInvocationConfig } from "./invocation-config.js";
 import { SubagentOperationError } from "./tool-result.js";
 import { type AgentInvocation, type SpawnOptions, type SubagentType } from "./types.js";
-import {
-  type AgentActivity,
-  type AgentDetails,
-  buildInvocationTags,
-  getDisplayName,
-} from "./ui/agent-format.js";
+import { type AgentDetails, buildInvocationTags, getDisplayName } from "./ui/agent-format.js";
 import type { FleetList } from "./ui/fleet-list.js";
 import { sanitizeText } from "../shared/terminal-text.js";
 
@@ -24,12 +18,11 @@ type AgentToolUpdate = (update: {
 type AgentToolExecuteDeps = {
   pi: ExtensionAPI;
   manager: AgentManager;
-  agentActivity: Map<string, AgentActivity>;
   fleet: FleetList;
   getModelDefaults?: () => Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">;
 };
 
-/** Already-normalized spawn policy; model authorization and activity remain shared. */
+/** Already-normalized spawn policy; model authorization and manager tracking remain shared. */
 export function createSpawnExecution(
   deps: AgentToolExecuteDeps,
   start: (
@@ -40,7 +33,7 @@ export function createSpawnExecution(
     signal?: AbortSignal,
   ) => string | Promise<string>,
 ) {
-  const { pi, manager, agentActivity, fleet } = deps;
+  const { pi, manager, fleet } = deps;
   return async (
     toolCallId: string,
     params: {
@@ -82,7 +75,6 @@ export function createSpawnExecution(
       thinking,
     };
     const { tags } = buildInvocationTags(agentInvocation);
-    const { state, callbacks } = createActivityTracker();
 
     signal?.throwIfAborted();
     ctx.signal?.throwIfAborted();
@@ -94,13 +86,11 @@ export function createSpawnExecution(
       forkContext: params.forkContext,
       invocation: agentInvocation,
       allowedTools: ctx.allowedTools,
-      ...callbacks,
     };
     const id = await start(ctx, subagentType, params.message, options, signal);
 
     const record = manager.getRecord(id);
     if (record) record.toolCallId = toolCallId;
-    agentActivity.set(id, state);
     fleet.ensureTimer();
     fleet.update();
 

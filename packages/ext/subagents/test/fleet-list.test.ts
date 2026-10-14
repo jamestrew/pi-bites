@@ -1,163 +1,46 @@
-import {
-  getKeybindings,
-  type KeybindingsConfig,
-  KeybindingsManager,
-  setKeybindings,
-  type Terminal,
-  TUI_KEYBINDINGS,
-  TuiAltScreen,
-  visibleWidth,
-} from "@earendil-works/pi-tui";
-import { describe, expect, it, vi } from "vitest";
+import { getKeybindings, visibleWidth } from "@earendil-works/pi-tui";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentManager } from "../agent-manager.js";
 import type { AgentRecord } from "../types.js";
-import { type AgentActivity, getDisplayName } from "../ui/agent-format.js";
-import {
-  FleetList,
-  type FleetUICtx,
-  formatFleetElapsed,
-  formatFleetTokens,
-} from "../ui/fleet-list.js";
+import { getDisplayName } from "../ui/agent-format.js";
+import { FleetList, formatFleetElapsed, formatFleetTokens } from "../ui/fleet-list.js";
 
-// ---- Key sequences (see node_modules/@earendil-works/pi-tui/dist/keys.js) ----
-const DOWN = "\x1b[B";
-const UP = "\x1b[A";
-const LEFT = "\x1b[D";
-const RIGHT = "\x1b[C";
-const CTRL_UP = "\x1b[1;5A";
-const CTRL_DOWN = "\x1b[1;5B";
-const ESC = "\x1b";
-const ENTER = "\r";
-// Kitty-protocol key-RELEASE for ↓ (event type 3) — listeners receive these too.
-const DOWN_RELEASE = "\x1b[1;1:3B";
-
-const theme = { fg: (c: string, s: string) => `<${c}>${s}</${c}>`, bold: (s: string) => `*${s}*` };
-
-/** A no-op session so a record is "openable" by default (the list hides session-less agents). */
-const FAKE_SESSION = { subscribe: () => () => {}, messages: [] };
+const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+const fleets: FleetList[] = [];
+afterEach(() => {
+  for (const fleet of fleets.splice(0)) fleet.dispose();
+  vi.useRealTimers();
+});
 
 function makeRecord(over: Partial<AgentRecord> = {}): AgentRecord {
   return {
     id: "a1",
     type: "worker",
-    prompt: "Sleep then report",
-    description: "Sleep then report 1",
+    description: "inspect files",
     status: "running",
-    toolUses: 0,
     startedAt: Date.now(),
-    session: FAKE_SESSION as any,
+    session: { subscribe: () => () => {}, messages: [] },
     lifetimeUsage: { input: 13100, output: 0, cacheWrite: 0 },
-    compactionCount: 0,
     ...over,
   } as AgentRecord;
 }
 
-function makeActivity(record: AgentRecord): AgentActivity {
-  return {
-    activeTools: new Map(),
-    toolUses: 0,
-    responseText: "",
-    turnCount: 0,
-    lifetimeUsage: record.lifetimeUsage,
+function harness(agents: AgentRecord[]) {
+  let widget: { render(width: number): string[] } | undefined;
+  const tui = { requestRender: vi.fn() };
+  const ui = {
+    setWidget: vi.fn((_key, factory, options) => {
+      expect(options ?? { placement: "aboveEditor" }).toEqual({ placement: "aboveEditor" });
+      widget = factory?.(tui, theme);
+    }),
+    onTerminalInput: vi.fn(),
+    custom: vi.fn(),
   };
-}
-
-/** Fake manager exposing only what FleetList touches. */
-function fakeManager(agents: AgentRecord[]): AgentManager {
-  return {
-    listAgents: () => agents,
-    runtimes: { protect: () => () => {} },
-    isRuntimeDisposing: () => false,
-    abort: () => true,
-    steer: vi.fn(() => true),
-  } as unknown as AgentManager;
-}
-
-interface Harness {
-  fleet: FleetList;
-  ui: FleetUICtx;
-  manager: AgentManager;
-  /** The overlay component (a real ConversationViewer) once one is opened. */
-  overlayComponent: () => { handleInput(data: string): void } | undefined;
-  /** Feed a key to the registered input handler; returns the consume result. */
-  press: (data: string) => { consume?: boolean } | undefined;
-  /** Render the currently-registered FleetView widget at the given width. */
-  render: (width?: number) => string[];
-  setEditorText: (t: string) => void;
-  /** Whether an overlay has been opened. */
-  overlayOpened: () => boolean;
-  overlayOptions: () => unknown;
-  /** Whether the most recently opened overlay's `done` was invoked (closed). */
-  overlayClosed: () => boolean;
-  /** Simulate the viewer closing itself (Esc → done); flushes the close microtask. */
-  closeOverlay: () => Promise<void>;
-}
-
-function harness(agents: AgentRecord[], tui?: TuiAltScreen): Harness {
-  let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined;
-  let widgetFactory: ((tui: any, theme: any) => { render(w: number): string[] }) | undefined;
-  let editorText = "";
-  let opened = false;
-  let closed = false;
-  let overlayDone: ((r: undefined) => void) | undefined;
-  let overlayComponent: { handleInput(data: string): void } | undefined;
-  let overlayOptions: unknown;
-  const fakeTui = tui ?? { requestRender: () => {}, terminal: { columns: 120, rows: 40 } };
-
-  const ui: FleetUICtx = {
-    setWidget: (_key, content) => {
-      widgetFactory = content as any;
-    },
-    onTerminalInput: (h) => {
-      if (tui) return tui.addInputListener(h);
-      inputHandler = h;
-      return () => {
-        inputHandler = undefined;
-      };
-    },
-    getEditorText: () => editorText,
-    notify: () => {},
-    custom: ((factory: any, options: unknown) => {
-      opened = true;
-      overlayOptions = options;
-      return new Promise<undefined>((resolve) => {
-        const done = (r: undefined) => {
-          closed = true;
-          overlayDone = undefined;
-          resolve(r);
-        };
-        overlayDone = done;
-        // Construct the overlay component so the controller wires viewerClose,
-        // and keep it so tests can drive the real ConversationViewer's input.
-        overlayComponent = factory(fakeTui, theme, undefined, done);
-      });
-    }) as FleetUICtx["custom"],
-  };
-
-  const manager = fakeManager(agents);
-  const activity = new Map(agents.map((agent) => [agent.id, makeActivity(agent)]));
-  const fleet = new FleetList(manager, activity);
+  const fleet = new FleetList({ listAgents: () => agents } as AgentManager);
+  fleets.push(fleet);
   fleet.setUICtx(ui);
   fleet.update();
-
-  return {
-    fleet,
-    ui,
-    manager,
-    overlayComponent: () => overlayComponent,
-    press: (data) => inputHandler?.(data),
-    render: (width = 120) => (widgetFactory ? widgetFactory(fakeTui, theme).render(width) : []),
-    setEditorText: (t) => {
-      editorText = t;
-    },
-    overlayOpened: () => opened,
-    overlayOptions: () => overlayOptions,
-    overlayClosed: () => closed,
-    closeOverlay: async () => {
-      overlayDone?.(undefined);
-      await Promise.resolve();
-    },
-  };
+  return { fleet, ui, tui, render: (width = 120) => widget?.render(width) ?? [] };
 }
 
 describe("formatFleetElapsed", () => {
@@ -180,243 +63,20 @@ describe("formatFleetTokens", () => {
   });
 });
 
-describe("FleetList navigation", () => {
-  it.each([
-    {},
-    {
-      "tui.altScreen.previousPrompt": ["ctrl+up", "ctrl+shift+up", "alt+up"],
-      "tui.altScreen.nextPrompt": ["ctrl+down", "ctrl+shift+down", "alt+down"],
-    },
-  ] satisfies KeybindingsConfig[])(
-    "reserves fullscreen Ctrl+↑/↓ regardless of FleetView visibility %j",
-    (bindings) => {
-      const previousKeybindings = getKeybindings();
-      const keybindings = new KeybindingsManager(TUI_KEYBINDINGS, bindings);
-      setKeybindings(keybindings);
-      let input!: (data: string) => void;
-      const noop = () => {};
-      const terminal: Terminal = {
-        columns: 120,
-        rows: 40,
-        kittyProtocolActive: false,
-        start: (handler) => {
-          input = handler;
-        },
-        stop: noop,
-        drainInput: async () => {},
-        write: noop,
-        moveBy: noop,
-        hideCursor: noop,
-        showCursor: noop,
-        clearLine: noop,
-        clearFromCursor: noop,
-        clearScreen: noop,
-        setTitle: noop,
-        setProgress: noop,
-      };
-      const tui = new TuiAltScreen(terminal);
-      vi.spyOn(tui, "requestRender").mockImplementation(noop);
-      const h = harness(
-        [
-          makeRecord({ id: "a1", description: "one" }),
-          makeRecord({ id: "a2", description: "two" }),
-        ],
-        tui,
-      );
-      const reservedBindings = keybindings.getUserBindings();
-      try {
-        expect(keybindings.getKeys("tui.altScreen.previousPrompt")).not.toContain("ctrl+up");
-        expect(keybindings.getKeys("tui.altScreen.nextPrompt")).not.toContain("ctrl+down");
-        tui.start();
-        input(CTRL_UP);
-        expect(h.render().find((line) => line.includes("two"))).toContain("▶");
-        input(CTRL_UP);
-        expect(h.render().find((line) => line.includes("one"))).toContain("▶");
-        input(CTRL_DOWN);
-        expect(h.render().find((line) => line.includes("two"))).toContain("▶");
-        expect(keybindings.getKeys("tui.altScreen.previousPrompt")).toContain("ctrl+shift+up");
-        expect(keybindings.getKeys("tui.altScreen.nextPrompt")).toContain("ctrl+shift+down");
-        h.fleet.setEnabled(false);
-        expect(keybindings.getUserBindings()).toEqual(reservedBindings);
-        h.fleet.setEnabled(true);
-        h.render();
-        input(CTRL_UP);
-        expect(h.render().some((line) => line.includes("FleetView focused"))).toBe(true);
-        keybindings.setUserBindings({
-          ...keybindings.getUserBindings(),
-          "tui.altScreen.nextPrompt": ["alt+down"],
-          "tui.input.newLine": "ctrl+j",
-        });
-      } finally {
-        h.fleet.dispose();
-        tui.stop();
-        setKeybindings(previousKeybindings);
-      }
-      expect(keybindings.getUserBindings()).toEqual({
-        ...reservedBindings,
-        "tui.altScreen.nextPrompt": ["alt+down"],
-        "tui.input.newLine": "ctrl+j",
-      });
-    },
-  );
-
-  it("does not register a widget when there are no agents", () => {
-    const h = harness([]);
-    expect(h.render()).toEqual([]);
-  });
-
-  it("activates on Ctrl+↑, consuming the key", () => {
+describe("read-only Fleet", () => {
+  it("renders status without input hooks, overlays or host keybinding changes", () => {
+    const bindings = structuredClone(getKeybindings().getUserBindings());
     const h = harness([makeRecord()]);
-    const res = h.press(CTRL_UP);
-    expect(res).toEqual({ consume: true });
-    // main selected, list active → nav hint shown
-    expect(h.render().some((l) => l.includes("FleetView focused"))).toBe(true);
-  });
-
-  it("does not activate on plain arrows used by prompt history/navigation", () => {
-    const h = harness([makeRecord()]);
-    expect(h.press(DOWN)).toBeUndefined();
-    expect(h.press(UP)).toBeUndefined();
-    expect(h.press(LEFT)).toBeUndefined();
-    expect(h.press(RIGHT)).toBeUndefined();
-  });
-
-  it("activates even when the prompt is non-empty", () => {
-    const h = harness([makeRecord()]);
-    h.setEditorText("hello");
-    expect(h.press(CTRL_UP)).toEqual({ consume: true });
-  });
-
-  it("ignores key-release events so one tap moves exactly one row", () => {
-    const h = harness([
-      makeRecord({ id: "a1", description: "one" }),
-      makeRecord({ id: "a2", description: "two" }),
-    ]);
-    h.press(CTRL_UP); // activate → selection on last row
-    h.press(DOWN_RELEASE); // release half of the SAME tap — must be a no-op
-    expect(h.render().find((l) => l.includes("two"))).toContain("▶");
-    expect(h.render().find((l) => l.includes("one"))).not.toContain("▶");
-  });
-
-  it("moves selection down/up and clamps at the ends", () => {
-    const agents = [
-      makeRecord({ id: "a1", description: "one" }),
-      makeRecord({ id: "a2", description: "two" }),
-    ];
-    const h = harness(agents);
-    h.press(CTRL_UP); // activate → last row (a2)
-    expect(h.render().find((l) => l.includes("two"))).toContain("▶");
-    h.press(CTRL_UP); // → 1 (a1)
-    expect(h.render().find((l) => l.includes("one"))).toContain("▶");
-    h.press(CTRL_DOWN); // → 2 (a2)
-    expect(h.render().find((l) => l.includes("two"))).toContain("▶");
-    expect(h.press(DOWN)).toEqual({ consume: true }); // down past last exits
-    expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
-  });
-
-  it("↓ below the last row deactivates (returns to the prompt)", () => {
-    const h = harness([makeRecord()]);
-    h.press(CTRL_UP); // activate, last row
-    expect(h.press(DOWN)).toEqual({ consume: true });
-    expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
-  });
-
-  it("Esc deactivates", () => {
-    const h = harness([makeRecord()]);
-    h.press(CTRL_UP);
-    expect(h.press(ESC)).toEqual({ consume: true });
-    expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
-  });
-
-  it("yields input and deactivates while any bash gate is pending", () => {
-    const h = harness([makeRecord()]);
-    h.press(CTRL_UP);
-
-    h.fleet.bashGateStarted("gate-1");
-    h.fleet.bashGateStarted("gate-2");
-    expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
-    expect(h.press(ENTER)).toBeUndefined();
-    expect(h.press(ESC)).toBeUndefined();
-    expect(h.overlayOpened()).toBe(false);
-
-    h.fleet.bashGateResolved("gate-1");
-    expect(h.press(CTRL_UP)).toBeUndefined();
-    h.fleet.bashGateResolved("unknown-gate");
-    expect(h.press(CTRL_UP)).toBeUndefined();
-    h.fleet.bashGateResolved("gate-2");
-    expect(h.press(CTRL_UP)).toEqual({ consume: true });
-  });
-
-  it("passes non-nav keys through and cancels navigation", () => {
-    const h = harness([makeRecord()]);
-    h.press(CTRL_UP);
-    expect(h.press("x")).toBeUndefined();
-    expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
-  });
-
-  it("ignores all input while disabled and hides the widget", () => {
-    const h = harness([makeRecord()]);
-    h.fleet.setEnabled(false);
-    expect(h.press(DOWN)).toBeUndefined();
-    expect(h.render()).toEqual([]);
-  });
-
-  it("re-arms the refresh timer when the list is re-shown (toggle off→on)", () => {
-    vi.useFakeTimers();
-    try {
-      const agents = [makeRecord({ id: "a1" })];
-      const listAgents = vi.fn(() => agents);
-      const manager = { listAgents, abort: () => true } as unknown as AgentManager;
-      const fleet = new FleetList(manager, new Map());
-      fleet.setUICtx({
-        setWidget: () => {},
-        onTerminalInput: () => () => {},
-        getEditorText: () => "",
-        notify: () => {},
-        custom: (() => new Promise<undefined>(() => {})) as FleetUICtx["custom"],
-      });
-      fleet.update(); // shows list, arms the timer
-      fleet.setEnabled(false); // hides, clears the timer
-      fleet.setEnabled(true); // re-shows — must re-arm the timer
-      const before = listAgents.mock.calls.length;
-      vi.advanceTimersByTime(250); // a tick should fire and re-read the roster
-      expect(listAgents.mock.calls.length).toBeGreaterThan(before);
-      fleet.dispose();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-});
-
-describe("FleetList rendering", () => {
-  it("renders main + agent rows with cursor gutter, type, description and right-aligned stats", () => {
-    const h = harness([makeRecord({ description: "Sleep then report 1" })]);
-    const lines = h.render(120);
-    // hint + main + one agent
-    expect(lines[0]).toContain("ctrl+↑ focus agents");
-    expect(lines[1]).toContain("•");
-    const agentLine = lines.find((l) => l.includes("Sleep then report 1"))!;
-    expect(agentLine).not.toContain("⏺");
-    expect(agentLine).not.toContain("◯");
-    expect(agentLine).toContain(getDisplayName("worker"));
-    expect(agentLine).toContain("↓ 13.1k tokens");
-    expect(agentLine).toMatch(/\d+s · ↓/); // "<seconds>s · ↓ ..." (timing-agnostic)
-  });
-
-  it("keeps the original description and stats throughout bash approval handling", () => {
-    const h = harness([makeRecord({ id: "waiting", description: "inspect files" })]);
-    const expectStableRow = () => {
-      const agentLine = h.render(120).find((line) => line.includes("inspect files"));
-      expect(agentLine).toContain("↓ 13.1k tokens");
-      expect(agentLine).toMatch(/\d+s · ↓/);
-      expect(h.render(120).some((line) => line.includes("Waiting for bash approval"))).toBe(false);
-    };
-
-    expectStableRow();
-    h.fleet.bashGateStarted("gate");
-    expectStableRow();
-    h.fleet.bashGateResolved("gate");
-    expectStableRow();
+    const lines = h.render();
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("main");
+    expect(lines[1]).toContain(getDisplayName("worker"));
+    expect(lines[1]).toContain("inspect files · running");
+    expect(lines[1]).toContain("0s · ↓ 13.1k tokens");
+    expect(lines.join("\n")).not.toMatch(/focus|select|enter|▶/);
+    expect(h.ui.onTerminalInput).not.toHaveBeenCalled();
+    expect(h.ui.custom).not.toHaveBeenCalled();
+    expect(getKeybindings().getUserBindings()).toEqual(bindings);
   });
 
   it("orders agents earliest-launched first (top)", () => {
@@ -452,6 +112,8 @@ describe("FleetList rendering", () => {
     );
     const h = harness(agents);
     const lines = h.render(120);
+    expect(lines).toHaveLength(7);
+    expect(lines.join("\n")).not.toContain("report 5");
     // 8 agents, cap 5 visible → "↓ 3 more"
     expect(lines.some((l) => l.includes("↓ 3 more"))).toBe(true);
   });
@@ -471,126 +133,73 @@ describe("FleetList rendering", () => {
     }
   });
 
-  it("windows the visible agents so the selection stays on screen", () => {
-    const agents = Array.from({ length: 8 }, (_, i) =>
-      makeRecord({ id: `a${i}`, description: `report ${i}` }),
-    );
-    const h = harness(agents);
-    h.press(CTRL_UP); // activate at last agent
-    const lines = h.render(120);
-    expect(lines.find((l) => l.includes("report 7"))).toContain("▶");
-    expect(lines.some((l) => l.includes("↑"))).toBe(true); // hidden-above indicator
-  });
-});
-
-describe("FleetList overlay lifecycle", () => {
-  it("opens conversations as a full-window edge-to-edge overlay", () => {
-    const h = harness([makeRecord()]);
-    h.press(CTRL_UP);
-    h.press(ENTER);
-
-    expect(h.overlayOptions()).toEqual({
-      overlay: true,
-      overlayOptions: { width: "100%", maxHeight: "100%", margin: 0 },
+  it.each([
+    ["idle", undefined, "idle"],
+    ["queued", undefined, "queued"],
+    ["completed", undefined, "completed"],
+    ["error", undefined, "errored"],
+    ["stopped", "interrupt", "interrupted"],
+    ["stopped", "shutdown", "shutdown"],
+  ] as const)("shows %s lifecycle status", (status, source, label) => {
+    const record = makeRecord({
+      status,
+      completedAt: status === "idle" || status === "queued" ? undefined : Date.now(),
+      ...(source ? { abort: { timestamp: Date.now(), source, reason: source } } : {}),
     });
+    expect(harness([record]).render().join("\n")).toContain(` · ${label}`);
   });
 
-  it("closes an open viewer before yielding to a bash gate", async () => {
-    const h = harness([makeRecord()]);
-    h.press(CTRL_UP);
-    h.press(ENTER);
-
-    h.fleet.bashGateStarted("gate");
-    expect(h.overlayClosed()).toBe(true);
-    h.fleet.bashGateResolved("gate");
-    await Promise.resolve();
-    expect(h.press(CTRL_UP)).toEqual({ consume: true });
-  });
-
-  it("Enter on 'main' just deactivates (no overlay)", () => {
-    const h = harness([makeRecord()]);
-    h.press(CTRL_UP); // active at agent
-    h.press(UP); // main
-    h.press(ENTER);
-    expect(h.overlayOpened()).toBe(false); // never opened an overlay
-    expect(h.render().some((l) => l.includes("ctrl+↑ focus agents"))).toBe(true);
-  });
-
-  it("keeps the cursor on the viewed agent after closing, even if the list reordered", async () => {
-    const fakeSession = { subscribe: () => () => {}, messages: [] };
-    const agents = [
-      makeRecord({ id: "a1", description: "one", session: fakeSession as any }),
-      makeRecord({ id: "a2", description: "two", session: fakeSession as any }),
-      makeRecord({ id: "a3", description: "three", session: fakeSession as any }),
-    ];
-    const h = harness(agents);
-    h.press(CTRL_UP); // activate at a3
-    h.press(UP); // a2
-    h.press(ENTER); // open a2
-    // a1 finishes and drops out while viewing → a2 shifts from idx 2 to idx 1.
-    agents.splice(0, 1);
-    await h.closeOverlay();
-    // Selection follows a2 ("two") to its new position, not whatever is at idx 2 now.
-    expect(h.render().find((l) => l.includes("two"))).toContain("▶");
-    expect(h.render().find((l) => l.includes("three"))).not.toContain("▶");
-  });
-
-  it("wires the viewer's steer composer to manager.steer with the agent id", () => {
-    const agents = [makeRecord({ id: "live", description: "the one" })];
-    const h = harness(agents);
-    h.press(CTRL_UP); // activate at the agent
-    h.press(ENTER); // open the conversation viewer
-
-    const viewer = h.overlayComponent();
-    expect(viewer).toBeDefined();
-    viewer!.handleInput("\r"); // Enter → open composer
-    for (const ch of "go left") viewer!.handleInput(ch);
-    viewer!.handleInput("\r"); // Enter → send
-
-    expect(h.manager.steer).toHaveBeenCalledWith("live", "go left");
-  });
-
-  it("does NOT auto-close when the viewed agent finishes (final output stays readable)", () => {
-    const agents = [makeRecord({ id: "live", description: "the one" })];
-    const h = harness(agents);
-    h.press(CTRL_UP); // active at the agent
-    h.press(ENTER); // opens overlay
-    expect(h.overlayOpened()).toBe(true);
-    // The agent finishes, well past the linger window...
-    agents[0] = makeRecord({
-      id: "live",
-      description: "the one",
-      status: "completed",
-      completedAt: Date.now() - 60_000,
+  it("shows unloaded residency and pending mail without loading the conversation", () => {
+    const record = makeRecord({
+      status: "idle",
+      session: undefined,
+      retainedConversation: { entries: [] } as any,
     });
-    h.fleet.onAgentFinished();
-    expect(h.overlayClosed()).toBe(false); // viewer stays open
-    expect(h.render().some((l) => l.includes("the one"))).toBe(true); // and stays listed while viewed
+    const h = harness([record]);
+    h.fleet.setPendingMail(record.id, 2);
+    expect(h.render(160).join("\n")).toContain("idle · unloaded · 2 pending messages");
   });
 
-  it("lingers a finished agent in the list, then drops it after the window", () => {
-    const recent = makeRecord({
-      id: "r",
-      description: "recent done",
+  it("ticks elapsed time and usage, re-arms after enabling, and removes the widget on dispose", () => {
+    vi.useFakeTimers();
+    const record = makeRecord();
+    const h = harness([record]);
+    h.fleet.setEnabled(false);
+    expect(h.render()).toEqual([]);
+    h.fleet.setEnabled(true);
+    vi.advanceTimersByTime(1000);
+    expect(h.render().join("\n")).toContain("1s · ↓ 13.1k tokens");
+    record.lifetimeUsage = { input: 100, output: 200, cacheWrite: 50 };
+    vi.advanceTimersByTime(200);
+    expect(h.render().join("\n")).toContain("↓ 350 tokens");
+    expect(h.tui.requestRender).toHaveBeenCalled();
+    h.fleet.dispose();
+    expect(h.render()).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("freezes finished elapsed time and clears the row after its linger window", () => {
+    vi.useFakeTimers();
+    const record = makeRecord({
+      startedAt: Date.now() - 10_000,
       status: "completed",
       completedAt: Date.now(),
     });
-    expect(
-      harness([recent])
-        .render()
-        .some((l) => l.includes("recent done")),
-    ).toBe(true);
-    const old = makeRecord({
-      id: "o",
-      description: "old done",
-      status: "completed",
-      completedAt: Date.now() - 60_000,
-    });
-    expect(
-      harness([old])
-        .render()
-        .some((l) => l.includes("old done")),
-    ).toBe(false);
+    const h = harness([record]);
+    expect(h.render().join("\n")).toContain("10s · ↓ 13.1k tokens");
+    vi.advanceTimersByTime(400);
+    expect(h.render().join("\n")).toContain("10s · ↓ 13.1k tokens");
+    vi.advanceTimersByTime(200);
+    expect(h.render()).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("sanitizes descriptions so they cannot add rows or terminal escapes", () => {
+    const h = harness([makeRecord({ description: "inspect\nfiles\x1b]2;owned\x07" })]);
+    expect(h.render()).toHaveLength(2);
+    for (const control of ["\n", "\x1b", "\x07"]) {
+      expect(h.render()[1]).not.toContain(control);
+    }
   });
 });
 
