@@ -2,6 +2,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
+import { openAgentSession } from "../agent-runner.js";
+import { shutdownAgentSession } from "../agent-session-shutdown.js";
+import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { setupV2 } from "./helpers/v2-harness.js";
 
 vi.setConfig({ testTimeout: 30_000 });
@@ -196,4 +199,170 @@ it("rejects ambiguous bare model IDs and unavailable configured defaults", async
   });
   expect(explicit.details.modelName).toBe("v2-mail/test-model");
   await h.manager.waitForAll();
+});
+
+it("passes the authenticated root scope into SDK children and forbids descendant broadening", async () => {
+  const h = await setupV2(cleanup);
+  const inside = h.faux.getModel();
+  const outside = { ...inside, id: "outside" };
+  const provider = h.ctx.modelRegistry.getRegisteredProviderConfig(inside.provider);
+  h.ctx.modelRegistry.getAvailable = () => [inside, outside];
+  h.ctx.modelRegistry.getRegisteredProviderConfig = () => ({
+    ...provider,
+    models: [inside, outside],
+  });
+  h.ctx.scopedModels = [{ model: inside }];
+  h.faux.setResponses([fauxAssistantMessage("done"), fauxAssistantMessage("leaf done")]);
+  const result = await h.call("spawn_agent", {
+    task_name: "parent",
+    message: "work",
+    fork_turns: "none",
+  });
+  await h.manager.waitForAll();
+  const parent = h.manager.getRecord(result.details.agentId);
+  expect(parent.session.scopedModels.map((entry: any) => entry.model.id)).toEqual(["test-model"]);
+  // Native child scope/defaults are not the security boundary.
+  parent.session.setScopedModels([]);
+  const child = h.controller.forChild(h.pi, parent, () => h.pi.getActiveTools());
+  const call = child.capture({
+    ...h.ctx,
+    scopedModels: [],
+    sessionManager: parent.session.sessionManager,
+  });
+  await expect(
+    call.execute(
+      "spawn_agent",
+      { task_name: "leaf", message: "work", model: "outside", fork_turns: "none" },
+      {
+        callerId: call.callerId,
+        callId: "outside",
+      },
+    ),
+  ).rejects.toThrow("Model not in scope");
+  let leafId = "";
+  h.pi.events.on("subagents:created", (event: any) => {
+    leafId = event.id;
+  });
+  await call.execute(
+    "spawn_agent",
+    { task_name: "leaf", message: "work", fork_turns: "none" },
+    {
+      callerId: call.callerId,
+      callId: "inside",
+    },
+  );
+  await h.manager.waitForAll();
+  const grandchild = h.manager.getRecord(leafId);
+  expect(grandchild.session.scopedModels.map((entry: any) => entry.model.id)).toEqual([
+    "test-model",
+  ]);
+});
+
+it("tightens root scope without aborting a turn, and rejects later work even through old captures", async () => {
+  const nativeSetter = AgentSession.prototype.setScopedModels;
+  const h = await setupV2(cleanup);
+  h.pi.getActiveTools = () => [
+    "spawn_agent",
+    "list_agents",
+    "send_message",
+    "followup_task",
+    "wait_agent",
+    "interrupt_agent",
+  ];
+  const outside = h.faux.getModel();
+  const inside = { ...outside, id: "inside" };
+  const provider = h.ctx.modelRegistry.getRegisteredProviderConfig(outside.provider);
+  h.ctx.modelRegistry.getAvailable = () => [inside, outside];
+  h.ctx.modelRegistry.getRegisteredProviderConfig = () => ({
+    ...provider,
+    models: [inside, outside],
+  });
+  const root = await openAgentSession(h.ctx, "default", {
+    pi: h.pi,
+    model: outside,
+    isolated: true,
+  });
+  cleanup.unshift(() => shutdownAgentSession(root));
+  h.ctx.sessionManager = root.sessionManager;
+  await h.emit("session_start");
+  h.faux.setResponses([
+    {
+      ...fauxAssistantMessage(""),
+      stopReason: "toolUse",
+      content: [
+        { type: "toolCall", id: "wait", name: "wait_agent", arguments: { timeout_ms: 3_600_000 } },
+      ],
+    },
+  ]);
+  const spawned = await h.call("spawn_agent", {
+    task_name: "a",
+    message: "wait",
+    fork_turns: "none",
+  });
+  const record = h.manager.getRecord(spawned.details.agentId);
+  await vi.waitFor(() => expect(record.toolCalls).toHaveLength(1));
+  const child = h.controller.forChild(h.pi, record, () => h.pi.getActiveTools());
+  const childCtx = { ...h.ctx, scopedModels: [], sessionManager: record.session.sessionManager };
+  const oldChild = child.capture(childCtx);
+  const oldRoot = h.controller.capture(h.ctx, { forkContext: false });
+  // Native /scoped-models uses this setter. No root lifecycle event follows it.
+  root.setScopedModels([{ model: inside }]);
+  const rootDescriptors = Object.getOwnPropertyDescriptors(h.ctx);
+  for (const key of Object.keys(h.ctx))
+    Object.defineProperty(h.ctx, key, {
+      configurable: true,
+      get() {
+        throw new Error("stale root ctx");
+      },
+    });
+  for (const key of Object.keys(childCtx))
+    Object.defineProperty(childCtx, key, {
+      get() {
+        throw new Error("stale child ctx");
+      },
+    });
+  expect(record.status).toBe("running");
+  expect(record.abortController.signal.aborted).toBe(false);
+  await expect(
+    oldChild.execute(
+      "spawn_agent",
+      { task_name: "leaf", message: "no", fork_turns: "none" },
+      {
+        callerId: oldChild.callerId,
+        callId: "leaf",
+      },
+    ),
+  ).rejects.toThrow("Model not in scope");
+  await expect(
+    oldRoot.execute(
+      "followup_task",
+      { target: "a", message: "no" },
+      {
+        callerId: oldRoot.callerId,
+        callId: "followup",
+      },
+    ),
+  ).rejects.toThrow("Model not in scope");
+  expect(record.generation).toBe(1);
+  Object.defineProperties(h.ctx, rootDescriptors);
+  // Subsequent fresh root contexts read the native session's newly resolved scope.
+  h.ctx.scopedModels = root.scopedModels;
+
+  await h.call("interrupt_agent", { target: "a" });
+  await record.promise;
+  await expect(h.call("followup_task", { target: "a", message: "still no" })).rejects.toThrow(
+    "Model not in scope",
+  );
+  await h.manager.disposeRuntime(record.id);
+  // Mail still queues for an unloaded, out-of-scope conversation, without a reload.
+  await expect(
+    h.call("send_message", { target: "a", message: "information" }),
+  ).resolves.toMatchObject({ value: "" });
+  expect(record.session).toBeUndefined();
+  await expect(h.call("followup_task", { target: "a", message: "no reload" })).rejects.toThrow(
+    "Model not in scope",
+  );
+  expect(record.session).toBeUndefined();
+  h.controller.invalidate();
+  expect(AgentSession.prototype.setScopedModels).toBe(nativeSetter);
 });

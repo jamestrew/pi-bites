@@ -14,12 +14,6 @@ export const SubagentsSettingsSchema = Type.Object({
   defaultReasoningEffort: Type.Optional(Type.Unsafe<ThinkingLevel>(Type.String())),
   maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1024 })),
   maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
-  /**
-   * Validate runtime subagent model choices against pi's resolved session scope from
-   * CLI `--models` and global/project `enabledModels`. Empty scope is unrestricted.
-   * Caller-selected violations fail; role defaults and inherited violations warn and proceed.
-   */
-  scopeModels: Type.Optional(Type.Boolean()),
   fleetView: Type.Optional(Type.Boolean()),
 });
 
@@ -32,7 +26,6 @@ export interface SettingsAppliers {
   ) => void;
   setMaxDepth?: (n: number | undefined) => void;
   setMaxConcurrent: (n: number) => void;
-  setScopeModels: (enabled: boolean) => void;
   setFleetView: (b: boolean) => void;
 }
 
@@ -69,8 +62,6 @@ export function parseSubagentsSettings(value: unknown): SubagentsSettings | unde
     value.maxConcurrent <= 1024
   )
     settings.maxConcurrent = value.maxConcurrent;
-  if ("scopeModels" in value && typeof value.scopeModels === "boolean")
-    settings.scopeModels = value.scopeModels;
   if ("fleetView" in value && typeof value.fleetView === "boolean")
     settings.fleetView = value.fleetView;
   return Value.Check(SubagentsSettingsSchema, settings) ? settings : undefined;
@@ -136,7 +127,6 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
   });
   appliers.setMaxDepth?.(s.maxDepth);
   if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
-  if (typeof s.scopeModels === "boolean") appliers.setScopeModels(s.scopeModels);
   if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);
 }
 

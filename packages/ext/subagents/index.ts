@@ -19,7 +19,6 @@ import {
 } from "./subagent-messages.js";
 import { createV2Tools } from "./v2-tools.js";
 import { spawnNamed } from "./task-paths.js";
-import { captureSubagentContext } from "./operation-context.js";
 import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
 import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
@@ -222,7 +221,7 @@ export function createSubagents(
     const allowedTools = getAllowedTools().filter(
       (name) => !options.allowedTools || options.allowedTools.includes(name),
     );
-    const snapshot = captureSubagentContext(piRef, ctx, options.forkContext, allowedTools);
+    const snapshot = operations.captureContext(ctx, options.forkContext, allowedTools);
     const signal = AbortSignal.any([
       approvalOwner.signal,
       ...(snapshot.signal ? [snapshot.signal] : []),
@@ -270,7 +269,6 @@ export function createSubagents(
         setModelDefaults: (defaults) => {
           modelDefaults = defaults;
         },
-        setScopeModels: setScopeModelsEnabled,
         setFleetView: setFleetViewEnabled,
       },
       (event, payload) => pi.events.emit(event, payload),
@@ -417,6 +415,7 @@ export function createSubagents(
     events: pi.events,
     pi,
     getCtx: () => currentCtx,
+    getErrorModels: () => operations.getAllowedModels(),
     manager: {
       spawn: (_pi, _ctx, type, prompt, options) => {
         if (!currentCtx) throw new Error("No active session");
@@ -475,16 +474,8 @@ export function createSubagents(
     fleet.setEnabled(b);
   }
 
-  // ---- Scope models configuration ----
+  // ---- Model defaults ----
   let modelDefaults: Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort"> = {};
-  let scopeModelsEnabled = false;
-  function isScopeModelsEnabled(): boolean {
-    return scopeModelsEnabled;
-  }
-  function setScopeModelsEnabled(enabled: boolean): void {
-    scopeModelsEnabled = enabled;
-  }
-
   // Grab UI context from first tool execution.
   pi.on("tool_execution_start", async (_event, ctx) => {
     fleet.setUICtx(ctx.ui);
@@ -497,13 +488,13 @@ export function createSubagents(
       manager,
       agentActivity,
       fleet,
-      isScopeModelsEnabled,
       getMessenger: (id) => deliveries.get(id)?.messenger,
+      queueMail,
     }),
     manager,
-    isScopeModelsEnabled,
     getAllowedTools,
   );
+  manager.getAllowedModels = () => operations.getAllowedModels();
   pi.on("session_tree", async (_event, ctx) => {
     operations.invalidate();
     approvalOwner.abort();
@@ -523,8 +514,6 @@ export function createSubagents(
     manager,
     agentActivity,
     getModelLabelFromConfig,
-    isScopeModelsEnabled,
-    setScopeModelsEnabled,
     isFleetViewEnabled,
     setFleetViewEnabled,
   });

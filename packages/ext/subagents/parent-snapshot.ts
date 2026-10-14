@@ -1,6 +1,7 @@
 import type { SubagentContext } from "./operation-context.js";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
+import { allowedSubagentModels } from "./model-scope.js";
 
 /** Session data a spawned agent may safely use after its parent context becomes stale. */
 export interface ParentSnapshot {
@@ -9,6 +10,7 @@ export interface ParentSnapshot {
   systemPrompt: string;
   model?: Model<Api>;
   availableModels: Model<Api>[];
+  scopedModels?: Array<{ model: Model<Api> }>;
   providers: Array<[string, ProviderConfig]>;
 }
 
@@ -25,6 +27,7 @@ export function snapshotParent(ctx: SubagentContext): ParentSnapshot {
     systemPrompt: ctx.getSystemPrompt(),
     model: ctx.model,
     availableModels: registry.getAvailable(),
+    scopedModels: allowedSubagentModels(ctx).map((model) => ({ model })),
     providers,
   };
 }

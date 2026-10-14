@@ -1,7 +1,7 @@
 import { TaskPaths } from "./task-paths.js";
 import { AgentTree, getAgentSessionId } from "./agent-tree.js";
 import type { RegisterCollaboration } from "./subagent-context.js";
-import type { SubagentContext } from "./operation-context.js";
+import { captureSubagentContext, type SubagentContext } from "./operation-context.js";
 import { randomUUID } from "node:crypto";
 import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { AgentCloser, type ClosedAgentRecord } from "./agent-close.js";
@@ -21,6 +21,8 @@ import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
 import { MISSING_FINAL_RESPONSE_ERROR } from "./types.js";
 import type { AgentRecord, SubagentType, SpawnOptions } from "./types.js";
 import { recordAssistantUsage, type AssistantUsage } from "./usage.js";
+import { allowedSubagentModels, assertSubagentModel, assertAgentModel } from "./model-scope.js";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 export type OnAgentComplete = (record: AgentRecord, generation: number) => void;
 export type OnAgentStart = (record: AgentRecord) => void;
@@ -59,6 +61,7 @@ interface TurnHooks {
 export type { SpawnOptions } from "./types.js";
 
 export class AgentManager {
+  getAllowedModels?: () => Model<Api>[];
   private agents = new Map<string, AgentRecord>();
   readonly taskPaths = new TaskPaths(() => this.listAgents());
   readonly tree = new AgentTree(this.agents, (id) => this.isClosing(id));
@@ -235,10 +238,7 @@ export class AgentManager {
     return this.maxConcurrent;
   }
 
-  /**
-   * Spawn an agent and return its ID immediately.
-   * Rejects at capacity unless the caller explicitly opts into queuing.
-   */
+  /** Spawn immediately, rejecting at capacity unless explicitly queued. */
   spawn(
     pi: ExtensionAPI,
     ctx: SubagentContext,
@@ -248,6 +248,10 @@ export class AgentManager {
     capacityChecked = false,
   ): string {
     if (this.closing) throw new Error("AgentManager is shutting down.");
+    assertSubagentModel(
+      options.model ?? ctx.model,
+      this.getAllowedModels?.() ?? allowedSubagentModels(ctx),
+    );
     this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
     const resolved = resolveAgent(requestedType);
     if (!requestedType.trim() || !resolved.matched)
@@ -688,6 +692,7 @@ export class AgentManager {
   followup(id: string, deliver: () => boolean, pending: () => boolean): boolean {
     const record = this.agents.get(id);
     if (!record?.session || this.isClosing(id) || this.isRuntimeDisposing(id)) return false;
+    assertAgentModel(record, this.getAllowedModels?.());
     if (record.status !== "running" && record.status !== "queued") {
       if (
         (this.settledGeneration.get(record) ?? 0) < record.generation ||
@@ -725,6 +730,7 @@ export class AgentManager {
 
     const options = this.options.get(record);
     if (!options) return false;
+    assertAgentModel(record, this.getAllowedModels?.());
     if (!capacityChecked) this.assertExecutionAvailable();
     this.runtimes.touch(id);
     const session = record.session;
@@ -833,6 +839,7 @@ export class AgentManager {
 
   reopen(pi: ExtensionAPI, ctx: SubagentContext, id: string, options?: ReopenOptions) {
     this.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
+    ctx = { ...ctx, getAllowedModels: this.getAllowedModels ?? ctx.getAllowedModels };
     return this.reopener.open(pi, ctx, id, {
       ...options,
       rootSessionId: this.tree.rootSessionId(ctx.sessionManager.getSessionId()),
@@ -840,12 +847,15 @@ export class AgentManager {
   }
 
   async reload(pi: ExtensionAPI, ctx: SubagentContext, id: string, signal?: AbortSignal) {
+    ctx = captureSubagentContext(pi, ctx, false, ctx.allowedTools ?? pi.getActiveTools());
+    ctx.getAllowedModels = this.getAllowedModels ?? ctx.getAllowedModels;
+    const record = this.agents.get(id);
+    if (record) assertAgentModel(record, this.getAllowedModels?.());
     await this.runtimes.pending(id);
     signal?.throwIfAborted();
     if (this.isClosing(id)) throw new Error("Subagent owner is closed");
     return this.reopener.open(pi, ctx, id, {
       signal,
-      scopeModels: ctx.scopeModels,
       rootSessionId: this.tree.rootSessionId(ctx.sessionManager.getSessionId()),
     });
   }

@@ -97,6 +97,47 @@ describe("cross-extension RPC", () => {
       });
     });
 
+    it("keeps RPC error alternatives scoped without narrowing model lookup", async () => {
+      const inside = { provider: "test", id: "inside", name: "Inside" };
+      const outside = { provider: "test", id: "outside", name: "Outside" };
+      ctx = {
+        modelRegistry: {
+          getAll: () => [inside, outside],
+          getAvailable: () => [inside, outside],
+          find: (_provider: string, id: string) =>
+            [inside, outside].find((model) => model.id === id),
+        },
+      };
+      deps.getErrorModels = () => [inside];
+      registerRpcHandlers(deps);
+      const reply = vi.fn();
+      events.on("subagents:rpc:spawn:reply:missing", reply);
+      events.emit("subagents:rpc:spawn", {
+        requestId: "missing",
+        type: "worker",
+        prompt: "work",
+        options: { model: "missing" },
+      });
+      await vi.waitFor(() => expect(reply).toHaveBeenCalled());
+      expect(reply).toHaveBeenCalledWith({
+        success: false,
+        error: 'Model not found: "missing".\n\nAvailable models:\n  test/inside',
+      });
+      expect(manager.spawn).not.toHaveBeenCalled();
+      // Resolution still finds outside; the owning spawn seam authorizes it.
+      events.emit("subagents:rpc:spawn", {
+        requestId: "found",
+        type: "worker",
+        prompt: "work",
+        options: { model: "test/outside" },
+      });
+      await vi.waitFor(() => expect(manager.spawn).toHaveBeenCalled());
+      expect(manager.spawn).toHaveBeenCalledWith(deps.pi, ctx, "worker", "work", {
+        description: "",
+        model: outside,
+      });
+    });
+
     it("passes options through to manager.spawn", async () => {
       registerRpcHandlers(deps);
       const reply = vi.fn();

@@ -50,6 +50,7 @@ describe("embedded agent runner (real pi session)", () => {
       cwd,
       getSystemPrompt: () => "PARENT",
       model,
+      scopedModels: [],
       modelRegistry: {
         find: () => model,
         getAll: () => [model],

@@ -132,6 +132,7 @@ function createSession(finalText: string) {
 }
 
 const ctx = {
+  scopedModels: [],
   cwd: "/tmp",
   model: undefined,
   modelRegistry: {

@@ -25,7 +25,8 @@ export interface SubagentContext {
   parentRole?: string;
   /** Assigned by the session-tree controller, never by model arguments. */
   callerAgentId?: string;
-  scopeModels?: boolean;
+  /** Reads the owning root's refreshed snapshot, never a captured Pi context. */
+  getAllowedModels?: () => ReturnType<ExtensionContext["modelRegistry"]["getAvailable"]>;
 }
 
 export function captureSubagentContext(
@@ -48,6 +49,7 @@ export function captureSubagentContext(
     model: ctx.model,
     signal: ctx.signal,
     scopedModels: [...ctx.scopedModels],
+    getAllowedModels: ctx.getAllowedModels,
     thinking: ctx.thinking ?? pi.getThinkingLevel(),
     allowedTools: [...allowedTools],
     parentRole: ctx.parentRole ?? getActiveSubagent(),

@@ -21,6 +21,7 @@ const ctx = {
   ...mockCtx,
   model,
   scopedModels: [],
+  ui: { notify: vi.fn() },
   modelRegistry: { ...mockCtx.modelRegistry, getAvailable: () => [model] },
 } as any;
 let manager: AgentManager;
@@ -158,7 +159,6 @@ it("rejects unknown, unrecoverable, foreign-owned, corrupt and unauthorized stat
       pi,
       { ...ctx, scopedModels: [{ model: { provider: "test", id: "other" } }] },
       id,
-      { scopeModels: true },
     ),
   ).rejects.toThrow("not in scope");
   vi.mocked(runAgent).mockResolvedValueOnce({ session: mockSession(), responseText: "done" });
@@ -360,4 +360,29 @@ it("keeps an unloaded named identity recoverable after failed reopening and shar
   expect(record.sessionId).toBe("retained-named");
   expect(record.retainedConversation).toBeUndefined();
   expect(record.session).toBeDefined();
+});
+
+it("rejects a scoped runtime reload before loading and snapshots context getters before deferred reload", async () => {
+  const id = await closedAgent();
+  const fresh = { ...ctx, ui: { notify: vi.fn() } };
+  let allowed = [{ ...model, id: "other" }];
+  manager.getAllowedModels = () => allowed;
+  await expect(manager.reload(pi, fresh, id)).rejects.toThrow("Model not in scope");
+  expect(openAgentSession).not.toHaveBeenCalled();
+  allowed = [model];
+  vi.mocked(openAgentSession).mockResolvedValueOnce({ ...mockSession(), model });
+  const loading = manager.reload(pi, fresh, id);
+  for (const key of Object.keys(fresh))
+    Object.defineProperty(fresh, key, {
+      get() {
+        throw new Error("stale ctx");
+      },
+    });
+  await expect(loading).resolves.toBe("pending_init");
+  expect(manager.getRecord(id)?.session?.model).toBe(model);
+  allowed = [{ ...model, id: "other" }];
+  await expect(manager.reload(pi, { ...ctx, ui: { notify: vi.fn() } }, id)).rejects.toThrow(
+    "Model not in scope",
+  );
+  expect(openAgentSession).toHaveBeenCalledOnce();
 });

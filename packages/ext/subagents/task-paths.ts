@@ -4,6 +4,7 @@ import type { SubagentContext } from "./operation-context.js";
 import type { SpawnOptions } from "./types.js";
 import { getAgentSessionId } from "./agent-tree.js";
 import type { AgentRecord } from "./types.js";
+import { allowedSubagentModels, assertSubagentModel } from "./model-scope.js";
 
 export function validateTaskName(name: string): void {
   if (!name) throw new Error("agent_name must not be empty");
@@ -66,6 +67,7 @@ export async function spawnNamed(
   signal?: AbortSignal,
 ): Promise<string> {
   signal?.throwIfAborted();
+  assertSubagentModel(options.model ?? ctx.model, allowedSubagentModels(ctx));
   manager.tree.assertCanDelegate(ctx.sessionManager.getSessionId());
   manager.taskPaths.available(ctx.sessionManager.getSessionId(), options.taskName ?? "");
   manager.assertExecutionAvailable();
