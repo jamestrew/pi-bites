@@ -28,7 +28,7 @@ collaboration, discovery prerequisite, custom provider or host upgrade. Extensio
 `disable` entries belong in `.pi/pi-bites.json` (or the global configuration);
 `subagents` and `codexAdapter` remain independently disableable after reload.
 Operational settings belong in `.pi/subagents.json`, overriding
-`~/.pi/agent/subagents.json`, or use `/agents` → Settings. `maxConcurrent` defaults
+`~/.pi/agent/subagents.json`. `maxConcurrent` defaults
 to three **children** (four total including root), shared across descendants.
 Execution admission is advisory and counts native active work, not initialization
 or queue-only reload. Accepted concurrent work can start above that execution limit;
@@ -36,8 +36,9 @@ resident runtimes and pending residency claims remain separately bounded.
 Configured values continue to count children. Nesting is uncapped by default (#384); explicit `maxDepth`
 is opt-in local policy, not upstream V2 parity (`0` disables spawn, `1` permits only
 root children). Project values override global values; removing the effective setting
-restores uncapped nesting on the next settings load. `fleetView` retains its existing
-meaning. Subagent model scope is mandatory (#387): descendants share the authenticated
+restores uncapped nesting on the next settings load. `fleetView` enables the compact,
+read-only above-editor status display, bounded to five agent rows plus an overflow
+count. Fleet does not capture keys or open conversation overlays. Subagent model scope is mandatory (#387): descendants share the authenticated
 root session scope, and an empty native scope permits all authenticated models.
 The retired `scopeModels` field is ignored. Tightening scope leaves current turns
 running but rejects subsequent spawn, follow-up and runtime reload requests using
@@ -119,7 +120,7 @@ scheduling/provider or renderer tests, not additional live-provider evidence.
 | Pressure, unload/reload/reuse, descendant mail, approval reset, owner replacement        | `subagents/test/v2-residency-e2e.test.ts`                                                                                           |
 | Active interruption, stale contexts, root/self authorization and descendant preservation | `subagents/test/v2-interrupt.test.ts`, `v2-messaging-e2e.test.ts`                                                                   |
 | Late approval cancellation, per-command identity, Auto Mode/human escalation             | `bash-gate/command-authorization.test.ts`, `bash-gate/bash-gate.test.ts`, `automode/`                                               |
-| Fleet/navigation and retained history                                                    | `subagents/test/fleet-*.test.ts`, `conversation-viewer*.test.ts`                                                                    |
+| Read-only Fleet and retained history                                                     | `subagents/test/fleet-*.test.ts`, `subagents/test/v2-residency-e2e.test.ts`                                                         |
 | Direct and historical V1 saved display, no restored executors                            | `subagents/ui/subagent-message-render.test.ts`, `subagents/test/notifications.test.ts`, `codex-adapter/code-mode-rendering.test.ts` |
 | Usage and tracked Pi panes separate from model content                                   | `subagents/test/usage.test.ts`, `session-tracker/`                                                                                  |
 
@@ -182,7 +183,7 @@ non-synthetic sessions; provider payloads can contain private context.
   late approval cancellation, Auto Mode/human escalation and lifecycle replacement
   remain unverified. The current live harness covers fresh forks and interruption
   of a settled task only; it does not claim these adversarial scenarios pass.
-- Interactive Fleet/navigation, restored display and tracked-pane behavior have
+- Read-only Fleet status, restored display and tracked-pane behavior have
   automated coverage, not a human terminal walkthrough. No application-restart
   recovery, additional host architecture or provider-side compaction claim is made.
 

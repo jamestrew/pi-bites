@@ -81,8 +81,7 @@ export class AgentRuntimes {
       this.hooks.isSettled(record) &&
       !record.session.pendingMessageCount &&
       !this.hasPendingMail(record) &&
-      !record.pendingSteers?.length &&
-      !record.pendingCancelSteers?.length
+      !record.pendingSteers?.length
     );
   }
 

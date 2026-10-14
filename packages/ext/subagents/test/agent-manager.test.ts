@@ -183,7 +183,7 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     expect(manager.getRecord(id)!.compactionCount).toBe(2);
   });
 
-  it("cancel-and-steer persists resumed usage and tool calls", async () => {
+  it("follow-up persists resumed usage and tool calls", async () => {
     manager = new AgentManager();
     const session = { ...mockSession(), abort: vi.fn(() => Promise.resolve()) };
     let finishInitialRun!: () => void;
@@ -216,9 +216,10 @@ describe("AgentManager — lifetime usage + compaction count are eagerly initial
     const id = manager.spawn(mockPi, mockCtx, "worker", "test", {
       description: "test",
     });
-    await expect(manager.cancelAndSteer(id, "change course")).resolves.toBe(true);
     vi.mocked(appendFile).mockClear();
     finishInitialRun();
+    await manager.getRecord(id)!.promise;
+    expect(await manager.sendInput(id, "change course")).toBe(true);
     await manager.getRecord(id)!.promise;
 
     const written = vi.mocked(appendFile).mock.calls.map(([, data]) => JSON.parse(data as string));

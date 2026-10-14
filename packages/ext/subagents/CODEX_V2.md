@@ -135,7 +135,7 @@ unavailable routes must remain explicitly unverified. No host pin change is need
 
 Ordinary extension activation registers all six V2 tools through the shared controller.
 There is no staging entrypoint, V1 executor, dual-mode option, nested collaboration,
-or discovery prerequisite. The manager, Fleet/navigation, approvals, runner, provider
+or discovery prerequisite. The manager, Fleet status, approvals, runner, provider
 registry and selected-tool intersection remain authoritative. Tools are direct on GPT,
 Anthropic and other Pi tool-calling routes, with or without Code Mode. Children inherit
 permitted tools and get canonical self/parent task paths plus V2 message/task guidance.
@@ -327,8 +327,8 @@ waiting queue is introduced.
 Role tool intersections, model scope and delegation-depth restrictions still apply.
 
 When a new runtime needs a slot, admission unloads the least-recently-touched eligible
-terminal runtime. Completion, input/reload and opening a conversation viewer touch
-the runtime. Active/unsettled turns, protected viewers/operations, and pending mail
+terminal runtime. Completion and input/reload touch the runtime. Active/unsettled
+turns, protected operations, and pending mail
 are ineligible. Native pending input and the messenger's unseen activity are checked
 separately: persisted queue-only history is not evidence that mail has been read.
 No eligible slot produces an explicit error. Concurrent admission claims count
@@ -336,12 +336,17 @@ before teardown starts; a reduced ceiling may require several eligible unloads.
 
 Unloading preserves the same manager record, canonical path, session ID, transcript,
 generation, usage, descendants and ownership. It invalidates the runtime incarnation
-and approval allowances, not the conversation. Fleet/history label unloaded history;
-saved messages and usage are not represented as a restored live runtime. An open
-retained-history viewer stays an explicitly read-only snapshot if another operation
-reloads the identity; reopen the viewer to follow its live session. Descendant
+and approval allowances, not the conversation. Fleet labels unloaded residency;
+saved messages and usage are not represented as a restored live runtime. Descendant
 completion arriving while a parent is unloaded is retained in a live-manager mailbox
 and queued into Pi after successful reopening, without starting a parent turn.
+
+Fleet is a compact, read-only above-editor status display with up to five agent
+rows and an overflow count. It retains the refresh cadence, elapsed time, usage,
+lifecycle, residency and pending-mail indicators without navigation, overlays or
+keyboard overrides. There is no agent-management command or conversation-inspection
+UI; shell approval retains command details, allow/deny paths and reviewer transcript
+evidence independently of Fleet.
 
 Both `send_message` and `followup_task` can reopen owned unloaded identities. Reopen
 retains the child's model (which must still be authorized and in scope), role,
@@ -407,9 +412,7 @@ No model, including GPT-5.4, is hardcoded as the subagent default.
 Configure `defaultModel` and `defaultReasoningEffort` in global
 `~/.pi/agent/subagents.json` or project `.pi/subagents.json` (project fields win).
 They correspond to Codex's `agents.default_subagent_model` and
-`agents.default_subagent_reasoning_effort`. Settings load on session start/reload;
-changing operational settings through `/agents` preserves manual project defaults
-without copying inherited global values into the project. Existing children retain
+`agents.default_subagent_reasoning_effort`. Settings load on session start/reload. Existing children retain
 their selected model/effort through follow-up and unload/reload.
 
 Direct spawn accepts exact authenticated Pi `provider/modelId` identities or an

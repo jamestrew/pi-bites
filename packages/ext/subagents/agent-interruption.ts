@@ -1,12 +1,9 @@
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentRecord } from "./types.js";
 
-type Source = "cancel_and_steer" | "interrupt";
-type PendingRedirect = NonNullable<AgentRecord["pendingCancelSteers"]>[number];
-
 interface Hooks {
   isSettled: (record: AgentRecord, generation: number) => boolean;
-  onRequest: (record: AgentRecord, source: Source, generation: number) => void;
+  onRequest: (record: AgentRecord, source: "interrupt", generation: number) => void;
   onFailure: (record: AgentRecord, error: unknown) => void;
 }
 
@@ -16,36 +13,17 @@ export class AgentInterrupter {
 
   constructor(private hooks: Hooks) {}
 
-  interrupt(
-    record: AgentRecord,
-    session: AgentSession,
-    source: Source,
-    message?: string,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
+  interrupt(record: AgentRecord, session: AgentSession): Promise<boolean> {
     const generation = record.generation;
     const promise = record.promise;
     return this.serialize(record, async () => {
-      signal?.throwIfAborted();
       if (!this.isRunningGeneration(record, session, generation, promise)) return false;
 
       const previousAbort = record.abort;
+      const source = "interrupt";
       const abort = { timestamp: Date.now(), source, reason: source } as const;
-      let settleRedirect: (() => void) | undefined;
-      const redirect =
-        source === "cancel_and_steer"
-          ? {
-              message: message ?? "",
-              settled: new Promise<void>((resolve) => (settleRedirect = resolve)),
-              accepted: undefined as boolean | undefined,
-            }
-          : undefined;
-      if (redirect) (record.pendingCancelSteers ??= []).push(redirect);
-      else {
-        record.pendingCancelSteers = undefined;
-        record.status = "stopped";
-        record.error = "interrupted";
-      }
+      record.status = "stopped";
+      record.error = "interrupted";
       record.abort = abort;
 
       let cleared = { steering: [] as string[], followUp: [] as string[] };
@@ -53,27 +31,18 @@ export class AgentInterrupter {
         this.hooks.onRequest(record, source, generation);
         cleared = session.clearQueue();
         await session.abort();
-        const committed = this.owns(record, session, generation, promise, abort, redirect);
-        if (redirect) redirect.accepted = committed;
-        settleRedirect?.();
-        if (!committed) this.removeRedirect(record, redirect);
-        return committed;
+        return this.owns(record, session, generation, promise, abort);
       } catch (error) {
         const current =
           !this.hooks.isSettled(record, generation) &&
-          this.owns(record, session, generation, promise, abort, redirect);
+          this.owns(record, session, generation, promise, abort);
         if (current) {
           this.hooks.onFailure(record, error);
           record.abort = previousAbort;
-          if (!redirect) {
-            record.status = "running";
-            record.error = undefined;
-          }
+          record.status = "running";
+          record.error = undefined;
           await this.restoreQueue(record, session, generation, promise, previousAbort, cleared);
         }
-        if (redirect) redirect.accepted = false;
-        settleRedirect?.();
-        this.removeRedirect(record, redirect);
         return false;
       }
     });
@@ -100,23 +69,14 @@ export class AgentInterrupter {
     generation: number,
     promise: Promise<string> | undefined,
     abort: AgentRecord["abort"],
-    redirect?: PendingRedirect,
   ): boolean {
     return (
       record.generation === generation &&
       record.session === session &&
       record.promise === promise &&
-      record.status === (redirect ? "running" : "stopped") &&
-      record.abort === abort &&
-      (!redirect || !this.hooks.isSettled(record, generation))
+      record.status === "stopped" &&
+      record.abort === abort
     );
-  }
-
-  private removeRedirect(record: AgentRecord, redirect?: PendingRedirect): void {
-    if (!redirect) return;
-    const index = record.pendingCancelSteers?.indexOf(redirect) ?? -1;
-    if (index >= 0) record.pendingCancelSteers?.splice(index, 1);
-    if (record.pendingCancelSteers?.length === 0) record.pendingCancelSteers = undefined;
   }
 
   private async restoreQueue(

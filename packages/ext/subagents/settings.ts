@@ -1,6 +1,6 @@
 // Persistence for pi-subagents operational settings.
 // - Global:  ~/.pi/agent/subagents.json (via getAgentDir()) — manual defaults, never written here
-// - Project: <cwd>/.pi/subagents.json — written by /agents → Settings; overrides global on load
+// - Project: <cwd>/.pi/subagents.json — overrides global on load
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -32,7 +32,6 @@ export interface SettingsAppliers {
 /** Emit callback — the settings channels only, to keep helpers testable. */
 type SettingsEventMap = {
   "subagents:settings_loaded": { settings: SubagentsSettings };
-  "subagents:settings_changed": { settings: SubagentsSettings; persisted: boolean };
 };
 export type SettingsEmit = <K extends keyof SettingsEventMap>(
   event: K,
@@ -105,7 +104,7 @@ export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()):
   const path = projectPath(cwd);
   try {
     mkdirSync(dirname(path), { recursive: true });
-    // /agents saves operational fields only; preserve manual project defaults,
+    // Preserve manual project defaults when writing operational fields;
     // never materialize inherited global defaults into the project file.
     const { defaultModel, defaultReasoningEffort } = readSettingsFile(path);
     writeFileSync(
@@ -131,20 +130,6 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
 }
 
 /**
- * Format the user-facing toast for a settings mutation. Pure function —
- * routes the success/failure of `saveSettings` into the right message + level
- * so the UI layer (index.ts) stays a thin wire between input and notification.
- */
-export function persistToastFor(
-  successMsg: string,
-  persisted: boolean,
-): { message: string; level: "info" | "warning" } {
-  return persisted
-    ? { message: successMsg, level: "info" }
-    : { message: `${successMsg} (session only; failed to persist)`, level: "warning" };
-}
-
-/**
  * Load merged settings, apply them to in-memory state, and emit the
  * `subagents:settings_loaded` lifecycle event. Returns the loaded settings so
  * callers can log/inspect. Extension init wires this once.
@@ -158,21 +143,4 @@ export function applyAndEmitLoaded(
   applySettings(settings, appliers);
   emit("subagents:settings_loaded", { settings });
   return settings;
-}
-
-/**
- * Persist a settings snapshot, emit the `subagents:settings_changed` event
- * (regardless of persist outcome so listeners see the in-memory change), and
- * return the toast the UI should display. Event payload carries the `persisted`
- * flag so listeners can react to write failures.
- */
-export function saveAndEmitChanged(
-  snapshot: SubagentsSettings,
-  successMsg: string,
-  emit: SettingsEmit,
-  cwd: string = process.cwd(),
-): { message: string; level: "info" | "warning" } {
-  const persisted = saveSettings(snapshot, cwd);
-  emit("subagents:settings_changed", { settings: snapshot, persisted });
-  return persistToastFor(successMsg, persisted);
 }

@@ -1,11 +1,11 @@
 import { parseAutoModeDecision, type AutoModeDecision } from "../../automode/index.js";
 /**
- * fleet-wiring.test.ts — end-to-end wiring of the FleetView through the REAL
+ * fleet-wiring.test.ts — end-to-end wiring of the Fleet through the REAL
  * extension (src/index.ts), not the FleetList class in isolation.
  *
  * The unit tests in fleet-list.test.ts drive FleetList with a fake ui/manager.
  * These prove the bits only the extension can: that `tool_execution_start`
- * hands the fleet the live UI (so it captures input), that spawning an
+ * hands Fleet the live UI without capturing input, that spawning an
  * agent actually registers the `aboveEditor` widget once the agent has a session,
  * and that `session_shutdown` tears it down. runAgent is mocked (no LLM); the
  * manager, settings load, completion routing, and lifecycle handlers are real.
@@ -71,9 +71,7 @@ function makePi() {
 
 /** A UI context with the surfaces the widget + fleet touch; setWidget is spied. */
 function uiCtx() {
-  let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined;
   let fleetWidget: ((tui: any, theme: any) => { render(width: number): string[] }) | undefined;
-  let closeCustom: (() => void) | undefined;
   const tui = { requestRender: vi.fn(), terminal: { columns: 160, rows: 40 } };
   const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
   return {
@@ -83,29 +81,10 @@ function uiCtx() {
         fleetWidget = typeof content === "function" ? (content as any) : undefined;
     }),
     notify: vi.fn(),
-    onTerminalInput: vi.fn((handler) => {
-      inputHandler = handler;
-      return () => {
-        inputHandler = undefined;
-      };
-    }),
-    getEditorText: vi.fn(() => ""),
+    onTerminalInput: vi.fn(),
     input: vi.fn(async () => undefined as string | undefined),
     select: vi.fn(async () => "Deny"),
-    custom: vi.fn(
-      (factory: (...args: any[]) => unknown) =>
-        new Promise<undefined>((resolve) => {
-          const done = () => {
-            closeCustom = undefined;
-            resolve(undefined);
-          };
-          closeCustom = done;
-          factory(tui, theme, undefined, done);
-        }),
-    ),
-    press: (data: string) => inputHandler?.(data),
-    customOpen: () => closeCustom !== undefined,
-    closeCustom: () => closeCustom?.(),
+    custom: vi.fn(),
     renderFleet: (width = 160) => fleetWidget?.(tui, theme).render(width) ?? [],
   };
 }
@@ -151,7 +130,7 @@ function mockRunningAgent(): void {
   );
 }
 
-function expectStableFleetRow(ui: ReturnType<typeof uiCtx>, description: string, command: string) {
+function expectStableFleetRow(ui: ReturnType<typeof uiCtx>, command: string) {
   const lines = ui.renderFleet();
   const agentLine = lines.find((line) => line.includes("probe"));
   expect(agentLine).toContain("↓ 0 tokens");
@@ -159,7 +138,7 @@ function expectStableFleetRow(ui: ReturnType<typeof uiCtx>, description: string,
   expect(lines.join("\n")).not.toContain(command);
 }
 
-describe("FleetView wiring (real extension lifecycle)", () => {
+describe("Fleet wiring (real extension lifecycle)", () => {
   let tmpDir: string;
   let agentDir: string;
   let prevCwd: string;
@@ -189,12 +168,14 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     vi.restoreAllMocks();
   });
 
-  it("captures terminal input on tool_execution_start (fleet hooked into the UI)", async () => {
+  it("does not capture terminal input on tool_execution_start", async () => {
     const { pi, lifecycle } = makePi();
     subagentsExtension(pi);
     const ui = uiCtx();
     await lifecycle.get("tool_execution_start")?.({}, ctxWith(ui));
-    expect(ui.onTerminalInput).toHaveBeenCalled();
+    expect(ui.onTerminalInput).not.toHaveBeenCalled();
+    expect(pi.registerCommand).not.toHaveBeenCalled();
+    await lifecycle.get("session_shutdown")?.({}, ctxWith(ui));
   });
 
   it("inherits parent yolo mode without prompting or automode review", async () => {
@@ -324,7 +305,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
   });
 
-  it("keeps the FleetView row stable while manual subagent approval is pending", async () => {
+  it("keeps the Fleet row stable while manual subagent approval is pending", async () => {
     mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
     const ui = uiCtx();
@@ -360,8 +341,14 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
     await flush();
 
-    expect(ui.select).toHaveBeenCalledOnce();
-    expectStableFleetRow(ui, "stable manual row", "git push origin main");
+    expect(ui.select).toHaveBeenCalledWith(
+      expect.stringContaining("git push origin main"),
+      ["Allow", 'Allow for session ("git push")', "Deny"],
+      { signal: expect.any(AbortSignal) },
+    );
+    expectStableFleetRow(ui, "git push origin main");
+    expect(ui.onTerminalInput).not.toHaveBeenCalled();
+    expect(ui.custom).not.toHaveBeenCalled();
 
     resolveSelect("Deny");
     pi.events.emit("bites:bash_gate_resolved", { requiresHuman: false });
@@ -439,7 +426,7 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     });
   });
 
-  it("keeps the FleetView row stable while Automode reviews a subagent command", async () => {
+  it("keeps the Fleet row stable while Automode reviews a subagent command", async () => {
     mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
     let resolveReview!: (decision: AutoModeDecision) => void;
@@ -478,49 +465,12 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     await flush();
 
     expect(review).toHaveBeenCalledOnce();
-    expectStableFleetRow(ui, "stable Automode row", "rm build.txt");
-    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
+    expectStableFleetRow(ui, "rm build.txt");
+    expect(ui.onTerminalInput).not.toHaveBeenCalled();
 
     resolveReview(parseAutoModeDecision('{"outcome":"allow"}'));
     pi.events.emit("bites:bash_gate_resolved", { requiresHuman: false });
     await flush();
-    await lifecycle.get("session_shutdown")?.({}, ctx);
-  });
-
-  it("keeps an open conversation visible during a non-human Automode review", async () => {
-    mockRunningAgent();
-    const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi, { isEnabled: () => true, review: vi.fn() });
-    const ui = uiCtx();
-    const ctx = ctxWith(ui);
-    await lifecycle.get("tool_execution_start")?.({}, ctx);
-    await tools
-      .get("spawn_agent")
-      .execute(
-        "tc",
-        { message: "viewed agent", agent_type: "worker", task_name: "probe", fork_turns: "none" },
-        undefined,
-        undefined,
-        ctx,
-      );
-
-    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
-    expect(ui.press("\r")).toEqual({ consume: true });
-    expect(ui.customOpen()).toBe(true);
-
-    const gate = {
-      cwd: process.cwd(),
-      command: "rm build.txt",
-      toolName: "exec_command",
-      requiresHuman: false,
-    } as const;
-    pi.events.emit("bites:bash_gate", gate);
-    expect(ui.customOpen()).toBe(true);
-
-    ui.closeCustom();
-    await flush();
-    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
-    pi.events.emit("bites:bash_gate_resolved", gate);
     await lifecycle.get("session_shutdown")?.({}, ctx);
   });
 
@@ -755,89 +705,12 @@ describe("FleetView wiring (real extension lifecycle)", () => {
     ).toEqual([undefined, "human-approved", "reviewer-approved"]);
     expect(ui.select).toHaveBeenCalledWith(
       expect.stringContaining("needs human approval"),
-      ["Allow once", "Export command", "View conversation", "Deny"],
+      ["Allow once", "Export command", "Deny"],
       { signal: expect.any(AbortSignal) },
     );
     expect(review).toHaveBeenCalledTimes(2);
     expect(request.subagentContext).not.toContain('user: "The human approved');
     expect(request.subagentContext.length).toBeLessThanOrEqual(40_000);
-  });
-
-  it("yields terminal input between bash-gate pending and resolved events", async () => {
-    mockRunningAgent();
-    const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
-    const ui = uiCtx();
-    const ctx = ctxWith(ui);
-    await lifecycle.get("tool_execution_start")?.({}, ctx);
-    await tools.get("spawn_agent").execute(
-      "tc",
-      {
-        message: "live one",
-        agent_type: "worker",
-        task_name: "probe",
-        fork_turns: "none",
-      },
-      undefined,
-      undefined,
-      ctx,
-    );
-
-    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
-    const gate = {
-      cwd: process.cwd(),
-      command: "rm build.txt",
-      requiresHuman: true,
-      waitId: "manual-gate",
-    } as const;
-    pi.events.emit("bites:bash_gate", gate);
-    expect(ui.press("\r")).toBeUndefined();
-    expect(ui.press("\x1b")).toBeUndefined();
-    expect(ui.custom).not.toHaveBeenCalled();
-
-    pi.events.emit("bites:bash_gate_resolved", gate);
-    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
-    await lifecycle.get("session_shutdown")?.({}, ctx);
-  });
-
-  it("keeps input yielded until every overlapping human gate resolves", async () => {
-    mockRunningAgent();
-    const { pi, tools, lifecycle } = makePi();
-    subagentsExtension(pi);
-    const ui = uiCtx();
-    const ctx = ctxWith(ui);
-    await lifecycle.get("tool_execution_start")?.({}, ctx);
-    await tools
-      .get("spawn_agent")
-      .execute(
-        "tc",
-        { message: "live one", agent_type: "worker", task_name: "probe", fork_turns: "none" },
-        undefined,
-        undefined,
-        ctx,
-      );
-    const humanGate = (waitId: string) => ({
-      cwd: process.cwd(),
-      command: "rm build.txt",
-      requiresHuman: true as const,
-      waitId,
-    });
-    const automaticGate = {
-      cwd: process.cwd(),
-      command: "rm build.txt",
-      requiresHuman: false,
-    } as const;
-
-    pi.events.emit("bites:bash_gate", automaticGate);
-    pi.events.emit("bites:bash_gate", humanGate("escalation"));
-    pi.events.emit("bites:bash_gate", humanGate("concurrent-manual"));
-    pi.events.emit("bites:bash_gate_resolved", automaticGate);
-    pi.events.emit("bites:bash_gate_resolved", humanGate("escalation"));
-    expect(ui.press("\x1b[1;5A")).toBeUndefined();
-
-    pi.events.emit("bites:bash_gate_resolved", humanGate("concurrent-manual"));
-    expect(ui.press("\x1b[1;5A")).toEqual({ consume: true });
-    await lifecycle.get("session_shutdown")?.({}, ctx);
   });
 
   it("registers the aboveEditor widget once a spawned agent has a session, then clears it on shutdown", async () => {

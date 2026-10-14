@@ -7,6 +7,8 @@ A small collection of personal extensions for the pi coding agent.
 - **Codex V2-style subagents** — `default`, `worker`, and `explorer` roles with
   direct tools for spawning, messaging, follow-up tasks, waiting, and interruption.
   Children inherit parent permissions and work with or without Code Mode.
+  Fleet shows read-only status above the editor: up to five agent rows and an
+  overflow count, with elapsed time, usage, lifecycle, residency, and pending mail.
 - **Codex-shaped tools for GPT models** — shell sessions, patches, web browsing,
   and local image viewing inside Pi's native `codemode`.
 - **Automode** — model-reviewed bash-gate approvals for the main agent and

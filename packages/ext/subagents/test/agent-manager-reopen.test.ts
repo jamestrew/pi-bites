@@ -278,42 +278,32 @@ it("lets a concurrent caller cancel only its own wait and closes a committing re
   expect(manager.getRecord(id)).toBeUndefined();
 });
 
-it.each(["interrupt", "redirect"])(
-  "supports %s during the first resumed turn",
-  async (operation) => {
-    const id = await closedAgent();
-    const turn = deferred<string>();
-    const session = {
-      ...mockSession(),
-      abort: vi.fn(async () => {
-        turn.resolve("partial");
-      }),
-    };
-    vi.mocked(openAgentSession).mockResolvedValueOnce(session);
-    vi.mocked(resumeAgent)
-      .mockReturnValueOnce(turn.promise)
-      .mockResolvedValueOnce("redirect result");
-    await manager.reopen(pi, ctx, id);
-    expect(await manager.sendInput(id, "first resumed turn")).toBe(true);
-    try {
-      const accepted =
-        operation === "interrupt"
-          ? await manager.interruptTurn(id)
-          : await manager.cancelAndSteer(id, "change direction");
-      expect(accepted).toBe(true);
-      await manager.getRecord(id)!.promise;
-      expect(session.abort).toHaveBeenCalledOnce();
-      expect(manager.getRecord(id)).toMatchObject(
-        operation === "interrupt"
-          ? { status: "stopped", abort: { source: "interrupt" } }
-          : { status: "completed", result: "redirect result" },
-      );
-    } finally {
-      turn.resolve("cleanup");
-      await manager.getRecord(id)!.promise;
-    }
-  },
-);
+it("supports interruption during the first resumed turn", async () => {
+  const id = await closedAgent();
+  const turn = deferred<string>();
+  const session = {
+    ...mockSession(),
+    abort: vi.fn(async () => {
+      turn.resolve("partial");
+    }),
+  };
+  vi.mocked(openAgentSession).mockResolvedValueOnce(session);
+  vi.mocked(resumeAgent).mockReturnValueOnce(turn.promise);
+  await manager.reopen(pi, ctx, id);
+  expect(await manager.sendInput(id, "first resumed turn")).toBe(true);
+  try {
+    expect(await manager.interruptTurn(id)).toBe(true);
+    await manager.getRecord(id)!.promise;
+    expect(session.abort).toHaveBeenCalledOnce();
+    expect(manager.getRecord(id)).toMatchObject({
+      status: "stopped",
+      abort: { source: "interrupt" },
+    });
+  } finally {
+    turn.resolve("cleanup");
+    await manager.getRecord(id)!.promise;
+  }
+});
 
 it("closing an owning subtree cancels a sibling-initiated descendant reopen before publication", async () => {
   manager.setMaxConcurrent(3);

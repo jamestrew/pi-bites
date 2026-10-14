@@ -281,7 +281,6 @@ describe("AgentManager.close", () => {
     const repeated = manager.close(id);
 
     await expect(manager.sendInput(id, "too late")).resolves.toBe(false);
-    await expect(manager.cancelAndSteer(id, "too late")).resolves.toBe(false);
     expect(session.steer).not.toHaveBeenCalled();
     await expect(first).resolves.toBe("running");
     await expect(repeated).resolves.toBe("shutdown");

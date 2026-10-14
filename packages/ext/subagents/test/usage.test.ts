@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getLifetimeTotal, getSessionContextPercent, getSessionTokens } from "../usage.js";
+import { getLifetimeTotal, getSessionTokens } from "../usage.js";
 
 // Regression for issue #38 — token semantics + context indicator
 describe("usage", () => {
@@ -28,35 +28,6 @@ describe("usage", () => {
         },
       } as any;
       expect(getSessionTokens(broken)).toBe(0);
-    });
-  });
-
-  describe("getSessionContextPercent", () => {
-    it("returns null when contextUsage is unavailable", () => {
-      const session = {
-        getSessionStats: () => ({ tokens: { input: 10, output: 20, cacheWrite: 5 } }),
-      };
-      expect(getSessionContextPercent(session)).toBeNull();
-    });
-
-    it("returns null when percent is null (post-compaction)", () => {
-      const session = {
-        getSessionStats: () => ({
-          tokens: { input: 10, output: 20, cacheWrite: 5 },
-          contextUsage: { tokens: null, contextWindow: 200_000, percent: null },
-        }),
-      };
-      expect(getSessionContextPercent(session)).toBeNull();
-    });
-
-    it("returns the upstream percent when available", () => {
-      const session = {
-        getSessionStats: () => ({
-          tokens: { input: 10, output: 20, cacheWrite: 5 },
-          contextUsage: { tokens: 50_000, contextWindow: 200_000, percent: 25 },
-        }),
-      };
-      expect(getSessionContextPercent(session)).toBe(25);
     });
   });
 
@@ -96,8 +67,8 @@ describe("usage", () => {
       expect(getLifetimeTotal(lifetime)).toBe(610); // 350 + 260, monotone
     });
 
-    // The accumulator survives compaction because it lives on AgentActivity /
-    // AgentRecord, not on session.state.messages (which compaction replaces).
+    // The accumulator survives compaction because it lives on AgentRecord,
+    // not on session.state.messages (which compaction replaces).
     it("stays monotone across simulated compaction when fed via addUsage-style accumulation", () => {
       const usage = { input: 0, output: 0, cacheWrite: 0 };
       const onUsage = (u: { input: number; output: number; cacheWrite: number }) => {

@@ -9,8 +9,6 @@ import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
 import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { registerNotificationRenderer } from "./notifications.js";
-import { registerAgentsCommand } from "./agents-command.js";
-import { getModelLabelFromConfig } from "../shared/model-resolver.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import {
   createSubagentMessenger,
@@ -19,10 +17,8 @@ import {
 } from "./subagent-messages.js";
 import { createV2Tools } from "./v2-tools.js";
 import { spawnNamed } from "./task-paths.js";
-import { type AgentActivity } from "./ui/agent-format.js";
 import { FleetList } from "./ui/fleet-list.js";
-import { CONVERSATION_OVERLAY_OPTIONS, ConversationViewer } from "./ui/conversation-viewer.js";
-import { onSubagentApprovalRequest, type BitesBashGatePayload } from "../bash-gate/events.js";
+import { onSubagentApprovalRequest } from "../bash-gate/events.js";
 import type { BashGateController } from "../bash-gate/index.js";
 import {
   buildSubagentReviewerTranscript,
@@ -53,8 +49,6 @@ export function createSubagents(
     deliveries.set(id, { pi, messenger: parentMessenger });
   });
 
-  // ---- Agent activity tracking ----
-  const agentActivity = new Map<string, AgentActivity>();
   // Session approvals are scoped to a live child conversation, never its retained id.
   const parentAllowances = new Map<string, { incarnation?: string; keys: Set<string> }>();
 
@@ -90,10 +84,7 @@ export function createSubagents(
   const completion = createAgentCompletionHandler({
     pi,
     getRecord: (id) => manager.getRecord(id),
-    onAgentFinishedUI: (id) => {
-      if (!manager.getRecord(id)?.taskName) agentActivity.delete(id);
-      fleet.onAgentFinished();
-    },
+    onAgentFinishedUI: () => fleet.onAgentFinished(),
     shouldNotify: (record) => !retiredConversations.has(record),
     queueCompletion: (record) => {
       if (!record.taskName || record.status === "stopped") return;
@@ -131,8 +122,6 @@ export function createSubagents(
     getAutoCompactionThreshold,
     (record) => {
       parentAllowances.delete(record.id);
-      const activity = agentActivity.get(record.id);
-      if (activity) activity.session = undefined;
       childControllers.get(record.id)?.invalidate();
       const id = getAgentSessionId(record);
       if (id) {
@@ -202,8 +191,6 @@ export function createSubagents(
       pending.shift();
     }
     if (!pending?.length) unloadedMail.delete(record);
-    const activity = agentActivity.get(record.id);
-    if (activity) activity.session = record.session;
   };
   manager.runtimes.hasPendingMail = (record) => {
     const id = getAgentSessionId(record);
@@ -366,28 +353,6 @@ export function createSubagents(
           );
         }
       : undefined;
-    const getConversation = () => {
-      const record = request.agentId ? manager.getRecord(request.agentId) : undefined;
-      if (!record?.session) return undefined;
-      return async () => {
-        const session = record.session;
-        if (!session) return;
-        await ui.custom<undefined>(
-          (tui, theme, keybindings, done) =>
-            new ConversationViewer(
-              tui,
-              session,
-              record,
-              agentActivity.get(record.id),
-              theme,
-              done,
-              undefined,
-              keybindings,
-            ),
-          CONVERSATION_OVERLAY_OPTIONS,
-        );
-      };
-    };
     const labels = request.labels.join(", ") || "unknown rule";
     const reasons = request.reasons.filter(Boolean).join("; ");
     const prompt = reasons
@@ -407,7 +372,6 @@ export function createSubagents(
       rememberAllowance,
       checkCurrent,
       review,
-      getConversation,
     });
   });
 
@@ -434,20 +398,8 @@ export function createSubagents(
   // Broadcast readiness so extensions loaded after us can discover us
   pi.events.emit("subagents:ready", {});
 
-  // Claude Code-style FleetView: navigable list of main + subagents above the editor.
-  fleet = new FleetList(manager, agentActivity);
-  const humanGate = (data: unknown) => {
-    const gate = data as BitesBashGatePayload;
-    return gate.requiresHuman ? gate : undefined;
-  };
-  const unsubBashGateStarted = pi.events.on("bites:bash_gate", (data) => {
-    const gate = humanGate(data);
-    if (gate) fleet.bashGateStarted(gate.waitId);
-  });
-  const unsubBashGateResolved = pi.events.on("bites:bash_gate_resolved", (data) => {
-    const gate = humanGate(data);
-    if (gate) fleet.bashGateResolved(gate.waitId);
-  });
+  // Compact, read-only status above the editor.
+  fleet = new FleetList(manager);
 
   // Persist queued parent deliveries before aborting children and tearing down.
   pi.on("session_shutdown", async () => {
@@ -461,8 +413,6 @@ export function createSubagents(
     unsubCloseRpc();
     unsubPingRpc();
     unsubBashGateApproval();
-    unsubBashGateStarted();
-    unsubBashGateResolved();
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
     manager.abortAll();
     parentMessenger.dispose();
@@ -470,13 +420,8 @@ export function createSubagents(
     fleet.dispose();
     await manager.shutdown();
   });
-  let fleetViewEnabled = true;
-  function isFleetViewEnabled(): boolean {
-    return fleetViewEnabled;
-  }
-  function setFleetViewEnabled(b: boolean): void {
-    fleetViewEnabled = b;
-    fleet.setEnabled(b);
+  function setFleetViewEnabled(enabled: boolean): void {
+    fleet.setEnabled(enabled);
   }
 
   // ---- Model defaults ----
@@ -491,7 +436,6 @@ export function createSubagents(
     createV2Tools(pi, {
       getModelDefaults: () => modelDefaults,
       manager,
-      agentActivity,
       fleet,
       ...manager.taskDelivery,
     }),
@@ -513,14 +457,6 @@ export function createSubagents(
     await Promise.allSettled(manager.listAgents().map((record) => manager.close(record.id)));
   });
 
-  // ---- /agents interactive menu ----
-  registerAgentsCommand(pi, {
-    manager,
-    agentActivity,
-    getModelLabelFromConfig,
-    isFleetViewEnabled,
-    setFleetViewEnabled,
-  });
   return operations;
 }
 

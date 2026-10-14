@@ -401,34 +401,6 @@ export class AgentManager {
     };
   }
 
-  private async applyPendingRedirects(
-    record: AgentRecord,
-    generation: number,
-    session: AgentSession,
-    abortController: AbortController,
-    hooks: TurnHooks,
-    responseText: string,
-  ): Promise<string> {
-    while (
-      record.generation === generation &&
-      record.pendingCancelSteers?.length &&
-      record.status !== "stopped"
-    ) {
-      const redirect = record.pendingCancelSteers.shift();
-      if (!record.pendingCancelSteers.length) record.pendingCancelSteers = undefined;
-      if (!redirect) continue;
-      await redirect.settled;
-      if (!redirect.accepted) continue;
-      if (record.generation !== generation || record.status !== "running") break;
-      record.status = "running";
-      responseText = await resumeAgent(session, redirect.message, {
-        signal: abortController.signal,
-        ...hooks,
-      });
-    }
-    return responseText;
-  }
-
   private finishGeneration(
     record: AgentRecord,
     generation: number,
@@ -505,14 +477,6 @@ export class AgentManager {
     const promise = started
       .then(async ({ responseText, session }) => {
         if (record.generation !== generation) return responseText;
-        responseText = await this.applyPendingRedirects(
-          record,
-          generation,
-          session,
-          abortController,
-          resumeHooks,
-          responseText,
-        );
         // Pi may have settled just before input arrived, while manager status is still running.
         // Keep ownership here rather than letting sendCustomMessage launch an untracked turn.
         while (
@@ -630,7 +594,7 @@ export class AgentManager {
         next.start();
       } catch (err) {
         // Surface late failures on the record so the user/agent can see them
-        // via /agents, then keep draining.
+        // via collaboration status, then keep draining.
         record.status = "error";
         record.error = err instanceof Error ? err.message : String(err);
         record.completedAt = Date.now();
@@ -672,13 +636,6 @@ export class AgentManager {
       record.pendingSteers.push(message);
     }
     return true;
-  }
-
-  async cancelAndSteer(id: string, message: string, signal?: AbortSignal): Promise<boolean> {
-    const record = this.agents.get(id);
-    if (!record?.session || this.closer.isClosing(id) || record.status !== "running") return false;
-    const source = "cancel_and_steer";
-    return this.interruptions.interrupt(record, record.session, source, message, signal);
   }
 
   /** Submit ordinary input through the manager's close-aware lifecycle gate. */
@@ -742,7 +699,6 @@ export class AgentManager {
     record.result = undefined;
     record.error = undefined;
     record.abort = undefined;
-    record.pendingCancelSteers = undefined;
     record.pendingSteers = undefined;
     record.completedAt = undefined;
     record.startedAt = Date.now();
@@ -815,7 +771,7 @@ export class AgentManager {
 
     const session = record.session;
     const promise = record.promise;
-    const interrupted = await this.interruptions.interrupt(record, session, "interrupt");
+    const interrupted = await this.interruptions.interrupt(record, session);
     if (!interrupted) return false;
     await promise;
     return true;
@@ -903,7 +859,6 @@ export class AgentManager {
     }
 
     if (record.status !== "running") return false;
-    record.pendingCancelSteers = undefined;
     record.status = "stopped";
     record.error = "aborted";
     record.completedAt = Date.now();
@@ -930,7 +885,6 @@ export class AgentManager {
       const record = this.agents.get(queued.id);
       if (record) {
         record.pendingSteers = undefined;
-        record.pendingCancelSteers = undefined;
         record.status = "stopped";
         record.completedAt = Date.now();
         this.settledGeneration.set(record, record.generation);
@@ -949,7 +903,6 @@ export class AgentManager {
     for (const record of this.agents.values()) {
       if (record.status === "running") {
         record.pendingSteers = undefined;
-        record.pendingCancelSteers = undefined;
         record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
         this.recordDiagnostic(record, "abort_requested", { source: "shutdown" });
         this.clearSessionQueue(record.session);

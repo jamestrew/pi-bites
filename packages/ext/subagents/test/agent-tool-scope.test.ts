@@ -20,7 +20,6 @@ function harness(
           getRecord: () => undefined,
           getMaxConcurrent: () => 2,
         } as never,
-        agentActivity: new Map(),
         fleet: { ensureTimer: vi.fn(), update: vi.fn() } as never,
         getModelDefaults: () => ({ defaultModel }),
       },

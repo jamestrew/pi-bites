@@ -159,10 +159,6 @@ export interface RunResult {
   session: AgentSession;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function getAssistantUsage(message: AssistantMessage): AssistantUsage {
   const { usage } = message;
   return {
@@ -175,12 +171,6 @@ function getAssistantUsage(message: AssistantMessage): AssistantUsage {
     model: message.model,
     timestamp: message.timestamp,
   };
-}
-
-function getToolCallName(value: unknown): string {
-  if (!isRecord(value)) return "unknown";
-  if (typeof value.name === "string") return value.name;
-  return typeof value.toolName === "string" ? value.toolName : "unknown";
 }
 
 /**
@@ -676,33 +666,4 @@ export async function resumeAgent(
  */
 export async function steerAgent(session: AgentSession, message: string): Promise<void> {
   await session.steer(message);
-}
-
-/**
- * Get the subagent's conversation messages as formatted text.
- */
-export function getAgentConversation(session: AgentSession): string {
-  const parts: string[] = [];
-
-  for (const msg of session.messages) {
-    if (msg.role === "user") {
-      const text = typeof msg.content === "string" ? msg.content : extractText(msg.content);
-      if (text.trim()) parts.push(`[User]: ${text.trim()}`);
-    } else if (msg.role === "assistant") {
-      const textParts: string[] = [];
-      const toolCalls: string[] = [];
-      for (const c of msg.content) {
-        if (c.type === "text" && c.text) textParts.push(c.text);
-        else if (c.type === "toolCall") toolCalls.push(`  Tool: ${getToolCallName(c)}`);
-      }
-      if (textParts.length > 0) parts.push(`[Assistant]: ${textParts.join("\n")}`);
-      if (toolCalls.length > 0) parts.push(`[Tool Calls]:\n${toolCalls.join("\n")}`);
-    } else if (msg.role === "toolResult") {
-      const text = extractText(msg.content);
-      const truncated = text.length > 200 ? text.slice(0, 200) + "..." : text;
-      parts.push(`[Tool Result (${msg.toolName})]: ${truncated}`);
-    }
-  }
-
-  return parts.join("\n\n");
 }
