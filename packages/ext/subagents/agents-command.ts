@@ -23,8 +23,6 @@ type AgentsCommandDeps = {
   manager: AgentManager;
   agentActivity: Map<string, AgentActivity>;
   getModelLabelFromConfig: (model: string) => string;
-  isScopeModelsEnabled: () => boolean;
-  setScopeModelsEnabled: (enabled: boolean) => void;
   isFleetViewEnabled: () => boolean;
   setFleetViewEnabled: (enabled: boolean) => void;
 };
@@ -34,8 +32,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     manager,
     agentActivity,
     getModelLabelFromConfig,
-    isScopeModelsEnabled,
-    setScopeModelsEnabled,
     isFleetViewEnabled,
     setFleetViewEnabled,
   } = deps;
@@ -140,7 +136,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
     return {
       maxDepth: manager.tree.getMaxDepth(),
       maxConcurrent: manager.getMaxConcurrent(),
-      scopeModels: isScopeModelsEnabled(),
       fleetView: isFleetViewEnabled(),
     };
   }
@@ -160,13 +155,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           values: [String(maxConcurrent)],
         },
         {
-          id: "scopeModels",
-          label: "Scope models",
-          description: "Validate subagent models against scoped models (/scoped-models)",
-          currentValue: isScopeModelsEnabled() ? "on" : "off",
-          values: ["on", "off"],
-        },
-        {
           id: "fleetView",
           label: "Fleet view",
           description:
@@ -184,10 +172,6 @@ export function registerAgentsCommand(pi: ExtensionAPI, deps: AgentsCommandDeps)
           manager.setMaxConcurrent(count);
           notifyApplied(ctx, `Max concurrency set to ${count}`);
         }
-      } else if (id === "scopeModels") {
-        const enabled = value === "on";
-        setScopeModelsEnabled(enabled);
-        notifyApplied(ctx, `Scope models ${enabled ? "enabled" : "disabled"}`);
       } else if (id === "fleetView") {
         const enabled = value === "on";
         setFleetViewEnabled(enabled);

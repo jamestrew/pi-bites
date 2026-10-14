@@ -34,6 +34,10 @@ function staleableParentCtx(): { parent: any; goStale: () => void } {
     if (stale) throw new Error("stale ctx");
   };
   const parent = {
+    get scopedModels() {
+      assertLive();
+      return [];
+    },
     get cwd() {
       assertLive();
       return "/tmp";

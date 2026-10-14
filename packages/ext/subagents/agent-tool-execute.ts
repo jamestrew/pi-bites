@@ -26,7 +26,6 @@ type AgentToolExecuteDeps = {
   manager: AgentManager;
   agentActivity: Map<string, AgentActivity>;
   fleet: FleetList;
-  isScopeModelsEnabled: () => boolean;
   getModelDefaults?: () => Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">;
 };
 
@@ -41,7 +40,7 @@ export function createSpawnExecution(
     signal?: AbortSignal,
   ) => string | Promise<string>,
 ) {
-  const { pi, manager, agentActivity, fleet, isScopeModelsEnabled } = deps;
+  const { pi, manager, agentActivity, fleet } = deps;
   return async (
     toolCallId: string,
     params: {
@@ -70,7 +69,6 @@ export function createSpawnExecution(
         {
           ...ctx,
           thinking: ctx.thinking ?? pi.getThinkingLevel(),
-          scopeModels: ctx.scopeModels ?? isScopeModelsEnabled(),
         },
         deps.getModelDefaults?.(),
       );

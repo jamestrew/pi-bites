@@ -36,9 +36,13 @@ resident runtimes and pending residency claims remain separately bounded.
 Configured values continue to count children. Nesting is uncapped by default (#384); explicit `maxDepth`
 is opt-in local policy, not upstream V2 parity (`0` disables spawn, `1` permits only
 root children). Project values override global values; removing the effective setting
-restores uncapped nesting on the next settings load. `scopeModels` and `fleetView`
-retain their existing meaning. Selected tools, model scope and additive delegation
-policies still apply.
+restores uncapped nesting on the next settings load. `fleetView` retains its existing
+meaning. Subagent model scope is mandatory (#387): descendants share the authenticated
+root session scope, and an empty native scope permits all authenticated models.
+The retired `scopeModels` field is ignored. Tightening scope leaves current turns
+running but rejects subsequent spawn, follow-up and runtime reload requests using
+excluded models; queue-only mail and interruption remain available. Selected tools
+and additive delegation policies still apply.
 
 Material adaptations remain explicit: flat Pi tool names; supported model/tool
 permissions rather than Codex infrastructure; Pi tool-batch delivery boundaries;

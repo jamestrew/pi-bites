@@ -423,6 +423,7 @@ export async function openAgentSession(
     settingsManager,
     modelRuntime,
     model,
+    scopedModels: parent.scopedModels,
     // SDK tools is a persistent registry ceiling, not only the initial active list.
     // Keep underlying cores and permitted owned tools, even when projection hides them.
     tools: options.allowedTools

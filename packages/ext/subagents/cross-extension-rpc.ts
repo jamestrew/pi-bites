@@ -10,7 +10,7 @@
  */
 
 import type { AgentManager, SpawnOptions } from "./agent-manager.js";
-import { type ModelRegistry, resolveModel } from "../shared/model-resolver.js";
+import { type ModelRegistry, type ModelEntry, resolveModel } from "../shared/model-resolver.js";
 import type { ThinkingLevel } from "./types.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -36,7 +36,11 @@ function isThinkingLevel(value: unknown): value is ThinkingLevel {
   return typeof value === "string" && Object.hasOwn(THINKING_LEVELS, value);
 }
 
-export function decodeSpawnOptions(raw: unknown, registry?: ModelRegistry): SpawnOptions {
+export function decodeSpawnOptions(
+  raw: unknown,
+  registry?: ModelRegistry,
+  errorModels?: readonly ModelEntry[],
+): SpawnOptions {
   const input = raw ?? {};
   if (!isRecord(input)) throw new Error("Spawn RPC options must be an object");
 
@@ -58,7 +62,7 @@ export function decodeSpawnOptions(raw: unknown, registry?: ModelRegistry): Spaw
         `Model override "${input.model}" provided but ctx.modelRegistry is unavailable`,
       );
     }
-    const model = resolveModel(input.model, registry);
+    const model = resolveModel(input.model, registry, errorModels);
     if (typeof model === "string") throw new Error(model);
     options.model = model;
   }
@@ -110,6 +114,7 @@ export interface RpcDeps {
   events: EventBus;
   pi: unknown; // passed through to manager.spawn
   getCtx: () => unknown; // returns current ExtensionContext
+  getErrorModels?: () => readonly ModelEntry[];
   manager: SpawnCapable;
 }
 
@@ -169,7 +174,13 @@ export function registerRpcHandlers(deps: RpcDeps): RpcHandle {
     const registry =
       isRecord(ctx) && isModelRegistry(ctx.modelRegistry) ? ctx.modelRegistry : undefined;
     return {
-      id: await manager.spawn(pi, ctx, type, prompt, decodeSpawnOptions(options, registry)),
+      id: await manager.spawn(
+        pi,
+        ctx,
+        type,
+        prompt,
+        decodeSpawnOptions(options, registry, deps.getErrorModels?.()),
+      ),
     };
   });
 

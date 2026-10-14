@@ -60,7 +60,6 @@ describe("settings persistence", () => {
     const appliers: SettingsAppliers = {
       setMaxDepth: (depth) => tree.setMaxDepth(depth),
       setMaxConcurrent: vi.fn(),
-      setScopeModels: vi.fn(),
       setFleetView: vi.fn(),
     };
     const load = () => applyAndEmitLoaded(appliers, vi.fn(), projectDir);
@@ -93,8 +92,8 @@ describe("settings persistence", () => {
   });
 
   it("loads from global when no project file", () => {
-    writeGlobal({ maxConcurrent: 16, scopeModels: true });
-    expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 16, scopeModels: true });
+    writeGlobal({ maxConcurrent: 16, maxDepth: 2 });
+    expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 16, maxDepth: 2 });
   });
 
   it("loads from project when no global file", () => {
@@ -103,11 +102,11 @@ describe("settings persistence", () => {
   });
 
   it("merges global + project with project winning on conflicts", () => {
-    writeGlobal({ maxConcurrent: 16, scopeModels: true });
+    writeGlobal({ maxConcurrent: 16, maxDepth: 2 });
     writeProject({ maxConcurrent: 4, fleetView: false });
     expect(loadSettings(projectDir)).toEqual({
       maxConcurrent: 4, // project wins
-      scopeModels: true, // from global
+      maxDepth: 2, // from global
       fleetView: false, // from project only
     });
   });
@@ -162,7 +161,7 @@ describe("settings persistence", () => {
   it("round-trips values: saveSettings then loadSettings", () => {
     const settings = {
       maxConcurrent: 7,
-      scopeModels: true,
+      maxDepth: 2,
     };
     saveSettings(settings, projectDir);
     expect(loadSettings(projectDir)).toEqual(settings);
@@ -202,9 +201,9 @@ describe("settings persistence", () => {
   });
 
   it("composes partial global + partial project correctly", () => {
-    writeGlobal({ scopeModels: true });
+    writeGlobal({ maxDepth: 2 });
     writeProject({ maxConcurrent: 2 });
-    expect(loadSettings(projectDir)).toEqual({ scopeModels: true, maxConcurrent: 2 });
+    expect(loadSettings(projectDir)).toEqual({ maxDepth: 2, maxConcurrent: 2 });
   });
 
   describe("sanitizer", () => {
@@ -230,8 +229,8 @@ describe("settings persistence", () => {
     );
 
     it("drops maxConcurrent < 1", () => {
-      writeProject({ maxConcurrent: 0, scopeModels: true });
-      expect(loadSettings(projectDir)).toEqual({ scopeModels: true });
+      writeProject({ maxConcurrent: 0, maxDepth: 2 });
+      expect(loadSettings(projectDir)).toEqual({ maxDepth: 2 });
     });
 
     it("drops negative maxConcurrent", () => {
@@ -253,21 +252,13 @@ describe("settings persistence", () => {
       expect(loadSettings(projectDir)).toEqual({});
     });
 
-    it("accepts scopeModels boolean (true and false)", () => {
-      writeProject({ scopeModels: true });
-      expect(loadSettings(projectDir)).toEqual({ scopeModels: true });
-      writeProject({ scopeModels: false });
-      expect(loadSettings(projectDir)).toEqual({ scopeModels: false });
-    });
-
-    it("drops non-boolean scopeModels", () => {
-      writeProject({ scopeModels: "yes" });
-      expect(loadSettings(projectDir).scopeModels).toBeUndefined();
-      writeProject({ scopeModels: 1 });
-      expect(loadSettings(projectDir).scopeModels).toBeUndefined();
-      writeProject({ scopeModels: null });
-      expect(loadSettings(projectDir).scopeModels).toBeUndefined();
-    });
+    it.each([true, false, "yes", 1, null])(
+      "drops the retired scopeModels setting %j",
+      (scopeModels) => {
+        writeProject({ scopeModels, maxConcurrent: 2 });
+        expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 2 });
+      },
+    );
 
     it("returns {} when the JSON root is not an object (array, string, null)", () => {
       mkdirSync(join(projectDir, ".pi"), { recursive: true });
@@ -282,10 +273,10 @@ describe("settings persistence", () => {
     it("keeps valid fields while dropping invalid siblings", () => {
       writeProject({
         maxConcurrent: 4, // ok
-        scopeModels: true, // ok
+        maxDepth: 2, // ok
         defaultJoinMode: "nope", // dropped
       });
-      expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 4, scopeModels: true });
+      expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 4, maxDepth: 2 });
     });
 
     it("accepts maxConcurrent at the ceiling", () => {
@@ -352,7 +343,6 @@ describe("settings persistence", () => {
     beforeEach(() => {
       appliers = {
         setMaxConcurrent: vi.fn(),
-        setScopeModels: vi.fn(),
         setFleetView: vi.fn(),
       };
     });
@@ -360,26 +350,23 @@ describe("settings persistence", () => {
     it("is a no-op on an empty settings object", () => {
       applySettings({}, appliers);
       expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
-      expect(appliers.setScopeModels).not.toHaveBeenCalled();
     });
 
     it("applies only the fields that are present", () => {
       applySettings({ maxConcurrent: 4 }, appliers);
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(4);
-      expect(appliers.setScopeModels).not.toHaveBeenCalled();
     });
 
     it("applies all fields when all are present", () => {
       applySettings(
         {
           maxConcurrent: 8,
-          scopeModels: true,
+          maxDepth: 2,
           fleetView: false,
         },
         appliers,
       );
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(8);
-      expect(appliers.setScopeModels).toHaveBeenCalledWith(true);
       expect(appliers.setFleetView).toHaveBeenCalledWith(false);
     });
 
@@ -388,11 +375,6 @@ describe("settings persistence", () => {
       expect(appliers.setFleetView).toHaveBeenCalledWith(true);
       applySettings({}, appliers);
       expect(appliers.setFleetView).toHaveBeenCalledTimes(1); // absence is "use default"
-    });
-
-    it("applies scopeModels: false", () => {
-      applySettings({ scopeModels: false }, appliers);
-      expect(appliers.setScopeModels).toHaveBeenCalledWith(false);
     });
   });
 
@@ -418,7 +400,6 @@ describe("settings persistence", () => {
     beforeEach(() => {
       appliers = {
         setMaxConcurrent: vi.fn(),
-        setScopeModels: vi.fn(),
         setFleetView: vi.fn(),
       };
     });
@@ -443,19 +424,18 @@ describe("settings persistence", () => {
 
     it("loads, applies, and emits subagents:settings_loaded with merged settings", () => {
       writeGlobal({ maxConcurrent: 16 });
-      writeProject({ scopeModels: true });
+      writeProject({ maxDepth: 2 });
       const emit = vi.fn();
 
       const result = applyAndEmitLoaded(appliers, emit, projectDir);
 
       expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(16);
-      expect(appliers.setScopeModels).toHaveBeenCalledWith(true);
 
       expect(emit).toHaveBeenCalledTimes(1);
       expect(emit).toHaveBeenCalledWith("subagents:settings_loaded", {
-        settings: { maxConcurrent: 16, scopeModels: true },
+        settings: { maxConcurrent: 16, maxDepth: 2 },
       });
-      expect(result).toEqual({ maxConcurrent: 16, scopeModels: true });
+      expect(result).toEqual({ maxConcurrent: 16, maxDepth: 2 });
     });
 
     it("still emits the event when both files are missing (payload carries {})", () => {
@@ -473,7 +453,7 @@ describe("settings persistence", () => {
   describe("saveAndEmitChanged", () => {
     it("persists, emits with persisted=true, and returns info toast on success", () => {
       const emit = vi.fn();
-      const snapshot = { maxConcurrent: 5, scopeModels: true };
+      const snapshot = { maxConcurrent: 5, maxDepth: 2 };
 
       const toast = saveAndEmitChanged(snapshot, "Max concurrency set to 5", emit, projectDir);
 

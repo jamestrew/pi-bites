@@ -11,10 +11,10 @@ import { resolveAgent } from "./agent-types.js";
 import { snapshotParent } from "./parent-snapshot.js";
 import { assertValidSpawnCwd } from "./spawn-cwd.js";
 import type { AgentRecord, WaitAgentStatus } from "./types.js";
+import { allowedSubagentModels, assertSubagentModel } from "./model-scope.js";
 
 export interface ReopenOptions {
   signal?: AbortSignal;
-  scopeModels?: boolean;
   rootSessionId?: string;
 }
 
@@ -74,6 +74,8 @@ export class AgentReopener {
       ...[options.signal, ctx.signal].filter((s): s is AbortSignal => !!s),
     ]);
     signal.throwIfAborted();
+    const allowed = allowedSubagentModels(ctx);
+    const getAllowedModels = ctx.getAllowedModels ?? (() => allowed);
     if (!id.trim()) throw new Error(`invalid agent id ${id}`);
     const parent = snapshotParent(ctx);
     const active = this.agents.get(id);
@@ -86,8 +88,10 @@ export class AgentReopener {
       throw new Error(`agent with id ${id} is not owned by this session`);
     if (this.closer.isClosing(id)) throw new Error(`agent with id ${id} is closing`);
     const pending = this.reopening.get(id);
-    if (pending) return waitForOperation(pending, signal);
-    if (active?.session) return getAgentStatus(active);
+    if (active?.session) {
+      assertSubagentModel(active.session.model, allowedSubagentModels(ctx));
+      return getAgentStatus(active);
+    }
     if (!closed) throw new Error(`agent with id ${id} not found`);
     if (!closed.recoverable || !("conversation" in closed))
       throw new Error(`agent with id ${id} has no recoverable conversation`);
@@ -132,12 +136,8 @@ export class AgentReopener {
       !parent.availableModels.some((m) => m.provider === model.provider && m.id === model.id)
     )
       throw new Error("No currently authorized model is available for resume.");
-    if (
-      options.scopeModels &&
-      ctx.scopedModels.length &&
-      !ctx.scopedModels.some(({ model: m }) => m.provider === model.provider && m.id === model.id)
-    )
-      throw new Error("Model not in scope for resume.");
+    assertSubagentModel(model, allowedSubagentModels(ctx));
+    if (pending) return waitForOperation(pending, signal);
     const currentTools = ctx.allowedTools ?? pi.getActiveTools();
     const ceiling = active?.allowedTools;
     const allowedTools = ceiling
@@ -171,8 +171,11 @@ export class AgentReopener {
       let session: AgentSession | undefined;
       let releaseRuntime: (() => void) | undefined;
       try {
+        assertSubagentModel(model, getAllowedModels());
         releaseRuntime = await this.hooks.admitRuntime(signal);
         signal.throwIfAborted();
+        assertSubagentModel(model, getAllowedModels());
+        parent.scopedModels = getAllowedModels().map((model) => ({ model }));
         this.hooks.invalidate(record);
         record.incarnation = randomUUID();
         session = await openAgentSession(parent, record.type, {

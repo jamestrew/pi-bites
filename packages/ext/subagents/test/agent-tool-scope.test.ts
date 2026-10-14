@@ -5,7 +5,10 @@ import { resolveAgent } from "../agent-types.js";
 const inside = { provider: "test", id: "inside", name: "Inside", reasoning: true };
 const outside = { provider: "test", id: "outside", name: "Outside", reasoning: true };
 
-function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "high" }> = []) {
+function harness(
+  scopedModels: Array<{ model: typeof inside; thinkingLevel?: "high" }> = [],
+  defaultModel?: string,
+) {
   const notify = vi.fn();
   const spawn = vi.fn(() => "agent-1");
   const createExecute = () =>
@@ -19,7 +22,7 @@ function harness(scopedModels: Array<{ model: typeof inside; thinkingLevel?: "hi
         } as never,
         agentActivity: new Map(),
         fleet: { ensureTimer: vi.fn(), update: vi.fn() } as never,
-        isScopeModelsEnabled: () => true,
+        getModelDefaults: () => ({ defaultModel }),
       },
       spawn,
     );
@@ -83,16 +86,12 @@ test("upstream-resolved scoped entries allow their model regardless of pinned th
   expect(runtime.notify).not.toHaveBeenCalled();
 });
 
-test("an inherited out-of-scope model warns and proceeds", async () => {
+test("an inherited out-of-scope model fails before spawning", async () => {
   const runtime = harness([{ model: inside }]);
 
-  await runtime.run();
-
-  expect(runtime.notify).toHaveBeenCalledWith(
-    expect.stringContaining("out-of-scope model"),
-    "warning",
-  );
-  expect(runtime.spawn).toHaveBeenCalledOnce();
+  await expect(runtime.run()).rejects.toThrow("Model not in scope");
+  expect(runtime.notify).not.toHaveBeenCalled();
+  expect(runtime.spawn).not.toHaveBeenCalled();
 });
 
 test("empty upstream scope leaves model selection unrestricted", async () => {
@@ -132,4 +131,29 @@ test("role overrides cannot hide an explicit out-of-scope request", async () => 
   const role = resolveAgent("worker");
   const agent = { ...role, config: { ...role.config, model: "test/inside" } };
   await expect(runtime.run("test/outside", { agent })).rejects.toThrow("Model not in scope");
+});
+
+test("configured and role models cannot bypass mandatory scope", async () => {
+  const configured = harness([{ model: inside }], "test/outside");
+  await expect(configured.run()).rejects.toThrow("Model not in scope");
+  expect(configured.spawn).not.toHaveBeenCalled();
+
+  const role = resolveAgent("worker");
+  const runtime = harness([{ model: inside }]);
+  await expect(
+    runtime.run("test/inside", {
+      agent: { ...role, config: { ...role.config, model: "test/outside" } },
+    }),
+  ).rejects.toThrow("Model not in scope");
+  expect(runtime.spawn).not.toHaveBeenCalled();
+});
+
+test("lookup errors only offer authenticated in-scope alternatives", async () => {
+  const runtime = harness([{ model: inside }, { model: { ...outside, id: "unauthenticated" } }]);
+  await expect(runtime.run("missing")).rejects.toThrow(
+    'Model not found: "missing".\n\nAvailable models:\n  test/inside',
+  );
+  await expect(runtime.run("test/outside")).rejects.toThrow(
+    'Model not in scope: "test/outside".\n\nAllowed authenticated models (from session scope):\n  test/inside',
+  );
 });

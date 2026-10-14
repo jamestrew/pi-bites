@@ -25,7 +25,11 @@ export function getModelLabelFromConfig(model: string): string {
  * Tries exact match first ("provider/modelId"), then fuzzy match against all available models.
  * Returns the Model on success, or an error message string on failure.
  */
-export function resolveModel(input: string, registry: ModelRegistry): Model<Api> | string {
+export function resolveModel(
+  input: string,
+  registry: ModelRegistry,
+  errorModels?: readonly ModelEntry[],
+): Model<Api> | string {
   // Available models (those with auth configured)
   const all = registry.getAvailable?.() ?? registry.getAll();
   const availableSet = new Set(all.map(modelKey));
@@ -96,12 +100,12 @@ export function resolveModel(input: string, registry: ModelRegistry): Model<Api>
   // named provider is preferred when present; this only kicks in when it isn't,
   // so the same model from another provider beats falling back to "inherit".
   if (slashIdx !== -1) {
-    const bare = resolveModel(input.slice(slashIdx + 1), registry);
+    const bare = resolveModel(input.slice(slashIdx + 1), registry, errorModels);
     if (typeof bare !== "string") return bare;
   }
 
   // 4. No match — list available models
-  const modelList = all
+  const modelList = (errorModels ?? all)
     .map((m) => `  ${m.provider}/${m.id}`)
     .sort()
     .join("\n");
@@ -109,14 +113,21 @@ export function resolveModel(input: string, registry: ModelRegistry): Model<Api>
 }
 
 /** Direct collaboration uses exact catalog identities, never fuzzy/provider fallback. */
-export function resolveExactModel(input: string, registry: ModelRegistry): Model<Api> | string {
+export function resolveExactModel(
+  input: string,
+  registry: ModelRegistry,
+  errorModels?: readonly ModelEntry[],
+): Model<Api> | string {
   const models = registry.getAvailable?.() ?? registry.getAll();
   const qualified = models.find((model) => `${model.provider}/${model.id}` === input);
   if (qualified) return qualified;
   const matches = models.filter((model) => model.id === input);
   const match = matches[0];
   if (matches.length === 1 && match) return match;
-  const available = (matches.length ? matches : models)
+  const alternatives = errorModels ?? models;
+  const available = (
+    matches.length ? alternatives.filter((model) => model.id === input) : alternatives
+  )
     .map((model) => `  ${model.provider}/${model.id}`)
     .sort()
     .join("\n");

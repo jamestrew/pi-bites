@@ -6,7 +6,8 @@ import {
 } from "@earendil-works/pi-ai";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { SubagentContext } from "./operation-context.js";
-import { modelKey, resolveExactModel } from "../shared/model-resolver.js";
+import { resolveExactModel } from "../shared/model-resolver.js";
+import { allowedSubagentModels, assertSubagentModel } from "./model-scope.js";
 import type { SubagentsSettings } from "./settings.js";
 import { isThinkingLevel, type AgentConfig, type ThinkingLevel } from "./types.js";
 
@@ -25,12 +26,12 @@ export function resolveAgentInvocationConfig(
   params: { model?: string; reasoning_effort?: string },
   ctx: Pick<
     SubagentContext,
-    "cwd" | "model" | "modelRegistry" | "thinking" | "scopeModels" | "scopedModels" | "ui"
+    "cwd" | "model" | "modelRegistry" | "thinking" | "getAllowedModels" | "scopedModels"
   >,
   defaults: Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort"> = {},
 ) {
   const resolve = (input: string) => {
-    const model = resolveExactModel(input, ctx.modelRegistry);
+    const model = resolveExactModel(input, ctx.modelRegistry, allowedSubagentModels(ctx));
     if (typeof model === "string") throw new Error(model);
     return model;
   };
@@ -42,23 +43,8 @@ export function resolveAgentInvocationConfig(
       );
     return effort;
   };
-  const checkScope = (model: Model<Api> | undefined, explicit: boolean, input?: string) => {
-    if (!ctx.scopeModels || !model || !ctx.scopedModels.length) return;
-    const allowed = new Set(ctx.scopedModels.map(({ model }) => modelKey(model)));
-    if (allowed.has(modelKey(model))) return;
-    const label = input ?? `${model.provider}/${model.id}`;
-    if (explicit)
-      throw new Error(
-        `Model not in scope: "${label}".\n\nAllowed models (from session scope):\n${[...allowed]
-          .sort()
-          .map((name) => `  ${name}`)
-          .join("\n")}`,
-      );
-    ctx.ui.notify(
-      `Agent "${agentConfig.displayName ?? agentConfig.name}" using out-of-scope model "${label}"`,
-      "warning",
-    );
-  };
+  const checkScope = (model: Model<Api> | undefined) =>
+    assertSubagentModel(model, allowedSubagentModels(ctx));
   const requestedModel = params.model ?? defaults.defaultModel;
   const requestedEffort = params.reasoning_effort ?? defaults.defaultReasoningEffort;
   let model =
@@ -72,13 +58,13 @@ export function resolveAgentInvocationConfig(
           ? "off"
           : (ctx.thinking ?? "medium");
 
-  checkScope(model, params.model !== undefined, requestedModel);
+  checkScope(model);
 
   // Codex validates requested/default settings before applying the selected role.
   // Full-history inherited roles have their model/effort fields cleared by the caller.
   if (agentConfig.model !== undefined) {
     model = resolve(agentConfig.model);
-    checkScope(model, false, agentConfig.model);
+    checkScope(model);
   }
   if (agentConfig.thinking !== undefined) thinking = validateEffort(model, agentConfig.thinking);
   else if (agentConfig.model !== undefined) thinking = validateEffort(model, thinking);

@@ -245,8 +245,11 @@ it("rechecks the retained model and narrows delegated tools on reload", async ()
   const model = h.ctx.model;
   const getAvailable = h.ctx.modelRegistry.getAvailable;
   h.ctx.modelRegistry.getAvailable = () => [];
-  await expect(h.call("send_message", { target: "a", message: "NOT AUTHORIZED" })).rejects.toThrow(
-    "authorized model",
+  await expect(
+    h.call("send_message", { target: "a", message: "QUEUED WITHOUT AUTH" }),
+  ).resolves.toMatchObject({ value: "" });
+  await expect(h.call("followup_task", { target: "a", message: "NOT AUTHORIZED" })).rejects.toThrow(
+    "Model not in scope",
   );
   h.ctx.modelRegistry.getAvailable = getAvailable;
   h.ctx.model = { ...model, id: "different-parent-model" };

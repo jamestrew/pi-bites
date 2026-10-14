@@ -409,7 +409,6 @@ it.each(["all", "none", "1"])(
     const cwd = mkdtempSync(join(tmpdir(), "v2-scope-"));
     cleanup.push(async () => rmSync(cwd, { recursive: true, force: true }));
     h.ctx.cwd = cwd;
-    saveSettings({ scopeModels: true }, cwd);
     await h.emit("session_start");
     const inside = { provider: "test", id: "inside", reasoning: true };
     const outside = { provider: "other", id: "outside", reasoning: true };

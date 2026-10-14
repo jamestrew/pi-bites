@@ -12,6 +12,9 @@ import type {
 import { Check } from "typebox/value";
 import type { AgentManager } from "./agent-manager.js";
 import { captureSubagentContext } from "./operation-context.js";
+import { allowedSubagentModels } from "./model-scope.js";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { observeNativeModelScope } from "./native-model-scope.js";
 export type SubagentTools = ReturnType<typeof createV2Tools>;
 export type SubagentOperation = keyof SubagentTools;
 type OwnedTool = SubagentTools[SubagentOperation];
@@ -29,15 +32,45 @@ export class SubagentController {
   private owner = new AbortController();
   private activeCalls = new Set<string>();
   private failedResults = new Map<string, unknown>();
+  private unsubscribeScope?: () => void;
 
   constructor(
     private pi: ExtensionAPI,
     private tools: SubagentTools,
     private manager: AgentManager,
-    private isScopeModelsEnabled: () => boolean,
     private getAllowedTools: () => string[],
     private child?: AgentRecord,
+    private scope: { models: Model<Api>[] } = { models: [] },
   ) {}
+
+  getAllowedModels(): Model<Api>[] {
+    return this.scope.models;
+  }
+
+  private refreshScope(ctx: ExtensionContext): void {
+    if (this.child) return;
+    this.scope.models = allowedSubagentModels(ctx);
+    const owner = ctx.sessionManager;
+    this.unsubscribeScope?.();
+    const registry = ctx.modelRegistry;
+    this.unsubscribeScope = observeNativeModelScope(owner, (scopedModels) => {
+      // Only stable host dependencies cross the native callback boundary.
+      this.scope.models = [];
+      this.scope.models = allowedSubagentModels({ modelRegistry: registry, scopedModels });
+    });
+  }
+
+  captureContext(
+    ctx: ExtensionContext,
+    forkContext = false,
+    allowedTools = this.getAllowedTools(),
+  ) {
+    this.refreshScope(ctx);
+    const snapshot = captureSubagentContext(this.pi, ctx, forkContext, allowedTools);
+    const scope = this.scope;
+    snapshot.getAllowedModels = () => scope.models;
+    return snapshot;
+  }
 
   private tool(name: SubagentOperation): OwnedTool {
     const tool = (this.tools as Partial<Record<SubagentOperation, OwnedTool>>)[name];
@@ -46,6 +79,8 @@ export class SubagentController {
   }
 
   invalidate(): void {
+    this.unsubscribeScope?.();
+    this.unsubscribeScope = undefined;
     this.owner.abort(new Error("Subagent owner changed"));
     this.owner = new AbortController();
     this.activeCalls = new Set();
@@ -57,10 +92,9 @@ export class SubagentController {
     const owner = this.owner.signal;
     owner.throwIfAborted();
     const forkContext = options.forkContext ?? this.tools.spawn_agent.captureHistory?.({}) ?? false;
-    const snapshot = captureSubagentContext(this.pi, ctx, forkContext, this.getAllowedTools());
+    const snapshot = this.captureContext(ctx, forkContext);
     snapshot.callerAgentId = this.child?.id;
     snapshot.parentRole = this.child?.type ?? snapshot.parentRole;
-    snapshot.scopeModels = this.isScopeModelsEnabled();
     const callerId = snapshot.sessionManager.getSessionId();
     const activeCalls = this.activeCalls;
     const execute = async (
@@ -126,13 +160,20 @@ export class SubagentController {
       pi,
       this.tools,
       this.manager,
-      this.isScopeModelsEnabled,
       getAllowedTools,
       record,
+      this.scope,
     );
   }
 
   registerTools(): void {
+    // Native scope edits have no dedicated event. Snapshot every active root boundary.
+    const refreshScope = (_event: unknown, ctx: ExtensionContext) => this.refreshScope(ctx);
+    this.pi.on("session_start", refreshScope);
+    this.pi.on("session_tree", refreshScope);
+    this.pi.on("model_select", refreshScope);
+    this.pi.on("before_agent_start", refreshScope);
+    this.pi.on("tool_execution_start", refreshScope);
     // Pi discards thrown error.details. Its result hook preserves the error flag
     // while attaching our frozen UI snapshot to the live and persisted result.
     this.pi.on("tool_result", (event) => {
@@ -178,16 +219,8 @@ export class SubagentController {
       this.pi.registerTool(definition);
       if (name === "spawn_agent") {
         const refresh = (_event: unknown, ctx: ExtensionContext) => {
-          const available = ctx.modelRegistry.getAvailable();
-          const models =
-            this.isScopeModelsEnabled() && ctx.scopedModels.length
-              ? available.filter((model) =>
-                  ctx.scopedModels.some(
-                    ({ model: scoped }) =>
-                      model.provider === scoped.provider && model.id === scoped.id,
-                  ),
-                )
-              : available;
+          this.refreshScope(ctx);
+          const models = this.getAllowedModels();
           const description = tool.description.replace(
             "No picker-visible model overrides are currently loaded.",
             describeSpawnModels(models, SettingsManager.create(ctx.cwd)),

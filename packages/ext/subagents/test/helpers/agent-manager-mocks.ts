@@ -9,6 +9,7 @@ export const mockPi = { events: { emit: vi.fn() } } as any;
 export const mockCtx = {
   cwd: "/tmp",
   model: undefined,
+  scopedModels: [],
   getSystemPrompt: () => "parent prompt",
   modelRegistry: {
     getAvailable: () => [],
