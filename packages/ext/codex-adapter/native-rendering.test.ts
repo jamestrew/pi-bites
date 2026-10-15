@@ -36,6 +36,8 @@ test("native renderer restores command/patch/error rows, image fallback and scri
         isPartial: false,
         expanded,
         showImages: false,
+        durationMs: undefined,
+        outputPad: 1,
         isError: result.isError,
       },
     )
@@ -94,6 +96,8 @@ function rendered(
       isError: event.isError ?? false,
       expanded,
       showImages: false,
+      durationMs: undefined,
+      outputPad: 1,
     },
   )
     .render(width)
@@ -156,7 +160,8 @@ test("saved patch previews survive later file changes and explicit text/return v
     expect(text).toContain("+1 after");
     expect(text).not.toContain("different file contents");
     expect(text).toMatch(/Output ~\d+ input tokens/);
-    expect(text).toContain('summary\n{"answer":42}');
+    expect(text).toContain("summary");
+    expect(text).toContain('{"answer":42}');
   }
   expect(rendered(h, end, true).join("\n")).toContain("\u001b[");
   expect(textOf(end)).not.toContain("-before");
@@ -354,6 +359,8 @@ test("hybrid redraws keep native output/error caches separate across partial, fi
       isError: end.isError,
       expanded,
       showImages: false,
+      durationMs: undefined,
+      outputPad: 1,
     });
     previous = component;
     return stripVTControlCharacters(component.render(100).join("\n"));
@@ -417,6 +424,8 @@ test("hybrid caches idle redraws but rerenders on resize and invalidation", asyn
       isError: false,
       expanded: false,
       showImages: false,
+      durationMs: undefined,
+      outputPad: 1,
     },
   );
   const first = component.render(80);

@@ -111,11 +111,11 @@ describe("registered inline reference handler", () => {
       timestamp: 0,
     });
     const event = Object.freeze({
-      type: "before_agent_start",
-      messageType: "custom",
+      type: "before_agent_start" as const,
+      messageType: "custom" as const,
       message,
       systemPrompt,
-      get systemPromptOptions() {
+      get systemPromptOptions(): BeforeAgentStartEvent["systemPromptOptions"] {
         throw new Error("Custom starts must not access expansion options");
       },
     });
@@ -125,8 +125,7 @@ describe("registered inline reference handler", () => {
       },
     } as ExtensionContext;
 
-    // Older hosts' types do not yet include custom startup events.
-    expect(await handler(event as unknown as BeforeAgentStartEvent, ctx)).toBeUndefined();
+    expect(await handler(event, ctx)).toBeUndefined();
     expect(event.message).toBe(message);
     expect(event.systemPrompt).toBe(systemPrompt);
   });
@@ -143,7 +142,8 @@ describe("registered inline reference handler", () => {
           systemPrompt,
           systemPromptOptions,
         });
-        const result = await handler(event, { cwd } as ExtensionContext);
+        // The missing discriminator intentionally exercises older hosts' event shape.
+        const result = await handler(event as BeforeAgentStartEvent, { cwd } as ExtensionContext);
 
         expect(event.systemPrompt).toBe(systemPrompt);
         expect(event.systemPromptOptions).toEqual(originalOptions);
@@ -179,6 +179,7 @@ describe("registered inline reference handler", () => {
     async (prompt) => {
       const event = Object.freeze({
         type: "before_agent_start" as const,
+        messageType: "user" as const,
         prompt,
         systemPrompt,
         systemPromptOptions,
@@ -193,6 +194,7 @@ describe("registered inline reference handler", () => {
     const result = await handler(
       Object.freeze({
         type: "before_agent_start" as const,
+        messageType: "user" as const,
         prompt: "$skill:triage $skill:triage. $prompt:review $prompt:review! $skill:missing",
         systemPrompt,
         systemPromptOptions,

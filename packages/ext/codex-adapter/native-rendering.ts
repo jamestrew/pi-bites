@@ -245,7 +245,18 @@ export function createNativeRendering(pi: ExtensionAPI, owned: Record<string, Re
                 0,
               ),
             );
-          const output = result.content.filter(
+          // Pi joins adjacent text emissions and the final script error into one block.
+          const content = result.content.flatMap((part) => {
+            if (options.expanded || !context.isError || part.type !== "text") return [part];
+            const errorStart = part.text.lastIndexOf("\nScript error:\n");
+            return errorStart < 0
+              ? [part]
+              : [
+                  { ...part, text: part.text.slice(0, errorStart) },
+                  { ...part, text: part.text.slice(errorStart + 1) },
+                ];
+          });
+          const output = content.filter(
             (part, i) => !(i === 0 && part.type === "text" && HEADER.test(part.text)),
           );
           if (output.length) {
@@ -271,7 +282,7 @@ export function createNativeRendering(pi: ExtensionAPI, owned: Record<string, Re
                 );
             const outputResult = {
               ...result,
-              content: result.content.filter((part) => !errors.includes(part)),
+              content: content.filter((part) => !errors.includes(part)),
               details: { ...data, calls: [] },
             };
             const nativeOutput = nativeRenderResult(
