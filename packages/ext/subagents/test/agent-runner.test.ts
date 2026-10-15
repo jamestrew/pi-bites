@@ -922,3 +922,27 @@ describe("embedded agent runner configuration", () => {
     expect(options.customTools).toBeUndefined();
   });
 });
+
+it.each([true, false, undefined])(
+  "retains explicit settlement aborted=%s in runner diagnostics",
+  async (aborted) => {
+    const { session, listeners } = createSession("DONE");
+    createAgentSession.mockResolvedValue({ session });
+    const prompt = session.prompt.getMockImplementation()!;
+    session.prompt.mockImplementationOnce(async () => {
+      await prompt();
+      for (const listener of listeners)
+        listener({ type: "agent_settled", ...(aborted === undefined ? {} : { aborted }) });
+    });
+    const diagnostics: Array<{ event: string; details?: Record<string, unknown> }> = [];
+    await resumeAgent(session as any, "continue", {
+      onDiagnostic: (event, details) => diagnostics.push({ event, details }),
+    });
+    const settled = diagnostics.find(({ event }) => event === "agent_settled");
+    expect(settled).toBeDefined();
+    expect(settled!.details).toEqual({
+      resumed: true,
+      ...(aborted === undefined ? {} : { aborted }),
+    });
+  },
+);

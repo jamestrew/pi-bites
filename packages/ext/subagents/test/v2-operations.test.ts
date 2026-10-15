@@ -478,3 +478,31 @@ it("reads saved selected-target waits without restoring a V1 executor", () => {
     "Invalid arguments",
   );
 });
+
+it.each([
+  { aborted: true, stopReason: "stop", expected: "interrupted" },
+  { aborted: false, stopReason: "stop", expected: { completed: "previous answer" } },
+  { aborted: undefined, stopReason: "aborted", expected: "interrupted" },
+  { aborted: false, stopReason: "aborted", expected: { completed: "previous answer" } },
+  { aborted: false, stopReason: "error", expected: { errored: "provider failure" } },
+])(
+  "uses settlement abort metadata for root status: $aborted / $stopReason",
+  async ({ aborted, stopReason, expected }) => {
+    const h = harness();
+    await h.emit("agent_start");
+    await h.emit("agent_end", {
+      messages: [
+        {
+          role: "assistant",
+          stopReason,
+          errorMessage: "provider failure",
+          content: [{ type: "text", text: "previous answer" }],
+        },
+      ],
+    });
+    await h.emit("agent_settled", { aborted });
+    expect((await h.call("list_agents", {})).value.agents).toEqual([
+      { agent_name: "/root", agent_status: expected },
+    ]);
+  },
+);

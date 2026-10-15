@@ -75,7 +75,8 @@ function setup(thresholdTokens?: number, mode = "tui", contextWindow?: number) {
         } as never,
         ctx as never,
       ),
-    agentSettled: () => handlers.get("agent_settled")?.({} as never, ctx as never),
+    agentSettled: () =>
+      handlers.get("agent_settled")?.({ aborted: run.signal.aborted } as never, ctx as never),
   };
 }
 

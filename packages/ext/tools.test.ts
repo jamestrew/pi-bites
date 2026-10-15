@@ -288,3 +288,44 @@ describe("edit tool", () => {
     expect(guidance).toContain("replace_all only when every occurrence should change");
   });
 });
+
+test("bash live timing starts after approval while final timing uses the recorded execution duration", async () => {
+  initTheme("dark");
+  const bash = await captureTool("bash");
+  const args = { command: "sleep 0.1" };
+  const theme = { bold: (s: string) => s, fg: (_role: string, s: string) => s };
+  const context = {
+    toolCallId: "post-approval",
+    state: {},
+    executionStarted: true,
+    invalidate() {},
+    durationMs: undefined as number | undefined,
+  };
+  const draw = (isPartial: boolean) =>
+    bash
+      .renderResult({ content: [] }, { expanded: false, isPartial }, theme, context)
+      .render(100)
+      .join("\n");
+  const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+  let pending: Promise<unknown> | undefined;
+  try {
+    bash.renderCall(args, theme, context);
+    clock.mockReturnValue(11000);
+    expect(draw(true)).not.toContain("Elapsed");
+    pending = bash.execute("post-approval", args, undefined, undefined, {
+      cwd: process.cwd(),
+      sessionManager: { getSessionId: () => "test", getSessionFile: () => undefined },
+    });
+    bash.renderCall(args, theme, context);
+    expect(draw(true)).toContain("Elapsed 0.0s");
+    clock.mockReturnValue(13000);
+    expect(draw(true)).toContain("Elapsed 2.0s");
+    await pending;
+    context.durationMs = 200;
+    expect(draw(false)).toContain("Took 0.2s");
+  } finally {
+    draw(false);
+    clock.mockRestore();
+    await pending;
+  }
+});

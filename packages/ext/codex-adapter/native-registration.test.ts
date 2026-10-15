@@ -2,6 +2,11 @@ import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { setup, textOf } from "./test/native-session.js";
+import {
+  createCodemodeExtension,
+  type ExtensionAPI,
+  type ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import type { CommandAuthorizationRequest } from "../bash-gate/index.js";
 
 test("parent uses host-free native discovery and typed parallel shell results", async () => {
@@ -452,3 +457,28 @@ for (const api of ["openai-responses", "openai-codex-responses", "openai-complet
     },
   );
 }
+
+test("registered decoration preserves native MCP reachability hints for named tools and discovery", async () => {
+  let native!: ToolDefinition;
+  await createCodemodeExtension({ mode: "on", models: false })({
+    registerTool(tool) {
+      native = tool as unknown as ToolDefinition;
+    },
+  } as ExtensionAPI);
+  const h = await setup(["read", "codemode"]);
+  const registered = h.session.getToolDefinition("codemode")!;
+  expect(registered.reachesTools).toBeTypeOf("function");
+  for (const code of [
+    'await tools.mcp__docs__search({q:"timing"});',
+    'text(await searchTools("docs"));',
+    'text(await describeTool("mcp__docs__search"));',
+    'text(await describeNamespace("docs"));',
+    "text(ALL_TOOLS);",
+  ]) {
+    expect(registered.reachesTools!({ code })).toEqual(native.reachesTools!({ code }));
+  }
+  expect(registered.reachesTools!({ code: 'text(await searchTools("docs"));' })).toBe("all");
+  // Readiness hints do not change the registry ceiling or recover hidden tools.
+  expect(h.session.getCallableToolNames()).not.toContain("exec_command");
+  expect((await h.run("await tools.exec_command({cmd:'true'});")).isError).toBe(true);
+});
