@@ -133,6 +133,7 @@ function formatPromptBlock(prompt: LoadedPromptTemplate): string {
 
 function registerInlineReferenceContext(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
+    if (!("prompt" in event)) return;
     const refs = parseInlineReferences(event.prompt);
     if (refs.length === 0) return;
 

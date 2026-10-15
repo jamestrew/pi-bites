@@ -102,44 +102,77 @@ describe("registered inline reference handler", () => {
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  test("only appends hidden reference messages across referenced and ordinary inputs", async () => {
-    const originalOptions = structuredClone(systemPromptOptions);
-    for (const prompt of ["$skill:triage", "address these", "$prompt:review", "ok commit"]) {
-      const event = Object.freeze({
-        type: "before_agent_start" as const,
-        prompt,
-        systemPrompt,
-        systemPromptOptions,
-      });
-      const result = await handler(event, { cwd } as ExtensionContext);
+  test("leaves custom starts unchanged without accessing expansion context", async () => {
+    const message = Object.freeze({
+      role: "custom",
+      customType: "continuation",
+      content: "Continue with $skill:triage and $prompt:review",
+      display: false,
+      timestamp: 0,
+    });
+    const event = Object.freeze({
+      type: "before_agent_start",
+      messageType: "custom",
+      message,
+      systemPrompt,
+      get systemPromptOptions() {
+        throw new Error("Custom starts must not access expansion options");
+      },
+    });
+    const ctx = {
+      get cwd(): string {
+        throw new Error("Custom starts must not access expansion context");
+      },
+    } as ExtensionContext;
 
-      expect(event.systemPrompt).toBe(systemPrompt);
-      expect(event.systemPromptOptions).toEqual(originalOptions);
-      if (!prompt.startsWith("$")) {
-        expect(result).toBeUndefined();
-        continue;
-      }
-
-      expect(Object.keys(result!)).toEqual(["message"]);
-      expect(result?.message).toMatchObject({
-        customType: "inline-reference-context",
-        display: false,
-        details: prompt,
-      });
-      const content = result?.message?.content;
-      expect(content).toEqual(expect.stringMatching(/already loaded/i));
-      expect(content).toEqual(expect.stringMatching(/referenced files/i));
-      if (prompt === "$skill:triage") {
-        expect(content).toContain(
-          `<skill name="triage" location="${join(cwd, "skills", "triage", "SKILL.md")}">\nReferences are relative to ${join(cwd, "skills", "triage")}.\n\nInvestigate the failure.\n</skill>`,
-        );
-      } else {
-        expect(content).toContain(
-          `<prompt name="review" location="${join(cwd, CONFIG_DIR_NAME, "prompts", "review.md")}">\nReview the changes.\n</prompt>`,
-        );
-      }
-    }
+    // Older hosts' types do not yet include custom startup events.
+    expect(await handler(event as unknown as BeforeAgentStartEvent, ctx)).toBeUndefined();
+    expect(event.message).toBe(message);
+    expect(event.systemPrompt).toBe(systemPrompt);
   });
+
+  test.each([undefined, "user"] as const)(
+    "only appends hidden reference messages across referenced and ordinary inputs (message type: %s)",
+    async (messageType) => {
+      const originalOptions = structuredClone(systemPromptOptions);
+      for (const prompt of ["$skill:triage", "address these", "$prompt:review", "ok commit"]) {
+        const event = Object.freeze({
+          type: "before_agent_start" as const,
+          ...(messageType === undefined ? {} : { messageType }),
+          prompt,
+          systemPrompt,
+          systemPromptOptions,
+        });
+        const result = await handler(event, { cwd } as ExtensionContext);
+
+        expect(event.systemPrompt).toBe(systemPrompt);
+        expect(event.systemPromptOptions).toEqual(originalOptions);
+        if (!prompt.startsWith("$")) {
+          expect(result).toBeUndefined();
+          continue;
+        }
+
+        expect(Object.keys(result!)).toEqual(["message"]);
+        expect(result?.message).toMatchObject({
+          customType: "inline-reference-context",
+          display: false,
+          details: prompt,
+        });
+        const content = result?.message?.content;
+        expect(content).toEqual(expect.stringMatching(/already loaded/i));
+        expect(content).toEqual(expect.stringMatching(/referenced files/i));
+        if (prompt === "$skill:triage") {
+          expect(content).toContain(
+            `<skill name="triage" location="${join(cwd, "skills", "triage", "SKILL.md")}">\nReferences are relative to ${join(cwd, "skills", "triage")}.\n\nInvestigate the failure.\n</skill>`,
+          );
+        } else {
+          expect(content).toContain(
+            `<prompt name="review" location="${join(cwd, CONFIG_DIR_NAME, "prompts", "review.md")}">\nReview the changes.\n</prompt>`,
+          );
+        }
+      }
+    },
+  );
 
   test.each(["$skill:missing", "$prompt:missing", "$skill:missing $prompt:missing"])(
     "does not inject context or change the system prompt for unresolved references: %s",
