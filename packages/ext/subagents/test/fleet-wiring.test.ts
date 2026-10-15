@@ -10,7 +10,7 @@ import { parseAutoModeDecision, type AutoModeDecision } from "../../automode/ind
  * and that `session_shutdown` tears it down. runAgent is mocked (no LLM); the
  * manager, settings load, completion routing, and lifecycle handlers are real.
  */
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
@@ -166,6 +166,42 @@ describe("Fleet wiring (real extension lifecycle)", () => {
     rmSync(tmpDir, { recursive: true, force: true });
     rmSync(agentDir, { recursive: true, force: true });
     vi.restoreAllMocks();
+  });
+
+  it("restores three child slots and enabled Fleet when settings are removed on session reload", async () => {
+    mockRunningAgent();
+    const { pi, tools, lifecycle } = makePi();
+    subagentsExtension(pi);
+    const ui = uiCtx();
+    const ctx = ctxWith(ui);
+    const config = join(tmpDir, ".pi", "pi-bites.json");
+    writeFileSync(config, JSON.stringify({ subagents: { maxConcurrent: 1, fleetView: false } }));
+    const spawn = (task_name: string) =>
+      tools
+        .get("spawn_agent")
+        .execute(
+          "tc",
+          { message: "work", task_name, fork_turns: "none" },
+          undefined,
+          undefined,
+          ctx,
+        );
+    try {
+      await lifecycle.get("session_start")({}, ctx);
+      await lifecycle.get("tool_execution_start")({}, ctx);
+      await spawn("one");
+      await expect(spawn("two")).rejects.toThrow(/slot/);
+      expect(ui.renderFleet()).toEqual([]);
+      rmSync(config);
+      await lifecycle.get("session_start")({ reason: "reload" }, ctx);
+      expect(ui.renderFleet().join("\n")).toContain("one");
+      await spawn("two");
+      await spawn("three");
+      await expect(spawn("four")).rejects.toThrow(/slot/);
+      expect(pi.events.emit).toHaveBeenCalledWith("subagents:settings_loaded", { settings: {} });
+    } finally {
+      await lifecycle.get("session_shutdown")({}, ctx);
+    }
   });
 
   it("does not capture terminal input on tool_execution_start", async () => {

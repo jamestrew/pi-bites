@@ -1,7 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai/compat";
-import { saveSettings } from "../settings.js";
-import { setupV2 } from "./helpers/v2-harness.js";
+import { setupV2, writeSubagentsConfig } from "./helpers/v2-harness.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -94,7 +93,7 @@ it("shares capacity and tool ceilings for nested spawns without leaking a reject
     "interrupt_agent",
     "read",
   ];
-  saveSettings({ maxConcurrent: 2 }, h.ctx.cwd);
+  writeSubagentsConfig({ maxConcurrent: 2 }, h.ctx.cwd);
   await h.emit("session_start");
   const respond = (ctx: TranscriptContext) => {
     const text = JSON.stringify(ctx);

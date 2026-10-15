@@ -1,11 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { saveSettings } from "../settings.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, expect, it, vi } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { harness as makeHarness } from "./helpers/v2-harness.js";
+import { harness as makeHarness, writeSubagentsConfig } from "./helpers/v2-harness.js";
 import { mockSession, waitForCancellation } from "./helpers/agent-manager-mocks.js";
 
 vi.mock("../agent-runner.js", async (original) => ({
@@ -94,7 +93,7 @@ it.each([0, 1])(
     const cwd = mkdtempSync(join(tmpdir(), "v2-depth-"));
     h.ctx.cwd = cwd;
     cleanup.push(async () => rmSync(cwd, { recursive: true, force: true }));
-    saveSettings({ maxDepth, maxConcurrent: 1 }, cwd);
+    writeSubagentsConfig({ maxDepth, maxConcurrent: 1 }, cwd);
     await h.emit("session_start");
     let ctx = h.ctx;
     let parent: any;
@@ -439,7 +438,7 @@ it("transfers admission to a published runtime before reentrant spawning", async
   const cwd = mkdtempSync(join(tmpdir(), "v2-publication-"));
   cleanup.push(async () => rmSync(cwd, { recursive: true, force: true }));
   h.ctx.cwd = cwd;
-  saveSettings({ maxConcurrent: 2 }, cwd);
+  writeSubagentsConfig({ maxConcurrent: 2 }, cwd);
   await h.emit("session_start");
   let second: Promise<any> | undefined;
   h.pi.events.on("subagents:created", (event: any) => {

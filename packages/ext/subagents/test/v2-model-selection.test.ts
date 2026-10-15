@@ -43,8 +43,8 @@ it("uses the configured default on full forks and lets an explicit model overrid
   });
   mkdirSync(join(h.ctx.cwd, ".pi"), { recursive: true });
   writeFileSync(
-    join(h.ctx.cwd, ".pi/subagents.json"),
-    JSON.stringify({ defaultModel: "test-model" }),
+    join(h.ctx.cwd, ".pi/pi-bites.json"),
+    JSON.stringify({ subagents: { defaultModel: "test-model" } }),
   );
   await h.emit("session_start");
   h.faux.setResponses([fauxAssistantMessage("done"), fauxAssistantMessage("done")]);
@@ -104,8 +104,8 @@ it("uses configured effort independently of model and lets explicit effort win",
   h.faux.getModel().reasoning = true;
   mkdirSync(join(h.ctx.cwd, ".pi"), { recursive: true });
   writeFileSync(
-    join(h.ctx.cwd, ".pi/subagents.json"),
-    JSON.stringify({ defaultReasoningEffort: "low" }),
+    join(h.ctx.cwd, ".pi/pi-bites.json"),
+    JSON.stringify({ subagents: { defaultReasoningEffort: "low" } }),
   );
   await h.emit("session_start");
   const observed: (string | undefined)[] = [];
@@ -161,8 +161,8 @@ it("retains the chosen model and effort across unload and follow-up after defaul
   h.ctx.model = parent;
   mkdirSync(join(h.ctx.cwd, ".pi"), { recursive: true });
   writeFileSync(
-    join(h.ctx.cwd, ".pi/subagents.json"),
-    JSON.stringify({ defaultModel: "parent", defaultReasoningEffort: "high" }),
+    join(h.ctx.cwd, ".pi/pi-bites.json"),
+    JSON.stringify({ subagents: { defaultModel: "parent", defaultReasoningEffort: "high" } }),
   );
   await h.emit("session_start");
   // Updating configuration and the caller's model must not reselect an existing child.
@@ -183,8 +183,8 @@ it("rejects ambiguous bare model IDs and unavailable configured defaults", async
   ).rejects.toThrow("Ambiguous model");
   mkdirSync(join(h.ctx.cwd, ".pi"), { recursive: true });
   writeFileSync(
-    join(h.ctx.cwd, ".pi/subagents.json"),
-    JSON.stringify({ defaultModel: "missing/model" }),
+    join(h.ctx.cwd, ".pi/pi-bites.json"),
+    JSON.stringify({ subagents: { defaultModel: "missing/model" } }),
   );
   await h.emit("session_start");
   await expect(h.call("spawn_agent", { task_name: "a", message: "work" })).rejects.toThrow(

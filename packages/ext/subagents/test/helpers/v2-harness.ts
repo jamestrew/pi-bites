@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import type { SubagentsSettings } from "../../settings.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getApiProvider, registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -85,4 +86,10 @@ export async function setupV2(
   await h.emit("session_start");
   const manager = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));
   return { ...h, faux, manager };
+}
+
+/** Write an isolated project fixture, not application persistence. */
+export function writeSubagentsConfig(settings: SubagentsSettings, cwd: string): void {
+  mkdirSync(join(cwd, ".pi"), { recursive: true });
+  writeFileSync(join(cwd, ".pi", "pi-bites.json"), JSON.stringify({ subagents: settings }));
 }

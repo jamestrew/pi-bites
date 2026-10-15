@@ -1,23 +1,6 @@
-// Persistence for pi-subagents operational settings.
-// - Global:  ~/.pi/agent/subagents.json (via getAgentDir()) — manual defaults, never written here
-// - Project: <cwd>/.pi/subagents.json — overrides global on load
+import type { SubagentsConfig } from "../config.js";
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { Type, type Static } from "typebox";
-import * as Value from "typebox/value";
-import { isThinkingLevel, type ThinkingLevel } from "./types.js";
-
-export const SubagentsSettingsSchema = Type.Object({
-  defaultModel: Type.Optional(Type.String()),
-  defaultReasoningEffort: Type.Optional(Type.Unsafe<ThinkingLevel>(Type.String())),
-  maxDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 1024 })),
-  maxConcurrent: Type.Optional(Type.Integer({ minimum: 1, maximum: 1024 })),
-  fleetView: Type.Optional(Type.Boolean()),
-});
-
-export type SubagentsSettings = Static<typeof SubagentsSettingsSchema>;
+export type SubagentsSettings = SubagentsConfig;
 
 /** Setter hooks used by applySettings to wire persisted values into in-memory state. */
 export interface SettingsAppliers {
@@ -25,97 +8,8 @@ export interface SettingsAppliers {
     defaults: Pick<SubagentsSettings, "defaultModel" | "defaultReasoningEffort">,
   ) => void;
   setMaxDepth?: (n: number | undefined) => void;
-  setMaxConcurrent: (n: number) => void;
+  setMaxConcurrent: (n: number | undefined) => void;
   setFleetView: (b: boolean) => void;
-}
-
-/** Emit callback — the settings channels only, to keep helpers testable. */
-type SettingsEventMap = {
-  "subagents:settings_loaded": { settings: SubagentsSettings };
-};
-export type SettingsEmit = <K extends keyof SettingsEventMap>(
-  event: K,
-  payload: SettingsEventMap[K],
-) => void;
-
-export function parseSubagentsSettings(value: unknown): SubagentsSettings | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const settings: SubagentsSettings = {};
-  if ("defaultModel" in value && typeof value.defaultModel === "string")
-    settings.defaultModel = value.defaultModel;
-  if ("defaultReasoningEffort" in value && isThinkingLevel(value.defaultReasoningEffort))
-    settings.defaultReasoningEffort = value.defaultReasoningEffort;
-  if (
-    "maxDepth" in value &&
-    typeof value.maxDepth === "number" &&
-    Number.isInteger(value.maxDepth) &&
-    value.maxDepth >= 0 &&
-    value.maxDepth <= 1024
-  )
-    settings.maxDepth = value.maxDepth;
-  if (
-    "maxConcurrent" in value &&
-    typeof value.maxConcurrent === "number" &&
-    Number.isInteger(value.maxConcurrent) &&
-    value.maxConcurrent >= 1 &&
-    value.maxConcurrent <= 1024
-  )
-    settings.maxConcurrent = value.maxConcurrent;
-  if ("fleetView" in value && typeof value.fleetView === "boolean")
-    settings.fleetView = value.fleetView;
-  return Value.Check(SubagentsSettingsSchema, settings) ? settings : undefined;
-}
-
-function globalPath(): string {
-  return join(getAgentDir(), "subagents.json");
-}
-
-function projectPath(cwd: string): string {
-  return join(cwd, CONFIG_DIR_NAME, "subagents.json");
-}
-
-/**
- * Read a settings file. Missing file is silent (returns `{}`). A file that
- * exists but can't be parsed emits a warning to stderr so users aren't
- * silently reverted to defaults — and still returns `{}` so startup proceeds.
- */
-function readSettingsFile(path: string): SubagentsSettings {
-  if (!existsSync(path)) return {};
-  try {
-    return parseSubagentsSettings(JSON.parse(readFileSync(path, "utf-8"))) ?? {};
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    console.warn(`[pi-subagents] Ignoring malformed settings at ${path}: ${reason}`);
-    return {};
-  }
-}
-
-/** Load merged settings: global provides defaults, project overrides. */
-export function loadSettings(cwd: string = process.cwd()): SubagentsSettings {
-  return { ...readSettingsFile(globalPath()), ...readSettingsFile(projectPath(cwd)) };
-}
-
-/**
- * Write project-local settings. Global is never touched from code.
- * Returns `true` on success, `false` if the write (or mkdir) failed so the
- * caller can surface a warning — persistence isn't fatal but isn't silent.
- */
-export function saveSettings(s: SubagentsSettings, cwd: string = process.cwd()): boolean {
-  const path = projectPath(cwd);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    // Preserve manual project defaults when writing operational fields;
-    // never materialize inherited global defaults into the project file.
-    const { defaultModel, defaultReasoningEffort } = readSettingsFile(path);
-    writeFileSync(
-      path,
-      JSON.stringify({ defaultModel, defaultReasoningEffort, ...s }, null, 2),
-      "utf-8",
-    );
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** Apply persisted settings to the in-memory state via caller-supplied setters. */
@@ -125,22 +19,6 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
     defaultReasoningEffort: s.defaultReasoningEffort,
   });
   appliers.setMaxDepth?.(s.maxDepth);
-  if (typeof s.maxConcurrent === "number") appliers.setMaxConcurrent(s.maxConcurrent);
-  if (typeof s.fleetView === "boolean") appliers.setFleetView(s.fleetView);
-}
-
-/**
- * Load merged settings, apply them to in-memory state, and emit the
- * `subagents:settings_loaded` lifecycle event. Returns the loaded settings so
- * callers can log/inspect. Extension init wires this once.
- */
-export function applyAndEmitLoaded(
-  appliers: SettingsAppliers,
-  emit: SettingsEmit,
-  cwd: string = process.cwd(),
-): SubagentsSettings {
-  const settings = loadSettings(cwd);
-  applySettings(settings, appliers);
-  emit("subagents:settings_loaded", { settings });
-  return settings;
+  appliers.setMaxConcurrent(s.maxConcurrent);
+  appliers.setFleetView(s.fleetView ?? true);
 }

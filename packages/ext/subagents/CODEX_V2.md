@@ -409,8 +409,10 @@ explicit role skip role model/effort application; fresh/recent forks and explici
 roles apply it. The three embedded roles currently specify neither model nor effort.
 No model, including GPT-5.4, is hardcoded as the subagent default.
 
-Configure `defaultModel` and `defaultReasoningEffort` in global
-`~/.pi/agent/subagents.json` or project `.pi/subagents.json` (project fields win).
+Configure `subagents.defaultModel` and `subagents.defaultReasoningEffort` in global
+`~/.pi/agent/pi-bites.json` or project `.pi/pi-bites.json` (project fields win
+individually). Legacy `subagents.json` files are ignored and left untouched, with
+manual-cutover warnings on session start/reload; see the [migration examples](../../../README.md#manual-cutover-from-subagentsjson).
 They correspond to Codex's `agents.default_subagent_model` and
 `agents.default_subagent_reasoning_effort`. Settings load on session start/reload. Existing children retain
 their selected model/effort through follow-up and unload/reload.
@@ -419,9 +421,9 @@ Direct spawn accepts exact authenticated Pi `provider/modelId` identities or an
 unambiguous exact model ID. Ambiguous bare IDs require provider qualification;
 unknown/unavailable choices fail rather than fuzzy-matching, changing providers,
 or falling back to the parent. Internal RPC/small-model fuzzy resolution is unchanged.
-Existing optional scope policy remains: explicit out-of-scope choices fail;
-configured/role/inherited choices warn and proceed. Reload still rechecks current
-authorization and scope.
+Root session model scope is mandatory for explicit, configured, role and inherited
+choices. Out-of-scope choices fail; reload rechecks current authorization and scope.
+The retired `scopeModels` setting cannot opt out.
 
 Reasoning overrides use Pi's levels and `getSupportedThinkingLevels`, not Codex's
 provider-specific effort names/catalog. Unsupported explicit/configured efforts fail

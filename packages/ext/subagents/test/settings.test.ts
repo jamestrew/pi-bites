@@ -1,434 +1,48 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentTree } from "../agent-tree.js";
-import {
-  applyAndEmitLoaded,
-  applySettings,
-  loadSettings,
-  type SettingsAppliers,
-  saveSettings,
-} from "../settings.js";
+import { describe, expect, it } from "vitest";
+import { applySettings } from "../settings.js";
 
-/**
- * Tests for persistent settings. Uses two tmp directories:
- * - `globalDir`: redirected via PI_CODING_AGENT_DIR so getAgentDir() returns it.
- *   Simulates `~/.pi/agent/` — the global scope.
- * - `projectDir`: passed explicitly as cwd to load/save.
- *   Simulates the user's project root. Settings live at `<projectDir>/.pi/subagents.json`.
- */
-describe("settings persistence", () => {
-  let globalDir: string;
-  let projectDir: string;
-  let originalAgentDirEnv: string | undefined;
-
-  const globalFile = () => join(globalDir, "subagents.json");
-  const projectFile = () => join(projectDir, ".pi", "subagents.json");
-
-  beforeEach(() => {
-    globalDir = mkdtempSync(join(tmpdir(), "pi-settings-global-"));
-    projectDir = mkdtempSync(join(tmpdir(), "pi-settings-project-"));
-    originalAgentDirEnv = process.env.PI_CODING_AGENT_DIR;
-    process.env.PI_CODING_AGENT_DIR = globalDir;
-  });
-
-  afterEach(() => {
-    if (originalAgentDirEnv == null) delete process.env.PI_CODING_AGENT_DIR;
-    else process.env.PI_CODING_AGENT_DIR = originalAgentDirEnv;
-    rmSync(globalDir, { recursive: true, force: true });
-    rmSync(projectDir, { recursive: true, force: true });
-  });
-
-  function writeGlobal(obj: unknown) {
-    writeFileSync(globalFile(), JSON.stringify(obj));
-  }
-
-  function writeProject(obj: unknown) {
-    mkdirSync(join(projectDir, ".pi"), { recursive: true });
-    writeFileSync(projectFile(), JSON.stringify(obj));
-  }
-
-  it("returns {} when both files are missing", () => {
-    expect(loadSettings(projectDir)).toEqual({});
-  });
-
-  it("applies opt-in depth limits with project precedence and resets to uncapped when absent", () => {
-    const tree = new AgentTree(new Map(), () => false);
-    const appliers: SettingsAppliers = {
-      setMaxDepth: (depth) => tree.setMaxDepth(depth),
-      setMaxConcurrent: vi.fn(),
-      setFleetView: vi.fn(),
-    };
-    const load = () => applyAndEmitLoaded(appliers, vi.fn(), projectDir);
-    writeGlobal({ maxDepth: 1 });
-    load();
-    expect(tree.getMaxDepth()).toBe(1);
-    writeProject({ maxDepth: 0 });
-    load();
-    expect(() => tree.assertCanDelegate("root")).toThrow("depth limit");
-    writeProject({});
-    load();
-    expect(tree.getMaxDepth()).toBe(1);
-    writeGlobal({});
-    load();
-    expect(tree.getMaxDepth()).toBeUndefined();
-    expect(() => tree.assertCanDelegate("root")).not.toThrow();
-  });
-
-  it("returns {} when both files are malformed JSON", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    try {
-      writeFileSync(globalFile(), "not json {{");
-      mkdirSync(join(projectDir, ".pi"), { recursive: true });
-      writeFileSync(projectFile(), "also not json");
-      expect(loadSettings(projectDir)).toEqual({});
-      expect(warn).toHaveBeenCalledTimes(2);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it("loads from global when no project file", () => {
-    writeGlobal({ maxConcurrent: 16, maxDepth: 2 });
-    expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 16, maxDepth: 2 });
-  });
-
-  it("loads from project when no global file", () => {
-    writeProject({ maxConcurrent: 8 });
-    expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 8 });
-  });
-
-  it("merges global + project with project winning on conflicts", () => {
-    writeGlobal({ maxConcurrent: 16, maxDepth: 2 });
-    writeProject({ maxConcurrent: 4, fleetView: false });
-    expect(loadSettings(projectDir)).toEqual({
-      maxConcurrent: 4, // project wins
-      maxDepth: 2, // from global
-      fleetView: false, // from project only
-    });
-  });
-
-  it("loads global model defaults and overrides each field from the project", () => {
-    writeGlobal({ defaultModel: "openai/gpt-5.4", defaultReasoningEffort: "high" });
-    expect(loadSettings(projectDir)).toEqual({
-      defaultModel: "openai/gpt-5.4",
-      defaultReasoningEffort: "high",
-    });
-    writeProject({ defaultModel: "openai/gpt-5.4-mini" });
-    expect(loadSettings(projectDir)).toEqual({
-      defaultModel: "openai/gpt-5.4-mini",
-      defaultReasoningEffort: "high",
-    });
-    writeProject({ defaultReasoningEffort: "off" });
-    expect(loadSettings(projectDir)).toEqual({
-      defaultModel: "openai/gpt-5.4",
-      defaultReasoningEffort: "off",
-    });
-  });
-
-  it("operational saves preserve project model defaults without pinning global defaults", () => {
-    writeGlobal({ defaultModel: "global-model", defaultReasoningEffort: "high" });
-    writeProject({ defaultModel: "project-model", maxDepth: 4 });
-    saveSettings({ maxConcurrent: 2 }, projectDir);
-    expect(loadSettings(projectDir)).toEqual({
-      defaultModel: "project-model",
-      defaultReasoningEffort: "high",
-      maxConcurrent: 2,
-    });
-    writeGlobal({ defaultModel: "new-global-model", defaultReasoningEffort: "low" });
-    expect(loadSettings(projectDir)).toEqual({
-      defaultModel: "project-model",
-      defaultReasoningEffort: "low",
-      maxConcurrent: 2,
-    });
-    expect(saveSettings({ defaultReasoningEffort: "off" }, projectDir)).toBe(true);
-    saveSettings({ fleetView: false }, projectDir);
-    expect(loadSettings(projectDir)).toEqual({
-      defaultModel: "project-model",
-      defaultReasoningEffort: "off",
-      fleetView: false,
-    });
-    expect(saveSettings({ defaultModel: "replacement-model" }, projectDir)).toBe(true);
-    expect(loadSettings(projectDir)).toEqual({
-      defaultModel: "replacement-model",
-      defaultReasoningEffort: "off",
-    });
-  });
-
-  it("round-trips values: saveSettings then loadSettings", () => {
-    const settings = {
-      maxConcurrent: 7,
-      maxDepth: 2,
-    };
-    saveSettings(settings, projectDir);
-    expect(loadSettings(projectDir)).toEqual(settings);
-  });
-
-  it("round-trips fleetView (true and false); keeps boolean, drops non-boolean", () => {
-    saveSettings({ fleetView: false }, projectDir);
-    expect(loadSettings(projectDir)).toEqual({ fleetView: false });
-    saveSettings({ fleetView: true }, projectDir);
-    expect(loadSettings(projectDir)).toEqual({ fleetView: true });
-    writeProject({ fleetView: "on" } as any);
-    expect(loadSettings(projectDir)).toEqual({}); // non-boolean dropped
-  });
-
-  it("saveSettings writes only to the project file; global is untouched", () => {
-    writeGlobal({ maxConcurrent: 16 });
-    saveSettings({ maxConcurrent: 2 }, projectDir);
-
-    // Project file contains the new value
-    expect(JSON.parse(readFileSync(projectFile(), "utf-8"))).toEqual({ maxConcurrent: 2 });
-    // Global file unchanged
-    expect(JSON.parse(readFileSync(globalFile(), "utf-8"))).toEqual({ maxConcurrent: 16 });
-  });
-
-  it("saveSettings creates <cwd>/.pi/ when missing", () => {
-    expect(existsSync(join(projectDir, ".pi"))).toBe(false);
-    saveSettings({ maxConcurrent: 4 }, projectDir);
-    expect(existsSync(projectFile())).toBe(true);
-  });
-
-  it("ignores unknown extra fields on load (forward-compat)", () => {
-    writeProject({ maxConcurrent: 2, futureField: "ignored" });
-    const loaded = loadSettings(projectDir);
-    expect(loaded.maxConcurrent).toBe(2);
-    // Unknown fields are stripped by the sanitizer — old versions won't persist garbage
-    expect((loaded as Record<string, unknown>).futureField).toBeUndefined();
-  });
-
-  it("composes partial global + partial project correctly", () => {
-    writeGlobal({ maxDepth: 2 });
-    writeProject({ maxConcurrent: 2 });
-    expect(loadSettings(projectDir)).toEqual({ maxDepth: 2, maxConcurrent: 2 });
-  });
-
-  describe("sanitizer", () => {
-    it("drops invalid model defaults without masking valid global defaults", () => {
-      writeGlobal({ defaultModel: "global-model", defaultReasoningEffort: "high" });
-      for (const invalid of [null, 7, false, {}, []]) {
-        writeProject({ defaultModel: invalid, defaultReasoningEffort: invalid });
-        expect(loadSettings(projectDir)).toEqual({
-          defaultModel: "global-model",
-          defaultReasoningEffort: "high",
-        });
-      }
-      writeProject({ defaultReasoningEffort: "turbo" });
-      expect(loadSettings(projectDir).defaultReasoningEffort).toBe("high");
-    });
-
-    it.each(["off", "minimal", "low", "medium", "high", "xhigh", "max"])(
-      "loads the valid reasoning effort %s",
-      (defaultReasoningEffort) => {
-        writeProject({ defaultReasoningEffort });
-        expect(loadSettings(projectDir)).toEqual({ defaultReasoningEffort });
+describe("subagent settings application", () => {
+  it("resets all omitted settings instead of retaining values from a previous load", () => {
+    let defaults: unknown;
+    let maxDepth: number | undefined;
+    let maxConcurrent: number | undefined;
+    let fleetView: boolean | undefined;
+    const appliers = {
+      setModelDefaults: (value: unknown) => {
+        defaults = value;
       },
-    );
-
-    it("drops maxConcurrent < 1", () => {
-      writeProject({ maxConcurrent: 0, maxDepth: 2 });
-      expect(loadSettings(projectDir)).toEqual({ maxDepth: 2 });
-    });
-
-    it("drops negative maxConcurrent", () => {
-      writeProject({ maxConcurrent: -3 });
-      expect(loadSettings(projectDir)).toEqual({});
-    });
-
-    it("drops non-integer maxConcurrent (floats, NaN, strings)", () => {
-      writeProject({ maxConcurrent: 3.5 });
-      expect(loadSettings(projectDir).maxConcurrent).toBeUndefined();
-      writeProject({ maxConcurrent: "four" });
-      expect(loadSettings(projectDir).maxConcurrent).toBeUndefined();
-      writeProject({ maxConcurrent: null });
-      expect(loadSettings(projectDir).maxConcurrent).toBeUndefined();
-    });
-
-    it("drops the retired defaultJoinMode setting", () => {
-      writeProject({ defaultJoinMode: "smart" });
-      expect(loadSettings(projectDir)).toEqual({});
-    });
-
-    it.each([true, false, "yes", 1, null])(
-      "drops the retired scopeModels setting %j",
-      (scopeModels) => {
-        writeProject({ scopeModels, maxConcurrent: 2 });
-        expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 2 });
+      setMaxDepth: (value: number | undefined) => {
+        maxDepth = value;
       },
-    );
-
-    it("returns {} when the JSON root is not an object (array, string, null)", () => {
-      mkdirSync(join(projectDir, ".pi"), { recursive: true });
-      writeFileSync(projectFile(), '["not", "an", "object"]');
-      expect(loadSettings(projectDir)).toEqual({});
-      writeFileSync(projectFile(), '"just a string"');
-      expect(loadSettings(projectDir)).toEqual({});
-      writeFileSync(projectFile(), "null");
-      expect(loadSettings(projectDir)).toEqual({});
-    });
-
-    it("keeps valid fields while dropping invalid siblings", () => {
-      writeProject({
-        maxConcurrent: 4, // ok
-        maxDepth: 2, // ok
-        defaultJoinMode: "nope", // dropped
-      });
-      expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 4, maxDepth: 2 });
-    });
-
-    it("accepts maxConcurrent at the ceiling", () => {
-      writeProject({ maxConcurrent: 1024 });
-      expect(loadSettings(projectDir)).toEqual({ maxConcurrent: 1024 });
-    });
-
-    it("drops values above the ceiling", () => {
-      writeProject({ maxConcurrent: 1025 });
-      expect(loadSettings(projectDir).maxConcurrent).toBeUndefined();
-    });
-
-    it("drops absurdly large values (e.g. 1e6)", () => {
-      writeProject({ maxConcurrent: 1_000_000 });
-      expect(loadSettings(projectDir)).toEqual({});
-    });
-  });
-
-  describe("save result + corrupt-file warning", () => {
-    it("saveSettings returns true on success", () => {
-      expect(saveSettings({ maxConcurrent: 2 }, projectDir)).toBe(true);
-      expect(JSON.parse(readFileSync(projectFile(), "utf-8"))).toEqual({ maxConcurrent: 2 });
-    });
-
-    it("saveSettings returns false when the target dir cannot be created", () => {
-      // Place a regular file where the parent of the settings file would go —
-      // mkdirSync + writeFileSync both fail with ENOTDIR / EEXIST.
-      const filePosingAsCwd = join(tmpdir(), `pi-settings-notdir-${Date.now()}`);
-      writeFileSync(filePosingAsCwd, "");
-      try {
-        expect(saveSettings({ maxConcurrent: 1 }, filePosingAsCwd)).toBe(false);
-      } finally {
-        rmSync(filePosingAsCwd, { force: true });
-      }
-    });
-
-    it("warns to console.warn when an existing file is malformed", () => {
-      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      mkdirSync(join(projectDir, ".pi"), { recursive: true });
-      writeFileSync(projectFile(), "not valid json {{{");
-      try {
-        expect(loadSettings(projectDir)).toEqual({});
-        expect(spy).toHaveBeenCalledTimes(1);
-        expect(String(spy.mock.calls[0]![0])).toMatch(/Ignoring malformed settings/);
-      } finally {
-        spy.mockRestore();
-      }
-    });
-
-    it("does NOT warn when a file is simply missing", () => {
-      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
-      try {
-        expect(loadSettings(projectDir)).toEqual({});
-        expect(spy).not.toHaveBeenCalled();
-      } finally {
-        spy.mockRestore();
-      }
-    });
-  });
-
-  describe("applySettings", () => {
-    let appliers: SettingsAppliers;
-
-    beforeEach(() => {
-      appliers = {
-        setMaxConcurrent: vi.fn(),
-        setFleetView: vi.fn(),
-      };
-    });
-
-    it("is a no-op on an empty settings object", () => {
-      applySettings({}, appliers);
-      expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
-    });
-
-    it("applies only the fields that are present", () => {
-      applySettings({ maxConcurrent: 4 }, appliers);
-      expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(4);
-    });
-
-    it("applies all fields when all are present", () => {
-      applySettings(
-        {
-          maxConcurrent: 8,
-          maxDepth: 2,
-          fleetView: false,
-        },
-        appliers,
-      );
-      expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(8);
-      expect(appliers.setFleetView).toHaveBeenCalledWith(false);
-    });
-
-    it("applies fleetView (true and false); skips it when absent", () => {
-      applySettings({ fleetView: true }, appliers);
-      expect(appliers.setFleetView).toHaveBeenCalledWith(true);
-      applySettings({}, appliers);
-      expect(appliers.setFleetView).toHaveBeenCalledTimes(1); // absence is "use default"
-    });
-  });
-
-  describe("applyAndEmitLoaded", () => {
-    let appliers: SettingsAppliers;
-
-    beforeEach(() => {
-      appliers = {
-        setMaxConcurrent: vi.fn(),
-        setFleetView: vi.fn(),
-      };
-    });
-
-    it("applies model defaults on load and resets missing defaults on the next load", () => {
-      appliers.setModelDefaults = vi.fn();
-      writeGlobal({ defaultModel: "global-model", defaultReasoningEffort: "high" });
-      writeProject({ defaultReasoningEffort: "off" });
-      applyAndEmitLoaded(appliers, vi.fn(), projectDir);
-      expect(appliers.setModelDefaults).toHaveBeenLastCalledWith({
-        defaultModel: "global-model",
+      setMaxConcurrent: (value: number | undefined) => {
+        maxConcurrent = value;
+      },
+      setFleetView: (value: boolean) => {
+        fleetView = value;
+      },
+    };
+    applySettings(
+      {
+        defaultModel: "provider/model",
         defaultReasoningEffort: "off",
-      });
-      writeGlobal({});
-      writeProject({});
-      applyAndEmitLoaded(appliers, vi.fn(), projectDir);
-      expect(appliers.setModelDefaults).toHaveBeenLastCalledWith({
-        defaultModel: undefined,
-        defaultReasoningEffort: undefined,
-      });
-    });
-
-    it("loads, applies, and emits subagents:settings_loaded with merged settings", () => {
-      writeGlobal({ maxConcurrent: 16 });
-      writeProject({ maxDepth: 2 });
-      const emit = vi.fn();
-
-      const result = applyAndEmitLoaded(appliers, emit, projectDir);
-
-      expect(appliers.setMaxConcurrent).toHaveBeenCalledWith(16);
-
-      expect(emit).toHaveBeenCalledTimes(1);
-      expect(emit).toHaveBeenCalledWith("subagents:settings_loaded", {
-        settings: { maxConcurrent: 16, maxDepth: 2 },
-      });
-      expect(result).toEqual({ maxConcurrent: 16, maxDepth: 2 });
-    });
-
-    it("still emits the event when both files are missing (payload carries {})", () => {
-      const emit = vi.fn();
-
-      const result = applyAndEmitLoaded(appliers, emit, projectDir);
-
-      expect(emit).toHaveBeenCalledWith("subagents:settings_loaded", { settings: {} });
-      expect(result).toEqual({});
-      // No setters fired — defaults preserved
-      expect(appliers.setMaxConcurrent).not.toHaveBeenCalled();
-    });
+        maxDepth: 0,
+        maxConcurrent: 1,
+        fleetView: false,
+      },
+      appliers,
+    );
+    expect([defaults, maxDepth, maxConcurrent, fleetView]).toEqual([
+      { defaultModel: "provider/model", defaultReasoningEffort: "off" },
+      0,
+      1,
+      false,
+    ]);
+    applySettings({}, appliers);
+    expect([defaults, maxDepth, maxConcurrent, fleetView]).toEqual([
+      { defaultModel: undefined, defaultReasoningEffort: undefined },
+      undefined,
+      undefined,
+      true,
+    ]);
   });
 });

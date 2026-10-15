@@ -1,5 +1,6 @@
+import { loadConfig } from "../config.js";
 import { getAgentSessionId } from "./agent-tree.js";
-import { applyAndEmitLoaded, type SubagentsSettings } from "./settings.js";
+import { applySettings, type SubagentsSettings } from "./settings.js";
 import type { AgentRecord } from "./types.js";
 import { SubagentController } from "./operations.js";
 import { requestCommandApproval } from "../bash-gate/approval.js";
@@ -34,6 +35,7 @@ export function createSubagents(
   bashGate?: Pick<BashGateController, "isYolo">,
   getAutoCompactionThreshold?: () => number | undefined,
   getAllowedTools: () => string[] = () => pi.getActiveTools(),
+  getSettings: (cwd: string) => SubagentsSettings = (cwd) => loadConfig(cwd).subagents ?? {},
 ) {
   // ---- Register custom notification renderers ----
   registerNotificationRenderer(pi);
@@ -254,18 +256,16 @@ export function createSubagents(
     parentAllowances.clear();
     currentCtx = ctx;
     currentSessionToken = {};
-    applyAndEmitLoaded(
-      {
-        setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
-        setMaxDepth: (n) => manager.tree.setMaxDepth(n),
-        setModelDefaults: (defaults) => {
-          modelDefaults = defaults;
-        },
-        setFleetView: setFleetViewEnabled,
+    const settings = getSettings(ctx.cwd);
+    applySettings(settings, {
+      setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
+      setMaxDepth: (n) => manager.tree.setMaxDepth(n),
+      setModelDefaults: (defaults) => {
+        modelDefaults = defaults;
       },
-      (event, payload) => pi.events.emit(event, payload),
-      ctx.cwd,
-    );
+      setFleetView: setFleetViewEnabled,
+    });
+    pi.events.emit("subagents:settings_loaded", { settings });
     startParentMessenger(ctx);
   });
 

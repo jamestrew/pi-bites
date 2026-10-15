@@ -1,12 +1,11 @@
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { saveSettings } from "../settings.js";
 import { stripVTControlCharacters } from "node:util";
 import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, expect, it } from "vitest";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
-import { harness, setupV2 } from "./helpers/v2-harness.js";
+import { harness, setupV2, writeSubagentsConfig } from "./helpers/v2-harness.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -166,7 +165,7 @@ it.each(["spawn_agent", "send_message", "followup_task"])(
 
 it("shows available configured spawn metadata before success without inventing unknown fields", async () => {
   const h = await setupV2(cleanup);
-  saveSettings({ defaultModel: "test-model", defaultReasoningEffort: "off" }, h.ctx.cwd);
+  writeSubagentsConfig({ defaultModel: "test-model", defaultReasoningEffort: "off" }, h.ctx.cwd);
   await h.emit("session_start");
   const tool = h.direct.get("spawn_agent");
   const context = { state: {}, expanded: false };
@@ -180,7 +179,7 @@ it("shows available configured spawn metadata before success without inventing u
       })
       .render(100)[0],
   ).toBe("spawn_agent a explicit high");
-  unlinkSync(join(h.ctx.cwd, ".pi/subagents.json"));
+  unlinkSync(join(h.ctx.cwd, ".pi/pi-bites.json"));
   await h.emit("session_start");
   expect(tool.renderCall(args, plain, context).render(100)[0]).toBe("spawn_agent a test-model off");
   expect(

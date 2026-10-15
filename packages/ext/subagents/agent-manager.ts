@@ -236,7 +236,7 @@ export class AgentManager {
     this.recordDiagnostic(record, "failure_observed", { ...failure });
   }
 
-  setMaxConcurrent(n: number) {
+  setMaxConcurrent(n = DEFAULT_MAX_CONCURRENT) {
     this.maxConcurrent = Math.max(1, n);
     this.drainQueue();
   }

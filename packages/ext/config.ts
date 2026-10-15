@@ -201,6 +201,43 @@ const CodexAdapterSchema = Type.Object({
 });
 export type CodexAdapterConfig = Static<typeof CodexAdapterSchema>;
 
+const SubagentsSchema = Type.Object({
+  defaultModel: Type.Optional(
+    Type.String({
+      description:
+        "Default child model as provider/model-id. Omitted: inherit the parent model. Always subject to the root session's model scope.",
+    }),
+  ),
+  defaultReasoningEffort: Type.Optional(
+    Type.Enum(["off", ...THINKING_LEVELS], {
+      description:
+        "Default child reasoning effort; explicit requests and role policy still apply. Omitted: inherit parent effort, or use Pi defaults when selecting a model.",
+    }),
+  ),
+  maxDepth: Type.Optional(
+    Type.Integer({
+      minimum: 0,
+      maximum: 1024,
+      description: "Optional nesting cap (root depth zero). Omitted: uncapped nesting.",
+    }),
+  ),
+  maxConcurrent: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 1024,
+      default: 3,
+      description: "Shared execution and runtime residency budget across the root's descendants.",
+    }),
+  ),
+  fleetView: Type.Optional(
+    Type.Boolean({
+      default: true,
+      description: "Show the compact, read-only Fleet above the editor.",
+    }),
+  ),
+});
+export type SubagentsConfig = Static<typeof SubagentsSchema>;
+
 // Runtime accepts unknown keys to preserve existing configs during reads and writes.
 // The generator closes all objects in the editor schema to flag stale settings.
 export const BitesConfigSchema = Type.Object(
@@ -217,6 +254,7 @@ export const BitesConfigSchema = Type.Object(
     autoCompaction: Type.Optional(AutoCompactionSchema),
     autoMode: Type.Optional(AutoModeSchema),
     codexAdapter: Type.Optional(CodexAdapterSchema),
+    subagents: Type.Optional(SubagentsSchema),
     disable: Type.Optional(
       Type.Array(Type.Enum(EXTENSION_NAMES), {
         description:
@@ -286,9 +324,21 @@ function tryReadJson(filePath: string, label: string): BitesConfig {
  * Load and merge config from global and project-local files.
  * Project-local values override global values within each section.
  */
-export function loadConfig(cwd: string): BitesConfig {
+export function loadConfig(cwd: string, warn?: (message: string) => void): BitesConfig {
   const globalPath = join(getAgentDir(), "pi-bites.json");
   const projectPath = join(cwd, CONFIG_DIR_NAME, "pi-bites.json");
+
+  // Only lifecycle loads supply a notifier; eager startup and SDK children stay silent.
+  if (warn) {
+    for (const directory of [getAgentDir(), join(cwd, CONFIG_DIR_NAME)]) {
+      const legacy = join(directory, "subagents.json");
+      if (existsSync(legacy)) {
+        warn(
+          `Legacy subagent settings at ${legacy} are ignored. Manually move supported fields into "subagents" in ${join(directory, "pi-bites.json")}, then /reload. No files were changed.`,
+        );
+      }
+    }
+  }
 
   const global = tryReadJson(globalPath, "global");
   const project = tryReadJson(projectPath, "project-local");
@@ -305,6 +355,7 @@ export function loadConfig(cwd: string): BitesConfig {
     autoCompaction: { ...global.autoCompaction, ...project.autoCompaction },
     autoMode: { ...global.autoMode, ...project.autoMode },
     codexAdapter: { ...global.codexAdapter, ...project.codexAdapter },
+    subagents: { ...global.subagents, ...project.subagents },
     ...(disableUnion.length > 0 ? { disable: disableUnion } : {}),
   };
 }

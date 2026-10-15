@@ -3,8 +3,7 @@ import { initTheme, ToolExecutionComponent } from "@earendil-works/pi-coding-age
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai/compat";
 import { afterEach, expect, it, vi } from "vitest";
-import { saveSettings } from "../settings.js";
-import { harness, setupV2 } from "./helpers/v2-harness.js";
+import { harness, setupV2, writeSubagentsConfig } from "./helpers/v2-harness.js";
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -209,7 +208,7 @@ it("persists cancelled wait timing through Pi's error-result hook and removes th
 it("observes only direct children, retaining unloaded child counts and each agent's own stats", async () => {
   const h = await setupV2(cleanup);
   h.pi.getActiveTools = () => ["spawn_agent", "list_agents", "wait_agent", "send_message"];
-  saveSettings({ maxConcurrent: 4 }, h.ctx.cwd);
+  writeSubagentsConfig({ maxConcurrent: 4 }, h.ctx.cwd);
   await h.emit("session_start");
   h.faux.setResponses([fauxAssistantMessage("PARENT FINAL")]);
   const parent = await h.call("spawn_agent", {

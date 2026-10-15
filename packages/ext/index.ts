@@ -37,7 +37,15 @@ export default async function (pi: ExtensionAPI) {
   const disabled = new Set(startupConfig.disable ?? []);
 
   pi.on("session_start", async (_event, ctx) => {
-    configRef.current = loadConfig(ctx.cwd);
+    configRef.current = loadConfig(
+      ctx.cwd,
+      isSubagent
+        ? undefined
+        : (message) => {
+            if (ctx.hasUI) ctx.ui.notify(message, "warning");
+            else console.warn(message);
+          },
+    );
   });
 
   const autoMode =
@@ -63,6 +71,7 @@ export default async function (pi: ExtensionAPI) {
               : (configRef.current.autoCompaction?.thresholdTokens ??
                 DEFAULT_AUTO_COMPACTION_THRESHOLD),
           getAllowedTools,
+          () => configRef.current.subagents ?? {},
         );
   subagents?.registerTools();
   codexAdapter = disabled.has("codexAdapter")

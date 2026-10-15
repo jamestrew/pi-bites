@@ -157,6 +157,38 @@
       },
       "additionalProperties": false
     },
+    "subagents": {
+      "type": "object",
+      "properties": {
+        "defaultModel": {
+          "type": "string",
+          "description": "Default child model as provider/model-id. Omitted: inherit the parent model. Always subject to the root session's model scope."
+        },
+        "defaultReasoningEffort": {
+          "enum": ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+          "description": "Default child reasoning effort; explicit requests and role policy still apply. Omitted: inherit parent effort, or use Pi defaults when selecting a model."
+        },
+        "maxDepth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024,
+          "description": "Optional nesting cap (root depth zero). Omitted: uncapped nesting."
+        },
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024,
+          "default": 3,
+          "description": "Shared execution and runtime residency budget across the root's descendants."
+        },
+        "fleetView": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the compact, read-only Fleet above the editor."
+        }
+      },
+      "additionalProperties": false
+    },
     "disable": {
       "type": "array",
       "items": {

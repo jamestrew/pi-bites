@@ -1,3 +1,4 @@
+import type { BitesConfig } from "./config.js";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 const registerModules = [
@@ -28,7 +29,7 @@ type RegisterModule = (typeof registerModules)[number];
 
 async function loadExtension(
   options: {
-    disable?: string[];
+    disable?: BitesConfig["disable"];
     argv?: string[];
     subagent?: string;
     realCodex?: boolean;
@@ -68,7 +69,10 @@ async function loadExtension(
   if (options.realCodex) vi.doUnmock("@earendil-works/pi-coding-agent");
   else vi.doMock("@earendil-works/pi-coding-agent", () => ({}));
 
-  const loadConfig = vi.fn(() => (options.disable ? { disable: options.disable } : {}));
+  const loadConfig = vi.fn(
+    (_cwd: string, _warn?: (message: string) => void): BitesConfig =>
+      options.disable ? { disable: options.disable } : {},
+  );
   const registerBitesCommands = vi.fn();
   vi.doMock("./config.js", () => ({
     loadConfig,
@@ -149,6 +153,7 @@ describe("extension entrypoint", () => {
         loaded.bashGate,
         expect.any(Function),
         expect.any(Function),
+        expect.any(Function),
       );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./codex-adapter/index.js")).toHaveBeenCalledWith(
@@ -169,6 +174,37 @@ describe("extension entrypoint", () => {
         }),
       ).toBe("ponytail:codex:base");
       expect(loaded.registerBitesCommands).toHaveBeenCalledTimes(1);
+    } finally {
+      loaded.restoreArgv();
+    }
+  });
+
+  test("refreshes shared subagent config and surfaces migration warnings on session start/reload", async () => {
+    const loaded = await loadExtension();
+    const notify = vi.fn();
+    const stderr = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const configs: BitesConfig[] = [{ subagents: { maxConcurrent: 1, fleetView: false } }, {}];
+    loaded.loadConfig.mockImplementation((_cwd, warn) => {
+      warn?.("Legacy settings: manual migration required");
+      return configs.shift()!;
+    });
+    const getSettings = loaded.registerSpies.get("./subagents/index.js")!.mock.calls[0]![5];
+    const ctx = { cwd: "/project", hasUI: true, ui: { notify } };
+    try {
+      for (const handler of loaded.handlers.get("session_start") ?? []) await handler({}, ctx);
+      expect(getSettings()).toEqual({ maxConcurrent: 1, fleetView: false });
+      expect(notify).toHaveBeenCalledWith("Legacy settings: manual migration required", "warning");
+      for (const key of Object.keys(ctx))
+        Object.defineProperty(ctx, key, {
+          get() {
+            throw new Error("stale ctx");
+          },
+        });
+      expect(getSettings()).toEqual({ maxConcurrent: 1, fleetView: false });
+      for (const handler of loaded.handlers.get("session_start") ?? [])
+        await handler({ reason: "reload" }, { cwd: "/project", hasUI: false });
+      expect(getSettings()).toEqual({});
+      expect(stderr).toHaveBeenCalledWith("Legacy settings: manual migration required");
     } finally {
       loaded.restoreArgv();
     }

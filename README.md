@@ -67,6 +67,71 @@ See the [configuration schema](pi-bites.schema.json) for all options and extensi
 names. `/bites:list`, `/bites:off <name>`, and `/bites:on <name>` manage extensions;
 changes take effect on the next launch.
 
+### Subagents
+
+Set `subagents` inside either `pi-bites.json`. Project fields override global
+fields individually; omitted fields inherit global settings, then built-in behavior.
+
+| Field                    | Built-in behavior                                                                                                   | Accepted values                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `defaultModel`           | Inherit the parent model                                                                                            | Exact authenticated `provider/model-id` or unambiguous model ID                                    |
+| `defaultReasoningEffort` | Inherit parent effort; when selecting a model, use Pi's per-model/global default, then `medium`, capability-clamped | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; must be supported by the selected model |
+| `maxDepth`               | Uncapped nesting                                                                                                    | Integer 0–1024; root is depth 0, so 0 prevents children                                            |
+| `maxConcurrent`          | Three children, sharing execution/residency budgets across descendants                                              | Integer 1–1024                                                                                     |
+| `fleetView`              | Enabled, compact read-only Fleet                                                                                    | Boolean                                                                                            |
+
+Explicit model/effort requests override configured defaults, then role policy
+applies. All choices must respect the owning root session's authenticated model
+scope; empty Pi scope permits all authenticated models. `scopeModels` is retired,
+not an opt-out. There is no `/agents` settings UI or settings writer.
+
+Settings are re-read on session start and `/reload`. Removing an effective setting
+restores its built-in behavior on the next load; removing a project override exposes
+any global value. Changing defaults does not replace retained children's selected
+models or reasoning efforts on follow-up or runtime reload.
+
+#### Manual cutover from `subagents.json`
+
+Legacy `~/.pi/agent/subagents.json` and `.pi/subagents.json` are **ignored**, even
+when no replacement exists. Each existing file produces a warning on session
+start/reload naming its location and destination. Pi-bites never copies, rewrites,
+or deletes these files. Global paths follow Pi's agent-directory override.
+
+For example, manually replace the supported fields from a legacy global file:
+
+```json
+{ "defaultModel": "provider/model-id", "defaultReasoningEffort": "high", "maxConcurrent": 8 }
+```
+
+by merging this section into `~/.pi/agent/pi-bites.json`, preserving other sections:
+
+```json
+{
+  "subagents": {
+    "defaultModel": "provider/model-id",
+    "defaultReasoningEffort": "high",
+    "maxConcurrent": 8
+  }
+}
+```
+
+Likewise, legacy project settings such as `{ "maxConcurrent": 2, "fleetView": false }`
+become this section in `.pi/pi-bites.json`:
+
+```json
+{
+  "subagents": {
+    "maxConcurrent": 2,
+    "fleetView": false
+  }
+}
+```
+
+Here the project keeps the global model/effort but overrides concurrency. Copy only
+the five supported fields above, not retired controls such as `scopeModels` or
+`defaultJoinMode`; the editor schema flags them. Run `/reload` to apply. To stop the
+warnings, manually archive or remove the old files after checking the cutover.
+
 ## Tmux integration
 
 Add this to `.tmux.conf` after any theme or plugin that sets `status-right`:

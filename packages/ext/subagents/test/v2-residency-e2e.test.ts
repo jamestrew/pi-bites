@@ -1,7 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { fauxAssistantMessage, type TranscriptContext } from "@earendil-works/pi-ai/compat";
-import { saveSettings } from "../settings.js";
-import { setupV2 } from "./helpers/v2-harness.js";
+import { setupV2, writeSubagentsConfig } from "./helpers/v2-harness.js";
 vi.setConfig({ testTimeout: 30_000 });
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
@@ -19,7 +18,7 @@ it("reclaims residency under pressure and reloads the same named conversation wi
     "interrupt_agent",
     "wait_agent",
   ];
-  saveSettings({ maxConcurrent: 1 }, h.ctx.cwd);
+  writeSubagentsConfig({ maxConcurrent: 1 }, h.ctx.cwd);
   await h.emit("session_start");
   const requests: TranscriptContext[] = [];
   h.faux.setResponses(
@@ -131,7 +130,7 @@ it("joins concurrent reload/message/follow-up and keeps cancelled waits from can
 
 it("cancellation after committed unload releases admission without restoring the evicted runtime or launching late", async () => {
   const h = await setup();
-  saveSettings({ maxConcurrent: 1 }, h.ctx.cwd);
+  writeSubagentsConfig({ maxConcurrent: 1 }, h.ctx.cwd);
   await h.emit("session_start");
   h.faux.setResponses([fauxAssistantMessage("done")]);
   const ids: string[] = [];
@@ -176,7 +175,7 @@ it("keeps descendants running and queues their completion for an unloaded parent
     "followup_task",
     "wait_agent",
   ];
-  saveSettings({ maxConcurrent: 2 }, h.ctx.cwd);
+  writeSubagentsConfig({ maxConcurrent: 2 }, h.ctx.cwd);
   await h.emit("session_start");
   const requests: TranscriptContext[] = [];
   const tool = (name: string, args: Record<string, string | number>) => ({
@@ -305,7 +304,7 @@ it("invalidates session approvals across runtime incarnations", async () => {
 
 it("evicts least-recently-touched terminal agents and never oversubscribes concurrent admission", async () => {
   const h = await setup();
-  saveSettings({ maxConcurrent: 2 }, h.ctx.cwd);
+  writeSubagentsConfig({ maxConcurrent: 2 }, h.ctx.cwd);
   await h.emit("session_start");
   h.faux.setResponses(Array.from({ length: 6 }, () => fauxAssistantMessage("done")));
   const spawn = (task_name: string) =>
@@ -355,7 +354,7 @@ it("retires unloaded identities on root replacement instead of routing into the 
 
 it.each(["registry", "rpc"])("bounds loaded runtimes for sequential %s spawns", async (route) => {
   const h = await setup();
-  saveSettings({ maxConcurrent: 1 }, h.ctx.cwd);
+  writeSubagentsConfig({ maxConcurrent: 1 }, h.ctx.cwd);
   await h.emit("session_start");
   h.faux.setResponses(["first", "second", "third"].map((text) => fauxAssistantMessage(text)));
   const ids: string[] = [];

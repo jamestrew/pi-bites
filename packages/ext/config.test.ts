@@ -44,6 +44,13 @@ describe("config JSON schema", () => {
     autoCompaction: { thresholdTokens: 200_000 },
     autoMode: { model: "provider/model", thinking: "max", policy: "Review safely" },
     codexAdapter: { webSearchProviders: ["trusted-proxy"], allowOpenAICodexFallback: false },
+    subagents: {
+      defaultModel: "provider/model",
+      defaultReasoningEffort: "off",
+      maxDepth: 0,
+      maxConcurrent: 3,
+      fleetView: true,
+    },
     disable: ["notifications"],
   } satisfies {
     [K in Exclude<keyof BitesConfig, "$schema">]-?: Required<NonNullable<BitesConfig[K]>>;
@@ -55,6 +62,10 @@ describe("config JSON schema", () => {
     { $schema: "file:///tmp/pi-bites.schema.json", ...config },
     { bashGate: { rules: [{}, { cmd: "bun", subcommands: [], flagAny: "--force" }] } },
     { codexAdapter: { webSearchProviders: [] } },
+    { subagents: { maxDepth: 1024, maxConcurrent: 1024, fleetView: false } },
+    ...["off", "minimal", "low", "medium", "high", "xhigh", "max"].map(
+      (defaultReasoningEffort) => ({ subagents: { defaultReasoningEffort } }),
+    ),
   ])("accepts valid config %j in both schema and loader", async (value) => {
     const { parseBitesConfig } = await import("./config.js");
     expect(Value.Check(schema, value)).toBe(true);
@@ -80,6 +91,17 @@ describe("config JSON schema", () => {
     { codexAdapter: { webSearchProviders: [""] } },
     { codexAdapter: { webSearchProviders: [" \t\n"] } },
     { codexAdapter: { allowOpenAICodexFallback: "yes" } },
+    { subagents: [] },
+    { subagents: { defaultModel: 1 } },
+    { subagents: { defaultReasoningEffort: "turbo" } },
+    { subagents: { maxDepth: -1 } },
+    { subagents: { maxDepth: 1025 } },
+    { subagents: { maxDepth: 1.5 } },
+    { subagents: { maxConcurrent: 0 } },
+    { subagents: { maxConcurrent: 1025 } },
+    { subagents: { maxConcurrent: "3" } },
+    { subagents: { maxConcurrent: 1.5 } },
+    { subagents: { fleetView: "on" } },
     { disable: ["unknown"] },
   ])("rejects invalid values %j in both schema and loader", async (value) => {
     const { parseBitesConfig } = await import("./config.js");
@@ -93,6 +115,8 @@ describe("config JSON schema", () => {
       .filter((key) => key !== "disable")
       .map((key) => ({ [key]: { staleSetting: true } })),
     { codexAdapter: { providers: ["openai"] } },
+    { subagents: { scopeModels: false } },
+    { subagents: { defaultJoinMode: "smart" } },
     { bashGate: { rules: [{ flagsAny: "--force" }] } },
     { disable: ["explore"] },
     { disable: ["inlineReferences"] },
@@ -105,6 +129,98 @@ describe("config JSON schema", () => {
 });
 
 describe("loadConfig", () => {
+  test("warns about legacy files without reading, using, or changing them or unrelated config", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
+    agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
+    mkdirSync(join(project, ".pi"));
+    const globalLegacy = join(agentDir, "subagents.json");
+    const projectLegacy = join(project, ".pi", "subagents.json");
+    const globalConfig = join(agentDir, "pi-bites.json");
+    const projectConfig = join(project, ".pi", "pi-bites.json");
+    const warn = vi.fn();
+    const { loadConfig } = await import("./config.js");
+    try {
+      expect(loadConfig(project, warn).subagents).toEqual({});
+      expect(warn).not.toHaveBeenCalled();
+      const globalBytes = '{ "maxConcurrent": 99, "defaultModel": "legacy/model" }\n';
+      const projectBytes = "{ invalid legacy JSON";
+      const configBytes = '{ "custom": true, "subagents": { "fleetView": false } }\n';
+      writeFileSync(globalLegacy, globalBytes);
+      writeFileSync(projectLegacy, projectBytes);
+      writeFileSync(globalConfig, configBytes);
+      for (let load = 0; load < 2; load++) {
+        expect(loadConfig(project, warn).subagents).toEqual({ fleetView: false });
+        expect(warn).toHaveBeenLastCalledWith(expect.stringContaining(projectLegacy));
+      }
+      expect(warn).toHaveBeenCalledTimes(4);
+      for (const [legacy, destination] of [
+        [globalLegacy, globalConfig],
+        [projectLegacy, projectConfig],
+      ]) {
+        const message = warn.mock.calls.find(([message]) => message.includes(legacy))![0];
+        expect(message).toContain(destination);
+        expect(message).toMatch(/manual/i);
+        expect(message).toContain("subagents");
+      }
+      expect(readFileSync(globalLegacy, "utf8")).toBe(globalBytes);
+      expect(readFileSync(projectLegacy, "utf8")).toBe(projectBytes);
+      expect(readFileSync(globalConfig, "utf8")).toBe(configBytes);
+      expect(existsSync(projectConfig)).toBe(false);
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
+  test("merges subagent fields independently and forgets removed settings on the next load", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
+    agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
+    const globalPath = join(agentDir, "pi-bites.json");
+    const projectPath = join(project, ".pi", "pi-bites.json");
+    mkdirSync(join(project, ".pi"));
+    writeFileSync(
+      globalPath,
+      JSON.stringify({
+        subagents: {
+          defaultModel: "provider/global",
+          defaultReasoningEffort: "high",
+          maxConcurrent: 8,
+          maxDepth: 2,
+        },
+      }),
+    );
+    writeFileSync(
+      projectPath,
+      JSON.stringify({
+        subagents: {
+          defaultModel: "provider/project",
+          maxConcurrent: 1,
+          fleetView: false,
+        },
+      }),
+    );
+    try {
+      const { loadConfig } = await import("./config.js");
+      expect(loadConfig(project).subagents).toEqual({
+        defaultModel: "provider/project",
+        defaultReasoningEffort: "high",
+        maxConcurrent: 1,
+        maxDepth: 2,
+        fleetView: false,
+      });
+      rmSync(projectPath);
+      expect(loadConfig(project).subagents).toEqual({
+        defaultModel: "provider/global",
+        defaultReasoningEffort: "high",
+        maxConcurrent: 8,
+        maxDepth: 2,
+      });
+      rmSync(globalPath);
+      expect(loadConfig(project).subagents).toEqual({});
+    } finally {
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+
   test("ignores the retired explore toggle without disabling subagents or losing config", async () => {
     const { EXTENSION_NAMES, parseBitesConfig } = await import("./config.js");
     expect(EXTENSION_NAMES).not.toContain("explore");
@@ -194,6 +310,7 @@ describe("loadConfig", () => {
         autoCompaction: {},
         autoMode: {},
         codexAdapter: {},
+        subagents: {},
       });
       expect(error).toHaveBeenCalledWith(expect.stringContaining("failed to parse project-local"));
     } finally {

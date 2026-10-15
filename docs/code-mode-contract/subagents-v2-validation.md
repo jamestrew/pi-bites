@@ -27,8 +27,11 @@ Ordinary activation exposes six direct tools without a V1 selector, nested
 collaboration, discovery prerequisite, custom provider or host upgrade. Extension
 `disable` entries belong in `.pi/pi-bites.json` (or the global configuration);
 `subagents` and `codexAdapter` remain independently disableable after reload.
-Operational settings belong in `.pi/subagents.json`, overriding
-`~/.pi/agent/subagents.json`. `maxConcurrent` defaults
+Operational settings belong in `pi-bites.json.subagents`: project `.pi/pi-bites.json`
+fields override global `~/.pi/agent/pi-bites.json` fields individually. Legacy
+`subagents.json` files contribute no settings and are left untouched; session
+start/reload warns with manual migration destinations. See the
+[settings and cutover guide](../../README.md#subagents). `maxConcurrent` defaults
 to three **children** (four total including root), shared across descendants.
 Execution admission is advisory and counts native active work, not initialization
 or queue-only reload. Accepted concurrent work can start above that execution limit;
@@ -36,7 +39,9 @@ resident runtimes and pending residency claims remain separately bounded.
 Configured values continue to count children. Nesting is uncapped by default (#384); explicit `maxDepth`
 is opt-in local policy, not upstream V2 parity (`0` disables spawn, `1` permits only
 root children). Project values override global values; removing the effective setting
-restores uncapped nesting on the next settings load. `fleetView` enables the compact,
+restores built-in behavior on the next session start/reload (uncapped depth, three
+children, enabled Fleet, inherited model/effort resolution). Changing defaults does
+not reselect retained children's models or efforts. `fleetView` enables the compact,
 read-only above-editor status display, bounded to five agent rows plus an overflow
 count. Fleet does not capture keys or open conversation overlays. Subagent model scope is mandatory (#387): descendants share the authenticated
 root session scope, and an empty native scope permits all authenticated models.
