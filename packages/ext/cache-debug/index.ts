@@ -9,6 +9,72 @@ const ENTRY = "pi-bites:cache-debug";
 const LIMITS =
   "Logical pre-transport request inspection only; later handlers may change the body. Internal retries, WebSocket continuation and fallback are not wire capture. Provider/proxy cache lifetime is unknown; elapsed time does not suppress capture.";
 
+type TransportFailure = {
+  type: "provider_transport_failure";
+  timestamp?: number;
+  configuredTransport?: "sse" | "websocket" | "websocket-cached" | "auto";
+  fallbackTransport?: "sse";
+  eventsEmitted?: boolean;
+  phase?: "before_message_stream_start" | "after_message_stream_start";
+  requestBytes?: number;
+};
+type Transport = {
+  httpResponses: number;
+  httpAttempts: {
+    status?: number;
+    requestIds: Record<string, string>;
+    requestIdsTruncated?: true;
+  }[];
+  failures: TransportFailure[];
+  diagnosticsTruncated: boolean;
+};
+
+// Unlike the subagent response summary, cache entries retain only request IDs,
+// not arbitrary rate-limit/header values. Inspect at most 128 header names.
+const REQUEST_ID_HEADERS = new Set(["x-request-id", "request-id", "openai-request-id"]);
+
+function transportFailures(
+  diagnostics: unknown,
+): Pick<Transport, "failures" | "diagnosticsTruncated"> {
+  const entries = Array.isArray(diagnostics) ? diagnostics : [];
+  const failures: TransportFailure[] = [];
+  // Eight diagnostic items per response suffice today; larger traces need a raised budget.
+  for (const entry of entries.slice(0, 8)) {
+    if (!object(entry) || entry.type !== "provider_transport_failure") continue;
+    const failure: TransportFailure = { type: "provider_transport_failure" };
+    if (
+      typeof entry.timestamp === "number" &&
+      Number.isSafeInteger(entry.timestamp) &&
+      entry.timestamp >= 0
+    )
+      failure.timestamp = entry.timestamp;
+    const details = object(entry.details) ? entry.details : {};
+    const configured = details.configuredTransport;
+    if (
+      configured === "sse" ||
+      configured === "websocket" ||
+      configured === "websocket-cached" ||
+      configured === "auto"
+    )
+      failure.configuredTransport = configured;
+    if (details.fallbackTransport === "sse") failure.fallbackTransport = "sse";
+    if (typeof details.eventsEmitted === "boolean") failure.eventsEmitted = details.eventsEmitted;
+    if (
+      details.phase === "before_message_stream_start" ||
+      details.phase === "after_message_stream_start"
+    )
+      failure.phase = details.phase;
+    if (
+      typeof details.requestBytes === "number" &&
+      Number.isSafeInteger(details.requestBytes) &&
+      details.requestBytes >= 0
+    )
+      failure.requestBytes = details.requestBytes;
+    failures.push(failure);
+  }
+  return { failures, diagnosticsTruncated: entries.length > 8 };
+}
+
 type Observation = {
   sessionId: string;
   generation: number;
@@ -19,6 +85,7 @@ type Observation = {
   timestamp: number;
   monotonic: number;
   fingerprints: Fingerprints;
+  transport: Transport;
 };
 type Baseline = Observation & { usage: Usage; usageSource: "provider-confirmed" | "normalized" };
 type InFlight = Observation & {
@@ -202,6 +269,12 @@ export default function registerCacheDebug(pi: ExtensionAPI): void {
         timestamp,
         monotonic,
         fingerprints,
+        transport: {
+          httpResponses: 0,
+          httpAttempts: [],
+          failures: [],
+          diagnosticsTruncated: false,
+        },
       };
     } catch (error) {
       // Error strings are ours, not payload/provider content.
@@ -219,6 +292,43 @@ export default function registerCacheDebug(pi: ExtensionAPI): void {
       ambiguous = true;
     }
     return undefined;
+  });
+
+  pi.on("after_provider_response", (event, ctx) => {
+    if (!enabled || !active || !inFlight || ambiguous) return;
+    // Earlier async handlers may have replaced the session and invalidated this ctx.
+    try {
+      if (sync(ctx)) return;
+    } catch {
+      return;
+    }
+    const transport = inFlight.transport;
+    transport.httpResponses++;
+    // Retain eight HTTP responses, while counting overflow without storing it.
+    if (transport.httpAttempts.length >= 8) return;
+    const attempt: Transport["httpAttempts"][number] = { requestIds: {} };
+    if (Number.isInteger(event.status) && event.status >= 100 && event.status <= 599)
+      attempt.status = event.status;
+    let inspected = 0;
+    for (const name in event.headers) {
+      if (!Object.hasOwn(event.headers, name)) continue;
+      if (++inspected > 128) {
+        attempt.requestIdsTruncated = true;
+        break;
+      }
+      const normalized = name.toLowerCase();
+      if (!REQUEST_ID_HEADERS.has(normalized)) continue;
+      const value = event.headers[name];
+      // Reject oversized or control-bearing IDs rather than persisting a truncation.
+      if (
+        typeof value === "string" &&
+        value.length > 0 &&
+        value.length <= 256 &&
+        !/[^A-Za-z0-9_.:-]/.test(value)
+      )
+        attempt.requestIds[normalized] = value;
+    }
+    transport.httpAttempts.push(attempt);
   });
 
   pi.on("provider_stream_event", (event, ctx) => {
@@ -301,6 +411,7 @@ export default function registerCacheDebug(pi: ExtensionAPI): void {
     }
     const current: Baseline = {
       ...request,
+      transport: { ...request.transport, ...transportFailures(message.diagnostics) },
       usage: copyUsage(message.usage),
       usageSource: request.terminal ? "provider-confirmed" : "normalized",
     };
@@ -394,6 +505,7 @@ export default function registerCacheDebug(pi: ExtensionAPI): void {
       observations,
       coverage: [
         LIMITS,
+        "HTTP response metadata is associated with the current logical observation, not an identified wire attempt. Missing callbacks do not identify transport or rule out retries; WebSocket sends/handshakes are not observed.",
         "Lost reuse/cost is an estimate, not proof of cause or billing.",
         "Provider-converted input may include moving cache markers; prefix changes do not identify the responsible extension.",
         ...(previous.usageSource === "normalized" || current.usageSource === "normalized"

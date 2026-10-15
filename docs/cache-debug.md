@@ -17,7 +17,7 @@ Status reports inspection/correlation limitations, baseline state and reset reas
 The recorder fingerprints instructions/system messages, ordered tools, cache key,
 remaining request options and individual ordered input items with a random
 in-memory HMAC key per reset generation. It retains no prompt bodies, tool arguments/results, raw
-keys, credentials, headers or raw provider events, and never changes requests or
+keys, credentials, arbitrary headers or raw provider events, and never changes requests or
 model-visible context. Persisted fingerprints cannot be compared across resets;
 the HMAC key is never persisted. Session/branch replacement, reload, successful
 compaction and context rewrites reset the baseline. Failed compaction does not.
@@ -33,6 +33,28 @@ ID validation when present; other APIs do not need Responses IDs or raw stream
 events. Each comparison records its usage source. Pi can normalize omitted cache
 metrics to zero, so normalized-only comparisons explicitly warn that a miss is
 not confirmed. Providers that never report cache activity cannot establish a miss.
+
+Both anomaly snapshots include bounded transport metadata. `after_provider_response`
+records the observed HTTP response count and up to eight ordered responses with
+status codes and allowlisted `x-request-id`, `request-id` and `openai-request-id`
+values. These provider request IDs are retained verbatim for support investigations;
+they are not HMAC fingerprints. Header names are case-insensitive; IDs must be
+1–256 ASCII letters, digits, underscores, dots, colons or hyphens. Only the first
+128 header names per response are inspected; header overflow is marked. Other
+headers are never retained.
+
+The first eight assistant diagnostics are inspected for `provider_transport_failure`,
+including failures followed by a successful SSE fallback. Only its type, valid
+timestamp, known transport/fallback/phase values, stream-start flag and request
+byte count are retained. Unknown fields, free-form errors and stacks are omitted;
+diagnostic overflow is marked. HTTP response-count overflow does not invalidate
+the prompt comparison, but the retained attempt list is incomplete.
+
+HTTP metadata is associated with the sole current logical observation: the response
+hook supplies no request/provider identity. WebSocket sends and handshakes are not
+observed. Missing callbacks or diagnostics mean unknown coverage, not proof of a
+particular transport or absence of retries; some internal retries and sticky
+fallbacks remain invisible. No healthy-hit entries are added for this metadata.
 
 Significant anomalies are retained regardless of elapsed time. Actual cache
 retention depends on the provider, proxy and request options; no guessed TTL
