@@ -20,7 +20,8 @@ source, conversation dumps, account IDs or image data.
 Executed on 2026-09-30 UTC: NixOS, Linux `6.18.53`, `x86_64`; Node `24.20.0`,
 Bun `1.4.2`, Python `3.14.7`, TypeScript `7.0.2`, Vitest `4.1.11`, oxlint `1.86.0`,
 oxfmt `0.47.0`. Pi CLI and installed `pi-coding-agent`, `pi-server`, `pi-tui`,
-`pi-ai`, `pi-agent-core` and `pi-codemode` are all `0.99.1`, the supported minimum.
+`pi-ai`, `pi-agent-core` and `pi-codemode` were all `0.99.1`, the minimum for this validation.
+This is a historical inventory; `pi-server` is no longer a prerequisite.
 The package declares Bun `1.3.11`; this run uses `1.4.2`, not that exact Bun pin.
 
 Version inventory includes `uname -srm; bun --version; node --version; pi --version`.

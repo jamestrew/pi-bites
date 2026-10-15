@@ -8,7 +8,7 @@ The default adapter now selects Code Mode for GPT-5.6/GPT-6 families. The false 
 
 ## Native discovery baseline (#368)
 
-Pi-bites now targets the supported Pi 0.99.1 baseline for `@earendil-works/pi-coding-agent`, `@earendil-works/pi-server`, and `@earendil-works/pi-tui`. Isolated development loads `builtin:codemode` and `builtin:tool-search` explicitly next to the local extension; it does not load MCP, arbitrary configured extensions, or credentials-backed servers. Loading remains separate from activation: `codemode` and `tool_search` are only active when selected by settings or tools.
+The #368 cutover targeted Pi 0.99.1 for `@earendil-works/pi-coding-agent`, `@earendil-works/pi-server`, and `@earendil-works/pi-tui`. This is a historical dependency inventory; `pi-server` is no longer a prerequisite. Isolated development loads `builtin:codemode` and `builtin:tool-search` explicitly next to the local extension; it does not load MCP, arbitrary configured extensions, or credentials-backed servers. Loading remains separate from activation: `codemode` and `tool_search` are only active when selected by settings or tools.
 
 The native foundation test uses public `createCodemodeExtension()` and `createToolSearchExtension()` factories through Pi's registered-extension/session seam. It proves script `searchTools`, `describeTool`, `ALL_TOOLS`, and safe tool execution; separately, `tool_search` activates an eligible deferred tool. The test also records exposure limits: direct active tools differ from registered codemode/deferred tools, `hidden` and `model-only` tools are not script-callable, and discovery is not an authorization grant. No live provider acceptance, MCP connection, or credential fallback is claimed by this local validation.
 
