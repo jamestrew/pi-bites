@@ -915,3 +915,34 @@ test("stop during the initial report does not leak a heartbeat timer", async () 
 
   expect(intervals).toBe(0);
 });
+
+test.each([
+  { aborted: true, messageAborted: false, classifyCount: 0 },
+  { aborted: true, messageAborted: true, classifyCount: 0 },
+  { aborted: false, messageAborted: false, classifyCount: 1 },
+  { aborted: false, messageAborted: true, classifyCount: 1 },
+  { aborted: undefined, messageAborted: false, classifyCount: 1 },
+  { aborted: undefined, messageAborted: true, classifyCount: 0 },
+])(
+  "settlement $aborted / message abort $messageAborted preserves answer and background states",
+  async ({ aborted, messageAborted, classifyCount }) => {
+    const states: string[] = [];
+    const classify = vi.fn(async () => true);
+    const lifecycle = createNeedsInputLifecycle(
+      async (state) => void states.push(state),
+      classify,
+      () => {},
+    );
+    await lifecycle.agentStart();
+    await lifecycle.backgroundAgentStarted("child");
+    const event = agentEnd("Which option?");
+    if (messageAborted && event.messages[0]?.role === "assistant")
+      event.messages[0].stopReason = "aborted";
+    lifecycle.agentEnd(event);
+    await lifecycle.agentSettled({} as ExtensionContext, aborted);
+    expect(classify).toHaveBeenCalledTimes(classifyCount);
+    expect(states.at(-1)).toBe("working");
+    await lifecycle.backgroundAgentFinished("child");
+    expect(states.at(-1)).toBe(classifyCount ? "needs-input" : "idle");
+  },
+);

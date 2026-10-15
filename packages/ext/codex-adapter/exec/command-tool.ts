@@ -92,7 +92,12 @@ export function throwForExecFailure(result: UnifiedExecResult): void {
 
 export function renderExecResult(
   result: AgentToolResult<ExecRenderDetails>,
-  options: { expanded: boolean; isPartial: boolean; showInputTokens?: boolean },
+  options: {
+    expanded: boolean;
+    isPartial: boolean;
+    showInputTokens?: boolean;
+    onHiddenContent?: (hidden: boolean) => void;
+  },
   theme: RenderTheme,
   context: { isError: boolean; state: { startedAt?: number; endedAt?: number } },
 ) {
@@ -120,6 +125,7 @@ export function renderExecResult(
       const lines = output ? outputText.render(width) : [];
       const visible = options.expanded ? lines : lines.slice(-COLLAPSED_OUTPUT_LINES);
       const hidden = lines.length - visible.length;
+      options.onHiddenContent?.(hidden > 0);
       const rendered: string[] = [...visible];
       if (statusText) {
         if (rendered.length) rendered.push("");

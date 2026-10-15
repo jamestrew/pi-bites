@@ -201,7 +201,10 @@ function recordSessionDiagnosticUnsafe(
       ...resumed,
     });
   } else if (event.type === "agent_settled") {
-    emitDiagnostic(callbacks.onDiagnostic, "agent_settled", resumed);
+    emitDiagnostic(callbacks.onDiagnostic, "agent_settled", {
+      aborted: event.aborted,
+      ...resumed,
+    });
   }
 }
 

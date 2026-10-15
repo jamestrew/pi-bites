@@ -33,7 +33,7 @@ export function createV2Tools(
   },
 ) {
   const roots = new Map<string, WaitAgentStatus>();
-  const terminalRoots = new Map<string, WaitAgentStatus>();
+  const terminalRoots = new Map<string, { status: WaitAgentStatus; aborted: boolean }>();
   pi.on("agent_start", (_event, ctx) => {
     const id = ctx.sessionManager.getSessionId();
     roots.set(id, "running");
@@ -42,17 +42,24 @@ export function createV2Tools(
   pi.on("agent_end", (event, ctx) => {
     const last = [...event.messages].reverse().find((message) => message.role === "assistant");
     const status: WaitAgentStatus =
-      last?.stopReason === "aborted"
-        ? "interrupted"
-        : last?.stopReason === "error"
-          ? { errored: last.errorMessage ?? "unknown error" }
-          : { completed: last ? extractText(last.content) || null : null };
+      last?.stopReason === "error"
+        ? { errored: last.errorMessage ?? "unknown error" }
+        : { completed: last ? extractText(last.content) || null : null };
     // agent_end precedes retries, compaction, and automatic continuation.
-    terminalRoots.set(ctx.sessionManager.getSessionId(), status);
+    terminalRoots.set(ctx.sessionManager.getSessionId(), {
+      status,
+      aborted: last?.stopReason === "aborted",
+    });
   });
-  pi.on("agent_settled", (_event, ctx) => {
+  pi.on("agent_settled", (event: { aborted?: boolean }, ctx) => {
     const id = ctx.sessionManager.getSessionId();
-    roots.set(id, terminalRoots.get(id) ?? { completed: null });
+    const terminal = terminalRoots.get(id);
+    roots.set(
+      id,
+      (event.aborted ?? terminal?.aborted)
+        ? "interrupted"
+        : (terminal?.status ?? { completed: null }),
+    );
     terminalRoots.delete(id);
   });
   pi.on("session_shutdown", () => {

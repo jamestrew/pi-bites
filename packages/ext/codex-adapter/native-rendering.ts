@@ -10,6 +10,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { sanitizeText } from "../shared/terminal-text.js";
 import { renderExecResult } from "./exec/command-tool.js";
+import type { ApplyPatchRenderSnapshot } from "./apply-patch/render-state.js";
 import type { UnifiedExecResult } from "./exec/session-manager.js";
 
 type Context = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
@@ -148,7 +149,7 @@ export function createNativeRendering(pi: ExtensionAPI, owned: Record<string, Re
       scope.calls.set(call.id, {
         ...call,
         status: event.isError ? "error" : "completed",
-        durationMs: Date.now() - call.startedAt,
+        durationMs: event.durationMs ?? Date.now() - call.startedAt,
         // Unrelated tools keep metadata-only presentation; do not retain arbitrary payloads.
         result:
           renderers.has(call.name) || event.isError
@@ -225,25 +226,23 @@ export function createNativeRendering(pi: ExtensionAPI, owned: Record<string, Re
               lastComponent: undefined,
             });
           const body = new Container();
-          const retained = data.display.calls;
+          let outputHidden = false;
+          const { calls: retained, omitted, cwd } = data.display;
           const calls = options.expanded ? retained : retained.slice(-8);
-          for (const [index, call] of calls.entries()) {
+          const rows = calls.map((call) =>
+            renderCall(call, renderers.get(call.name), theme, {
+              ...context,
+              cwd,
+            }),
+          );
+          for (const [index, row] of rows.entries()) {
             if (index) body.addChild(new Text(" ", 0, 0));
-            body.addChild(
-              renderCall(call, renderers.get(call.name), theme, {
-                ...context,
-                cwd: data.display.cwd,
-              }),
-            );
+            body.addChild(row.component);
           }
           // Execution metadata may retain calls whose larger display snapshots were evicted.
-          if (data.display.omitted)
+          if (omitted)
             body.addChild(
-              new Text(
-                theme.fg("dim", `[${data.display.omitted} earlier display snapshots omitted]`),
-                0,
-                0,
-              ),
+              new Text(theme.fg("dim", `[${omitted} earlier display snapshots omitted]`), 0, 0),
             );
           // Pi joins adjacent text emissions and the final script error into one block.
           const content = result.content.flatMap((part) => {
@@ -289,14 +288,14 @@ export function createNativeRendering(pi: ExtensionAPI, owned: Record<string, Re
               outputResult,
               { ...options, expanded: true },
               theme,
-              { ...context, lastComponent: undefined },
+              { ...context, state: {}, durationMs: undefined, lastComponent: undefined },
             );
             const nativeErrors = errors.length
               ? nativeRenderResult(
                   { ...outputResult, content: errors },
                   { ...options, expanded: true },
                   theme,
-                  { ...context, lastComponent: undefined },
+                  { ...context, state: {}, durationMs: undefined, lastComponent: undefined },
                 )
               : undefined;
             body.addChild({
@@ -314,12 +313,8 @@ export function createNativeRendering(pi: ExtensionAPI, owned: Record<string, Re
                       0,
                     ).render(width),
                   );
-                if (
-                  !options.expanded &&
-                  (lines.length > visible.length || errorLines.length > visibleErrors.length) &&
-                  retained.length <= calls.length
-                )
-                  rendered.push(...hint(theme).render(width));
+                outputHidden =
+                  lines.length > visible.length || errorLines.length > visibleErrors.length;
                 return rendered;
               },
               invalidate() {
@@ -328,7 +323,35 @@ export function createNativeRendering(pi: ExtensionAPI, owned: Record<string, Re
               },
             });
           }
-          if (retained.length > calls.length) body.addChild(hint(theme));
+          // Native renderCall owns the live clock. Delegate timing once, outside output
+          // clipping; output/error delegations above deliberately have no timing state.
+          const timing = nativeRenderResult(
+            { content: [], details: { calls: [] } },
+            options,
+            theme,
+            { ...context, lastComponent: undefined },
+          );
+          // Child previews retain local omission information; the footer keeps an
+          // expansion hint discoverable after the overall timer, including nested-only output.
+          const expansionHint = hint(theme);
+          body.addChild({
+            render(width) {
+              const lines = timing.render(width);
+              return [
+                ...lines,
+                ...(!options.expanded &&
+                (outputHidden ||
+                  retained.length > calls.length ||
+                  rows.some((row) => row.hasHiddenContent()))
+                  ? expansionHint.render(width)
+                  : []),
+              ];
+            },
+            invalidate() {
+              timing.invalidate();
+              expansionHint.invalidate();
+            },
+          });
           return fit(body);
         },
       };
@@ -348,12 +371,11 @@ function displayResult(
   };
 }
 
-function renderCall(
-  call: DisplayCall,
-  tool: Renderer | undefined,
-  theme: Theme,
-  outer: Context,
-): Component {
+function renderCall(call: DisplayCall, tool: Renderer | undefined, theme: Theme, outer: Context) {
+  let hiddenContent = false;
+  const markHidden = () => {
+    hiddenContent = true;
+  };
   const partial = call.status === "running";
   const error = call.status === "error";
   const state: Record<string, unknown> = {};
@@ -366,6 +388,7 @@ function renderCall(
     state,
     argsComplete: true,
     executionStarted: true,
+    durationMs: call.durationMs,
     isPartial: partial,
     isError: error,
     invalidate() {},
@@ -408,7 +431,14 @@ function renderCall(
       row.addChild(
         renderExecResult(
           result as AgentToolResult<UnifiedExecResult>,
-          { expanded: outer.expanded, isPartial: partial, showInputTokens: false },
+          {
+            expanded: outer.expanded,
+            isPartial: partial,
+            showInputTokens: false,
+            onHiddenContent: (hidden) => {
+              hiddenContent = hidden;
+            },
+          },
           theme,
           { isError: error, state: {} },
         ),
@@ -425,7 +455,8 @@ function renderCall(
     if (result)
       tool.renderResult?.(result, { expanded: outer.expanded, isPartial: partial }, theme, context);
     row.addChild(new Text(" ", 0, 0));
-    const snapshot = (result?.details as { render?: unknown } | undefined)?.render;
+    const snapshot = (result?.details as { render?: ApplyPatchRenderSnapshot } | undefined)?.render;
+    if (!outer.expanded && snapshot?.collapsedDiff !== snapshot?.expanded) markHidden();
     const child = tool.renderCall?.(
       input as never,
       theme,
@@ -437,13 +468,16 @@ function renderCall(
     if (call.name === "web_run" && result)
       tool.renderResult?.(result, { expanded: outer.expanded, isPartial: partial }, theme, context);
     if (error && result && !(call.name === "web_run" && outer.expanded))
-      row.addChild(detailsText(textContent(result), outer.expanded, theme));
-    else if (call.name === "web_run" && !outer.expanded && result && textContent(result))
+      row.addChild(detailsText(textContent(result), outer.expanded, theme, markHidden));
+    else if (call.name === "web_run" && !outer.expanded && result && textContent(result)) {
+      markHidden();
       row.addChild(hint(theme));
-  } else if (error && result) row.addChild(detailsText(textContent(result), outer.expanded, theme));
+    }
+  } else if (error && result)
+    row.addChild(detailsText(textContent(result), outer.expanded, theme, markHidden));
   if (call.status === "interrupted")
     row.addChild(new Text("\n" + theme.fg("dim", "No final result retained (script ended)"), 0, 0));
-  return fit(row);
+  return { component: fit(row), hasHiddenContent: () => hiddenContent };
 }
 function textContent(result: AgentToolResult<unknown>) {
   return result.content
@@ -451,7 +485,7 @@ function textContent(result: AgentToolResult<unknown>) {
     .map((p) => p.text)
     .join("\n");
 }
-function detailsText(text: string, expanded: boolean, theme: Theme) {
+function detailsText(text: string, expanded: boolean, theme: Theme, onHidden: () => void) {
   const lines = sanitizeText(text).split("\n");
   const component = new Container();
   component.addChild(
@@ -461,7 +495,10 @@ function detailsText(text: string, expanded: boolean, theme: Theme) {
       0,
     ),
   );
-  if (!expanded && lines.length > 8) component.addChild(hint(theme));
+  if (!expanded && lines.length > 8) {
+    onHidden();
+    component.addChild(hint(theme));
+  }
   return component;
 }
 function hint(theme: Theme) {

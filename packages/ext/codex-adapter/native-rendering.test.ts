@@ -3,7 +3,11 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { Text, visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { expect, test, vi } from "vitest";
-import { initTheme, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  initTheme,
+  ToolExecutionComponent,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { createNativeRendering } from "./native-rendering.js";
 import { setup, textOf } from "./test/native-session.js";
 
@@ -78,6 +82,7 @@ function rendered(
   expanded = false,
   width = 100,
   theme = plainTheme,
+  context: Record<string, unknown> = {},
 ) {
   return h.session.getToolDefinition("codemode")!.renderResult!(
     JSON.parse(JSON.stringify(event.result ?? event.partialResult)),
@@ -98,6 +103,7 @@ function rendered(
       showImages: false,
       durationMs: undefined,
       outputPad: 1,
+      ...context,
     },
   )
     .render(width)
@@ -396,7 +402,7 @@ test("hybrid caches idle redraws but rerenders on resize and invalidation", asyn
   });
   const tool = rendering.decorate({
     ...h.session.getToolDefinition("codemode")!,
-    renderResult: () => output,
+    renderResult: (result) => (result.content.length ? output : new Text("", 0, 0)),
   });
   const component = tool.renderResult!(
     {
@@ -508,3 +514,276 @@ test.each(["custom", "constructor", "toString", "__proto__"])(
     );
   },
 );
+
+test("nested snapshots prefer recorded duration and delegate only their own timing, including legacy absence", async () => {
+  const h = await setup();
+  const handlers = new Map<string, (event: any) => any>();
+  const childContexts: any[] = [];
+  const rendering = createNativeRendering(
+    {
+      on: (name: string, fn: (event: any) => any) => handlers.set(name, fn),
+    } as unknown as ExtensionAPI,
+    {
+      web_run: {
+        renderCall: (_args, _theme, ctx) => {
+          childContexts.push(ctx);
+          return new Text("child", 0, 0);
+        },
+      },
+    },
+  );
+  const tool = rendering.decorate({
+    ...h.session.getToolDefinition("codemode")!,
+    execute: async () => ({ content: [], details: { calls: [] } }),
+  });
+  await tool.execute("parent", { code: "" }, new AbortController().signal, undefined, {
+    cwd: h.cwd,
+  } as never);
+  const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
+  try {
+    for (const [id, durationMs] of [
+      ["recorded", 123],
+      ["fallback", undefined],
+    ] as const) {
+      clock.mockReturnValue(1000);
+      handlers.get("tool_execution_start")!({
+        parentToolCallId: "parent",
+        toolCallId: id,
+        toolName: "web_run",
+        args: {},
+      });
+      clock.mockReturnValue(9000);
+      handlers.get("tool_execution_end")!({
+        parentToolCallId: "parent",
+        toolCallId: id,
+        toolName: "web_run",
+        durationMs,
+        isError: false,
+        result: { content: [] },
+      });
+    }
+    const result = {
+      content: [],
+      ...handlers.get("tool_result")!({
+        toolName: "codemode",
+        toolCallId: "parent",
+        content: [],
+        details: { calls: [] },
+      }),
+    };
+    expect(result.details.display.calls.map((call: any) => call.durationMs)).toEqual([123, 8000]);
+    // Round-trip saved display; old snapshots have no duration and must not inherit the script's.
+    const saved = JSON.parse(JSON.stringify(result));
+    delete saved.details.display.calls[1].durationMs;
+    const component = tool.renderResult!(
+      saved,
+      { expanded: false, isPartial: false },
+      plainTheme as never,
+      {
+        durationMs: 9876,
+        state: {},
+        expanded: false,
+        outputPad: 1,
+      } as never,
+    );
+    expect(component.render(100).join("\n")).toContain("123ms");
+    expect(childContexts.map((ctx) => ctx.durationMs)).toEqual([123, undefined]);
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test("one native overall timer survives silent, clipped and expanded output, with the hint last", async () => {
+  const h = await setup(["read", "codemode"]);
+  writeFileSync(join(h.cwd, "item.txt"), "nested output");
+  for (const code of [
+    "void 0;",
+    "text('script only');",
+    "await tools.read({path:'item.txt'});",
+    "await tools.read({path:'item.txt'}); text('short');",
+    "await tools.read({path:'item.txt'}); text(Array.from({length:20},(_,i)=>'line '+i).join('\\n'));",
+    "await tools.read({path:'item.txt'}); text(Array.from({length:20},(_,i)=>'line '+i).join('\\n')); throw new Error('failure');",
+  ]) {
+    const end = await h.run(code);
+    expect(end.isError).toBe(code.includes("failure"));
+    for (const expanded of [false, true]) {
+      const lines = rendered(h, end, expanded, 100, plainTheme, { durationMs: 4321, outputPad: 3 });
+      const text = lines.join("\n");
+      expect(text.match(/Took /g)).toHaveLength(1);
+      expect(text).toContain("Took 4.3s");
+      const timerLine = lines.indexOf("Took 4.3s");
+      expect(lines[timerLine - 1]).toBe("");
+      expect(lines[timerLine - 2]).not.toBe("");
+      if (code.includes("failure")) {
+        expect(text).toContain("failure");
+        if (!expanded) expect(lines.at(-1)).toContain("to expand");
+      }
+      // The default host shell owns horizontal padding, even for nondefault outputPad.
+      expect(lines.find((line) => line.includes("Took "))).toBe("Took 4.3s");
+    }
+    expect(rendered(h, end).join("\n")).not.toMatch(/Took |Elapsed /);
+  }
+});
+
+test("silent running scripts reuse native live timing and finish with recorded time", async () => {
+  const h = await setup(["read", "codemode"]);
+  writeFileSync(join(h.cwd, "item.txt"), "nested output");
+  const end = await h.run("await tools.read({path:'item.txt'});");
+  const tool = h.session.getToolDefinition("codemode")!;
+  const state = {};
+  const invalidate = vi.fn();
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(1000);
+    tool.renderCall!({ code: "" }, plainTheme as never, { state, executionStarted: true } as never);
+    const partial = { type: "tool_execution_update", partialResult: end.result };
+    const context = { state, invalidate };
+    expect(rendered(h, partial, false, 100, plainTheme, context).join("\n")).toContain(
+      "Elapsed 0.0s",
+    );
+    vi.advanceTimersByTime(2000);
+    expect(invalidate).toHaveBeenCalled();
+    expect(rendered(h, partial, false, 100, plainTheme, context).join("\n")).toContain(
+      "Elapsed 2.0s",
+    );
+    expect(
+      rendered(h, end, false, 100, plainTheme, { ...context, durationMs: 321 }).join("\n"),
+    ).toContain("Took 0.3s");
+    const invalidations = invalidate.mock.calls.length;
+    vi.advanceTimersByTime(2000);
+    expect(invalidate).toHaveBeenCalledTimes(invalidations);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the host applies configured output padding once around code, nested rows, output and timing", async () => {
+  initTheme("dark");
+  const h = await setup(["read", "codemode"]);
+  writeFileSync(join(h.cwd, "item.txt"), "nested output");
+  const code = "await tools.read({path:'item.txt'}); text('explicit summary');";
+  const end = await h.run(code);
+  const tool = h.session.getToolDefinition("codemode")!;
+  for (const expanded of [false, true]) {
+    const row = new ToolExecutionComponent(
+      "codemode",
+      end.toolCallId,
+      { code },
+      { outputPad: 3, showImages: false },
+      tool,
+      { requestRender() {} } as never,
+      h.cwd,
+    );
+    row.setArgsComplete();
+    row.setExpanded(expanded);
+    row.updateResult({ ...end.result, isError: false, durationMs: 4321 });
+    const lines = row.render(100).map(stripVTControlCharacters);
+    for (const fragment of ["await tools.read", "✓ read", "explicit summary", "Took 4.3s"]) {
+      const line = lines.find((line) => line.includes(fragment));
+      expect(line).toBeDefined();
+      expect(line).toMatch(/^ {3}\S/);
+    }
+    expect(lines.every((line) => visibleWidth(line) <= 100)).toBe(true);
+    expect(lines[0]?.trim()).toBe("");
+    expect(lines.at(-1)?.trim()).toBe("");
+  }
+});
+
+test("truncated native output remains retrievable with final timing outside the collapsed preview", async () => {
+  const h = await setup(["read", "codemode"]);
+  writeFileSync(join(h.cwd, "item.txt"), "nested output");
+  const end = await h.run(
+    '// @options: {"max_output_tokens": 100}\nawait tools.read({path:"item.txt"}); text("retained full output\\n".repeat(1000));',
+  );
+  const path = end.result.details.fullOutputPath;
+  expect(path).toBeTypeOf("string");
+  expect(readFileSync(path, "utf8")).toContain("retained full output");
+  for (const expanded of [false, true]) {
+    const text = rendered(h, end, expanded, 200, plainTheme, { durationMs: 4321 }).join("\n");
+    expect(text).toContain(path);
+    expect(text.match(/Took /g)).toHaveLength(1);
+    expect(text).toContain("Took 4.3s");
+    for (const width of [1, 7, 20])
+      expect(
+        rendered(h, end, expanded, width, plainTheme, { durationMs: 4321 }).every(
+          (line) => visibleWidth(line) <= width,
+        ),
+      ).toBe(true);
+  }
+});
+
+test("nested-only shell, error, web and patch previews keep an expansion hint below overall timing", async () => {
+  initTheme("dark");
+  const h = await setup();
+  const shell = await h.run(
+    `await tools.exec_command({cmd:"printf '%s\\n' {1..20}",login:false});`,
+  );
+  const patch =
+    "*** Begin Patch\n*** Add File: long-preview.txt\n" +
+    Array.from({ length: 20 }, (_, i) => `+line ${i}`).join("\n") +
+    "\n*** End Patch";
+  const patched = await h.run(`await tools.apply_patch(${JSON.stringify(patch)});`);
+  const restored = (name: string) => ({
+    result: {
+      content: [],
+      details: {
+        calls: [],
+        display: {
+          cwd: h.cwd,
+          omitted: 0,
+          calls: [
+            {
+              id: "saved-child",
+              name,
+              args: {},
+              status: name === "custom" ? "error" : "completed",
+              startedAt: 0,
+              result: {
+                content: [
+                  {
+                    type: "text",
+                    text: Array.from({ length: 20 }, (_, i) => `detail ${i}`).join("\n"),
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    },
+  });
+  for (const end of [shell, patched, restored("custom"), restored("web_run")]) {
+    for (const expanded of [false, true]) {
+      const lines = rendered(h, end, expanded, 200, plainTheme, { durationMs: 4321 });
+      expect(lines.join("\n")).toContain("Took 4.3s");
+      expect(lines.at(-1)).toContain(expanded ? "Took 4.3s" : "to expand");
+    }
+  }
+  expect(
+    rendered(h, shell, false, 200, plainTheme, { durationMs: 4321 }).join("\n").match(/Took /g),
+  ).toHaveLength(2); // Shell per-wait timing remains separate from overall script timing.
+  const styled = rendered(
+    h,
+    shell,
+    false,
+    200,
+    {
+      ...plainTheme,
+      fg: (role, text) => `<${role}>${text}</${role}>`,
+    },
+    { durationMs: 4321 },
+  );
+  expect(stripVTControlCharacters(styled.at(-1) ?? "")).toMatch(/^<dim>\(.*to expand\)<\/dim>$/);
+
+  // A child hidden by wrapping may become fully visible after resize.
+  const saved = JSON.parse(JSON.stringify(shell.result));
+  saved.details.display.calls[0].result.details.output = "x".repeat(600);
+  const component = h.session.getToolDefinition("codemode")!.renderResult!(
+    saved,
+    { expanded: false, isPartial: false },
+    plainTheme as never,
+    { durationMs: 4321, state: {}, expanded: false } as never,
+  );
+  expect(component.render(80).at(-1)).toContain("to expand");
+  expect(component.render(800).at(-1)?.trimEnd()).toBe("Took 4.3s");
+});

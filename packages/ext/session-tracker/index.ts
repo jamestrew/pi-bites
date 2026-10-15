@@ -553,6 +553,7 @@ export function createNeedsInputLifecycle(
 ) {
   const backgroundAgents = new Set<string>();
   let pendingText: string | undefined;
+  let pendingAborted = false;
   let settledState: TrackerState = "idle";
   let agentRunning = false;
   const runningCompactions = new Set<symbol>();
@@ -577,6 +578,7 @@ export function createNeedsInputLifecycle(
     reset() {
       backgroundAgents.clear();
       pendingText = undefined;
+      pendingAborted = false;
       settledState = "idle";
       agentRunning = false;
       runningCompactions.clear();
@@ -586,13 +588,16 @@ export function createNeedsInputLifecycle(
       generation++;
       agentRunning = true;
       pendingText = undefined;
+      pendingAborted = false;
       await setState("working");
     },
     agentEnd(event: AgentEndEvent) {
       pendingText = extractLastAssistantText(event.messages);
+      const last = [...event.messages].reverse().find((message) => message.role === "assistant");
+      pendingAborted = last?.stopReason === "aborted";
     },
-    async agentSettled(ctx: ExtensionContext) {
-      const text = pendingText;
+    async agentSettled(ctx: ExtensionContext, aborted?: boolean) {
+      const text = (aborted ?? pendingAborted) ? undefined : pendingText;
       const settledGeneration = generation;
       pendingText = undefined;
       let nextSettledState: TrackerState = "idle";
@@ -714,7 +719,7 @@ export default function registerSessionTracker(
   pi.events.on("subagents:completed", finishBackgroundAgent);
   pi.events.on("subagents:failed", finishBackgroundAgent);
   pi.on("agent_end", (event) => needsInputLifecycle.agentEnd(event));
-  pi.on("agent_settled", (_event, ctx) => needsInputLifecycle.agentSettled(ctx));
+  pi.on("agent_settled", (event, ctx) => needsInputLifecycle.agentSettled(ctx, event.aborted));
   pi.on("session_shutdown", async (event) => {
     footerRuntime.stop(currentCtx);
     currentCtx = undefined;
