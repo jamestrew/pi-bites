@@ -1,5 +1,8 @@
 # Native Code Mode release validation (#372)
 
+For current Pi 1.4.0 runtime and distribution evidence, see
+[Pi 1.4 validation](native-validation-1.4.md). The 0.99.1 results below are historical.
+
 ## Disposition
 
 The integrated parent and SDK child adapter passes the local Pi 0.99.1 checks and

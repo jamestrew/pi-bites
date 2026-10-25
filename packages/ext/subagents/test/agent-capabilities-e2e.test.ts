@@ -21,6 +21,7 @@ import { openAgentSession } from "../agent-runner.js";
 import { onSubagentApprovalRequest } from "../../bash-gate/events.js";
 import { EXTENSION_NAMES } from "../../config.js";
 import { shutdownAgentSession } from "../agent-session-shutdown.js";
+import { setup as setupParent, textOf } from "../../codex-adapter/test/native-session.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -196,6 +197,94 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
     expect(child!.resourceLoader.getExtensions().errors).toEqual([]);
     await child!.reload();
     expect(child!.resourceLoader.getExtensions().errors).toEqual([]);
+  });
+
+  it("shares worker admission with parents, cancels queued child scripts, and reuses capacity", async () => {
+    // Keep the native default of two workers; approval promises hold them without CPU loops.
+    vi.stubEnv("PI_CODEMODE_MAX_WORKERS", "2");
+    const parents: Awaited<ReturnType<typeof setupParent>>[] = [];
+    const choices: ReturnType<typeof Promise.withResolvers<string>>[] = [];
+    const pending: Promise<unknown>[] = [];
+    const pi = {
+      exec: async () => ({ code: 1, stdout: "", stderr: "" }),
+      events: createEventBus(),
+    } as any;
+    const approve = vi.fn(async () => ({
+      outcome: "allow" as const,
+      authorization: "human-approved" as const,
+    }));
+    const unsubscribe = onSubagentApprovalRequest(pi, approve);
+    try {
+      configure([], [{ cmd: "printf" }]);
+      await open(undefined, INITIAL, { pi });
+      for (let i = 0; i < 2; i++) {
+        const parent = await setupParent(undefined, {
+          gate: true,
+          config: { bashGate: { rules: [{ cmd: "printf" }] } },
+        });
+        parents.push(parent);
+        const choice = Promise.withResolvers<string>();
+        choices.push(choice);
+        parent.ui.select.mockImplementationOnce(() => choice.promise);
+        pending.push(
+          parent.run(
+            '// @options: {"timeout_ms":10000}\ntext(await tools.exec_command({cmd:"printf parent",login:false}));',
+          ),
+        );
+        await expect.poll(() => parent.ui.select.mock.calls.length).toBe(1);
+      }
+
+      const starts: string[] = [];
+      child!.subscribe((event) => {
+        if (event.type === "tool_execution_start") starts.push(event.toolName);
+      });
+      const cancelled = run(
+        '// @options: {"timeout_ms":5000}\nawait tools.exec_command({cmd:"printf cancelled > cancelled",login:false});',
+      );
+      pending.push(cancelled);
+      await expect.poll(() => starts.length).toBe(1);
+      await child!.abort();
+      const aborted = await cancelled;
+      expect(aborted.isError, aborted.text).toBe(true);
+      expect(aborted.text).toContain("The script did not start.");
+      expect(approve).not.toHaveBeenCalled();
+
+      const expired = await run(
+        '// @options: {"timeout_ms":100}\nawait tools.exec_command({cmd:"printf expired > expired",login:false});',
+      );
+      expect(expired.isError, expired.text).toBe(true);
+      expect(expired.text).toMatch(/timed out/i);
+      expect(expired.text).toContain("The script did not start.");
+      expect(approve).not.toHaveBeenCalled();
+
+      const queued = run(
+        '// @options: {"timeout_ms":5000}\ntext(await tools.exec_command({cmd:"printf child",login:false}));',
+      );
+      pending.push(queued);
+      await expect.poll(() => starts.length).toBe(3);
+      expect(approve).not.toHaveBeenCalled();
+      choices[0]!.resolve("Allow");
+      const result = await queued;
+      expect(result.isError, result.text).toBe(false);
+      expect(result.text).toContain('"output":"child"');
+      expect(approve).toHaveBeenCalledOnce();
+      choices[1]!.resolve("Allow");
+      for (const result of await Promise.all(pending.slice(0, 2))) {
+        expect((result as any).isError, textOf(result)).toBe(false);
+      }
+      expect(existsSync(join(cwd, "cancelled"))).toBe(false);
+      expect(existsSync(join(cwd, "expired"))).toBe(false);
+      expect((await run("text(42);")).text).toMatch(/Output:\s*42/);
+    } finally {
+      for (const choice of choices) choice.resolve("Deny");
+      await Promise.allSettled([
+        ...parents.map((parent) => parent.session.abort()),
+        ...(child ? [child.abort()] : []),
+      ]);
+      await Promise.allSettled(pending);
+      unsubscribe();
+      vi.unstubAllEnvs();
+    }
   });
 
   it("discovers and executes typed native shell values host-free, then polls a resumable shell", async () => {
