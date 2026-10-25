@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 import { Value } from "typebox/value";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, test, vi } from "vitest";
 
 import { getBundledWebRunPath } from "./web-run/binary.js";
@@ -852,65 +853,87 @@ describe("web_run rendering", () => {
     fg: (role: string, text: string) => `<${role}>${text}</${role}>`,
     bg: (_role: string, text: string) => text,
   };
-
-  test("renders one semantic collapsed row without exposing navigation IDs", () => {
+  test("keeps one styled web row as cached padding and expansion change", () => {
     const tool = createWebRunTool({ getConfig: () => ({}) });
-    const context = {
-      state: {},
-      isPartial: false,
-      isError: false,
-    } as never;
-    const call = tool.renderCall!({ open: [{ ref_id: "turn0search4" }] }, theme as never, context);
-    const result = tool.renderResult!(
-      {
-        content: [{ type: "text", text: "result body" }],
-        details: { route: "stock", webRun: {} },
-      },
-      { expanded: false, isPartial: false },
-      theme as never,
-      context,
-    );
-
+    const context = { state: {}, isPartial: false, isError: false, outputPad: 0 };
     expect(tool.renderShell).toBe("self");
-    expect([...call.render(200), ...result.render(200)].map((line) => line.trimEnd())).toEqual([
-      "",
-      "<bold>Web</bold><accent> Open search result</accent>",
-      "",
-    ]);
+    for (const [outputPad, expanded] of [
+      [0, false],
+      [1, false],
+      [1, true],
+      [0, true],
+      [0, false],
+    ] as const) {
+      context.outputPad = outputPad;
+      const call = tool.renderCall!(
+        { open: [{ ref_id: "turn0search4" }] },
+        theme as never,
+        context as never,
+      );
+      const result = tool.renderResult!(
+        {
+          content: [{ type: "text", text: "first\nsecond" }],
+          details: { route: "stock", webRun: {} },
+        },
+        { expanded, isPartial: false },
+        theme as never,
+        context as never,
+      );
+      expect([...call.render(200), ...result.render(200)].map((line) => line.trimEnd())).toEqual([
+        "",
+        (outputPad ? " " : "") + "<bold>Web</bold><accent> Open search result</accent>",
+        ...(expanded
+          ? ["", ...["first", "second"].map((text) => `${outputPad ? " " : ""}<dim>${text}</dim>`)]
+          : []),
+        "",
+      ]);
+    }
   });
-
-  test("uses action summaries and reserves a blank line for expanded details", () => {
+  test.each([0, 1])("keeps standalone framing and safe widths with outputPad=%s", (outputPad) => {
     const tool = createWebRunTool({ getConfig: () => ({}) });
-    const context = {
-      state: {},
-      isPartial: false,
-      isError: false,
-    } as never;
-    const call = tool.renderCall!(
-      { search_query: [{ q: "TypeScript official handbook" }] },
-      theme as never,
-      context,
-    );
-    const result = tool.renderResult!(
-      {
-        content: [{ type: "text", text: "first\nsecond" }],
-        details: { route: "stock", webRun: {} },
-      },
-      { expanded: true, isPartial: false },
-      theme as never,
-      context,
-    );
-
-    expect([...call.render(200), ...result.render(200)].map((line) => line.trimEnd())).toEqual([
-      "",
-      "<bold>Web</bold><accent> Search TypeScript official handbook</accent>",
-      "",
-      "<dim>first</dim>",
-      "<dim>second</dim>",
-      "",
-    ]);
+    const plainTheme = {
+      bold: (text: string) => text,
+      fg: (_role: string, text: string) => text,
+      bg: (_role: string, text: string) => text,
+    };
+    const context = { state: {}, isPartial: true, isError: false, outputPad };
+    const args = {
+      search_query: [{ q: "docs\u001b]52;c;INJECTED\u0007" }],
+      open: [{ ref_id: "turn0view0" }],
+    };
+    for (const phase of ["partial", "success", "error"]) {
+      for (const expanded of [false, true]) {
+        context.isPartial = phase === "partial";
+        context.isError = phase === "error";
+        const call = tool.renderCall!(args, plainTheme as never, context as never);
+        const text =
+          (context.isError ? "search unavailable" : "first\n" + "界".repeat(80) + "\nlast") +
+          "\u001b]52;c;INJECTED\u0007";
+        const result = tool.renderResult!(
+          { content: [{ type: "text", text }], details: { route: "stock", webRun: {} } },
+          { expanded, isPartial: context.isPartial },
+          plainTheme as never,
+          context as never,
+        );
+        for (const width of [1, 2, 7, 80]) {
+          const lines = [...call.render(width), ...result.render(width)];
+          expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+          expect(lines[0]?.trim()).toBe("");
+          expect(lines.at(-1)?.trim()).toBe("");
+          expect(lines.join("\n")).not.toContain("INJECTED");
+          if (width !== 80) continue;
+          expect(lines[1]?.trimEnd()).toBe(
+            outputPad ? " Web Search docs · Open page" : "Web Search docs · Open page",
+          );
+          expect(lines.filter((line) => line.includes("Web Search"))).toHaveLength(1);
+          if (expanded) {
+            expect(lines[2]?.trim()).toBe("");
+            expect(lines.at(-2)?.trim()).toBe(context.isError ? "search unavailable" : "last");
+          } else expect(lines).toHaveLength(3);
+        }
+      }
+    }
   });
-
   test("includes every operation in a multi-operation call summary", () => {
     const tool = createWebRunTool({ getConfig: () => ({}) });
     const call = tool.renderCall!(
@@ -922,7 +945,7 @@ describe("web_run rendering", () => {
         find: [{ ref_id: "turn0view0", pattern: "needle" }],
       },
       theme as never,
-      { state: {}, isPartial: false, isError: false } as never,
+      { state: {}, isPartial: false, isError: false, outputPad: 0 } as never,
     );
 
     expect(call.render(200).join("\n")).toContain(

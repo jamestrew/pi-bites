@@ -10,6 +10,7 @@ import { nativeBinaryRecoveryMessage } from "../native-binary-error.js";
 import { runBundledTool } from "../native/runner.js";
 import { getBundledWebRunPath } from "./binary.js";
 import { summarizeWebRunCall } from "./summary.js";
+import { fitLine, sanitizeText } from "../../shared/terminal-text.js";
 
 const RESPONSES_APIS = new Set([
   "openai-responses",
@@ -520,6 +521,7 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
     renderCall(args, theme, context) {
       const summary = summarizeWebRunCall(args);
       const component = context.state.call ?? new Box(0, 1);
+      component.setPaddingX(context.outputPad);
       const background = context.isError
         ? "toolErrorBg"
         : context.isPartial
@@ -531,7 +533,11 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
         new Text(theme.bold("Web") + (summary ? theme.fg("accent", ` ${summary}`) : ""), 0, 0),
       );
       context.state.call = component;
-      return component;
+      return {
+        // Box keeps at least one content column, even when the inset consumes the width.
+        render: (width) => component.render(width).map((line) => fitLine(line, width)),
+        invalidate: () => component.invalidate(),
+      };
     },
     renderResult(result, { expanded }, theme, context) {
       const text = result.content.find((item) => item.type === "text")?.text;
@@ -539,7 +545,7 @@ export function createWebRunTool(options: CreateWebRunToolOptions): OwnedToolDef
         context.state.call.addChild(new Spacer(1));
         context.state.call.addChild(
           new Text(
-            text
+            sanitizeText(text)
               .split("\n")
               .map((line) => theme.fg("dim", line))
               .join("\n"),
