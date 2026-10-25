@@ -30,6 +30,7 @@ import {
   type SubagentSender,
 } from "../subagent-messages.js";
 import { ShellAuthorizationTransactions } from "../../bash-gate/authorization.js";
+import registerAutoCompaction from "../../auto-compaction.js";
 
 vi.setConfig({ testTimeout: 30_000 });
 
@@ -88,6 +89,10 @@ async function makeSession(
   tools: ToolDefinition[] = [],
   extensionFactories: Array<(pi: ExtensionAPI) => void> = [],
   activeToolNames = tools.map((tool) => tool.name),
+  options: {
+    streamSimple?: Parameters<ModelRuntime["registerProvider"]>[1]["streamSimple"];
+    mode?: Parameters<AgentSession["bindExtensions"]>[0]["mode"];
+  } = {},
 ) {
   const cwd = mkdtempSync(join(tmpdir(), "subagent-message-e2e-"));
   tempDirs.push(cwd);
@@ -100,6 +105,7 @@ async function makeSession(
     api: "openai-completions",
     apiKey: "test",
     baseUrl: "http://localhost",
+    ...(options.streamSimple ? { streamSimple: options.streamSimple } : {}),
     models: [
       {
         id: "model",
@@ -136,7 +142,7 @@ async function makeSession(
     settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
     resourceLoader: loader,
   });
-  await session.bindExtensions({});
+  await session.bindExtensions({ mode: options.mode });
   return { model, session, sessionManager, cwd };
 }
 
@@ -425,6 +431,157 @@ function compactFromExtension(pi: ExtensionAPI) {
     },
   }));
 }
+
+it("native split-turn summaries retain instructions without capping output at reserveTokens", async () => {
+  const summaries: Array<{ context: Context; maxTokens?: number }> = [];
+  const tool = defineTool({
+    name: "summary_probe",
+    label: "Summary probe",
+    description: "Return bounded synthetic compaction context.",
+    parameters: Type.Object({}),
+    async execute() {
+      return { content: [{ type: "text", text: "synthetic context ".repeat(200) }], details: {} };
+    },
+  });
+  let split = false;
+  let turns = 0;
+  let continued = false;
+  let resumedContext = "";
+  const { session } = await makeSession(
+    [tool],
+    [
+      (pi) =>
+        pi.on("session_before_compact", (event) => {
+          split = event.preparation.isSplitTurn;
+        }),
+    ],
+    undefined,
+    {
+      streamSimple: (model, context, options) => {
+        if (options?.cacheRetention === "none") {
+          summaries.push({ context: structuredClone(context), maxTokens: options.maxTokens });
+          return response(model, [{ type: "text", text: "Synthetic checkpoint." }]);
+        }
+        if (continued) {
+          resumedContext = JSON.stringify(context.messages);
+          return response(model, [{ type: "text", text: "Continued after the checkpoint." }]);
+        }
+        return turns++ === 0
+          ? response(
+              model,
+              [
+                { type: "thinking", thinking: "PRIVATE_REASONING_MARKER" },
+                ...[1, 2, 3].map((id) => ({
+                  type: "toolCall" as const,
+                  id: `summary-${id}`,
+                  name: tool.name,
+                  arguments: {},
+                })),
+              ],
+              "toolUse",
+            )
+          : response(model, [{ type: "text", text: "Finished synthetic work." }]);
+      },
+    },
+  );
+  try {
+    await session.prompt("Summarize only synthetic context.");
+    session.settingsManager.applyOverrides({
+      compaction: { enabled: false, reserveTokens: 7, keepRecentTokens: 100 },
+    });
+    await session.compact("Retain the SYNTHETIC_FOCUS marker.");
+    expect(split).toBe(true);
+    expect(summaries).toHaveLength(1);
+    for (const summary of summaries) {
+      expect(summary.maxTokens).toBeUndefined();
+      expect(JSON.stringify(summary.context)).toContain("SYNTHETIC_FOCUS");
+      expect(JSON.stringify(summary.context)).not.toContain("PRIVATE_REASONING_MARKER");
+    }
+    expect(session.messages.some((message) => message.role === "compactionSummary")).toBe(true);
+    continued = true;
+    await session.prompt("Continue.");
+    expect(resumedContext).toContain("Synthetic checkpoint.");
+    expect(session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "Continued after the checkpoint." }],
+    });
+  } finally {
+    session.dispose();
+  }
+});
+
+it("automatic compaction stops a real tool turn and starts one custom continuation", async () => {
+  const settled: boolean[] = [];
+  const starts: string[] = [];
+  let summaries = 0;
+  let requests = 0;
+  let continuationContext = "";
+  const tool = defineTool({
+    name: "continuation_probe",
+    label: "Continuation probe",
+    description: "Return synthetic context for automatic compaction.",
+    parameters: Type.Object({}),
+    async execute() {
+      return { content: [{ type: "text", text: "synthetic context ".repeat(200) }], details: {} };
+    },
+  });
+  const { session } = await makeSession(
+    [tool],
+    [
+      (pi) => {
+        registerAutoCompaction(pi, { current: { autoCompaction: { thresholdTokens: 1000 } } });
+        pi.on("before_agent_start", (event) => {
+          starts.push(event.messageType);
+        });
+      },
+    ],
+    undefined,
+    {
+      mode: "tui",
+      streamSimple: (model, context, options) => {
+        if (options?.cacheRetention === "none") {
+          summaries++;
+          return response(model, [{ type: "text", text: "Synthetic automatic checkpoint." }]);
+        }
+        if (requests++ === 0)
+          return response(
+            model,
+            [{ type: "toolCall", id: "continue-probe", name: tool.name, arguments: {} }],
+            "toolUse",
+            2000,
+          );
+        continuationContext = JSON.stringify(context.messages);
+        return response(model, [{ type: "text", text: "Resumed the task." }]);
+      },
+    },
+  );
+  session.settingsManager.applyOverrides({
+    compaction: { enabled: false, keepRecentTokens: 100, reserveTokens: 7 },
+  });
+  session.subscribe((event) => {
+    if (event.type === "agent_settled") settled.push(event.aborted);
+  });
+  try {
+    await session.prompt("Run the synthetic continuation probe.");
+    await expect.poll(() => settled.length).toBe(2);
+    expect(settled).toEqual([true, false]);
+    expect(starts).toEqual(["user", "custom"]);
+    expect(requests).toBe(2);
+    expect(summaries).toBe(1);
+    expect(continuationContext).toContain("Synthetic automatic checkpoint.");
+    expect(continuationContext).toContain("Continue the previous task after compaction.");
+    expect(session.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "Resumed the task." }],
+    });
+  } finally {
+    await session.abort();
+    session.abortCompaction();
+    session.dispose();
+  }
+});
 
 it.each([false, true])(
   "resume preserves a terminal provider error (compaction=%s)",
