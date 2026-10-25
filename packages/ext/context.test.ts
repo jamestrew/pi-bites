@@ -13,6 +13,7 @@ import registerContext, {
   buildContextBreakdown,
   renderContextMarkdown,
 } from "./context.js";
+import { setup } from "./codex-adapter/test/native-session.js";
 
 const sourceInfo = {
   path: "<builtin:read>",
@@ -266,4 +267,132 @@ it("inspector estimates projected messages without changing raw history", async 
   expect(manager.getEntry(replaced)).toMatchObject({
     message: { content: "replaced ".repeat(100) },
   });
+});
+
+it("context all lists native codemode tools without counting their declarations twice", async () => {
+  const h = await setup(undefined, {
+    config: { codexAdapter: { webSearchProviders: ["native-test"] } },
+  });
+  let handler!: RegisteredCommand["handler"];
+  registerContext(
+    {
+      registerCommand(_name: string, command: Omit<RegisteredCommand, "name" | "sourceInfo">) {
+        handler = command.handler;
+      },
+      getAllTools: () => h.session.getAllTools(),
+      getActiveTools: () => h.session.getActiveToolNames(),
+    } as unknown as ExtensionAPI,
+    undefined,
+    () => h.previewTools(),
+  );
+  let lines: string[] = [];
+  const inspect = async () => {
+    await handler("all", {
+      ...h.getContext(),
+      mode: "tui",
+      getSystemPromptOptions: () => ({ cwd: h.cwd }),
+      ui: {
+        custom: async (
+          factory: (
+            _tui: unknown,
+            theme: unknown,
+            _kb: unknown,
+            done: () => void,
+          ) => { render(width: number): string[] },
+        ) => {
+          const theme = {
+            fg: (_color: string, text: string) => text,
+            bold: (text: string) => text,
+          };
+          lines = factory(undefined, theme, undefined, () => {}).render(160);
+        },
+      },
+    } as unknown as ExtensionCommandContext);
+    return lines.join("\n");
+  };
+
+  expect(h.session.getActiveToolNames()).not.toContain("exec_command");
+  const expanded = await inspect();
+  expect(expanded).toContain("exec_command");
+  expect(expanded).toContain("apply_patch");
+  expect(expanded).toMatch(/exec_command: ~[\d.]+k? tokens/);
+  expect(expanded).toMatch(
+    /ALL_TOOLS, searchTools, describeTool, describeNamespace: ~\d+ tokens \(builtin, shared\)/,
+  );
+  expect(expanded).toMatch(/web_run: ~[\d.]+k? tokens\n/);
+
+  h.setTools([]);
+  await h.session.extensionRunner.emit({ type: "model_select" } as never);
+  h.setTools(["read", "codemode"]);
+  await h.session.extensionRunner.emit({ type: "model_select" } as never);
+  const readonly = await inspect();
+  expect(readonly).not.toContain("exec_command");
+  expect(readonly).not.toContain("apply_patch");
+  expect(readonly).toContain("read: ~0 tokens (declared separately)");
+});
+
+it("attributes only prepared sections and distinguishes explicit and budget deferral", () => {
+  const makeTool = (name: string, exposure: ToolInfo["exposure"]): ToolInfo => ({
+    name,
+    description: "",
+    parameters: { type: "object", properties: {} },
+    exposure,
+    sourceInfo,
+  });
+  const inlineSection = [
+    "### `raw_inline` (`raw-inline`)",
+    "Inline help.",
+    "### Internal heading",
+    "````markdown",
+    "```",
+    "### `explicit`",
+    "## demo",
+    "````",
+    "~~~markdown",
+    "### `budget`",
+    "~~~",
+    "More help.",
+    "",
+    "",
+  ].join("\n");
+  const namespacedSection = "### `namespaced`\nNamespaced help.";
+  const codemode = {
+    ...makeTool("codemode", "model-only"),
+    description: `Run code.\n\nGlobals:\n- \`ALL_TOOLS\`, \`await searchTools(query)\`, \`await describeTool(name)\`, \`await describeNamespace(name)\`: discover tools.\n\nNested tools:\n\n${inlineSection}## demo (some tools not listed)\nShared namespace help.\n\n${namespacedSection}`,
+  };
+  const result = buildContextBreakdown({
+    total: null,
+    window: 10000,
+    systemPrompt: "",
+    options: { cwd: "/tmp" },
+    tools: [
+      codemode,
+      makeTool("raw-inline", "codemode"),
+      { ...makeTool("namespaced", "codemode"), namespace: { name: "demo", description: "Demo" } },
+      makeTool("explicit", "deferred"),
+      makeTool("budget", "codemode"),
+      makeTool("read", "direct"),
+      makeTool("inactive", "direct"),
+      makeTool("hidden", "hidden"),
+      makeTool("modelOnly", "model-only"),
+    ],
+    activeTools: ["read", "codemode"],
+    messageTokens: 0,
+  });
+  const parent = result.parts.find((part) => part.label === "System tools")!.details![0]!;
+  const escapedTokens = (text: string) => Math.ceil(JSON.stringify(text).slice(1, -1).length / 4);
+  expect(parent.nestedTools).toEqual([
+    { label: "raw-inline", tokens: escapedTokens(inlineSection) },
+    { label: "namespaced", tokens: escapedTokens(namespacedSection) },
+    { label: "explicit", tokens: 0, note: "deferred" },
+    { label: "budget", tokens: 0, note: "deferred" },
+    { label: "read", tokens: 0, note: "declared separately" },
+    {
+      label: "ALL_TOOLS, searchTools, describeTool, describeNamespace",
+      tokens: expect.any(Number),
+      note: "builtin, shared",
+    },
+    { label: "runtime & wrapper", tokens: expect.any(Number) },
+  ]);
+  expect(parent.nestedTools!.reduce((sum, item) => sum + item.tokens, 0)).toBe(parent.tokens);
 });

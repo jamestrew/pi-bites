@@ -15,10 +15,16 @@ import { formatTokens } from "./shared/token-format.js";
 
 export type ContextPromptPreview = (systemPrompt: string, ctx: ExtensionCommandContext) => string;
 
+interface NestedToolDetail {
+  label: string;
+  tokens: number;
+  note?: string;
+}
+
 export interface ContextPart {
   label: string;
   tokens: number;
-  details?: Array<{ label: string; tokens: number }>;
+  details?: Array<{ label: string; tokens: number; nestedTools?: NestedToolDetail[] }>;
 }
 
 export interface ContextBreakdown {
@@ -78,10 +84,107 @@ function selectActiveTools(tools: ToolInfo[], activeNames: string[]): ToolInfo[]
   return tools.filter((tool) => active.has(tool.name));
 }
 
+function maskCodeFences(markdown: string): string {
+  let fence: string | undefined;
+  return markdown.replace(/^.*$/gm, (line) => {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    const delimiter = marker?.[1];
+    const suffix = marker?.[2] ?? "";
+    if (fence) {
+      if (
+        delimiter &&
+        delimiter[0] === fence[0] &&
+        delimiter.length >= fence.length &&
+        !suffix.trim()
+      )
+        fence = undefined;
+      return " ".repeat(line.length);
+    }
+    if (delimiter && !(delimiter[0] === "`" && suffix.includes("`"))) {
+      fence = delimiter;
+      return " ".repeat(line.length);
+    }
+    return line;
+  });
+}
+
+function codemodeDetails(tool: ToolInfo, callable: ToolInfo[], active: Set<string>) {
+  const description = tool.description;
+  const headings = maskCodeFences(description);
+  const names = new Set(callable.map((item) => item.name));
+  const namespaces = new Set(
+    callable.flatMap((item) => (item.namespace ? [item.namespace.name] : [])),
+  );
+  // Read native prepared sections, not a second implementation of Pi's inline budget.
+  const start = headings.indexOf("\n\nNested tools:\n\n");
+  const sections = [...headings.matchAll(/^### `([^`\n]+)`(?: \(`([^`\n]+)`\))?$/gm)].filter(
+    (match) => match.index > start && start >= 0 && names.has(match[2] ?? match[1] ?? ""),
+  );
+  const boundaries = [
+    ...sections.map((match) => match.index),
+    ...[...headings.matchAll(/^## (.+)$/gm)]
+      .filter((match) =>
+        namespaces.has((match[1] ?? "").replace(/ \((?:some )?tools not listed\)$/, "")),
+      )
+      .map((match) => match.index),
+    description.length,
+  ].sort((a, b) => a - b);
+  // Match the parent's JSON-serialized description estimate, including escaped newlines.
+  const tokens = (text: string) => estimateText(JSON.stringify(text).slice(1, -1));
+  const inlined = new Map(
+    sections.map((match) => [
+      match[2] ?? match[1] ?? "",
+      tokens(
+        description.slice(
+          match.index,
+          boundaries.find((end) => end > match.index),
+        ),
+      ),
+    ]),
+  );
+  const details: NestedToolDetail[] = callable.map((item) => ({
+    label: item.name,
+    tokens: inlined.get(item.name) ?? 0,
+    ...(inlined.has(item.name)
+      ? {}
+      : { note: active.has(item.name) ? "declared separately" : "deferred" }),
+  }));
+  const globals = description.split("Globals:\n")[1]?.split("\n\n")[0] ?? "";
+  const helpers: Record<string, string> = {
+    "text(value)": "text, image, console.log, return, exit",
+    "store(key, value)": "store, load",
+    ALL_TOOLS: "ALL_TOOLS, searchTools, describeTool, describeNamespace",
+  };
+  for (const match of globals.matchAll(/^- `([^`]+)`[^\n]*/gm)) {
+    const label = helpers[match[1] ?? ""];
+    if (label) details.push({ label, tokens: tokens(match[0]), note: "builtin, shared" });
+  }
+  details.push({
+    label: "runtime & wrapper",
+    tokens: Math.max(
+      0,
+      estimateProviderToolTokens(tool) - details.reduce((sum, item) => sum + item.tokens, 0),
+    ),
+  });
+  return details;
+}
+
 function toolDetails(tools: ToolInfo[], activeNames: string[]) {
+  const active = new Set(activeNames);
+  const nestedTools = tools.filter(
+    (tool) =>
+      tool.name !== "codemode" &&
+      (tool.exposure === "codemode" ||
+        tool.exposure === "deferred" ||
+        (tool.exposure === "direct" && active.has(tool.name))),
+  );
   return selectActiveTools(tools, activeNames).map((tool) => ({
     label: tool.name,
     tokens: estimateProviderToolTokens(tool),
+    // Native inline schemas already contribute to codemode's description estimate.
+    ...(tool.name === "codemode"
+      ? { nestedTools: codemodeDetails(tool, nestedTools, active) }
+      : {}),
   }));
 }
 
@@ -220,6 +323,13 @@ class ContextComponent {
         for (const [index, item] of (part.details ?? []).entries()) {
           const branch = index === (part.details?.length ?? 0) - 1 ? "└" : "├";
           lines.push(`${branch} ${item.label}: ~${formatTokens(item.tokens)} tokens`);
+          for (const [nestedIndex, nested] of (item.nestedTools ?? []).entries()) {
+            const nestedBranch = nestedIndex === (item.nestedTools?.length ?? 0) - 1 ? "└" : "├";
+            const note = nested.note ? ` (${nested.note})` : "";
+            lines.push(
+              `${branch === "└" ? " " : "│"} ${nestedBranch} ${nested.label}: ~${formatTokens(nested.tokens)} tokens${note}`,
+            );
+          }
         }
       }
     }
