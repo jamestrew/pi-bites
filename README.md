@@ -67,6 +67,19 @@ See the [configuration schema](pi-bites.schema.json) for all options and extensi
 names. `/bites:list`, `/bites:off <name>`, and `/bites:on <name>` manage extensions;
 changes take effect on the next launch.
 
+### Code Mode sessions
+
+Underlying tool selections are saved per branch, so resume, `/reload`, and `/tree`
+preserve Code Mode capabilities without re-enabling explicitly disabled tools.
+Sessions saved before selection checkpoints existed need explicit re-selection.
+For a session intended to have full core access, repair it once with:
+
+```bash
+pi --resume --tools +read,+bash,+edit,+write
+```
+
+Keep read-only sessions restricted; this command grants shell and patch access.
+
 ### Subagents
 
 Set `subagents` inside either `pi-bites.json`. Project fields override global

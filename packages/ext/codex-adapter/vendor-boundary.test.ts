@@ -12,6 +12,7 @@ const retainedGroups = [
   /^native-(?:registration|rendering)(?:\.test)?\.ts$/,
   /^test\/native-session\.ts$/,
   /^code-mode-activation\.test\.ts$/,
+  /^selection-(?:persistence(?:\.test)?|policy)\.ts$/,
   /^(?:owned-tool-contracts\.generated\.json|contracts\/(?:LICENSE|NOTICE))$/,
   /^(?:activation|index|native-binary-error|tool-execution)\.ts$/,
   /^(?:LICENSE|UPSTREAM\.md)$/,

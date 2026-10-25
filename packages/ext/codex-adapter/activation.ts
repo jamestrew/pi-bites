@@ -113,6 +113,9 @@ export function reconcileTools(
       selection.disabledVisible.add(name);
     }
   }
+  for (const name of NESTED_TOOLS) {
+    if (active.includes(name)) selection.tools.add(name);
+  }
   const retained = active.filter((name) => CORE.has(name) || !OWNED.has(name));
   const restored = restore(retained, previous.kind === "active" ? previous.displaced : []);
   if (!enabled) {

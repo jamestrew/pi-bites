@@ -13,6 +13,7 @@ import {
   createToolSearchExtension,
   type ExtensionContext,
   type ExtensionUIContext,
+  type FileEntry,
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
@@ -61,6 +62,11 @@ export async function setup(
   options: {
     config?: BitesConfig;
     defaultTools?: string[];
+    excludeTools?: string[];
+    noTools?: "all" | "builtin";
+    persist?: boolean;
+    sessionFile?: string;
+    entries?: FileEntry[];
     gate?: boolean;
     onAuthorization?: (request: CommandAuthorizationRequest) => void;
   } = {},
@@ -77,7 +83,8 @@ export async function setup(
   let adapter: ReturnType<typeof registerAdapter>;
   let preview: ReturnType<typeof registerAdapter>["previewPrompt"] | undefined;
   let transform: ((text: string, ctx: any) => string) | undefined;
-  const cwd = mkdtempSync(join(tmpdir(), "native-adapter-"));
+  const saved = options.sessionFile ? SessionManager.open(options.sessionFile) : undefined;
+  const cwd = saved?.getCwd() ?? mkdtempSync(join(tmpdir(), "native-adapter-"));
   const runtime = await ModelRuntime.create({
     allowModelNetwork: false,
     credentials: new InMemoryCredentialStore(),
@@ -133,6 +140,7 @@ export async function setup(
           },
           config,
           gate,
+          { tools: selected, noTools: options.noTools },
         );
         preview = adapter.previewPrompt;
         pi.on("session_start", (_e, ctx) => {
@@ -148,18 +156,30 @@ export async function setup(
     modelRuntime: runtime,
     model: runtime.getModel("native-test", "gpt-6.1-sol")!,
     resourceLoader: loader,
-    sessionManager: SessionManager.inMemory(cwd),
+    sessionManager:
+      saved ??
+      (options.persist
+        ? SessionManager.create(cwd, join(cwd, "sessions"))
+        : SessionManager.inMemory(cwd, {}, options.entries)),
     settingsManager: SettingsManager.inMemory({
       compaction: { enabled: false },
       retry: { enabled: false },
       ...(options.defaultTools ? { defaultTools: options.defaultTools } : {}),
     }),
     ...(selected ? { tools: selected } : {}),
+    ...(options.excludeTools ? { excludeTools: options.excludeTools } : {}),
+    ...(options.noTools ? { noTools: options.noTools } : {}),
   });
-  cleanup.push(async () => {
+  let closed = false;
+  async function close() {
+    if (closed) return;
+    closed = true;
     await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     session.dispose();
-    rmSync(cwd, { recursive: true, force: true });
+  }
+  cleanup.push(async () => {
+    await close();
+    if (!saved) rmSync(cwd, { recursive: true, force: true });
   });
   await session.bindExtensions(
     options.gate ? { uiContext: ui as unknown as ExtensionUIContext } : {},
@@ -182,6 +202,7 @@ export async function setup(
   const run = (code: string) => call("codemode", { code });
   return {
     session,
+    close,
     run,
     call,
     events,

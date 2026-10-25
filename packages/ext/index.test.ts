@@ -66,8 +66,7 @@ async function loadExtension(
     } else vi.doMock(modulePath, () => ({ default: spy }));
   }
 
-  if (options.realCodex) vi.doUnmock("@earendil-works/pi-coding-agent");
-  else vi.doMock("@earendil-works/pi-coding-agent", () => ({}));
+  vi.doUnmock("@earendil-works/pi-coding-agent");
 
   const loadConfig = vi.fn(
     (_cwd: string, _warn?: (message: string) => void): BitesConfig =>
@@ -85,7 +84,9 @@ async function loadExtension(
   const { default: registerExtension } = await import("./index.js");
   const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>();
   let activeTools = ["read", "bash", "edit", "write", "custom"];
-  const allTools = new Map<string, { name: string; defaultActive?: boolean }>();
+  const allTools = new Map<string, { name: string; defaultActive?: boolean }>(
+    activeTools.map((name) => [name, { name }]),
+  );
   const pi = {
     getAllTools: () => [...allTools.values()],
     getSettings: () => ({}),
@@ -101,6 +102,7 @@ async function loadExtension(
         activeTools.push(tool.name);
     }),
     registerMarkdownTransformer: vi.fn(),
+    appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     getActiveTools: vi.fn(() => activeTools),
     setActiveTools: vi.fn((tools: string[]) => {
@@ -160,6 +162,7 @@ describe("extension entrypoint", () => {
         loaded.pi,
         expect.any(Object),
         loaded.bashGate,
+        { tools: undefined, noTools: undefined },
       );
       expect(loaded.registerSpies.get("./context.js")).toHaveBeenCalledWith(
         loaded.pi,

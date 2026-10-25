@@ -20,12 +20,13 @@ import { createSubagents } from "./subagents/index.js";
 import { getActiveSubagent, getChildCollaboration } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
 import registerCodexAdapter, { type CodexAdapterController } from "./codex-adapter/index.js";
-import { type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { parseArgs, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
 
 export default async function (pi: ExtensionAPI) {
   const configRef: { current: BitesConfig } = { current: {} };
   const isSubagent = getActiveSubagent() != null;
+  const cliArgs = isSubagent ? undefined : parseArgs(process.argv.slice(2));
   const isNonInteractive = process.argv.some((arg) => arg === "--print" || arg === "-p");
 
   // Load config eagerly at startup to resolve the disable list.
@@ -76,7 +77,17 @@ export default async function (pi: ExtensionAPI) {
   subagents?.registerTools();
   codexAdapter = disabled.has("codexAdapter")
     ? undefined
-    : registerCodexAdapter(pi, configRef, bashGate);
+    : registerCodexAdapter(
+        pi,
+        configRef,
+        bashGate,
+        cliArgs
+          ? {
+              tools: cliArgs.tools,
+              noTools: cliArgs.noTools ? "all" : cliArgs.noBuiltinTools ? "builtin" : undefined,
+            }
+          : undefined,
+      );
   const previewCodexPrompt = codexAdapter?.previewPrompt;
 
   registerCacheDebug(pi);

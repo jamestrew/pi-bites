@@ -17,6 +17,23 @@ Explicit `-codemode`, plain default-tool selections omitting it, SDK/CLI registr
 restrictions, and removal of the active tool are respected. Unsupported models or
 an explicitly disabled adapter restore displaced core tools.
 
+The underlying selection and core displacement are checkpointed in versioned,
+branch-local `pi-bites:codex-tool-selection` custom entries. Resume, reload and
+`/tree` reconstruct this metadata before projection; unchanged checkpoints are
+not appended again. Reload preserves the projected active selection during
+shutdown. Current registry ceilings, exclusions, settings and host-supplied
+startup restrictions constrain recovery. The CLI entrypoint supplies parsed
+`tools`/`noTools` policy; embedded children use their SDK registry ceilings, not
+parent argv. Other SDK hosts using soft startup modifiers must pass their policy
+to adapter registration explicitly because Pi does not expose it to extensions.
+Only selection metadata is recovered, never authorization decisions or resources.
+
+Legacy sessions without a checkpoint do not recover permissions from descriptions
+or historical calls. For a session intended to have full core access, explicitly
+reselect them once with `pi --resume --tools +read,+bash,+edit,+write`; subsequent
+reconciliations checkpoint that selection. Read-only sessions must retain their
+restricted selection instead.
+
 Shell requires selected `bash`; patch requires `edit` or `write`. Inactive owned
 tools are **hidden**, not merely removed from active declarations: native
 `codemode`/`deferred` exposure would otherwise make them callable. Availability is

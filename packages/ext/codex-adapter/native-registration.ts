@@ -1,6 +1,5 @@
 import {
   createCodemodeExtension,
-  SettingsManager,
   formatSkillsForPrompt,
   type AgentToolResult,
   type AgentToolUpdateCallback,
@@ -23,6 +22,8 @@ import {
   reconcileTools,
 } from "./activation.js";
 import type { CodexAdapterController, CodexPromptPreview } from "./index.js";
+import { createSelectionPersistence } from "./selection-persistence.js";
+import { resolveSelectionPolicy, type AdapterSelectionPolicy } from "./selection-policy.js";
 import { createApplyPatchTool, isApplyPatchFailure } from "./apply-patch/tool.js";
 import { deleteApplyPatchRenderState } from "./apply-patch/render-state.js";
 import { createExecCommandTool, ExecCommandError } from "./exec/command-tool.js";
@@ -40,9 +41,11 @@ export default function registerNativeAdapter(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
   gate?: BashGateController,
+  selectionPolicy: AdapterSelectionPolicy = {},
 ): CodexAdapterController {
   gate?.manageExecCommand();
-  const state = createAdapterToolState();
+  let state = createAdapterToolState();
+  const selectionPersistence = createSelectionPersistence(pi);
   const sessions = createExecSessionManager();
   const owned = {
     exec_command: createExecCommandTool(sessions),
@@ -312,33 +315,24 @@ export default function registerNativeAdapter(
     },
   );
   const exposures = new Map<string, string>();
-  function reconcile(ctx: ExtensionContext) {
+  function reconcile(ctx: ExtensionContext, restoreSelection = false) {
     let selected = pi.getActiveTools();
-    const initial = !state.selection;
-    if (initial) {
-      const registered = new Set(pi.getAllTools().map((t) => t.name));
-      const settings = pi.getSettings();
-      const defaults = settings.defaultTools;
-      const resolved = SettingsManager.inMemory(settings).getDefaultTools();
-      const explicit =
-        defaults?.length === 0 ||
-        defaults?.some((name) => !name.startsWith("+") && !name.startsWith("-"));
-      const permits = (name: string) =>
-        registered.has(name) &&
-        defaults?.filter((t) => t === `-${name}` || t === `+${name}`).at(-1) !== `-${name}`;
-      if (
-        permits("codemode") &&
-        (!explicit || resolved?.includes("codemode")) &&
-        !selected.includes("codemode")
-      )
-        selected = [...selected, "codemode"];
-      selected = [
-        ...selected,
-        ...definitions
-          .filter((t) => permits(t.name) && !selected.includes(t.name))
-          .map((t) => t.name),
-      ];
+    if (restoreSelection || !state.selection) {
+      const policy = resolveSelectionPolicy(pi, selectionPolicy);
+      selected = selected.filter(policy.permitsRestore);
+      if (restoreSelection) state = selectionPersistence.restore(ctx, policy.permitsRestore);
+      if (!state.selection) {
+        if (policy.seedCodemode && !selected.includes("codemode"))
+          selected = [...selected, "codemode"];
+        selected = [
+          ...selected,
+          ...definitions
+            .filter((t) => policy.permits(t.name) && !selected.includes(t.name))
+            .map((t) => t.name),
+        ];
+      }
     }
+    const initial = !state.selection;
     const next = reconcileTools(selected, enabled(ctx), state);
     const nextActive = enabled(ctx) && next.includes("codemode");
     if (active && !nextActive) invalidate(ctx);
@@ -360,6 +354,7 @@ export default function registerNativeAdapter(
         ? []
         : pi.getActiveTools().filter((name) => callable.has(name) && !next.includes(name))),
     ]);
+    selectionPersistence.save(state);
   }
   const preview: CodexPromptPreview = (prompt, model, options) => {
     if (
@@ -455,11 +450,11 @@ export default function registerNativeAdapter(
   });
   pi.on("session_start", (_e, ctx) => {
     invalidate(ctx);
-    reconcile(ctx);
+    reconcile(ctx, true);
   });
   pi.on("session_tree", (_e, ctx) => {
     invalidate(ctx);
-    reconcile(ctx);
+    reconcile(ctx, true);
   });
   pi.on("model_select", (_e, ctx) => {
     owned.web_run.resetNavigationState();
@@ -474,10 +469,13 @@ export default function registerNativeAdapter(
     });
     if (systemPrompt !== event.systemPrompt) return { systemPrompt };
   });
-  pi.on("session_shutdown", async (_e, ctx) => {
+  pi.on("session_shutdown", async (event, ctx) => {
     invalidate(ctx);
     callable.clear();
-    pi.setActiveTools(reconcileTools(pi.getActiveTools(), false, state));
+    // Reload rebuilds from the current selection, not the transcript. Preserve the
+    // projection so its disappearance is not mistaken for an explicit disable.
+    if (event.reason !== "reload")
+      pi.setActiveTools(reconcileTools(pi.getActiveTools(), false, state));
     await sessions.shutdown();
   });
   return {
