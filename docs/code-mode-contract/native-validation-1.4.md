@@ -189,6 +189,55 @@ graph. It does not rerun CLI distribution probes, live providers, terminal image
 or layout acceptance, older Pi versions or other architectures, and it does not
 advance upstream-watch state.
 
+## Cancelled settlement and execution capacity (#406)
+
+The focused validation uses **Pi 1.4.0** (`pi-coding-agent`, `pi-tui`, `pi-ai`
+and `pi-agent-core`) on Linux x86_64, Node 24.21.0 and Bun 1.4.2. The checkout
+already contains #400's explicit cancellation handling. No production change,
+dependency churn, new status schema or abort-reason inference is necessary.
+
+`v2-operations.test.ts` observes root status through a child caller's direct
+`list_agents` operation. Explicit true interrupts even without assistant output
+or after successful/error output; explicit false preserves completion/provider
+errors and overrides an aborted message. Absent metadata retains the legacy
+message fallback. Intermediate ends remain running, and a new start clears the
+terminal observation. A separate case aborts before any fresh `agent_end` after
+a previously successful run.
+
+`agent-manager-capacity.test.ts` drives real SDK sessions through success, provider
+error and an abort requested after successful output. Execution admission remains
+occupied at `agent_end` and becomes available at every public `agent_settled`,
+before manager completion unwinds. The same task path and conversation accept a
+later follow-up after each outcome. Existing continuation admission tests remain.
+The real automatic-compaction fixture also queries `list_agents` across native
+start/end/settlement events: running → interrupted → running → completed. It
+retains one summary and one intentional custom continuation. Its observation
+operation is captured while idle, independently of the aborted run's signal.
+
+Existing tracker, runner and auto-compaction regressions retain cancelled-text
+classification, background/permission accounting, explicit diagnostic metadata,
+generation invalidation and throwing stale-context protections. No replacement
+tracker or abort-specific cleanup exception is introduced.
+
+```sh
+bun run typecheck
+bunx vitest run packages/ext/subagents/test/v2-operations.test.ts packages/ext/subagents/test/agent-manager-capacity.test.ts packages/ext/subagents/test/subagent-messages-e2e.test.ts packages/ext/session-tracker/session-tracker.test.ts packages/ext/subagents/test/agent-runner.test.ts packages/ext/auto-compaction.test.ts
+bun --bun vitest run packages/ext/subagents/test/agent-manager-capacity.test.ts packages/ext/subagents/test/subagent-messages-e2e.test.ts
+bun check
+```
+
+The Node-focused run passes **173 tests**; the separate Bun real-session/capacity
+run passes **25**. The full `bun check` passes **95 package files / 1,455 tests**
+(4 opt-in live tests skipped) and **4 script files / 49 tests**. Temporary mutations
+that ignore explicit abort metadata, retain cancelled execution admission, or
+release it at intermediate ends each fail the focused regressions; production
+files are restored unchanged afterward.
+
+This is offline integration evidence on the 1.4.0 development graph, not a rerun of
+CLI distribution, live-provider, terminal or other-architecture acceptance. The
+missing-metadata cases simulate older hosts; no older Pi version is run. The
+upstream-watch checkpoint remains unchanged.
+
 ## Unexecuted acceptance and limits
 
 - **Interactive fullscreen and regular-mode overlap: not run.** This agent run

@@ -480,29 +480,74 @@ it("reads saved selected-target waits without restoring a V1 executor", () => {
 });
 
 it.each([
+  { aborted: true, stopReason: undefined, expected: "interrupted" },
   { aborted: true, stopReason: "stop", expected: "interrupted" },
+  { aborted: true, stopReason: "error", expected: "interrupted" },
   { aborted: false, stopReason: "stop", expected: { completed: "previous answer" } },
+  { aborted: undefined, stopReason: "stop", expected: { completed: "previous answer" } },
   { aborted: undefined, stopReason: "aborted", expected: "interrupted" },
   { aborted: false, stopReason: "aborted", expected: { completed: "previous answer" } },
   { aborted: false, stopReason: "error", expected: { errored: "provider failure" } },
+  { aborted: undefined, stopReason: "error", expected: { errored: "provider failure" } },
 ])(
-  "uses settlement abort metadata for root status: $aborted / $stopReason",
+  "reports root settlement to a child list caller: $aborted / $stopReason",
   async ({ aborted, stopReason, expected }) => {
+    readyChild();
     const h = harness();
+    await h.call("spawn_agent", { task_name: "observer", message: "observe root" });
+    const manager = Reflect.get(globalThis, Symbol.for("pi-subagents:manager"));
+    const child = manager.getRecord(vi.mocked(runAgent).mock.calls[0]![3].agentId);
+    const operation = h.controller.capture({
+      ...h.ctx,
+      sessionManager: child.session.sessionManager,
+    });
+    const rootStatus = async () => {
+      const result = await operation.execute(
+        "list_agents",
+        {},
+        { callerId: operation.callerId, callId: crypto.randomUUID() },
+      );
+      return JSON.parse((result.content[0] as { text: string }).text).agents.find(
+        (agent: { agent_name: string }) => agent.agent_name === "/root",
+      ).agent_status;
+    };
     await h.emit("agent_start");
     await h.emit("agent_end", {
-      messages: [
-        {
-          role: "assistant",
-          stopReason,
-          errorMessage: "provider failure",
-          content: [{ type: "text", text: "previous answer" }],
-        },
-      ],
+      messages: stopReason
+        ? [
+            {
+              role: "assistant",
+              stopReason,
+              errorMessage: "provider failure",
+              content: [{ type: "text", text: "previous answer" }],
+            },
+          ]
+        : [],
     });
-    await h.emit("agent_settled", { aborted });
-    expect((await h.call("list_agents", {})).value.agents).toEqual([
-      { agent_name: "/root", agent_status: expected },
-    ]);
+    expect(await rootStatus()).toBe("running");
+    await h.emit("agent_settled", aborted === undefined ? {} : { aborted });
+    expect(await rootStatus()).toEqual(expected);
+    await h.emit("agent_start");
+    expect(await rootStatus()).toBe("running");
   },
 );
+
+it("reports an abort before any fresh agent_end instead of the previous successful run", async () => {
+  const h = harness();
+  await h.emit("agent_end", {
+    messages: [
+      { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "old answer" }] },
+    ],
+  });
+  await h.emit("agent_settled", { aborted: false });
+  expect((await h.call("list_agents", {})).value.agents).toContainEqual({
+    agent_name: "/root",
+    agent_status: { completed: "old answer" },
+  });
+  await h.emit("agent_start");
+  await h.emit("agent_settled", { aborted: true });
+  expect((await h.call("list_agents", {})).value.agents).toContainEqual({
+    agent_name: "/root",
+    agent_status: "interrupted",
+  });
+});

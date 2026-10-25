@@ -193,3 +193,66 @@ it("rejects follow-up when scope tightens during reload without rolling back the
   expect(record.retainedConversation).toBeDefined();
   expect(() => manager.assertExecutionAvailable()).not.toThrow();
 });
+
+it.each(["success", "error", "abort"] as const)(
+  "releases execution only at %s settlement and retains the task for follow-up",
+  async (outcome) => {
+    const h = await setupV2(cleanup);
+    const manager = new AgentManager(undefined, 1);
+    managers.push(manager);
+    const answer = fauxAssistantMessage("first answer");
+    h.faux.setResponses([
+      outcome === "error"
+        ? { ...answer, stopReason: "error", errorMessage: "synthetic provider failure" }
+        : answer,
+      fauxAssistantMessage("follow-up answer"),
+    ]);
+    const ends: string[] = [];
+    const settlements: Array<{ aborted: boolean; available: boolean }> = [];
+    const id = await spawnNamed(manager, h.pi, h.ctx, "worker", "first", {
+      taskName: "retained",
+      description: "settlement capacity",
+      isolated: true,
+      onSessionCreated: (session) => {
+        session.subscribe((event) => {
+          if (event.type === "agent_end") {
+            try {
+              manager.assertExecutionAvailable();
+              ends.push("available");
+            } catch {
+              ends.push("occupied");
+            }
+            // Abort after successful output, without awaiting idle from inside the run.
+            if (outcome === "abort" && ends.length === 1) void session.abort();
+          }
+          if (event.type === "agent_settled") {
+            let available = true;
+            try {
+              manager.assertExecutionAvailable();
+            } catch {
+              available = false;
+            }
+            settlements.push({ aborted: event.aborted, available });
+          }
+        });
+      },
+    });
+    await manager.waitForAll();
+    expect(ends).toEqual(["occupied"]);
+    expect(settlements).toEqual([{ aborted: outcome === "abort", available: true }]);
+
+    const sessionId = manager.getRecord(id)!.session!.sessionId;
+    expect(manager.getRecord(id)!.taskName).toBe("/root/retained");
+    expect(manager.startTurn(id, "follow up after settlement")).toBe(true);
+    await manager.waitForAll();
+    expect(manager.getRecord(id)!.session!.sessionId).toBe(sessionId);
+    expect(manager.getRecord(id)!.taskName).toBe("/root/retained");
+    expect(manager.getRecord(id)!.result).toBe("follow-up answer");
+    expect(ends).toEqual(["occupied", "occupied"]);
+    expect(settlements).toEqual([
+      { aborted: outcome === "abort", available: true },
+      { aborted: false, available: true },
+    ]);
+  },
+  30_000,
+);

@@ -528,7 +528,7 @@ it("native split-turn summaries retain instructions without capping output at re
 });
 
 it.each(["idle custom", "automatic compaction"] as const)(
-  "%s preserves shared startup context after its first tool call",
+  "%s preserves shared startup context and root settlement after its first tool call",
   async (origin) => {
     const resources = mkdtempSync(join(tmpdir(), "startup-context-"));
     tempDirs.push(resources);
@@ -547,6 +547,7 @@ it.each(["idle custom", "automatic compaction"] as const)(
     const requests: Context["messages"][] = [];
     const starts: Array<{ type: string; hasPrompt: boolean; idle: boolean }> = [];
     const settled: boolean[] = [];
+    const rootObservations: Array<{ event: string; status: unknown }> = [];
     let compactions = 0;
     const execute = vi.fn(async () => ({
       content: [{ type: "text" as const, text: "TOOL_RESULT_404 ".repeat(200) }],
@@ -582,13 +583,32 @@ it.each(["idle custom", "automatic compaction"] as const)(
       [
         (pi) => {
           // Exercise the same additive task identity hook used by SDK children.
-          createSubagents(pi)
-            .forChild(pi, child, () => pi.getActiveTools())
-            .registerTools();
+          const controller = createSubagents(pi);
+          controller.forChild(pi, child, () => pi.getActiveTools()).registerTools();
           registerAdapter(pi, { current: {} });
           registerPonytail(pi);
           registerInlineReferences(pi);
           registerAutoCompaction(pi, { current: { autoCompaction: { thresholdTokens: 1000 } } });
+          // An idle observer is not cancelled with the run it observes.
+          let operation!: ReturnType<typeof controller.capture>;
+          pi.on("session_start", (_event, ctx) => {
+            operation = controller.capture(ctx, { forkContext: false });
+          });
+          const observeRoot = async (event: { type: string }) => {
+            const result = await operation.execute(
+              "list_agents",
+              {},
+              { callerId: operation.callerId, callId: crypto.randomUUID() },
+            );
+            rootObservations.push({
+              event: event.type,
+              status: JSON.parse((result.content[0] as { text: string }).text).agents[0]
+                .agent_status,
+            });
+          };
+          pi.on("agent_start", observeRoot);
+          pi.on("agent_end", observeRoot);
+          pi.on("agent_settled", observeRoot);
           pi.on("before_agent_start", (event, ctx) => {
             starts.push({
               type: event.messageType,
@@ -670,6 +690,18 @@ it.each(["idle custom", "automatic compaction"] as const)(
         { type: "custom", hasPrompt: false, idle: false },
       ]);
       expect(settled).toEqual(origin === "automatic compaction" ? [true, false] : [false]);
+      expect(rootObservations).toEqual([
+        ...(origin === "automatic compaction"
+          ? [
+              { event: "agent_start", status: "running" },
+              { event: "agent_end", status: "running" },
+              { event: "agent_settled", status: "interrupted" },
+            ]
+          : []),
+        { event: "agent_start", status: "running" },
+        { event: "agent_end", status: "running" },
+        { event: "agent_settled", status: { completed: "Finished continuation." } },
+      ]);
       expect(compactions).toBe(origin === "automatic compaction" ? 1 : 0);
       expect(requests).toHaveLength(origin === "automatic compaction" ? 3 : 2);
       expect(execute).toHaveBeenCalledTimes(origin === "automatic compaction" ? 2 : 1);
