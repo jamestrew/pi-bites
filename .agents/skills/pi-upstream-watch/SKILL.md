@@ -1,6 +1,6 @@
 ---
 name: pi-upstream-watch
-description: Pi upstream watch reviews pi changelog entries since the stored checkpoint, cross-checks this extension repo for leverage, deprecations, and adaptation tasks, then advances the checkpoint only when the user asks.
+description: Review pi changelog entries since the stored checkpoint, cross-check this repo for adaptation and leverage, and ask the user to accept the review before advancing the checkpoint.
 disable-model-invocation: true
 ---
 
@@ -20,7 +20,7 @@ The helper writes `docs/upstream-watch/latest.md` and reads/writes `docs/upstrea
 
 ## Checkpoint
 
-The checkpoint lives at `docs/upstream-watch/state.json`. It records the last reviewed pi version. Do not advance it until the user explicitly says the review is accepted or asks you to mark the version reviewed.
+The checkpoint lives at `docs/upstream-watch/state.json`. It records the last accepted review, not the installed version or verified upgrade compatibility. Acceptance is handled in step 4.
 
 ## Process
 
@@ -49,8 +49,12 @@ For each non-ignore item, include the upstream version, changelog quote or summa
 
 Completion criterion: the user has an actionable review with no uncategorized changelog entries.
 
-### 4. Advance the checkpoint only on request
+### 4. Close the review with an acceptance question
 
-If the user asks to mark the review complete, update `docs/upstream-watch/state.json` so `lastCheckedVersion` equals the latest upstream version, set `lastCheckedAt` to today, and optionally append the reviewed report path.
+After presenting the review, ask: "Mark Pi <reviewed version> reviewed and advance the checkpoint from <checkpoint version>?" The agent owns this reminder so the user does not need to remember the state file. If the user first asks questions or requests follow-up issues, answer or complete those, then return to this question when no review questions remain.
 
-Completion criterion: the checkpoint matches the accepted upstream version, or remains unchanged if the user did not ask to advance it.
+On explicit acceptance or a direct request to mark the version reviewed, update `lastCheckedVersion` to the reviewed version, set `lastCheckedAt` to today's UTC date, and append the saved review report path without duplicates. Use the version actually reviewed, even if a newer release is now available. Review acceptance can precede implementation of its follow-up issues; it does not certify upgrade compatibility.
+
+While approval is pending or declined, leave the checkpoint unchanged. Creating issues alone is not approval.
+
+Completion criterion: the checkpoint matches the accepted reviewed version, or the user has been asked to accept it and the unchanged checkpoint is explicitly reported as awaiting approval or left unchanged at the user's request.
