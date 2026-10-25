@@ -133,6 +133,14 @@ test("native hybrid shows commands and their outputs without script emission, wi
   expect(text).toContain("<dim>(no output)</dim>");
   expect(text).not.toContain("input tokens");
   expect(text).not.toContain("Output");
+  for (const call of end.result.details.display.calls) {
+    const execution = h.events.find(
+      (event) => event.type === "tool_execution_end" && event.toolCallId === call.id,
+    );
+    expect(execution.durationMs).toEqual(expect.any(Number));
+    expect(call.durationMs).toBe(execution.durationMs);
+    expect(text).toContain(` · ${execution.durationMs}ms`);
+  }
   const tool = h.session.getToolDefinition("codemode")!;
   const call = tool.renderCall!(
     { code },
@@ -515,53 +523,86 @@ test.each(["custom", "constructor", "toString", "__proto__"])(
   },
 );
 
-test("nested snapshots prefer recorded duration and delegate only their own timing, including legacy absence", async () => {
+test("nested timing stays independent through parallel partials, completion and fresh restoration", async () => {
   const h = await setup();
   const handlers = new Map<string, (event: any) => any>();
   const childContexts: any[] = [];
+  const owned = {
+    web_run: {
+      renderCall: (_args: unknown, _theme: unknown, ctx: any) => {
+        childContexts.push(ctx);
+        return new Text("child", 0, 0);
+      },
+    },
+  };
   const rendering = createNativeRendering(
     {
       on: (name: string, fn: (event: any) => any) => handlers.set(name, fn),
     } as unknown as ExtensionAPI,
-    {
-      web_run: {
-        renderCall: (_args, _theme, ctx) => {
-          childContexts.push(ctx);
-          return new Text("child", 0, 0);
-        },
-      },
-    },
+    owned,
   );
+  const source = h.session.getToolDefinition("codemode")!;
+  const done = Promise.withResolvers<Awaited<ReturnType<typeof source.execute>>>();
   const tool = rendering.decorate({
-    ...h.session.getToolDefinition("codemode")!,
-    execute: async () => ({ content: [], details: { calls: [] } }),
+    ...source,
+    execute: () => done.promise,
   });
-  await tool.execute("parent", { code: "" }, new AbortController().signal, undefined, {
-    cwd: h.cwd,
-  } as never);
+  const updates: any[] = [];
+  const pending = tool.execute(
+    "parent",
+    { code: "" },
+    new AbortController().signal,
+    (update) => updates.push(JSON.parse(JSON.stringify(update))),
+    { cwd: h.cwd } as never,
+  );
+  const context = {
+    durationMs: 9876,
+    state: {},
+    expanded: false,
+    outputPad: 1,
+  };
   const clock = vi.spyOn(Date, "now").mockReturnValue(1000);
   try {
-    for (const [id, durationMs] of [
-      ["recorded", 123],
-      ["fallback", undefined],
-    ] as const) {
-      clock.mockReturnValue(1000);
+    const calls = [
+      { id: "recorded", durationMs: 123, isError: false, endedAt: -5000 },
+      { id: "fallback", durationMs: undefined, isError: false, endedAt: 9000 },
+      { id: "zero", durationMs: 0, isError: false, endedAt: 50000 },
+      { id: "error", durationMs: 456, isError: true, endedAt: 2000 },
+    ];
+    // All calls start before any finishes; settlement order is independent of launch order.
+    for (const { id } of calls)
       handlers.get("tool_execution_start")!({
         parentToolCallId: "parent",
         toolCallId: id,
         toolName: "web_run",
         args: {},
       });
-      clock.mockReturnValue(9000);
+    const running = tool.renderResult!(
+      updates.at(-1),
+      { expanded: false, isPartial: true },
+      plainTheme as never,
+      context as never,
+    )
+      .render(200)
+      .join("\n");
+    expect(running.match(/… web_run/g)).toHaveLength(4);
+    expect(running).not.toMatch(/\d+ms/);
+    expect(childContexts.map((ctx) => [ctx.durationMs, ctx.isPartial])).toEqual(
+      Array.from({ length: 4 }, () => [undefined, true]),
+    );
+    for (const { id, durationMs, isError, endedAt } of [...calls].reverse()) {
+      clock.mockReturnValue(endedAt);
       handlers.get("tool_execution_end")!({
         parentToolCallId: "parent",
         toolCallId: id,
         toolName: "web_run",
         durationMs,
-        isError: false,
-        result: { content: [] },
+        isError,
+        result: { content: isError ? [{ type: "text", text: "nested failure" }] : [] },
       });
     }
+    done.resolve({ content: [], details: { calls: [] } });
+    await pending;
     const result = {
       content: [],
       ...handlers.get("tool_result")!({
@@ -571,24 +612,52 @@ test("nested snapshots prefer recorded duration and delegate only their own timi
         details: { calls: [] },
       }),
     };
-    expect(result.details.display.calls.map((call: any) => call.durationMs)).toEqual([123, 8000]);
-    // Round-trip saved display; old snapshots have no duration and must not inherit the script's.
     const saved = JSON.parse(JSON.stringify(result));
-    delete saved.details.display.calls[1].durationMs;
-    const component = tool.renderResult!(
-      saved,
-      { expanded: false, isPartial: false },
-      plainTheme as never,
-      {
-        durationMs: 9876,
-        state: {},
-        expanded: false,
-        outputPad: 1,
-      } as never,
+    expect(saved.details.display.calls.map((call: any) => call.durationMs)).toEqual([
+      123, 8000, 0, 456,
+    ]);
+    // Legacy history retains its old start timestamp, but no reliable duration.
+    const legacy = JSON.parse(JSON.stringify(saved));
+    delete legacy.details.display.calls[1].durationMs;
+    rendering.reset();
+    const fresh = createNativeRendering({ on() {} } as unknown as ExtensionAPI, owned).decorate(
+      source,
     );
-    expect(component.render(100).join("\n")).toContain("123ms");
-    expect(childContexts.map((ctx) => ctx.durationMs)).toEqual([123, undefined]);
+    clock.mockReturnValue(1000000);
+    for (const [renderer, snapshot, durations] of [
+      [tool, result, [123, 8000, 0, 456]],
+      [fresh, saved, [123, 8000, 0, 456]],
+      [fresh, legacy, [123, undefined, 0, 456]],
+    ] as const) {
+      for (const expanded of [false, true]) {
+        childContexts.length = 0;
+        const text = renderer.renderResult!(
+          snapshot,
+          { expanded, isPartial: false },
+          plainTheme as never,
+          { ...context, state: {}, expanded } as never,
+        )
+          .render(200)
+          .join("\n");
+        expect(text).toContain("✓ web_run · 123ms");
+        expect(text).toContain("✓ web_run · 0ms");
+        expect(text).toContain("✗ web_run · 456ms");
+        if (!expanded) expect(text).toContain("nested failure");
+        expect(text).toContain("Took 9.9s");
+        expect(text).not.toContain("9876ms");
+        expect(text.includes("8000ms")).toBe(snapshot !== legacy);
+        expect(childContexts.map((ctx) => ctx.durationMs)).toEqual(durations);
+        expect(childContexts.map((ctx) => [ctx.isPartial, ctx.isError])).toEqual([
+          [false, false],
+          [false, false],
+          [false, false],
+          [false, true],
+        ]);
+      }
+    }
   } finally {
+    done.resolve({ content: [], details: { calls: [] } });
+    await pending;
     clock.mockRestore();
   }
 });

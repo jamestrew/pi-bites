@@ -133,6 +133,62 @@ No provider network, user credentials, live MCP server, interactive terminal,
 other architecture or older Pi version is part of this evidence. Upstream-watch
 state is unchanged.
 
+## Recorded nested-tool timing (#405)
+
+The focused run uses **Pi 1.4.0** (`pi-coding-agent`, `pi-tui` and
+`pi-agent-core`) on Linux x86_64, Node 24.21.0 and Bun 1.4.2. The checkout already
+contains #400's recorded-duration preference, explicit child renderer context and
+single native overall timer. No production timing change or dependency update is
+needed; this extends the existing rendering/session regressions, not a second
+timing implementation.
+
+`native-rendering.test.ts` verifies that real registered parallel shell calls,
+including an exit-7 result, retain the nested execution-end event's recorded
+`durationMs` in their serialized display and rendered rows. Its deterministic
+execution-event case starts four overlapping calls and settles them in reverse
+order. Recorded success, zero and error durations stay distinct despite forward
+and backward wall-clock changes; an event without timing retains the older-host
+wall-clock fallback. Running child contexts have no final duration and never
+inherit the deliberately different parent duration.
+
+The same display details round-trip through JSON and render through a fresh
+decorator with fresh renderer state after the original collector resets. Both
+collapsed and expanded results preserve child durations and the independent
+parent timer. A legacy snapshot with no duration retains its old start timestamp
+but neither invents a historical duration nor inherits the parent's. Existing
+regressions keep silent-script/live overall timing, clipped output/errors, trailing
+expansion hints, narrow widths, patch previews, images and full-output retrieval.
+The shared SDK-child registration/capability coverage is reused rather than
+copying the renderer matrix.
+
+Recorded duration preserves Pi's complete `execute()` measurement. Pi starts its
+monotonic timer after ordinary `tool_call` hook approval, but `exec_command`'s
+per-launch authorization runs **inside** its registered `execute()`, so that
+internal wait remains included in the recorded child duration. The shell's separate
+`wall_time_seconds` and live timing remain post-approval; `tools.test.ts` retains
+its ordinary bash post-approval timing regression. These are different measures,
+not a claim that every displayed timer excludes every approval wait. Neither
+native codemode's `details.calls` timer nor host nested-call lifetime metadata is
+substituted for the execution-end duration.
+
+```sh
+bunx vitest run packages/ext/codex-adapter/native-rendering.test.ts packages/ext/codex-adapter/native-registration.test.ts packages/ext/subagents/test/agent-capabilities-e2e.test.ts packages/ext/tools.test.ts
+bun --bun vitest run packages/ext/codex-adapter/native-rendering.test.ts
+bun run typecheck
+bun check
+```
+
+The focused four-file run passes **78 tests**; the Bun renderer run passes **21**.
+The final `bun check` passes **95 package files / 1,447 tests** (4 opt-in live tests
+skipped) and **4 script files / 49 tests**. Temporary mutations that discard zero
+with `||` or pass the parent duration into the child context both fail the focused
+regression; the unchanged production implementation passes after restoration.
+
+This is offline timing/rendering evidence against the installed 1.4.0 development
+graph. It does not rerun CLI distribution probes, live providers, terminal image
+or layout acceptance, older Pi versions or other architectures, and it does not
+advance upstream-watch state.
+
 ## Unexecuted acceptance and limits
 
 - **Interactive fullscreen and regular-mode overlap: not run.** This agent run
