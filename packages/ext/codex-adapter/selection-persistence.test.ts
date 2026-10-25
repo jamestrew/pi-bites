@@ -1,6 +1,66 @@
-import type { ExtensionUIContext, FileEntry } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionUIContext,
+  FileEntry,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { expect, test } from "vitest";
 import { setup, textOf } from "./test/native-session.js";
+
+function extensionTool(name: string, defaultActive: boolean): ToolDefinition {
+  return {
+    name,
+    label: name,
+    description: `Return ${name}`,
+    parameters: Type.Object({}),
+    defaultActive,
+    async execute() {
+      return { content: [{ type: "text", text: name }], details: {} };
+    },
+  };
+}
+
+test("resume retains ordinary tool additions/removals and defaults only never-mentioned tools", async () => {
+  const note = extensionTool("session_note", false);
+  const original = await setup(undefined, {
+    persist: true,
+    excludeTools: ["view_image"],
+    extensionTools: [note],
+  });
+  original.setTools([...original.session.getActiveToolNames(), "session_note"]);
+  expect(textOf(await original.call("session_note", {}))).toBe("session_note");
+  const added = original.session.sessionManager.getLeafId()!;
+  const sessionFile = original.session.sessionManager.getSessionFile()!;
+  await original.close();
+
+  const resumed = await setup(undefined, { sessionFile, extensionTools: [note] });
+  expect(resumed.session.getActiveToolNames()).toContain("session_note");
+  expect(resumed.session.getCallableToolNames()).toContain("session_note");
+  resumed.setTools(resumed.session.getActiveToolNames().filter((name) => name !== "session_note"));
+  await resumed.run("text('removed');");
+  await resumed.close();
+
+  const reopened = await setup(undefined, {
+    sessionFile,
+    extensionTools: [note, extensionTool("new_tool", true), extensionTool("dormant_tool", false)],
+  });
+  expect(reopened.session.getActiveToolNames()).toContain("new_tool");
+  expect(textOf(await reopened.call("new_tool", {}))).toBe("new_tool");
+  for (const name of ["session_note", "dormant_tool", "view_image"])
+    expect(reopened.session.getCallableToolNames()).not.toContain(name);
+  const discovery = await reopened.run(
+    "text(ALL_TOOLS.map(t=>t.name)); text(await searchTools('view_image'));",
+  );
+  expect(discovery.isError, textOf(discovery)).toBe(false);
+  expect(textOf(discovery)).not.toContain("view_image");
+  await reopened.session.navigateTree(added, { summarize: false });
+  expect(reopened.session.getActiveToolNames()).toEqual(
+    expect.arrayContaining(["session_note", "new_tool"]),
+  );
+  expect(textOf(await reopened.call("session_note", {}))).toBe("session_note");
+  for (const name of ["dormant_tool", "view_image"])
+    expect(reopened.session.getCallableToolNames()).not.toContain(name);
+});
 
 test("reopening a projected session preserves nested shell and patch permissions", async () => {
   const original = await setup(undefined, { persist: true });
@@ -74,6 +134,60 @@ test("reopening preserves a session-disabled codemode", async () => {
   expect(resumed.session.getActiveToolNames()).not.toContain("codemode");
   expect(resumed.session.getCallableToolNames()).not.toContain("exec_command");
 });
+
+test("branch-local codemode disables survive resume and navigation but allow a later re-enable", async () => {
+  const original = await setup(undefined, { persist: true });
+  await original.run("text('enabled branch');");
+  const enabled = original.session.sessionManager.getLeafId()!;
+  original.setTools(original.session.getActiveToolNames().filter((name) => name !== "codemode"));
+  await original.call("read", { path: "missing.txt" });
+  const disabled = original.session.sessionManager.getLeafId()!;
+  const sessionFile = original.session.sessionManager.getSessionFile()!;
+  await original.close();
+
+  const resumed = await setup(undefined, { sessionFile });
+  expect(resumed.session.getActiveToolNames()).not.toContain("codemode");
+  await resumed.session.navigateTree(enabled, { summarize: false });
+  expect(resumed.session.getActiveToolNames()).toContain("codemode");
+  expect(resumed.session.getCallableToolNames()).toContain("exec_command");
+  await resumed.session.navigateTree(disabled, { summarize: false });
+  expect(resumed.session.getActiveToolNames()).not.toContain("codemode");
+  expect(resumed.session.getCallableToolNames()).not.toContain("exec_command");
+  resumed.setTools([...resumed.session.getActiveToolNames(), "codemode"]);
+  const result = await resumed.run(
+    "text((await tools.exec_command({cmd:'printf reenabled',login:false})).output);",
+  );
+  expect(result.isError, textOf(result)).toBe(false);
+  expect(textOf(result)).toContain("reenabled");
+});
+
+test.each(["+codemode", "-codemode"])(
+  "startup %s overrides the restored codemode selection",
+  async (modifier) => {
+    const original = await setup(undefined, { persist: true });
+    await original.run("text('saved');");
+    if (modifier === "+codemode") {
+      original.setTools([]);
+      await original.call("read", { path: "missing.txt" });
+    }
+    const sessionFile = original.session.sessionManager.getSessionFile()!;
+    await original.close();
+
+    const resumed = await setup([modifier], { sessionFile });
+    expect(resumed.session.getActiveToolNames().includes("codemode")).toBe(
+      modifier === "+codemode",
+    );
+    expect(resumed.session.getCallableToolNames().includes("exec_command")).toBe(
+      modifier === "+codemode",
+    );
+    if (modifier === "+codemode") {
+      const result = await resumed.run(
+        "text((await tools.exec_command({cmd:'printf enabled',login:false})).output);",
+      );
+      expect(result.isError, textOf(result)).toBe(false);
+    }
+  },
+);
 
 test("reopening does not re-enable explicitly disabled nested tools", async () => {
   const original = await setup(undefined, {
@@ -180,4 +294,10 @@ test("reopening a read-only session does not acquire shell or patch permissions"
   expect((await resumed.run("await tools.exec_command({cmd:'touch forbidden'});")).isError).toBe(
     true,
   );
+  await resumed.session.setModel(resumed.runtime.getModel("native-test", "claude")!);
+  expect(resumed.session.getActiveToolNames()).toEqual(["read"]);
+  await resumed.session.setModel(resumed.runtime.getModel("native-test", "gpt-6.1-sol")!);
+  expect(resumed.session.getActiveToolNames()).toContain("codemode");
+  expect(resumed.session.getCallableToolNames()).not.toContain("exec_command");
+  expect(resumed.session.getCallableToolNames()).not.toContain("apply_patch");
 });

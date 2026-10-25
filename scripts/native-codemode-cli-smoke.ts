@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createAssistantMessageEventStream, type AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export default function (pi: ExtensionAPI): void {
+export function registerOfflineProvider(pi: ExtensionAPI, modelId = "model"): void {
   let turns = 0;
   pi.registerProvider("native-cli-smoke", {
     api: "openai-completions",
@@ -16,7 +16,7 @@ export default function (pi: ExtensionAPI): void {
     baseUrl: "http://localhost",
     models: [
       {
-        id: "model",
+        id: modelId,
         name: "Offline CLI smoke",
         reasoning: false,
         input: ["text"],
@@ -62,6 +62,10 @@ export default function (pi: ExtensionAPI): void {
       return stream;
     },
   });
+}
+
+export default function (pi: ExtensionAPI): void {
+  registerOfflineProvider(pi);
 }
 
 if (import.meta.main) {
