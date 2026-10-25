@@ -689,6 +689,96 @@ test("the host applies configured output padding once around code, nested rows, 
   }
 });
 
+test("nested web rows share the host inset in live and saved collapsed and expanded results", async () => {
+  initTheme("dark");
+  const h = await setup(undefined, {
+    config: { codexAdapter: { webSearchProviders: ["native-test"] } },
+  });
+  const helper = join(h.cwd, "web-helper");
+  const output = { output_text: "first\nlast 界\u001b]52;c;INJECTED\u0007" };
+  writeFileSync(helper, `#!/bin/sh\nprintf '%s' '${JSON.stringify(output)}'\n`, { mode: 0o755 });
+  vi.stubEnv("PI_CODEX_WEB_RUN_BIN", helper);
+  try {
+    const code = `await tools.web_run({search_query:[{q:'docs'}],open:[{ref_id:'turn0view0'}]});`;
+    const success = await h.run(code);
+    expect(success.isError, textOf(success)).toBe(false);
+    writeFileSync(helper, "#!/bin/sh\nprintf 'search unavailable' >&2\nexit 1\n");
+    const failure = await h.run(code);
+    expect(failure.isError).toBe(true);
+    const partial = h.events.find(
+      (e) =>
+        e.type === "tool_execution_update" &&
+        e.toolName === "codemode" &&
+        e.partialResult.details.display.calls.some((call: any) => call.name === "web_run"),
+    );
+    expect(partial).toBeDefined();
+    // Historical inspection must use only serializable display data, not the helper.
+    writeFileSync(helper, "#!/bin/sh\nexit 99\n");
+    const saved = JSON.parse(JSON.stringify(success));
+    for (const event of [partial, success, failure, saved]) {
+      for (const outputPad of [0, 1]) {
+        for (const expanded of [false, true]) {
+          for (const width of [1, 2, 7, 80])
+            expect(
+              rendered(h, event, expanded, width, plainTheme, { outputPad }).every(
+                (line) => visibleWidth(line) <= width,
+              ),
+            ).toBe(true);
+          const row = new ToolExecutionComponent(
+            "codemode",
+            success.toolCallId,
+            { code },
+            { outputPad, showImages: false },
+            h.session.getToolDefinition("codemode")!,
+            { requestRender() {} } as never,
+            h.cwd,
+          );
+          row.setArgsComplete();
+          row.setExpanded(expanded);
+          row.updateResult(
+            {
+              ...(event.result ?? event.partialResult),
+              isError: event.isError ?? false,
+            },
+            event === partial,
+          );
+          for (const width of [7, 80]) {
+            const lines = row.render(width).map(stripVTControlCharacters);
+            expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+            expect(lines.join("\n")).not.toContain("INJECTED");
+            if (width !== 80) continue;
+            const summary = lines.find((line) => line.includes("Web Search"));
+            expect(summary?.trimEnd()).toBe(
+              outputPad === 0 ? "Web Search docs · Open page" : " Web Search docs · Open page",
+            );
+            const index = lines.indexOf(summary!);
+            expect(lines[index - 1]?.trim()).toBe("");
+            expect(lines[index + 1]?.trim()).toBe("");
+            expect(lines.filter((line) => line.includes("Web Search"))).toHaveLength(1);
+            if (expanded && (event === success || event === saved))
+              expect(
+                lines.some((line) => line.trimEnd() === (outputPad ? " last 界" : "last 界")),
+              ).toBe(true);
+            if (event === failure) expect(lines.join("\n")).toContain("search unavailable");
+          }
+        }
+      }
+    }
+    expect(
+      rendered(h, saved, true, 200, {
+        ...plainTheme,
+        bold: (s) => `<bold>${s}</bold>`,
+        fg: (role, s) => `<${role}>${s}</${role}>`,
+      }).join("\n"),
+    ).toContain("<bold>Web</bold><accent> Search docs · Open page</accent>");
+    expect(
+      h.events.filter((e) => e.type === "tool_execution_end" && e.toolName === "web_run"),
+    ).toHaveLength(2);
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 test("truncated native output remains retrievable with final timing outside the collapsed preview", async () => {
   const h = await setup(["read", "codemode"]);
   writeFileSync(join(h.cwd, "item.txt"), "nested output");

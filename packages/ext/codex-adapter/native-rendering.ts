@@ -14,7 +14,7 @@ import type { ApplyPatchRenderSnapshot } from "./apply-patch/render-state.js";
 import type { UnifiedExecResult } from "./exec/session-manager.js";
 
 type Context = Parameters<NonNullable<ToolDefinition["renderResult"]>>[3];
-type Renderer = Pick<ToolDefinition, "renderCall" | "renderResult">;
+type Renderer = Pick<ToolDefinition, "renderCall" | "renderResult" | "renderShell">;
 interface DisplayCall {
   id: string;
   name: string;
@@ -383,6 +383,8 @@ function renderCall(call: DisplayCall, tool: Renderer | undefined, theme: Theme,
     call.name === "apply_patch" && typeof call.args === "string" ? { input: call.args } : call.args;
   const context: Context = {
     ...outer,
+    // The enclosing codemode shell already applies the host's horizontal inset.
+    outputPad: tool?.renderShell === "self" ? 0 : outer.outputPad,
     args: input,
     toolCallId: call.id,
     state,
