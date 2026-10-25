@@ -62,8 +62,8 @@ integration is established separately below.
 - The full check includes native discovery/accounting, permissions, shell lifetime,
   explicit cancellation ownership, late approvals, images/errors/full-output
   paths, saved timing, settlement/capacity, tracker and diagnostics regressions.
-  Focused restoration/timing/settlement work remains owned by #403–#406; passing
-  existing coverage here does not close those issues or claim their entire matrix.
+  Focused timing/settlement work remains owned by #405–#406; passing existing
+  coverage here does not close those issues or claim their entire matrix.
 
 Reproducible focused checks (repository root):
 
@@ -80,6 +80,58 @@ Bun coverage. The full check runs package tests under Node and script tests unde
 Bun: **95 package files / 1,440 tests pass (4 opt-in live tests skipped)** and
 **4 script files / 49 tests pass**. The focused three-file run passes 37 tests
 (the same four live tests skipped); the Bun-specific two-test run passes.
+
+## Selected tools across resume and tree navigation (#403)
+
+The focused compatibility run uses the same Linux x64 environment and **Pi 1.4.0**
+development graph, npm CLI and compiled system CLI described above. The checkout
+already includes branch-local adapter permission checkpoints. No production
+reconciliation change or dependency update is necessary: the observable restoration
+matrix passes against the actual 1.4 host, not a simulated restoration algorithm.
+Pi restores saved declarations; the adapter checkpoints retain the underlying core
+selection that its projection displaces. Saved display still cannot restore resources.
+
+`selection-persistence.test.ts` drives persisted `SessionManager.open` sessions and
+public `AgentSession.navigateTree` calls. Coverage includes ordinary tool additions
+and removals; fresh ordinary tools absent from an old branch; never-mentioned
+`defaultActive:false` tools; newly registered owned image tools remaining hidden;
+codemode disable/re-enable across resume and both branch directions; startup
+`+codemode`/`-codemode`; replacement registry/default selections, exclusions and
+no-builtin restrictions; shell/patch execution; and read-only model transitions
+restoring only displaced cores. Existing registered-session tests retain branch
+shell/store invalidation, late-approval and throwing-stale-context checks.
+
+The existing SDK-child ceiling cases now recover **full-access history into a
+narrower current registry** before checking native discovery, model-facing tool
+search, refused execution, model switches and reload. Persisted selection cannot
+recover forbidden patch, web or image tools, or shell in the read-only child.
+
+The offline CLI probe launches the selected executable twice with an isolated
+synthetic provider and temporary session files. It executes native codemode and
+asserts `Output: 42`, persists a codemode disable, reopens that session, navigates
+to the enabled branch, executes codemode successfully there, then navigates back
+to the disabled branch. Both compiled and npm **1.4.0** probes pass. This checks
+real RPC extension-command navigation, not terminal `/tree` UI acceptance.
+The probe loads the shared adapter, not every pi-bites extension.
+
+```sh
+bunx vitest run packages/ext/codex-adapter/native-registration.test.ts packages/ext/codex-adapter/selection-persistence.test.ts packages/ext/subagents/test/agent-capabilities-e2e.test.ts
+bun --bun vitest run packages/ext/codex-adapter/selection-persistence.test.ts
+bun scripts/tool-selection-cli-smoke.ts /run/current-system/sw/bin/pi
+bun scripts/tool-selection-cli-smoke.ts node_modules/.bin/pi
+bun scripts/native-codemode-cli-smoke.ts /run/current-system/sw/bin/pi
+bun run typecheck
+bun check
+```
+
+The focused run passes **59 tests**; the separate Bun restoration run passes **17**.
+The final `bun check` passes **95 package files / 1,446 tests** (4 opt-in live tests
+skipped) and **4 script files / 49 tests**. An initial full run encounters an EPIPE
+in the existing nested-web rendering helper; its focused rerun and the subsequent
+full check pass without changes to that fixture. No selection regression fails.
+No provider network, user credentials, live MCP server, interactive terminal,
+other architecture or older Pi version is part of this evidence. Upstream-watch
+state is unchanged.
 
 ## Unexecuted acceptance and limits
 

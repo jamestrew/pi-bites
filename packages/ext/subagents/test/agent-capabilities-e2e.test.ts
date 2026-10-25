@@ -334,10 +334,19 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
     ["read", "codemode", "tool_search"],
     [...CORE, "codemode", "tool_search", "exec_command", "write_stdin"],
   ])(
-    "keeps SDK selection ceilings through discovery, search, switches and reload: %j",
+    "keeps SDK selection ceilings through recovery, discovery, search, switches and reload: %j",
     async (...allowedTools) => {
       configure();
-      await open(undefined, allowedTools);
+      await open(undefined, INITIAL);
+      expect((await run("text('full-access history');")).isError).toBe(false);
+      const conversation = {
+        sessionId: child!.sessionManager.getSessionId(),
+        cwd,
+        entries: structuredClone(child!.sessionManager.getEntries()),
+      };
+      await shutdownAgentSession(child!);
+      child = undefined;
+      await open(undefined, allowedTools, { conversation });
       const assertCeiling = async () => {
         const result = await run(
           `text(ALL_TOOLS.map(t=>t.name)); text(await searchTools('apply_patch web_run view_image')); text(await describeTool('apply_patch'));`,

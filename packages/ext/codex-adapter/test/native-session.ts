@@ -14,6 +14,7 @@ import {
   type ExtensionContext,
   type ExtensionUIContext,
   type FileEntry,
+  type ToolDefinition,
   DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
@@ -67,6 +68,7 @@ export async function setup(
     persist?: boolean;
     sessionFile?: string;
     entries?: FileEntry[];
+    extensionTools?: ToolDefinition[];
     gate?: boolean;
     onAuthorization?: (request: CommandAuthorizationRequest) => void;
   } = {},
@@ -114,6 +116,7 @@ export async function setup(
     extensionFactories: [
       createToolSearchExtension(),
       (pi) => {
+        for (const tool of options.extensionTools ?? []) pi.registerTool(tool);
         setTools = pi.setActiveTools;
         const gate: BashGateController | undefined = options.onAuthorization
           ? {
