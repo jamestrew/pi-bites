@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseArgs } from "../node_modules/@earendil-works/pi-coding-agent/dist/cli/args.js";
 import {
   mergeReviewedPullRequest,
@@ -152,6 +152,50 @@ const piOutput = (findings: string) =>
   `Implemented and pushed issue #55.\n\nRALPH_FINDINGS\n${findings}\nRALPH_REVIEW: CHANGES REQUESTED\n`;
 
 describe("validated merge", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("waits for validation to appear and finish before merging", async () => {
+    const statuses = [undefined, "queued", "in_progress", "completed"];
+    let polls = 0;
+    const merges: ReadonlyArray<string>[] = [];
+    const command = async (args: ReadonlyArray<string>): Promise<string> => {
+      if (args[0] === "api") {
+        const status = statuses[polls++];
+        return JSON.stringify([
+          {
+            workflow_runs: status
+              ? [
+                  {
+                    head_sha: "head-55",
+                    status,
+                    conclusion: status === "completed" ? "success" : null,
+                    pull_requests: [{ number: 55 }],
+                  },
+                ]
+              : [],
+          },
+        ]);
+      }
+      merges.push(args);
+      return "MERGED";
+    };
+    const result = expect(
+      mergeReviewedPullRequest(
+        "owner/repo",
+        { number: 55, state: "OPEN", headRefOid: "head-55" },
+        "RALPH_REVIEW: APPROVED",
+        command,
+      ),
+    ).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(merges).toEqual([]);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await result;
+    expect(polls).toBe(4);
+    expect(merges[0]?.slice(0, 2)).toEqual(["pr", "merge"]);
+  });
+
   it("keeps CI validation on the immutable PR head even when the PR is retargeted", () => {
     const workflow = readFileSync(
       new URL("../.github/workflows/validation.yml", import.meta.url),
@@ -180,7 +224,7 @@ describe("validated merge", () => {
       merges.push(args);
       return "MERGED";
     };
-    await expect(
+    const result = expect(
       mergeReviewedPullRequest(
         "owner/repo",
         { number: 55, state: "OPEN", headRefOid: "head-55" },
@@ -188,6 +232,7 @@ describe("validated merge", () => {
         command,
       ),
     ).rejects.toThrow("validation");
+    await Promise.all([result, vi.advanceTimersByTimeAsync(20 * 60_000)]);
     expect(merges).toEqual([]);
   });
 
@@ -275,24 +320,30 @@ describe("validated merge", () => {
     ],
   ])("never merges an approved head without successful validation: %j", async (...runs) => {
     const merges: string[][] = [];
+    let polls = 0;
+    const pending = runs.length === 0 || runs[0]?.status !== "completed";
     const command = async (args: ReadonlyArray<string>): Promise<string> => {
-      if (args[0] === "api")
+      if (args[0] === "api") {
+        polls += 1;
         return JSON.stringify([
           { workflow_runs: runs.map((run) => ({ ...run, pull_requests: [{ number: 55 }] })) },
         ]);
+      }
       merges.push([...args]);
       return "MERGED";
     };
 
-    await expect(
+    const result = expect(
       mergeReviewedPullRequest(
         "owner/repo",
         { number: 55, state: "OPEN", headRefOid: "head-55" },
         "RALPH_REVIEW: APPROVED",
         command,
       ),
-    ).rejects.toThrow("validation");
+    ).rejects.toThrow(pending ? "Timed out waiting for validation" : "Unsuccessful validation");
+    await Promise.all([result, vi.advanceTimersByTimeAsync(20 * 60_000)]);
     expect(merges).toEqual([]);
+    expect(polls).toBe(pending ? 121 : 1);
   });
 });
 

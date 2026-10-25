@@ -137,32 +137,51 @@ export async function mergeReviewedPullRequest(
 ): Promise<boolean> {
   if (!shouldMergePullRequest(pullRequest.state, piOutput)) return false;
 
-  const pages = JSON.parse(
-    await command([
-      "api",
-      `repos/${repo}/actions/workflows/validation.yml/runs?head_sha=${pullRequest.headRefOid}&event=pull_request&per_page=100`,
-      "--paginate",
-      "--slurp",
-    ]),
-  ) as {
-    workflow_runs: ReadonlyArray<{
-      head_sha: string;
-      status: string;
-      conclusion: string | null;
-      pull_requests: ReadonlyArray<{ number: number }>;
-    }>;
-  }[];
-  const latest = pages
-    .flatMap((page) => page.workflow_runs)
-    .find((run) => run.pull_requests.some((pr) => pr.number === pullRequest.number));
-  if (
-    latest?.head_sha !== pullRequest.headRefOid ||
-    latest.status !== "completed" ||
-    latest.conclusion !== "success"
-  ) {
-    throw new Error(
-      `Pull request #${pullRequest.number} needs successful validation for ${pullRequest.headRefOid} (latest run: ${latest?.conclusion ?? latest?.status ?? "missing"})`,
-    );
+  // Allow queue time beyond the validation job's 15-minute execution limit.
+  const deadline = Date.now() + 20 * 60_000;
+  let waiting = false;
+  for (;;) {
+    const pages = JSON.parse(
+      await command([
+        "api",
+        `repos/${repo}/actions/workflows/validation.yml/runs?head_sha=${pullRequest.headRefOid}&event=pull_request&per_page=100`,
+        "--paginate",
+        "--slurp",
+      ]),
+    ) as {
+      workflow_runs: ReadonlyArray<{
+        head_sha: string;
+        status: string;
+        conclusion: string | null;
+        pull_requests: ReadonlyArray<{ number: number }>;
+      }>;
+    }[];
+    const latest = pages
+      .flatMap((page) => page.workflow_runs)
+      .find((run) => run.pull_requests.some((pr) => pr.number === pullRequest.number));
+    if (
+      latest?.head_sha === pullRequest.headRefOid &&
+      latest.status === "completed" &&
+      latest.conclusion === "success"
+    ) {
+      break;
+    }
+    const timedOut = Date.now() >= deadline;
+    if (
+      timedOut ||
+      (latest && (latest.head_sha !== pullRequest.headRefOid || latest.status === "completed"))
+    ) {
+      throw new Error(
+        `${timedOut ? "Timed out waiting for validation" : "Unsuccessful validation"} for pull request #${pullRequest.number} at ${pullRequest.headRefOid} (latest run: ${latest?.conclusion ?? latest?.status ?? "missing"})`,
+      );
+    }
+    if (!waiting) {
+      console.log(
+        `Pull request #${pullRequest.number}: waiting up to 20 minutes for validation...`,
+      );
+      waiting = true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10_000));
   }
 
   await command([
