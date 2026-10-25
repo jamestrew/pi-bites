@@ -1,14 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   createAssistantMessageEventStream,
   InMemoryCredentialStore,
+  getCurrentSystemPrompt,
+  getCurrentTools,
   type AssistantMessage,
   type Context,
   type StreamFunction,
 } from "@earendil-works/pi-ai";
 import {
+  CONFIG_DIR_NAME,
   createAgentSession,
   DefaultResourceLoader,
   defineTool,
@@ -19,10 +22,15 @@ import {
   type AgentSession,
   type ExtensionAPI,
   type ToolDefinition,
+  type Skill,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, expect, it, vi } from "vitest";
-import registerSubagents from "../index.js";
+import registerSubagents, { createSubagents } from "../index.js";
+import type { AgentRecord } from "../types.js";
+import registerAdapter from "../../codex-adapter/index.js";
+import registerPonytail from "../../ponytail/index.js";
+import registerInlineReferences from "../../inline-references/index.js";
 import { resumeAgent } from "../agent-runner.js";
 import {
   bindSubagentMessenger,
@@ -92,6 +100,9 @@ async function makeSession(
   options: {
     streamSimple?: Parameters<ModelRuntime["registerProvider"]>[1]["streamSimple"];
     mode?: Parameters<AgentSession["bindExtensions"]>[0]["mode"];
+    modelId?: string;
+    systemPrompt?: string;
+    skills?: Skill[];
   } = {},
 ) {
   const cwd = mkdtempSync(join(tmpdir(), "subagent-message-e2e-"));
@@ -108,7 +119,7 @@ async function makeSession(
     ...(options.streamSimple ? { streamSimple: options.streamSimple } : {}),
     models: [
       {
-        id: "model",
+        id: options.modelId ?? "model",
         name: "Mail Test",
         reasoning: false,
         input: ["text"],
@@ -118,7 +129,7 @@ async function makeSession(
       },
     ],
   });
-  const model = modelRuntime.getModel("mail-test", "model");
+  const model = modelRuntime.getModel("mail-test", options.modelId ?? "model");
   if (!model) throw new Error("test model missing");
   const sessionManager = SessionManager.inMemory(cwd);
   const loader = new DefaultResourceLoader({
@@ -130,6 +141,10 @@ async function makeSession(
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles: true,
+    systemPrompt: options.systemPrompt,
+    ...(options.skills
+      ? { skillsOverride: () => ({ skills: options.skills!, diagnostics: [] }) }
+      : {}),
   });
   await loader.reload();
   const { session } = await createAgentSession({
@@ -142,8 +157,9 @@ async function makeSession(
     settingsManager: SettingsManager.inMemory({ compaction: { enabled: false } }),
     resourceLoader: loader,
   });
-  await session.bindExtensions({ mode: options.mode });
-  return { model, session, sessionManager, cwd };
+  const errors: unknown[] = [];
+  await session.bindExtensions({ mode: options.mode, onError: (error) => errors.push(error) });
+  return { model, session, sessionManager, cwd, errors };
 }
 
 function wireMessenger(session: AgentSession, sessionManager: SessionManager) {
@@ -511,77 +527,200 @@ it("native split-turn summaries retain instructions without capping output at re
   }
 });
 
-it("automatic compaction stops a real tool turn and starts one custom continuation", async () => {
-  const settled: boolean[] = [];
-  const starts: string[] = [];
-  let summaries = 0;
-  let requests = 0;
-  let continuationContext = "";
-  const tool = defineTool({
-    name: "continuation_probe",
-    label: "Continuation probe",
-    description: "Return synthetic context for automatic compaction.",
-    parameters: Type.Object({}),
-    async execute() {
-      return { content: [{ type: "text", text: "synthetic context ".repeat(200) }], details: {} };
-    },
-  });
-  const { session } = await makeSession(
-    [tool],
-    [
-      (pi) => {
-        registerAutoCompaction(pi, { current: { autoCompaction: { thresholdTokens: 1000 } } });
-        pi.on("before_agent_start", (event) => {
-          starts.push(event.messageType);
-        });
-      },
-    ],
-    undefined,
-    {
-      mode: "tui",
-      streamSimple: (model, context, options) => {
-        if (options?.cacheRetention === "none") {
-          summaries++;
-          return response(model, [{ type: "text", text: "Synthetic automatic checkpoint." }]);
-        }
-        if (requests++ === 0)
-          return response(
-            model,
-            [{ type: "toolCall", id: "continue-probe", name: tool.name, arguments: {} }],
-            "toolUse",
-            2000,
-          );
-        continuationContext = JSON.stringify(context.messages);
-        return response(model, [{ type: "text", text: "Resumed the task." }]);
-      },
-    },
-  );
-  session.settingsManager.applyOverrides({
-    compaction: { enabled: false, keepRecentTokens: 100, reserveTokens: 7 },
-  });
-  session.subscribe((event) => {
-    if (event.type === "agent_settled") settled.push(event.aborted);
-  });
-  try {
-    await session.prompt("Run the synthetic continuation probe.");
-    await expect.poll(() => settled.length).toBe(2);
-    expect(settled).toEqual([true, false]);
-    expect(starts).toEqual(["user", "custom"]);
-    expect(requests).toBe(2);
-    expect(summaries).toBe(1);
-    expect(continuationContext).toContain("Synthetic automatic checkpoint.");
-    expect(continuationContext).toContain("Continue the previous task after compaction.");
-    expect(session.messages.at(-1)).toMatchObject({
-      role: "assistant",
-      stopReason: "stop",
-      content: [{ type: "text", text: "Resumed the task." }],
+it.each(["idle custom", "automatic compaction"] as const)(
+  "%s preserves shared startup context after its first tool call",
+  async (origin) => {
+    const resources = mkdtempSync(join(tmpdir(), "startup-context-"));
+    tempDirs.push(resources);
+    const filePath = join(resources, "SKILL.md");
+    writeFileSync(
+      filePath,
+      "---\nname: continuation_fixture_404\ndescription: Fixture\n---\nSKILL_BODY_404",
+    );
+    const pending = {
+      customType: "pending-startup-context",
+      content: "PENDING_CONTEXT_404",
+      display: false,
+    };
+    const continuation =
+      "Continue with $skill:continuation_fixture_404 and $prompt:continuation_fixture_404";
+    const requests: Context["messages"][] = [];
+    const starts: Array<{ type: string; hasPrompt: boolean; idle: boolean }> = [];
+    const settled: boolean[] = [];
+    let compactions = 0;
+    const execute = vi.fn(async () => ({
+      content: [{ type: "text" as const, text: "TOOL_RESULT_404 ".repeat(200) }],
+      details: {},
+    }));
+    const probe = defineTool({
+      name: "startup_probe",
+      label: "Startup probe",
+      description: "Return synthetic continuation context.",
+      parameters: Type.Object({}),
+      execute,
     });
-  } finally {
-    await session.abort();
-    session.abortCompaction();
-    session.dispose();
-  }
-});
+    const child: AgentRecord = {
+      id: "startup-child",
+      taskName: "/root/startup",
+      generation: 1,
+      type: "explorer",
+      parentSessionId: "parent",
+      prompt: "Verify startup context",
+      description: "Startup fixture",
+      status: "idle",
+      toolUses: 0,
+      toolCalls: [],
+      omittedToolCalls: 0,
+      startedAt: 0,
+      lifetimeUsage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      compactionCount: 0,
+      invocation: {},
+      failureHistory: [],
+    };
+    const { session, errors, cwd } = await makeSession(
+      [probe],
+      [
+        (pi) => {
+          // Exercise the same additive task identity hook used by SDK children.
+          createSubagents(pi)
+            .forChild(pi, child, () => pi.getActiveTools())
+            .registerTools();
+          registerAdapter(pi, { current: {} });
+          registerPonytail(pi);
+          registerInlineReferences(pi);
+          registerAutoCompaction(pi, { current: { autoCompaction: { thresholdTokens: 1000 } } });
+          pi.on("before_agent_start", (event, ctx) => {
+            starts.push({
+              type: event.messageType,
+              hasPrompt: "prompt" in event,
+              idle: ctx.isIdle(),
+            });
+          });
+          pi.on("session_compact", () => {
+            pi.sendMessage(pending, { triggerTurn: false, deliverAs: "nextTurn" });
+          });
+        },
+      ],
+      [probe.name, "list_agents", "bash", "codemode", "exec_command", "write_stdin"],
+      {
+        mode: "tui",
+        modelId: "gpt-6.1-sol",
+        systemPrompt: 'EXISTING_POLICY_404\n<active_agent name="explorer"/>',
+        skills: [
+          {
+            name: "continuation_fixture_404",
+            description: "Fixture",
+            filePath,
+            baseDir: resources,
+            sourceInfo: { path: filePath, source: "test", scope: "temporary", origin: "top-level" },
+            disableModelInvocation: false,
+          },
+        ],
+        streamSimple: (model, context, options) => {
+          if (options?.cacheRetention === "none") {
+            compactions++;
+            return response(model, [{ type: "text", text: "STARTUP_CHECKPOINT_404" }]);
+          }
+          requests.push(structuredClone(context.messages));
+          const lastRequest = origin === "automatic compaction" ? 3 : 2;
+          return requests.length < lastRequest
+            ? response(
+                model,
+                [
+                  {
+                    type: "toolCall",
+                    id: `probe-${requests.length}`,
+                    name: probe.name,
+                    arguments: {},
+                  },
+                ],
+                "toolUse",
+                origin === "automatic compaction" && requests.length === 1 ? 2000 : 1,
+              )
+            : response(model, [{ type: "text", text: "Finished continuation." }]);
+        },
+      },
+    );
+    const promptDir = join(cwd, CONFIG_DIR_NAME, "prompts");
+    mkdirSync(promptDir, { recursive: true });
+    writeFileSync(join(promptDir, "continuation_fixture_404.md"), "PROMPT_BODY_404");
+    session.settingsManager.applyOverrides({
+      compaction: { enabled: false, keepRecentTokens: 100, reserveTokens: 7 },
+    });
+    session.subscribe((event) => {
+      if (event.type === "agent_settled") settled.push(event.aborted);
+    });
+    try {
+      if (origin === "idle custom") {
+        await session.sendCustomMessage(pending, { triggerTurn: false, deliverAs: "nextTurn" });
+        expect(requests).toHaveLength(0);
+        await session.sendCustomMessage(
+          { customType: "startup-continuation", content: continuation, display: false },
+          { triggerTurn: true, deliverAs: "followUp" },
+        );
+      } else {
+        await session.prompt("Run the synthetic startup probe.");
+        await expect.poll(() => settled.length).toBe(2);
+      }
+      expect(errors).toEqual([]);
+      expect(starts).toEqual([
+        ...(origin === "automatic compaction"
+          ? [{ type: "user", hasPrompt: true, idle: false }]
+          : []),
+        { type: "custom", hasPrompt: false, idle: false },
+      ]);
+      expect(settled).toEqual(origin === "automatic compaction" ? [true, false] : [false]);
+      expect(compactions).toBe(origin === "automatic compaction" ? 1 : 0);
+      expect(requests).toHaveLength(origin === "automatic compaction" ? 3 : 2);
+      expect(execute).toHaveBeenCalledTimes(origin === "automatic compaction" ? 2 : 1);
+      for (const messages of requests.slice(-2)) {
+        const system = getCurrentSystemPrompt(messages);
+        for (const section of [
+          "EXISTING_POLICY_404",
+          '<active_agent name="explorer"/>',
+          "Your canonical task_name is /root/startup.",
+          "<pi-bites-ponytail>",
+          "<available_skills>",
+        ]) {
+          expect(system.split(section)).toHaveLength(2);
+        }
+        expect(system).toContain("tools.exec_command");
+        expect(getCurrentTools(messages).map((tool) => tool.name)).toContain("codemode");
+        const text = requestText(messages);
+        expect(text.match(/PENDING_CONTEXT_404/g)).toHaveLength(1);
+        expect(text).not.toContain("SKILL_BODY_404");
+        expect(text).not.toContain("PROMPT_BODY_404");
+        if (origin === "idle custom") expect(text).toContain(continuation);
+        else {
+          expect(text).toContain("STARTUP_CHECKPOINT_404");
+          expect(text.match(/Continue the previous task after compaction\./g)).toHaveLength(1);
+        }
+      }
+      expect(requestText(requests.at(-1)!)).toContain("TOOL_RESULT_404");
+      expect(session.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        stopReason: "stop",
+        content: [{ type: "text", text: "Finished continuation." }],
+      });
+      expect(
+        session.messages.filter(
+          (message) => message.role === "custom" && message.customType === pending.customType,
+        ),
+      ).toHaveLength(1);
+      expect(
+        session.messages.some(
+          (message) =>
+            message.role === "custom" && message.customType === "inline-reference-context",
+        ),
+      ).toBe(false);
+    } finally {
+      await session.abort();
+      session.abortCompaction();
+      await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+      session.dispose();
+    }
+  },
+);
 
 it.each([false, true])(
   "resume preserves a terminal provider error (compaction=%s)",
