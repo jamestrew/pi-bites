@@ -269,67 +269,80 @@ it("inspector estimates projected messages without changing raw history", async 
   });
 });
 
-it("context all lists native codemode tools without counting their declarations twice", async () => {
-  const h = await setup(undefined, {
-    config: { codexAdapter: { webSearchProviders: ["native-test"] } },
-  });
-  let handler!: RegisteredCommand["handler"];
-  registerContext(
-    {
-      registerCommand(_name: string, command: Omit<RegisteredCommand, "name" | "sourceInfo">) {
-        handler = command.handler;
-      },
-      getAllTools: () => h.session.getAllTools(),
-      getActiveTools: () => h.session.getActiveToolNames(),
-    } as unknown as ExtensionAPI,
-    undefined,
-    () => h.previewTools(),
-  );
-  let lines: string[] = [];
-  const inspect = async () => {
-    await handler("all", {
-      ...h.getContext(),
-      mode: "tui",
-      getSystemPromptOptions: () => ({ cwd: h.cwd }),
-      ui: {
-        custom: async (
-          factory: (
-            _tui: unknown,
-            theme: unknown,
-            _kb: unknown,
-            done: () => void,
-          ) => { render(width: number): string[] },
-        ) => {
-          const theme = {
-            fg: (_color: string, text: string) => text,
-            bold: (text: string) => text,
-          };
-          lines = factory(undefined, theme, undefined, () => {}).render(160);
+it.each(["gpt-6.1-sol", "claude"])(
+  "context all lists nested tools without double-counting on %s",
+  async (model) => {
+    const h = await setup(undefined, {
+      model,
+      config: { codexAdapter: { webSearchProviders: ["native-test"] } },
+    });
+    let handler!: RegisteredCommand["handler"];
+    registerContext(
+      {
+        registerCommand(_name: string, command: Omit<RegisteredCommand, "name" | "sourceInfo">) {
+          handler = command.handler;
         },
-      },
-    } as unknown as ExtensionCommandContext);
-    return lines.join("\n");
-  };
+        getAllTools: () => h.session.getAllTools(),
+        getActiveTools: () => h.session.getActiveToolNames(),
+      } as unknown as ExtensionAPI,
+      undefined,
+      () => h.previewTools(),
+    );
+    let lines: string[] = [];
+    const inspect = async () => {
+      await handler("all", {
+        ...h.getContext(),
+        mode: "tui",
+        getSystemPromptOptions: () => ({ cwd: h.cwd }),
+        ui: {
+          custom: async (
+            factory: (
+              _tui: unknown,
+              theme: unknown,
+              _kb: unknown,
+              done: () => void,
+            ) => { render(width: number): string[] },
+          ) => {
+            const theme = {
+              fg: (_color: string, text: string) => text,
+              bold: (text: string) => text,
+            };
+            lines = factory(undefined, theme, undefined, () => {}).render(160);
+          },
+        },
+      } as unknown as ExtensionCommandContext);
+      return lines.join("\n");
+    };
 
-  expect(h.session.getActiveToolNames()).not.toContain("exec_command");
-  const expanded = await inspect();
-  expect(expanded).toContain("exec_command");
-  expect(expanded).toContain("apply_patch");
-  expect(expanded).toMatch(/exec_command: ~[\d.]+k? tokens/);
-  expect(expanded).toMatch(
-    /ALL_TOOLS, searchTools, describeTool, describeNamespace: ~\d+ tokens \(builtin, shared\)/,
-  );
-  expect(expanded).toMatch(/web_run: ~[\d.]+k? tokens\n/);
+    expect(h.session.getActiveToolNames()).not.toContain("exec_command");
+    const expanded = await inspect();
+    if (model === "claude") {
+      for (const name of ["read", "bash", "edit", "write"])
+        expect(expanded).toMatch(new RegExp(`${name}: ~[\\d.]+k? tokens`));
+      expect(expanded).toContain("System tools · 1 items");
+      expect(expanded).not.toContain("exec_command");
+      expect(expanded).not.toContain("apply_patch");
+    } else {
+      expect(expanded).toContain("exec_command");
+      expect(expanded).toContain("apply_patch");
+      expect(expanded).toMatch(/exec_command: ~[\d.]+k? tokens/);
+      expect(expanded).toMatch(
+        /ALL_TOOLS, searchTools, describeTool, describeNamespace: ~\d+ tokens \(builtin, shared\)/,
+      );
+      expect(expanded).toMatch(/web_run: ~[\d.]+k? tokens\n/);
+    }
 
-  h.setTools([]);
-  await h.session.extensionRunner.emit({ type: "model_select" } as never);
-  h.setTools(["read", "codemode"]);
-  await h.session.extensionRunner.emit({ type: "model_select" } as never);
-  const readonly = await inspect();
-  expect(readonly).not.toContain("exec_command");
-  expect(readonly).not.toContain("apply_patch");
-  expect(readonly).toContain("read: ~0 tokens (declared separately)");
-});
+    h.setTools([]);
+    await h.session.extensionRunner.emit({ type: "model_select" } as never);
+    h.setTools(["read", "codemode"]);
+    await h.session.extensionRunner.emit({ type: "model_select" } as never);
+    const readonly = await inspect();
+    expect(readonly).not.toContain("exec_command");
+    expect(readonly).not.toContain("apply_patch");
+    if (model === "claude") expect(readonly).toMatch(/read: ~[1-9][\d.]*k? tokens/);
+    else expect(readonly).toContain("read: ~0 tokens (declared separately)");
+  },
+);
 
 it("attributes only prepared sections and distinguishes explicit and budget deferral", () => {
   const makeTool = (name: string, exposure: ToolInfo["exposure"]): ToolInfo => ({

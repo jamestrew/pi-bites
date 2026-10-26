@@ -12,10 +12,12 @@ The factory uses `models: false`: model-catalog/classifier helpers are outside t
 
 The bounded GPT-5.6/GPT-6/GPT-6.1/Sol scope and #365 route isolation are unchanged.
 The native factory replaces Pi's replaceable CLI builtin at load time. The adapter
-selects native codemode by default only within its permitted registry/selection.
+selects native codemode by default within its permitted registry/selection for all models.
 Explicit `-codemode`, plain default-tool selections omitting it, SDK/CLI registry
-restrictions, and removal of the active tool are respected. Unsupported models or
-an explicitly disabled adapter restore displaced core tools.
+restrictions, and removal of the active tool are respected. Non-adapter models
+restore displaced core tools and nest them through native Code Mode instead of
+enabling Codex-shaped tools or adapter prompts. An explicitly disabled adapter
+restores displaced core tools without selecting Code Mode.
 
 The underlying selection and core displacement are checkpointed in versioned,
 branch-local `pi-bites:codex-tool-selection` custom entries. Resume, reload and
@@ -48,8 +50,11 @@ a durable registry ceiling, so both script discovery and model-facing search omi
 parent-forbidden or explicitly unselected tools even when factories register them.
 Isolated RPC children still load no extensions.
 
-Native `on` mode is deliberate: `only` would hide unrelated direct tools and still
-would not hide codemode/deferred tools activated by search. Script `searchTools`,
+GPT adapter sessions deliberately use native `on` mode to preserve unrelated direct
+tools. Other models use native `only` mode: selected direct tools remain active and
+callable, but their declarations move inside Code Mode. Model-only collaboration
+stays direct; hidden tools stay inaccessible. Neither mode hides codemode/deferred
+tools activated by search. Script `searchTools`,
 `describeTool`, and `ALL_TOOLS` discover permitted tools without changing model
 declarations. Separately enabled `tool_search` may activate permitted owned tools
 as direct declarations. It cannot recover hidden capabilities. Full supported web

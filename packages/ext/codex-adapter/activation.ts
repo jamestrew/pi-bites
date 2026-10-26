@@ -99,8 +99,9 @@ function restore(tools: string[], displaced: DisplacedTool[]): string[] {
  */
 export function reconcileTools(
   active: string[],
-  enabled: boolean,
+  adapterEnabled: boolean,
   state: AdapterToolState,
+  codemodeEnabled = adapterEnabled,
 ): string[] {
   const selection = (state.selection ??= { tools: new Set(active), disabledVisible: new Set() });
   const previous = state.projection;
@@ -118,13 +119,15 @@ export function reconcileTools(
   }
   const retained = active.filter((name) => CORE.has(name) || !OWNED.has(name));
   const restored = restore(retained, previous.kind === "active" ? previous.displaced : []);
-  if (!enabled) {
+  if (!codemodeEnabled) {
     state.projection = { kind: "inactive" };
     return restored;
   }
   // Recompute from the current normal selection, including the cores we own.
   // A core removed after restoration must not survive in cached nested membership.
   const projection = activate(restored, selection);
+  // Native Code Mode keeps the normal selection; only GPT uses owned replacements.
+  if (!adapterEnabled) projection.nested.clear();
   const replaces = (name: string) =>
     projection.visible.has("codemode") &&
     (name === "read" || name === "bash"

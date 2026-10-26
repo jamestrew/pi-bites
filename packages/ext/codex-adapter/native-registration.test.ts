@@ -1,6 +1,7 @@
 import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test, vi } from "vitest";
+import { Type } from "typebox";
 import { setup, textOf } from "./test/native-session.js";
 import {
   createCodemodeExtension,
@@ -98,7 +99,55 @@ test("read-only registry selections cannot discover or call inactive shell and p
   expect((await h.run(`await tools.exec_command({cmd:'touch forbidden'});`)).isError).toBe(true);
 });
 
-test("model transitions restore core selection, clear store, and do not broaden GPT scope", async () => {
+test("non-GPT sessions nest native tools without enabling Codex tools or prompts", async () => {
+  const tool = (name: string, exposure: ToolDefinition["exposure"]): ToolDefinition => ({
+    name,
+    label: name,
+    description: name,
+    parameters: Type.Object({}),
+    exposure,
+    async execute() {
+      return { content: [{ type: "text", text: name }], details: {} };
+    },
+  });
+  const h = await setup(undefined, {
+    model: "claude",
+    extensionTools: [
+      tool("native_echo", "direct"),
+      tool("model_only", "model-only"),
+      tool("hidden_secret", "hidden"),
+    ],
+  });
+  expect(h.session.getActiveToolNames()).toEqual(
+    expect.arrayContaining(["read", "bash", "edit", "write", "native_echo", "codemode"]),
+  );
+  for (const name of [
+    "exec_command",
+    "apply_patch",
+    "web_run",
+    "view_image",
+    "hidden_secret",
+    "model_only",
+  ])
+    expect(h.session.getCallableToolNames()).not.toContain(name);
+  writeFileSync(join(h.cwd, "native.txt"), "native file");
+  const result = await h.run(`
+    text(await tools.read({path:'native.txt'}));
+    text(await tools.bash({command:'printf native-shell'}));
+    text(await tools.native_echo({}));
+  `);
+  expect(result.isError, textOf(result)).toBe(false);
+  expect(h.declarations.at(-1)).toEqual(["model_only", "codemode"]);
+  expect(h.previewTools().some((tool) => tool.name === "read")).toBe(false);
+  expect(textOf(result)).toContain("native file");
+  expect(textOf(result)).toContain("native-shell");
+  expect(textOf(result)).toContain("native_echo");
+  expect(h.preview()("original prompt", h.getContext().model, { cwd: h.cwd })).toBe(
+    "original prompt",
+  );
+});
+
+test("model transitions keep native Code Mode, clear store, and do not broaden GPT scope", async () => {
   const h = await setup();
   await h.run(`store('old',42);`);
   await h.session.setModel(h.runtime.getModel("native-test", "claude")!);
@@ -106,10 +155,29 @@ test("model transitions restore core selection, clear store, and do not broaden 
     expect.arrayContaining(["read", "bash", "edit", "write"]),
   );
   expect(h.session.getCallableToolNames()).not.toContain("exec_command");
-  expect(h.session.getActiveToolNames()).not.toContain("codemode");
+  expect(h.session.getActiveToolNames()).toContain("codemode");
+  expect(textOf(await h.run(`text(load('old'));`))).not.toContain("42");
+  expect(h.declarations.at(-1)).toEqual(["codemode"]);
   await h.session.setModel(h.runtime.getModel("native-test", "gpt-6.1-sol")!);
   expect(h.session.getActiveToolNames()).toContain("codemode");
   expect(textOf(await h.run(`text(load('old'));`))).not.toContain("42");
+});
+
+test("disabling native Code Mode survives model switches and allows explicit re-enabling", async () => {
+  const h = await setup(undefined, { model: "claude", defaultTools: ["read", "codemode"] });
+  h.setTools(["read"]);
+  await h.call("read", { path: "missing.txt" });
+  expect(h.declarations.at(-1)).toEqual(["read"]);
+  for (const model of ["gpt-6.1-sol", "claude"]) {
+    await h.session.setModel(h.runtime.getModel("native-test", model)!);
+    expect(h.session.getActiveToolNames()).toEqual(["read"]);
+    expect(h.session.getCallableToolNames()).not.toContain("exec_command");
+  }
+  h.setTools(["read", "codemode"]);
+  const result = await h.run("text(ALL_TOOLS.map(t=>t.name));");
+  expect(result.isError, textOf(result)).toBe(false);
+  expect(h.declarations.at(-1)).toEqual(["codemode"]);
+  expect(h.session.getCallableToolNames()).not.toContain("bash");
 });
 
 test("separately enabled tool search cannot recover read-only tools or explicit disables", async () => {
@@ -389,7 +457,11 @@ test("context previews follow native prepared loadouts and model/classifier help
   );
   expect(prepared()).not.toContain("tools.exec_command");
   await h.session.setModel(h.runtime.getModel("native-test", "claude")!);
-  expect(h.previewTools()).toEqual(h.session.getAllTools());
+  expect(prepared()).toBe(
+    h.session.agent.state.tools.find((t) => t.name === "codemode")!.description,
+  );
+  expect(prepared()).toContain("read(args:");
+  expect(prepared()).not.toContain("tools.exec_command");
 });
 
 test("native timeout interrupts a script and leaves the next invocation usable", async () => {

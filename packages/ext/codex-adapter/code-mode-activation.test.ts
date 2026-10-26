@@ -7,7 +7,7 @@ import {
   getDelegationTools,
 } from "./activation.js";
 
-test("only GPT-5.6/GPT-6/GPT-6.1 families and recognized prefixes enter Code Mode", () => {
+test("only GPT-5.6/GPT-6/GPT-6.1 families and recognized prefixes enter Codex adapter scope", () => {
   for (const id of [
     "gpt-5.6",
     "gpt-5.6-pro",

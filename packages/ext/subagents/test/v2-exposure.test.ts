@@ -207,7 +207,8 @@ it.each([
   await h.session.prompt("Inspect the permitted tools.");
   expect(h.payloads.length, JSON.stringify(h.session.messages)).toBeGreaterThan(0);
   assertPayload(h.payloads.at(-1), permitted);
-  const codeMode = options.route === "gpt" && !options.disabled;
+  const codeMode =
+    !options.disabled && (!options.selected || options.selected.includes("codemode"));
   expect(h.session.getActiveToolNames().includes("codemode")).toBe(codeMode);
   const spawn = await h.call("spawn_agent", {
     task_name: "probe",

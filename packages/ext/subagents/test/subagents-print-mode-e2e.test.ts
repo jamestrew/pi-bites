@@ -69,10 +69,11 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
       respond: (ctx) =>
         ctx.messages.some(
           (message) =>
-            message.role === "toolResult" && (message as { toolName?: string }).toolName === "read",
+            message.role === "toolResult" &&
+            (message as { toolName?: string }).toolName === "codemode",
         )
           ? "PRINT_TOOL_LOOP_COMPLETE"
-          : fauxToolCall("read", { path: "probe.txt" }),
+          : fauxToolCall("codemode", { code: "text(await tools.read({path:'probe.txt'}));" }),
     });
 
     expect(run.responseText).toBe("PRINT_TOOL_LOOP_COMPLETE");
@@ -134,17 +135,22 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
                 message: "Read large.txt, then report CHILD_RESUMED exactly.",
               });
         }
-        if (!toolNames.has("read")) return "## Goal\nContinue the compaction probe.";
+        if (!toolNames.has("codemode")) return "## Goal\nContinue the compaction probe.";
 
         const hasReadResults = ctx.messages.some(
           (message) =>
-            message.role === "toolResult" && (message as { toolName?: string }).toolName === "read",
+            message.role === "toolResult" &&
+            (message as { toolName?: string }).toolName === "codemode",
         );
         return hasReadResults
           ? "CHILD_RESUMED"
           : [
               fauxText("Compaction context. ".repeat(2_000)),
-              fauxToolCall("read", { path: "large.txt" }, { id: "read-large-1" }),
+              fauxToolCall(
+                "codemode",
+                { code: "text(await tools.read({path:'large.txt'}));" },
+                { id: "read-large-1" },
+              ),
             ];
       },
     });

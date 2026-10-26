@@ -169,21 +169,23 @@ function codemodeDetails(tool: ToolInfo, callable: ToolInfo[], active: Set<strin
   return details;
 }
 
-function toolDetails(tools: ToolInfo[], activeNames: string[]) {
+function toolDetails(tools: ToolInfo[], activeNames: string[], registeredTools = tools) {
   const active = new Set(activeNames);
-  const nestedTools = tools.filter(
+  const nestedTools = registeredTools.filter(
     (tool) =>
       tool.name !== "codemode" &&
       (tool.exposure === "codemode" ||
         tool.exposure === "deferred" ||
         (tool.exposure === "direct" && active.has(tool.name))),
   );
-  return selectActiveTools(tools, activeNames).map((tool) => ({
+  const declared = selectActiveTools(tools, activeNames);
+  const declaredNames = new Set(declared.map((tool) => tool.name));
+  return declared.map((tool) => ({
     label: tool.name,
     tokens: estimateProviderToolTokens(tool),
     // Native inline schemas already contribute to codemode's description estimate.
     ...(tool.name === "codemode"
-      ? { nestedTools: codemodeDetails(tool, nestedTools, active) }
+      ? { nestedTools: codemodeDetails(tool, nestedTools, declaredNames) }
       : {}),
   }));
 }
@@ -227,12 +229,13 @@ export function buildContextBreakdown(input: {
   systemPrompt: string;
   options: BuildSystemPromptOptions;
   tools: ToolInfo[];
+  registeredTools?: ToolInfo[];
   activeTools: string[];
   messageTokens: number;
 }): ContextBreakdown {
   const files = contextFileDetails(input.options);
   const skills = skillDetails(input.options, input.systemPrompt);
-  const tools = toolDetails(input.tools, input.activeTools);
+  const tools = toolDetails(input.tools, input.activeTools, input.registeredTools);
   const fileTokens = files.reduce((sum, item) => sum + item.tokens, 0);
   const skillTokens = skills.reduce((sum, item) => sum + item.tokens, 0);
   const toolTokens = tools.reduce((sum, item) => sum + item.tokens, 0);
@@ -407,6 +410,7 @@ export default function registerContext(
         systemPrompt,
         options: ctx.getSystemPromptOptions(),
         tools,
+        registeredTools,
         activeTools,
         messageTokens: estimateMessages(ctx),
       });

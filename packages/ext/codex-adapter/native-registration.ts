@@ -61,7 +61,14 @@ export default function registerNativeAdapter(
   // Pi supersedes its replaceable CLI builtin with this genuine native registration.
   // Forward native /context preparation unchanged; decorate only presentation updates/results.
   let preparedDescriptions: Readonly<Record<string, string>> = {};
-  void createCodemodeExtension({ mode: "on", models: false })({
+  let hiddenDeclarations = new Set<string>();
+  let active = false;
+  void createCodemodeExtension({
+    get mode() {
+      return active ? "on" : "only";
+    },
+    models: false,
+  })({
     ...pi,
     registerTool(tool) {
       pi.registerTool({
@@ -69,6 +76,7 @@ export default function registerNativeAdapter(
         prepareLoadout(loadout) {
           const prepared = tool.prepareLoadout?.(loadout);
           preparedDescriptions = prepared?.descriptions ?? {};
+          hiddenDeclarations = new Set(prepared?.hiddenDeclarations ?? []);
           return prepared;
         },
       });
@@ -76,7 +84,6 @@ export default function registerNativeAdapter(
   });
   let owner = new AbortController();
   let callable = new Set<string>();
-  let active = false;
   const scripts = new Map<
     string,
     {
@@ -333,7 +340,12 @@ export default function registerNativeAdapter(
       }
     }
     const initial = !state.selection;
-    const next = reconcileTools(selected, enabled(ctx), state);
+    const next = reconcileTools(
+      selected,
+      enabled(ctx),
+      state,
+      !configRef.current.disable?.includes("codexAdapter"),
+    );
     const nextActive = enabled(ctx) && next.includes("codemode");
     if (active && !nextActive) invalidate(ctx);
     active = nextActive;
@@ -482,10 +494,12 @@ export default function registerNativeAdapter(
     previewPrompt: preview,
     previewTools: (tools) =>
       pi.getActiveTools().includes("codemode")
-        ? tools.map((tool) => ({
-            ...tool,
-            description: preparedDescriptions[tool.name] ?? tool.description,
-          }))
+        ? tools
+            .filter((tool) => !hiddenDeclarations.has(tool.name))
+            .map((tool) => ({
+              ...tool,
+              description: preparedDescriptions[tool.name] ?? tool.description,
+            }))
         : tools,
     getAllowedTools: () => getDelegationTools(pi.getActiveTools(), state),
   };

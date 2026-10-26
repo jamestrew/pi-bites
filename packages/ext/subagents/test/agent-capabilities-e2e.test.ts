@@ -187,7 +187,10 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
       );
       expect(active).not.toContain("exec");
       expect(active).not.toContain("wait");
-      expect(active).not.toContain("codemode");
+      expect(active).toContain("codemode");
+      const result = await run("text(await tools.bash({command:'printf native-child'}));");
+      expect(result.isError, result.text).toBe(false);
+      expect(result.text).toContain("native-child");
       for (const name of NESTED_TOOLS) expect(active).not.toContain(name);
     }
   });
@@ -379,7 +382,7 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
       };
       await assertCeiling();
       await child!.setModel(faux.getModel("faux-1")!);
-      expect(child!.getActiveToolNames()).not.toContain("codemode");
+      expect(child!.getActiveToolNames()).toContain("codemode");
       await child!.setModel(faux.getModel("gpt-6.1-sol")!);
       await assertCeiling();
       await child!.reload();

@@ -69,6 +69,11 @@ changes take effect on the next launch.
 
 ### Code Mode sessions
 
+Code Mode works on every model. GPT models in the adapter's supported families use
+Codex-shaped tools; other models use Pi's native tools nested inside Code Mode.
+Selected direct tools are nested, while model-only tools such as subagents stay
+direct. Tool selections and explicit Code Mode disables still apply.
+
 Underlying tool selections are saved per branch, so resume, `/reload`, and `/tree`
 preserve Code Mode capabilities without re-enabling explicitly disabled tools.
 Sessions saved before selection checkpoints existed need explicit re-selection.

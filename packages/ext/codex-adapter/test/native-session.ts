@@ -5,6 +5,7 @@ import { afterEach, expect, vi } from "vitest";
 import {
   InMemoryCredentialStore,
   createAssistantMessageEventStream,
+  getCurrentTools,
   type AssistantMessage,
   type StreamFunction,
 } from "@earendil-works/pi-ai";
@@ -61,6 +62,7 @@ function response(
 export async function setup(
   selected?: string[],
   options: {
+    model?: string;
     config?: BitesConfig;
     defaultTools?: string[];
     excludeTools?: string[];
@@ -157,7 +159,7 @@ export async function setup(
     cwd,
     agentDir: cwd,
     modelRuntime: runtime,
-    model: runtime.getModel("native-test", "gpt-6.1-sol")!,
+    model: runtime.getModel("native-test", options.model ?? "gpt-6.1-sol")!,
     resourceLoader: loader,
     sessionManager:
       saved ??
@@ -190,13 +192,16 @@ export async function setup(
   const events: any[] = [];
   session.subscribe((event) => events.push(event));
   let seq = 0;
+  const declarations: string[][] = [];
   async function call(name: string, args: import("@earendil-works/pi-ai").JsonObject) {
     const id = `script-${++seq}`;
     let turns = 0;
-    session.agent.streamFunction = (model) =>
-      turns++ === 0
+    session.agent.streamFunction = (model, context) => {
+      declarations.push(getCurrentTools(context.messages).map((tool) => tool.name));
+      return turns++ === 0
         ? response(model, [{ type: "toolCall", id, name, arguments: args }], "toolUse")
         : response(model, [{ type: "text", text: "done" }], "stop");
+    };
     await session.prompt("run");
     const end = events.find((e) => e.type === "tool_execution_end" && e.toolCallId === id);
     expect(end).toBeDefined();
@@ -209,6 +214,7 @@ export async function setup(
     run,
     call,
     events,
+    declarations,
     cwd,
     runtime,
     config,

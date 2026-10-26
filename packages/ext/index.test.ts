@@ -319,7 +319,14 @@ describe("extension entrypoint", () => {
           {},
           { ...ctx, model: { ...ctx.model, id: "claude", provider: "work-provider" } },
         );
-      expect(loaded.getActiveTools()).toEqual(["read", "bash", "edit", "write", "custom"]);
+      expect(loaded.getActiveTools()).toEqual([
+        "read",
+        "bash",
+        "edit",
+        "write",
+        "custom",
+        "codemode",
+      ]);
     } finally {
       for (const handler of loaded.handlers.get("session_shutdown") ?? [])
         await handler({ reason: "quit" }, ctx);

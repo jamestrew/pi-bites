@@ -255,6 +255,28 @@ test("reload preserves the selected codemode and its underlying capabilities", a
   expect(textOf(result)).toContain("reloaded");
 });
 
+test("native-only read-only selections survive reload and resume", async () => {
+  const original = await setup(undefined, {
+    model: "claude",
+    persist: true,
+    defaultTools: ["read", "codemode"],
+  });
+  await original.run("text('saved');");
+  await original.session.reload();
+  await original.run("text('reloaded');");
+  expect(original.declarations.at(-1)).toEqual(["codemode"]);
+  const sessionFile = original.session.sessionManager.getSessionFile()!;
+  await original.close();
+
+  const resumed = await setup(undefined, { model: "claude", sessionFile });
+  const result = await resumed.run("text(ALL_TOOLS.map(t=>t.name));");
+  expect(result.isError, textOf(result)).toBe(false);
+  expect(resumed.declarations.at(-1)).toEqual(["codemode"]);
+  expect(resumed.session.getCallableToolNames()).toContain("read");
+  for (const name of ["bash", "edit", "write", "exec_command", "apply_patch"])
+    expect(resumed.session.getCallableToolNames()).not.toContain(name);
+});
+
 test("tree navigation restores each branch's selection without leaking shell permissions", async () => {
   const h = await setup();
   await h.run("text('full access branch');");
@@ -295,7 +317,7 @@ test("reopening a read-only session does not acquire shell or patch permissions"
     true,
   );
   await resumed.session.setModel(resumed.runtime.getModel("native-test", "claude")!);
-  expect(resumed.session.getActiveToolNames()).toEqual(["read"]);
+  expect(resumed.session.getActiveToolNames()).toEqual(["read", "codemode"]);
   await resumed.session.setModel(resumed.runtime.getModel("native-test", "gpt-6.1-sol")!);
   expect(resumed.session.getActiveToolNames()).toContain("codemode");
   expect(resumed.session.getCallableToolNames()).not.toContain("exec_command");
