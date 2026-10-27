@@ -257,7 +257,10 @@ export function buildFooterLine(
     ? colorContextUsage(contextTokens, contextTokenCount)
     : contextTokens;
   const contextLimit = formatTokens(usage?.contextWindow ?? ctx.model?.contextWindow ?? 0);
-  const context = `${coloredContextTokens}/${contextLimit} ${formatPercent(usage?.percent)}`;
+  const compactions = ctx.sessionManager
+    .getEntries()
+    .filter((entry) => entry.type === "compaction").length;
+  const context = `${coloredContextTokens}/${contextLimit} ${formatPercent(usage?.percent)} C${compactions}`;
   const stats = formatUsageStats(sumUsage(getMainSessionUsage(ctx), exploreUsage));
   const left = `${model} ${thinking} · ${context} · ${stats}`;
 

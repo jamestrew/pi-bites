@@ -84,9 +84,30 @@ test("buildFooterLine combines main and subagent token usage", () => {
     140,
   );
 
-  expect(line).toContain("openai-codex/gpt-5.5 low · 27k/272k 7.7%");
+  expect(line).toContain("openai-codex/gpt-5.5 low · 27k/272k 7.7% C0 ·");
   expect(line).toContain("↑46k ↓3.1k R83k CH64.3% $0.368");
   expect(line).toContain("repo (main)");
+});
+
+test("buildFooterLine counts saved compactions across the session and updates on render", () => {
+  const entries = [
+    { type: "compaction" },
+    { type: "custom", customType: "compaction" },
+    { type: "branch_summary" },
+    { type: "compaction" },
+  ];
+  const ctx: any = {
+    cwd: "/repo",
+    getContextUsage: () => ({ tokens: 27_000, contextWindow: 272_000, percent: 9.9 }),
+    sessionManager: {
+      getBranch: () => [],
+      getEntries: () => entries,
+    },
+  };
+
+  expect(buildFooterLine(ctx, footerData, usage(), 140)).toContain("27k/272k 9.9% C2 ·");
+  entries.push({ type: "compaction" });
+  expect(buildFooterLine(ctx, footerData, usage(), 140)).toContain("27k/272k 9.9% C3 ·");
 });
 
 test.each<[string, RepositoryStatus, string]>([
