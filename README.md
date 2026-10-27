@@ -18,7 +18,9 @@ A small collection of personal extensions for the pi coding agent.
   model's context window if that's lower.
 - **Inline context** — `$` completion for `$skill:name` and `$prompt:name`;
   `@path` inlines file contents or directory listings. Context loads without
-  expanding the visible prompt.
+  expanding the visible prompt. Attachments follow your text in the same user
+  message, including steering, follow-up, and extension-origin input. The chat transcript hides them;
+  raw sessions, exports, and editable history retain them.
 - **`/usage` and `/context`** — session cost/token statistics and a breakdown of
   the active context window.
 - **Local prompt-cache diagnostics** — provider-agnostic, default-on rolling fingerprints;

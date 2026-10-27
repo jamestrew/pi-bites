@@ -7,23 +7,42 @@ import registerUsageDashboard from "./usage-dashboard.js";
 import registerContext, { type ContextPromptPreview } from "./context.js";
 import registerCustomTools from "./tools.js";
 import registerFzfFileSearch from "./file-search/index.js";
-import registerAtMentionContext from "./at-mention-context/index.js";
 import registerNotifications from "./notifications.js";
 import registerAutoCompaction, { DEFAULT_AUTO_COMPACTION_THRESHOLD } from "./auto-compaction.js";
 import registerAutoMode from "./automode/index.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
-import registerSkillPromptReferences from "./inline-references/index.js";
+import registerInlineReferences from "./inline-references/index.js";
 import registerPonytail from "./ponytail/index.js";
 import registerSessionTracker from "./session-tracker/index.js";
 import { createSubagents } from "./subagents/index.js";
 import { getActiveSubagent, getChildCollaboration } from "./subagents/subagent-context.js";
 import registerView from "./view/index.js";
 import registerCodexAdapter, { type CodexAdapterController } from "./codex-adapter/index.js";
-import { parseArgs, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  parseArgs,
+  type ExtensionAPI,
+  type MarkdownTransformer,
+} from "@earendil-works/pi-coding-agent";
 import { loadConfig, registerBitesCommands, type BitesConfig } from "./config.js";
 
 export default async function (pi: ExtensionAPI) {
+  // Pi stores one transformer per extension; our modules share this registration.
+  const transformers: MarkdownTransformer[] = [];
+  const registerMarkdownTransformer = pi.registerMarkdownTransformer.bind(pi);
+  pi.registerMarkdownTransformer = (transformer) => {
+    transformers.push(transformer);
+    registerMarkdownTransformer((markdown, context) => {
+      for (const transform of transformers) {
+        try {
+          markdown = transform(markdown, context);
+        } catch {
+          // Match Pi's renderer: one failing transform must not disable the others.
+        }
+      }
+      return markdown;
+    });
+  };
   const configRef: { current: BitesConfig } = { current: {} };
   const isSubagent = getActiveSubagent() != null;
   const cliArgs = isSubagent ? undefined : parseArgs(process.argv.slice(2));
@@ -103,11 +122,14 @@ export default async function (pi: ExtensionAPI) {
   if (!isNonInteractive && !disabled.has("usageDashboard")) registerUsageDashboard(pi);
   if (!isNonInteractive && !disabled.has("fzf")) registerFzfFileSearch(pi);
   if (!disabled.has("promptNormalization")) registerPromptNormalization(pi);
-  if (!disabled.has("atMentionContext")) registerAtMentionContext(pi);
+  if (!disabled.has("atMentionContext") || !disabled.has("skillPromptReferences"))
+    registerInlineReferences(pi, {
+      files: !disabled.has("atMentionContext"),
+      skillsAndPrompts: !disabled.has("skillPromptReferences"),
+    });
   if (!isNonInteractive && !disabled.has("notifications"))
     registerNotifications(pi, configRef, autoMode);
   if (!isNonInteractive && !disabled.has("spotme")) registerSpotme(pi);
-  if (!disabled.has("skillPromptReferences")) registerSkillPromptReferences(pi);
   const previewPonytailPrompt = disabled.has("ponytail") ? undefined : registerPonytail(pi);
   const previewSystemPrompt: ContextPromptPreview = (prompt, ctx) => {
     const withCodex =

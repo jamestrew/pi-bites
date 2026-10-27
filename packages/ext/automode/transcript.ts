@@ -1,4 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { stripInlineContext } from "../inline-references/context.js";
 import {
   isShellAuthorizationEntry,
   SHELL_AUTHORIZATION_ENTRY,
@@ -120,7 +121,8 @@ function buildTranscript(
   const matchedIds = new Set<string>();
   const messageEntries: TranscriptEntry[] = messages.flatMap((message) => {
     if (message.role === "user") {
-      const text = textContent(message.content);
+      // Attached source material is not original human authorization.
+      const text = stripInlineContext(textContent(message.content));
       const nonText =
         typeof message.content !== "string" &&
         (!Array.isArray(message.content) ||

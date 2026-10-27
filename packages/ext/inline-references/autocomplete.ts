@@ -1,0 +1,220 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import {
+  CONFIG_DIR_NAME,
+  getAgentDir,
+  stripFrontmatter,
+  type ExtensionAPI,
+  type PromptTemplate,
+} from "@earendil-works/pi-coding-agent";
+import {
+  fuzzyFilter,
+  type AutocompleteItem,
+  type AutocompleteProvider,
+} from "@earendil-works/pi-tui";
+
+type LoadedPromptTemplate = Pick<PromptTemplate, "name" | "description" | "content" | "filePath">;
+
+type SlashCommandLike = {
+  name?: string;
+  value?: string;
+  label?: string;
+  description?: string;
+  getArgumentCompletions?: unknown;
+};
+
+const BUILTIN_COMMAND_NAMES = new Set([
+  "settings",
+  "model",
+  "scoped-models",
+  "export",
+  "import",
+  "share",
+  "copy",
+  "name",
+  "session",
+  "changelog",
+  "hotkeys",
+  "fork",
+  "clone",
+  "tree",
+  "trust",
+  "login",
+  "logout",
+  "new",
+  "compact",
+  "resume",
+  "reload",
+  "quit",
+]);
+
+function findDollarPrefix(textBeforeCursor: string): string | null {
+  return textBeforeCursor.match(/(?:^|[ \t])(\$[^\s]*)$/)?.[1] ?? null;
+}
+
+function loadDefaultPromptTemplates(cwd: string): LoadedPromptTemplate[] {
+  const dirs = [join(getAgentDir(), "prompts"), join(cwd, CONFIG_DIR_NAME, "prompts")];
+  const templates: LoadedPromptTemplate[] = [];
+
+  for (const dir of dirs) {
+    if (!existsSync(dir)) continue;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      const filePath = join(dir, entry.name);
+      const content = readFileSync(filePath, "utf-8");
+      const body = stripFrontmatter(content).trim();
+      const description =
+        body
+          .split("\n")
+          .find((line) => line.trim().length > 0)
+          ?.trim() ?? "";
+      templates.push({
+        name: basename(entry.name, ".md"),
+        description,
+        content: body,
+        filePath,
+      });
+    }
+  }
+
+  return templates;
+}
+
+function slashCommandName(command: SlashCommandLike): string {
+  return command.name ?? command.value ?? "";
+}
+
+function isPromptTemplateCommand(command: SlashCommandLike): boolean {
+  const name = slashCommandName(command);
+  if (!name || name.includes(":") || BUILTIN_COMMAND_NAMES.has(name)) return false;
+
+  // Pi's base provider orders and shapes commands as:
+  // built-ins, prompt templates, extension commands, skills.
+  // Extension commands always carry this property, even when the value is undefined.
+  return !("getArgumentCompletions" in command);
+}
+
+function referenceItemFromCommand(command: SlashCommandLike): AutocompleteItem | null {
+  const name = slashCommandName(command);
+  if (name.startsWith("skill:")) {
+    return { value: `$${name}`, label: `$${name}`, description: command.description };
+  }
+  if (isPromptTemplateCommand(command)) {
+    return { value: `$prompt:${name}`, label: `$prompt:${name}`, description: command.description };
+  }
+  return null;
+}
+
+function isSlashCommandLike(value: unknown): value is SlashCommandLike {
+  if (typeof value !== "object" || value === null) return false;
+  return (
+    (!("name" in value) || value.name === undefined || typeof value.name === "string") &&
+    (!("value" in value) || value.value === undefined || typeof value.value === "string") &&
+    (!("label" in value) || value.label === undefined || typeof value.label === "string") &&
+    (!("description" in value) ||
+      value.description === undefined ||
+      typeof value.description === "string")
+  );
+}
+
+function referenceItems(current: AutocompleteProvider): AutocompleteItem[] {
+  const commands =
+    "commands" in current && Array.isArray(current.commands)
+      ? current.commands.filter(isSlashCommandLike)
+      : [];
+  return commands
+    .map(referenceItemFromCommand)
+    .filter((item): item is AutocompleteItem => item !== null);
+}
+
+function isPathLikeSuggestion(item: AutocompleteItem): boolean {
+  return item.value.includes("/") || item.value.startsWith(".");
+}
+
+function referenceItemFromSlashSuggestion(
+  item: AutocompleteItem,
+  promptNames: Set<string>,
+): AutocompleteItem | null {
+  if (isPathLikeSuggestion(item)) return null;
+  if (item.value.startsWith("skill:")) {
+    return { value: `$${item.value}`, label: `$${item.value}`, description: item.description };
+  }
+  if (promptNames.has(item.value)) {
+    return {
+      value: `$prompt:${item.value}`,
+      label: `$prompt:${item.value}`,
+      description: item.description,
+    };
+  }
+  return null;
+}
+
+async function referenceItemsFromSlashProvider(
+  current: AutocompleteProvider,
+  signal: AbortSignal,
+  promptNames: Set<string>,
+): Promise<AutocompleteItem[]> {
+  const suggestions = await current.getSuggestions(["/"], 0, 1, { signal, force: false });
+  return (suggestions?.items ?? [])
+    .map((item) => referenceItemFromSlashSuggestion(item, promptNames))
+    .filter((item): item is AutocompleteItem => item !== null);
+}
+
+async function dollarSuggestions(
+  current: AutocompleteProvider,
+  dollarPrefix: string,
+  signal: AbortSignal,
+  promptNames: Set<string>,
+) {
+  let items = referenceItems(current);
+  if (items.length === 0) {
+    items = await referenceItemsFromSlashProvider(current, signal, promptNames);
+  }
+  if (dollarPrefix.startsWith("$skill:")) {
+    items = items.filter((item) => item.value.startsWith("$skill:"));
+  } else if (dollarPrefix.startsWith("$prompt:")) {
+    items = items.filter((item) => item.value.startsWith("$prompt:"));
+  }
+
+  const filtered = fuzzyFilter(items, dollarPrefix, (item) => item.value);
+  return filtered.length === 0 ? null : { items: filtered, prefix: dollarPrefix };
+}
+
+export function registerDollarAutocomplete(pi: ExtensionAPI) {
+  pi.on("session_start", async (_event, ctx) => {
+    const promptNames = new Set(loadDefaultPromptTemplates(ctx.cwd).map((prompt) => prompt.name));
+    ctx.ui.addAutocompleteProvider((current) => {
+      const triggerCharacters =
+        "triggerCharacters" in current && Array.isArray(current.triggerCharacters)
+          ? current.triggerCharacters.filter((value) => typeof value === "string")
+          : [];
+      return {
+        ...current,
+        triggerCharacters: [...triggerCharacters, "$"],
+        async getSuggestions(lines, cursorLine, cursorCol, options) {
+          const currentLine = lines[cursorLine] ?? "";
+          const beforeCursor = currentLine.slice(0, cursorCol);
+          const dollarPrefix = findDollarPrefix(beforeCursor);
+          if (dollarPrefix)
+            return dollarSuggestions(current, dollarPrefix, options.signal, promptNames);
+          return current.getSuggestions(lines, cursorLine, cursorCol, options);
+        },
+        applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
+          if (prefix.startsWith("$")) {
+            const currentLine = lines[cursorLine] ?? "";
+            const beforePrefix = currentLine.slice(0, cursorCol - prefix.length);
+            const afterCursor = currentLine.slice(cursorCol);
+            const newLines = [...lines];
+            newLines[cursorLine] = `${beforePrefix}${item.value} ${afterCursor}`;
+            return {
+              lines: newLines,
+              cursorLine,
+              cursorCol: beforePrefix.length + item.value.length + 1,
+            };
+          }
+          return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
+        },
+      };
+    });
+  });
+}

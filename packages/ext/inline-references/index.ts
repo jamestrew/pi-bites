@@ -1,17 +1,9 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
-import {
-  CONFIG_DIR_NAME,
-  getAgentDir,
-  stripFrontmatter,
-  type ExtensionAPI,
-  type PromptTemplate,
-} from "@earendil-works/pi-coding-agent";
-import {
-  fuzzyFilter,
-  type AutocompleteItem,
-  type AutocompleteProvider,
-} from "@earendil-works/pi-tui";
+import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { stripFrontmatter, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerDollarAutocomplete } from "./autocomplete.js";
+import { appendInlineContext, stripInlineContext } from "./context.js";
+import { expandMention, formatExpansion, parseAtMentions } from "./files.js";
 
 type InlineReferenceKind = "skill" | "prompt";
 
@@ -20,41 +12,6 @@ type InlineReference = {
   name: string;
   raw: string;
 };
-
-type LoadedPromptTemplate = Pick<PromptTemplate, "name" | "description" | "content" | "filePath">;
-
-type SlashCommandLike = {
-  name?: string;
-  value?: string;
-  label?: string;
-  description?: string;
-  getArgumentCompletions?: unknown;
-};
-
-const BUILTIN_COMMAND_NAMES = new Set([
-  "settings",
-  "model",
-  "scoped-models",
-  "export",
-  "import",
-  "share",
-  "copy",
-  "name",
-  "session",
-  "changelog",
-  "hotkeys",
-  "fork",
-  "clone",
-  "tree",
-  "trust",
-  "login",
-  "logout",
-  "new",
-  "compact",
-  "resume",
-  "reload",
-  "quit",
-]);
 
 function isReferenceBoundary(char: string | undefined): boolean {
   return char === undefined || /\s/.test(char);
@@ -89,222 +46,106 @@ export function parseInlineReferences(text: string): InlineReference[] {
   });
 }
 
-function findDollarPrefix(textBeforeCursor: string): string | null {
-  return textBeforeCursor.match(/(?:^|[ \t])(\$[^\s]*)$/)?.[1] ?? null;
-}
+export default function registerInlineReferences(
+  pi: ExtensionAPI,
+  options: { files?: boolean; skillsAndPrompts?: boolean } = {},
+) {
+  if (options.skillsAndPrompts !== false) registerDollarAutocomplete(pi);
+  pi.registerMarkdownTransformer((markdown, context) =>
+    context.messageType === "user" ? stripInlineContext(markdown) : markdown,
+  );
+  const lastInjected = new Map<string, string>();
+  const clear = () => lastInjected.clear();
+  pi.on("session_start", clear);
+  pi.on("session_compact", clear);
+  pi.on("session_tree", clear);
 
-function loadDefaultPromptTemplates(cwd: string): LoadedPromptTemplate[] {
-  const dirs = [join(getAgentDir(), "prompts"), join(cwd, CONFIG_DIR_NAME, "prompts")];
-  const templates: LoadedPromptTemplate[] = [];
+  // Remove replayed attachments before native template argument parsing can corrupt them.
+  pi.on("input", (event) => {
+    const text = stripInlineContext(event.text);
+    return text === event.text ? { action: "continue" } : { action: "transform", text };
+  });
 
-  for (const dir of dirs) {
-    if (!existsSync(dir)) continue;
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
-      const filePath = join(dir, entry.name);
-      const content = readFileSync(filePath, "utf-8");
-      const body = stripFrontmatter(content).trim();
-      const description =
-        body
-          .split("\n")
-          .find((line) => line.trim().length > 0)
-          ?.trim() ?? "";
-      templates.push({
-        name: basename(entry.name, ".md"),
-        description,
-        content: body,
-        filePath,
-      });
+  // Finalized user messages have already expanded native templates and left the queue.
+  pi.on("message_end", async ({ message }, ctx) => {
+    if (message.role !== "user") return;
+    const text =
+      typeof message.content === "string"
+        ? message.content
+        : message.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("\n");
+    const mentions = options.files === false ? [] : parseAtMentions(text).slice(0, 8);
+    const refs = options.skillsAndPrompts === false ? [] : parseInlineReferences(text);
+    if (!mentions.length && !refs.length) return;
+
+    const cwd = ctx.cwd;
+    const signal = ctx.signal;
+    const ui = ctx.ui;
+    const notify = ui.notify.bind(ui);
+    const commands = refs.length ? pi.getCommands() : [];
+    const blocks: string[] = [];
+    for (const ref of refs) {
+      const command = commands.find(
+        (command) =>
+          command.source === ref.kind &&
+          command.name === (ref.kind === "skill" ? `skill:${ref.name}` : ref.name),
+      );
+      if (!command) continue;
+      try {
+        const path = command.sourceInfo.path;
+        const body = stripFrontmatter(readFileSync(path, "utf-8")).trim();
+        blocks.push(
+          ref.kind === "skill"
+            ? `<skill name="${ref.name}" location="${path}">\nReferences are relative to ${dirname(path)}.\n\n${body}\n</skill>`
+            : `<prompt name="${ref.name}" location="${path}">\n${body}\n</prompt>`,
+        );
+      } catch {
+        // Missing or unreadable references must not prevent submitting the user's message.
+      }
     }
-  }
-
-  return templates;
-}
-
-function formatSkillBlock(skill: { name: string; filePath: string; baseDir: string }): string {
-  const content = readFileSync(skill.filePath, "utf-8");
-  const body = stripFrontmatter(content).trim();
-  return `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
-}
-
-function formatPromptBlock(prompt: LoadedPromptTemplate): string {
-  return `<prompt name="${prompt.name}" location="${prompt.filePath}">\n${prompt.content.trim()}\n</prompt>`;
-}
-
-function registerInlineReferenceContext(pi: ExtensionAPI) {
-  pi.on("before_agent_start", async (event, ctx) => {
-    if (!("prompt" in event)) return;
-    const refs = parseInlineReferences(event.prompt);
-    if (refs.length === 0) return;
-
-    const skills = refs
-      .filter((ref) => ref.kind === "skill")
-      .map((ref) => event.systemPromptOptions.skills.find((skill) => skill.name === ref.name))
-      .filter((skill) => skill !== undefined);
-
-    const loadedPrompts = loadDefaultPromptTemplates(ctx.cwd);
-    const prompts = refs
-      .filter((ref) => ref.kind === "prompt")
-      .map((ref) => loadedPrompts.find((prompt) => prompt.name === ref.name))
-      .filter((prompt) => prompt !== undefined);
-
-    const blocks = [...skills.map(formatSkillBlock), ...prompts.map(formatPromptBlock)];
-    if (blocks.length === 0) return;
-
+    const expansions = await Promise.all(
+      mentions.map((mention) => expandMention(cwd, mention, signal)),
+    );
+    const changed = expansions.flatMap((expansion) => {
+      if (!expansion) return [];
+      const key = JSON.stringify([
+        expansion.absolutePath,
+        expansion.mention.lineRange?.start,
+        expansion.mention.lineRange?.end,
+      ]);
+      const content = formatExpansion(expansion);
+      return lastInjected.get(key) === content
+        ? []
+        : [{ key, content, raw: expansion.mention.raw }];
+    });
+    if (!blocks.length && !changed.length) return;
+    const content = [
+      "The following referenced content is already loaded; do not read its source files again unless you need to inspect referenced files.",
+      ...changed.map(({ content }) => content),
+      ...blocks,
+    ].join("\n\n");
+    for (const { key, content } of changed) lastInjected.set(key, content);
+    if (changed.length)
+      notify(`Injected at-mention context: ${changed.map(({ raw }) => raw).join(", ")}`, "info");
+    const suffix = appendInlineContext("", content);
+    const lastText =
+      typeof message.content === "string"
+        ? -1
+        : message.content.map((part) => part.type).lastIndexOf("text");
     return {
       message: {
-        customType: "inline-reference-context",
-        content: [
-          "The following skill and prompt content is already loaded; do not read the referenced source files again unless you need to inspect referenced files.",
-          ...blocks,
-        ].join("\n\n"),
-        display: false,
-        details: refs.map((ref) => ref.raw).join(", "),
+        ...message,
+        content:
+          typeof message.content === "string"
+            ? message.content + suffix
+            : message.content.map((part, index) =>
+                index === lastText && part.type === "text"
+                  ? { ...part, text: part.text + suffix }
+                  : part,
+              ),
       },
     };
   });
-}
-
-function slashCommandName(command: SlashCommandLike): string {
-  return command.name ?? command.value ?? "";
-}
-
-function isPromptTemplateCommand(command: SlashCommandLike): boolean {
-  const name = slashCommandName(command);
-  if (!name || name.includes(":") || BUILTIN_COMMAND_NAMES.has(name)) return false;
-
-  // Pi's base provider orders and shapes commands as:
-  // built-ins, prompt templates, extension commands, skills.
-  // Extension commands always carry this property, even when the value is undefined.
-  return !("getArgumentCompletions" in command);
-}
-
-function referenceItemFromCommand(command: SlashCommandLike): AutocompleteItem | null {
-  const name = slashCommandName(command);
-  if (name.startsWith("skill:")) {
-    return { value: `$${name}`, label: `$${name}`, description: command.description };
-  }
-  if (isPromptTemplateCommand(command)) {
-    return { value: `$prompt:${name}`, label: `$prompt:${name}`, description: command.description };
-  }
-  return null;
-}
-
-function isSlashCommandLike(value: unknown): value is SlashCommandLike {
-  if (typeof value !== "object" || value === null) return false;
-  return (
-    (!("name" in value) || value.name === undefined || typeof value.name === "string") &&
-    (!("value" in value) || value.value === undefined || typeof value.value === "string") &&
-    (!("label" in value) || value.label === undefined || typeof value.label === "string") &&
-    (!("description" in value) ||
-      value.description === undefined ||
-      typeof value.description === "string")
-  );
-}
-
-function referenceItems(current: AutocompleteProvider): AutocompleteItem[] {
-  const commands =
-    "commands" in current && Array.isArray(current.commands)
-      ? current.commands.filter(isSlashCommandLike)
-      : [];
-  return commands
-    .map(referenceItemFromCommand)
-    .filter((item): item is AutocompleteItem => item !== null);
-}
-
-function isPathLikeSuggestion(item: AutocompleteItem): boolean {
-  return item.value.includes("/") || item.value.startsWith(".");
-}
-
-function referenceItemFromSlashSuggestion(
-  item: AutocompleteItem,
-  promptNames: Set<string>,
-): AutocompleteItem | null {
-  if (isPathLikeSuggestion(item)) return null;
-  if (item.value.startsWith("skill:")) {
-    return { value: `$${item.value}`, label: `$${item.value}`, description: item.description };
-  }
-  if (promptNames.has(item.value)) {
-    return {
-      value: `$prompt:${item.value}`,
-      label: `$prompt:${item.value}`,
-      description: item.description,
-    };
-  }
-  return null;
-}
-
-async function referenceItemsFromSlashProvider(
-  current: AutocompleteProvider,
-  signal: AbortSignal,
-  promptNames: Set<string>,
-): Promise<AutocompleteItem[]> {
-  const suggestions = await current.getSuggestions(["/"], 0, 1, { signal, force: false });
-  return (suggestions?.items ?? [])
-    .map((item) => referenceItemFromSlashSuggestion(item, promptNames))
-    .filter((item): item is AutocompleteItem => item !== null);
-}
-
-async function dollarSuggestions(
-  current: AutocompleteProvider,
-  dollarPrefix: string,
-  signal: AbortSignal,
-  promptNames: Set<string>,
-) {
-  let items = referenceItems(current);
-  if (items.length === 0) {
-    items = await referenceItemsFromSlashProvider(current, signal, promptNames);
-  }
-  if (dollarPrefix.startsWith("$skill:")) {
-    items = items.filter((item) => item.value.startsWith("$skill:"));
-  } else if (dollarPrefix.startsWith("$prompt:")) {
-    items = items.filter((item) => item.value.startsWith("$prompt:"));
-  }
-
-  const filtered = fuzzyFilter(items, dollarPrefix, (item) => item.value);
-  return filtered.length === 0 ? null : { items: filtered, prefix: dollarPrefix };
-}
-
-function registerDollarAutocomplete(pi: ExtensionAPI) {
-  pi.on("session_start", async (_event, ctx) => {
-    const promptNames = new Set(loadDefaultPromptTemplates(ctx.cwd).map((prompt) => prompt.name));
-    ctx.ui.addAutocompleteProvider((current) => {
-      const triggerCharacters =
-        "triggerCharacters" in current && Array.isArray(current.triggerCharacters)
-          ? current.triggerCharacters.filter((value) => typeof value === "string")
-          : [];
-      return {
-        ...current,
-        triggerCharacters: [...triggerCharacters, "$"],
-        async getSuggestions(lines, cursorLine, cursorCol, options) {
-          const currentLine = lines[cursorLine] ?? "";
-          const beforeCursor = currentLine.slice(0, cursorCol);
-          const dollarPrefix = findDollarPrefix(beforeCursor);
-          if (dollarPrefix)
-            return dollarSuggestions(current, dollarPrefix, options.signal, promptNames);
-          return current.getSuggestions(lines, cursorLine, cursorCol, options);
-        },
-        applyCompletion(lines, cursorLine, cursorCol, item, prefix) {
-          if (prefix.startsWith("$")) {
-            const currentLine = lines[cursorLine] ?? "";
-            const beforePrefix = currentLine.slice(0, cursorCol - prefix.length);
-            const afterCursor = currentLine.slice(cursorCol);
-            const newLines = [...lines];
-            newLines[cursorLine] = `${beforePrefix}${item.value} ${afterCursor}`;
-            return {
-              lines: newLines,
-              cursorLine,
-              cursorCol: beforePrefix.length + item.value.length + 1,
-            };
-          }
-          return current.applyCompletion(lines, cursorLine, cursorCol, item, prefix);
-        },
-      };
-    });
-  });
-}
-
-export default function registerSkillPromptReferences(pi: ExtensionAPI) {
-  registerDollarAutocomplete(pi);
-  registerInlineReferenceContext(pi);
 }

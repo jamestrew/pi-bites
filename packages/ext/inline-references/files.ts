@@ -1,8 +1,6 @@
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createLsTool, createReadTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-
-const MAX_MENTIONS = 8;
+import { createLsTool, createReadTool } from "@earendil-works/pi-coding-agent";
 
 type LineRange = {
   start: number;
@@ -154,63 +152,6 @@ export async function expandMention(
   return null;
 }
 
-function formatExpansion(expansion: Expansion): string {
+export function formatExpansion(expansion: Expansion): string {
   return `<file name="${expansion.absolutePath}" mention="${expansion.mention.raw}">\n${expansion.text}\n</file>`;
-}
-
-export default function registerAtMentionContext(pi: ExtensionAPI) {
-  const lastInjected = new Map<string, string>();
-  const clearLastInjected = () => lastInjected.clear();
-
-  pi.on("session_compact", clearLastInjected);
-  pi.on("session_tree", clearLastInjected);
-
-  pi.on("input", async (event, ctx) => {
-    if (event.source === "extension") return { action: "continue" };
-
-    const mentions = parseAtMentions(event.text).slice(0, MAX_MENTIONS);
-    if (mentions.length === 0) return { action: "continue" };
-
-    const cwd = ctx.cwd;
-    const signal = ctx.signal;
-    const ui = ctx.ui;
-    const notify = ui.notify.bind(ui);
-    const expansions = (
-      await Promise.all(mentions.map((mention) => expandMention(cwd, mention, signal)))
-    ).filter((expansion): expansion is Expansion => expansion !== null);
-    const changed = expansions
-      .map((expansion) => {
-        const key = JSON.stringify([
-          expansion.absolutePath,
-          expansion.mention.lineRange?.start,
-          expansion.mention.lineRange?.end,
-        ]);
-        return { expansion, key, content: formatExpansion(expansion) };
-      })
-      .filter(({ key, content }) => lastInjected.get(key) !== content);
-
-    if (changed.length === 0) return { action: "continue" };
-
-    const content = [
-      "The following files or directories were mentioned by @path in the user's prompt and have been pre-read as context.",
-      ...changed.map((item) => item.content),
-    ].join("\n\n");
-
-    pi.sendMessage(
-      {
-        customType: "at-mention-context",
-        content,
-        display: false,
-        details: changed.map(({ expansion }) => expansion.mention.path).join(", "),
-      },
-      { triggerTurn: false },
-    );
-    for (const { key, content } of changed) lastInjected.set(key, content);
-    notify(
-      `Injected at-mention context: ${changed.map(({ expansion }) => expansion.mention.raw).join(", ")}`,
-      "info",
-    );
-
-    return { action: "continue" };
-  });
 }

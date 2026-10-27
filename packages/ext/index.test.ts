@@ -11,7 +11,6 @@ const registerModules = [
   "./context.js",
   "./tools.js",
   "./file-search/index.js",
-  "./at-mention-context/index.js",
   "./notifications.js",
   "./auto-compaction.js",
   "./automode/index.js",
@@ -237,15 +236,23 @@ describe("extension entrypoint", () => {
     }
   });
 
-  test("can disable skill/prompt references independently of at-mention context", async () => {
-    const loaded = await loadExtension({ disable: ["skillPromptReferences"] });
-    try {
-      expect(loaded.registerSpies.get("./inline-references/index.js")).not.toHaveBeenCalled();
-      expect(loaded.registerSpies.get("./at-mention-context/index.js")).toHaveBeenCalledTimes(1);
-    } finally {
-      loaded.restoreArgv();
-    }
-  });
+  test.each([
+    ["skillPromptReferences", true, false],
+    ["atMentionContext", false, true],
+  ] as const)(
+    "can disable %s independently within inline references",
+    async (name, files, skillsAndPrompts) => {
+      const loaded = await loadExtension({ disable: [name] });
+      try {
+        expect(loaded.registerSpies.get("./inline-references/index.js")).toHaveBeenCalledWith(
+          loaded.pi,
+          { files, skillsAndPrompts },
+        );
+      } finally {
+        loaded.restoreArgv();
+      }
+    },
+  );
 
   test.each(["--print", "-p"])("registers subagents in %s mode", async (flag) => {
     const loaded = await loadExtension({ argv: [flag] });
