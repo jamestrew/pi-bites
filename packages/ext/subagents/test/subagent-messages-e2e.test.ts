@@ -875,3 +875,81 @@ it("preserves a terminal overflow error when unread mail vetoes recovery compact
     session.dispose();
   }
 });
+
+it("defers compaction until an earlier custom draft has a committed retention ID", async () => {
+  const requests: Context["messages"][] = [];
+  let summaries = 0;
+  let proposed = false;
+  const probe = defineTool({
+    name: "draft_probe",
+    label: "Probe",
+    description: "Return a fixture result.",
+    parameters: Type.Object({}),
+    execute: async () => ({
+      content: [{ type: "text" as const, text: "probe result" }],
+      details: {},
+    }),
+  });
+  const { session, errors } = await makeSession(
+    [probe],
+    [
+      (pi) => {
+        pi.on("turn_end", (event) => {
+          if (proposed) return;
+          proposed = true;
+          return {
+            entries: [
+              ...event.entries,
+              {
+                type: "custom_message",
+                customType: "pending",
+                content: "MUST_KEEP".repeat(1000),
+                display: false,
+              },
+            ],
+          };
+        });
+        registerAutoCompaction(pi, { current: { autoCompaction: { thresholdTokens: 1000 } } });
+      },
+    ],
+    undefined,
+    {
+      streamSimple: (model, context, options) => {
+        if (options?.cacheRetention === "none") {
+          summaries++;
+          return response(model, [{ type: "text", text: "Checkpoint" }]);
+        }
+        requests.push(structuredClone(context.messages));
+        return requests.length === 1
+          ? response(
+              model,
+              [{ type: "toolCall", id: "probe", name: probe.name, arguments: {} }],
+              "toolUse",
+              2000,
+            )
+          : response(model, [{ type: "text", text: "Done" }], "stop", 2000);
+      },
+    },
+  );
+  session.settingsManager.applyOverrides({
+    compaction: { enabled: false, keepRecentTokens: 100, reserveTokens: 500 },
+  });
+  try {
+    await session.prompt("Old task ".repeat(1000));
+    expect(errors).toEqual([]);
+    expect(requests).toHaveLength(2);
+    expect(requestText(requests[1]!)).toContain("MUST_KEEP");
+    expect(JSON.stringify(session.messages)).toContain("MUST_KEEP");
+    expect(summaries).toBe(1);
+    const checkpoints = session.sessionManager
+      .getBranch()
+      .filter((entry) => entry.type === "compaction");
+    expect(checkpoints).toHaveLength(1);
+    expect(session.sessionManager.getEntry(checkpoints[0]!.firstKeptEntryId)).toMatchObject({
+      type: "custom_message",
+      customType: "pending",
+    });
+  } finally {
+    session.dispose();
+  }
+});
