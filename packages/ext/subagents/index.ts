@@ -29,9 +29,8 @@ import {
 
 export function createSubagents(
   pi: ExtensionAPI,
-  autoMode?: Pick<AutoModeController, "isEnabled" | "review">,
+  autoMode?: Pick<AutoModeController, "getMode" | "review">,
   bashGate?: Pick<BashGateController, "isYolo">,
-  getAutoCompactionThreshold?: () => number | undefined,
   getAllowedTools: () => string[] = () => pi.getActiveTools(),
   getSettings: (cwd: string) => SubagentsSettings = (cwd) => loadConfig(cwd).subagents ?? {},
 ) {
@@ -118,7 +117,6 @@ export function createSubagents(
         compactionCount: record.compactionCount,
       });
     },
-    getAutoCompactionThreshold,
     (record) => {
       parentAllowances.delete(record.id);
       childControllers.get(record.id)?.invalidate();
@@ -241,11 +239,11 @@ export function createSubagents(
     disposeRuntime: (id: string) => manager.disposeRuntime(id),
   });
 
-  // --- Cross-extension RPC via pi.events ---
+  // Parent-owned approval broker.
   let approvalOwner = new AbortController();
   let currentCtx: ExtensionContext | undefined;
 
-  // Capture ctx from session_start for the RPC spawn handler.
+  // Reacquire the active context for incoming approval requests.
   pi.on("session_start", async (_event, ctx) => {
     operations.invalidate();
     approvalOwner.abort();
@@ -284,6 +282,7 @@ export function createSubagents(
     const ctx = currentCtx;
     if (!ctx) return { outcome: "failure", message: "parent approval context unavailable" };
     const ownerSessionToken = currentSessionToken;
+    const mode = autoMode?.getMode() ?? "strict";
     const signal = AbortSignal.any([
       approvalOwner.signal,
       ...[ctx.signal, request.signal].filter((value): value is AbortSignal => value !== undefined),
@@ -293,7 +292,7 @@ export function createSubagents(
       !request.agentSessionId ||
       manager.getRecord(request.agentId)?.incarnation === request.agentSessionId;
     const isAllowed = () => {
-      if (!request.agentId || !hasLiveIncarnation()) return false;
+      if (mode !== "auto" || !request.agentId || !hasLiveIncarnation()) return false;
       const allowance = parentAllowances.get(request.agentId);
       return (
         allowance?.incarnation === request.agentSessionId &&
@@ -301,7 +300,7 @@ export function createSubagents(
       );
     };
     const rememberAllowance = () => {
-      if (!request.agentId || !hasLiveIncarnation()) return;
+      if (mode !== "auto" || !request.agentId || !hasLiveIncarnation()) return;
       const allowance = parentAllowances.get(request.agentId);
       const keys =
         allowance?.incarnation === request.agentSessionId && allowance
@@ -313,6 +312,7 @@ export function createSubagents(
     const checkCurrent = () => {
       if (
         signal.aborted ||
+        (autoMode?.getMode() ?? "strict") !== mode ||
         !hasLiveIncarnation() ||
         !ownerSessionToken ||
         ownerSessionToken !== currentSessionToken
@@ -329,7 +329,7 @@ export function createSubagents(
       sessionManager: ctx.sessionManager,
       signal,
     };
-    const review = autoMode?.isEnabled()
+    const review = autoMode
       ? () => {
           const session = request.agentId ? manager.getRecord(request.agentId)?.session : undefined;
           return autoMode.review(
@@ -350,11 +350,6 @@ export function createSubagents(
           );
         }
       : undefined;
-    const labels = request.labels.join(", ") || "unknown rule";
-    const reasons = request.reasons.filter(Boolean).join("; ");
-    const prompt = reasons
-      ? `🔒 ${request.title} requests bash approval: ${request.command}\n${reasons} (${labels})`
-      : `🔒 ${request.title} requests bash approval: ${request.command}\n${labels}`;
     return requestCommandApproval({
       pi,
       ui,
@@ -363,7 +358,7 @@ export function createSubagents(
       command: request.command,
       toolName: request.toolName,
       signal,
-      prompt,
+      mode: mode === "auto" ? "auto" : "strict",
       sessionAllowKey: request.sessionAllowKey,
       isAllowed,
       rememberAllowance,

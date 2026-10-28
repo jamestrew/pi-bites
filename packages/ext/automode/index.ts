@@ -2,7 +2,7 @@ import type { CommandExecutionContext } from "../bash-gate/index.js";
 import { readFileSync } from "node:fs";
 import { type Api, type Model, type ToolCall, type Message } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { BitesConfig } from "../config.js";
+import type { BashGateMode, BitesConfig } from "../config.js";
 import { resolveModel } from "../shared/model-resolver.js";
 import { appendUsageRecord } from "../usage-files.js";
 import { ReviewerHistory, REVIEW_OUTPUT_TOKENS } from "./history.js";
@@ -46,7 +46,8 @@ type AutoModeReviewContext = Pick<
 
 export interface AutoModeController {
   isEnabled(): boolean;
-  setEnabled(enabled: boolean, ctx: { ui: Pick<ExtensionContext["ui"], "setStatus"> }): void;
+  getMode(): BashGateMode;
+  setMode(mode: BashGateMode, ctx: { ui: Pick<ExtensionContext["ui"], "setStatus"> }): void;
   review(request: AutoModeReviewRequest, ctx: AutoModeReviewContext): Promise<AutoModeDecision>;
 }
 
@@ -97,7 +98,7 @@ export default function registerAutoMode(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
 ): AutoModeController {
-  let enabled = false;
+  let mode: BashGateMode = "auto";
   const history = new ReviewerHistory();
   pi.on("session_shutdown", () => history.reset());
   pi.on("session_before_tree", () => history.reset());
@@ -108,18 +109,22 @@ export default function registerAutoMode(
   });
 
   const setStatus = (ctx: { ui: Pick<ExtensionContext["ui"], "setStatus"> }) =>
-    ctx.ui.setStatus("automode", enabled ? "🤖 AUTO" : undefined);
+    ctx.ui.setStatus(
+      "automode",
+      mode === "auto" ? "🤖 AUTO" : mode === "strict" ? "🔒 STRICT" : undefined,
+    );
 
   pi.on("session_start", (_event, ctx) => {
     history.reset();
-    enabled = configRef.current.bashGate?.mode === "auto";
+    mode = configRef.current.bashGate?.mode ?? "auto";
     setStatus(ctx);
   });
 
   return {
-    isEnabled: () => enabled,
-    setEnabled(value, ctx) {
-      enabled = value;
+    isEnabled: () => mode !== "yolo",
+    getMode: () => mode,
+    setMode(value, ctx) {
+      mode = value;
       setStatus(ctx);
     },
     async review(request, ctx) {

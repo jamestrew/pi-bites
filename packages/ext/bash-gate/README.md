@@ -26,9 +26,21 @@ Classification remains launch-only (`bash.command` and `exec_command.cmd`); `wri
 
 Human prompts share a queue with parent subagent approvals. Reviews run independently; queued prompts recheck live session allowances. Dialogs receive abort signals, and cancellation settles callers even when a reviewer or UI does not cooperate. A non-cooperative displayed dialog retains its queue slot until it closes, preventing a competing dialog. Late choices cannot grant allowances or launch commands.
 
-The existing Auto Mode escalation remains TUI/RPC `ui.select`; #286's host escalation interface has not landed on this branch. Headless review failures and denials continue to fail closed.
+## Permission modes
 
-API grounding: installed Pi 0.85.1 `docs/extensions.md` sections `tool_call`, `ExtensionContext`, dialog options, and session lifecycle; `docs/rpc.md` extension UI protocol. Repository source corroboration used Pi 0.85.0, whose tool hook runner awaits handlers without an automatic cancellation race.
+`bashGate.mode` defaults to `auto`. `Alt+Y` cycles `yolo` → `auto` → `strict`; `--yolo` locks YOLO.
+
+| Mode     | Tree-sitter safe | Reviewer allows | Reviewer denies/escalates            |
+| -------- | ---------------- | --------------- | ------------------------------------ |
+| `yolo`   | run              | not reviewed    | not reviewed                         |
+| `auto`   | run              | run             | ask via `ui.select`; deny without UI |
+| `strict` | run              | run             | deny with the rationale; never ask   |
+
+Configured `bashGate.rules` remain part of classification. Reviewer errors fail closed in both reviewed modes. Auto offers “Allow once”, “Allow for session”, “Export command”, and “Deny”; allowances are ignored in Strict. There is no human-only/manual mode. Disabling `autoMode` disables the reviewer: gated commands fail closed rather than falling back to a human prompt. Disabling `bashGate` disables shell gating entirely.
+
+Children send gated commands to the parent broker. It uses the parent’s current mode and owns child allowances; Auto escalations share the parent’s dialog queue, while Strict never waits for a person. Explicit deny-policy children still deny gated commands unless `--yolo` is set, preserving the existing policy ceiling.
+
+API grounding: installed Pi 1.4.0 `docs/extensions.md` sections `tool_call`, `ExtensionContext`, dialog options, and session lifecycle; `docs/rpc.md` extension UI protocol.
 
 ## Pending execution context
 

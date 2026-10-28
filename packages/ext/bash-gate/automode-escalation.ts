@@ -22,6 +22,8 @@ interface AutoModeEscalationOptions {
   signal?: AbortSignal;
   isAllowed?: () => boolean;
   checkCurrent?: () => void;
+  sessionAllowKey?: string;
+  rememberAllowance?: () => void;
 }
 
 export async function promptAutoModeEscalation({
@@ -34,7 +36,9 @@ export async function promptAutoModeEscalation({
   signal,
   isAllowed,
   checkCurrent,
-}: AutoModeEscalationOptions): Promise<"allow" | "deny"> {
+  sessionAllowKey,
+  rememberAllowance,
+}: AutoModeEscalationOptions): Promise<"allow" | "allow-session" | "deny"> {
   return withApprovalDialog(pi.events, signal, async () => {
     checkCurrent?.();
     if (isAllowed?.()) return "allow";
@@ -43,14 +47,19 @@ export async function promptAutoModeEscalation({
     try {
       const prompt = `🤖 Automode denied this command${rationale ? `: ${rationale}` : "."}\n${command}`;
 
+      const allowSession = `Allow for session ("${sessionAllowKey}")`;
       const choice = await ui.select(
         prompt,
-        ["Allow once", "Export command", "Deny"],
+        ["Allow once", ...(rememberAllowance ? [allowSession] : []), "Export command", "Deny"],
         ...(signal ? [{ signal }] : []),
       );
       signal?.throwIfAborted();
       checkCurrent?.();
 
+      if (rememberAllowance && choice === allowSession) {
+        rememberAllowance();
+        return "allow-session";
+      }
       if (choice === "Allow once") return "allow";
       if (choice === "Export command") {
         try {

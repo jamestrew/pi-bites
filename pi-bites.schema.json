@@ -35,9 +35,9 @@
       "type": "object",
       "properties": {
         "mode": {
-          "enum": ["manual", "auto", "yolo"],
+          "enum": ["auto", "strict", "yolo"],
           "description": "Initial permission mode for each session.",
-          "default": "manual"
+          "default": "auto"
         },
         "rules": {
           "type": "array",

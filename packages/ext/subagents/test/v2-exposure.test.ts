@@ -123,7 +123,6 @@ async function setup({
               pi,
               undefined,
               undefined,
-              undefined,
               () => adapter?.getAllowedTools() ?? pi.getActiveTools(),
             );
         controller?.registerTools();

@@ -258,7 +258,7 @@ it("passes the authenticated root scope into SDK children and forbids descendant
   ]);
 });
 
-it.each(["rpc", "programmatic"] as const)(
+it.each(["explicit", "inherited"] as const)(
   "%s spawns retain their model through scope tightening, unload, and later follow-up",
   async (source) => {
     const h = await setupV2(cleanup);
@@ -274,23 +274,10 @@ it.each(["rpc", "programmatic"] as const)(
       models: [outside, inside],
     });
     h.faux.setResponses([fauxAssistantMessage("saved"), fauxAssistantMessage("continued")]);
-    let id: string;
-    if (source === "rpc") {
-      const reply = Promise.withResolvers<{ success: boolean; data: { id: string } }>();
-      h.pi.events.on("subagents:rpc:spawn:reply:retained", reply.resolve);
-      h.pi.events.emit("subagents:rpc:spawn", {
-        requestId: "retained",
-        type: "worker",
-        prompt: "first",
-        options: { model: `${outside.provider}/${outside.id}` },
-      });
-      const result = await reply.promise;
-      expect(result).toMatchObject({ success: true });
-      id = result.data.id;
-    } else {
-      // No UI invocation metadata; inherit the root model through the programmatic seam.
-      id = await h.manager.spawn(h.pi, h.ctx, "worker", "first", { description: "retained" });
-    }
+    const id = await h.manager.spawn(h.pi, h.ctx, "worker", "first", {
+      description: "retained",
+      ...(source === "explicit" ? { model: outside } : {}),
+    });
     await h.manager.waitForAll();
     const record = h.manager.getRecord(id);
     expect(record.session.model.id).toBe(outside.id);

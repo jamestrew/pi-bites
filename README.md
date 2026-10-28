@@ -12,8 +12,8 @@ A small collection of personal extensions for the pi coding agent.
 - **Codex-shaped tools for GPT models** — shell sessions, patches, web browsing,
   and local image viewing inside Pi's native `codemode`.
 - **Automode** — model-reviewed bash-gate approvals for the main agent and
-  subagents, using a Codex Guardian-style policy. `Alt+Y` cycles manual, YOLO,
-  and Auto modes.
+  subagents, using a Codex Guardian-style policy. `Alt+Y` cycles YOLO → Auto →
+  Strict. Auto is the startup default; Strict denies rejected reviews without a dialog.
 - **Fixed-token auto-compaction** — defaults to 200,000 tokens, or 85% of the
   model's context window if that's lower.
 - **Inline context** — `$` completion for `$skill:name` and `$prompt:name`;
@@ -34,7 +34,7 @@ A small collection of personal extensions for the pi coding agent.
 pi install git:github.com/jamestrew/pi-bites
 ```
 
-Code Mode requires Pi 0.99.1 or newer.
+Pi 1.4.0 or newer is required for public boundary compaction.
 
 ## Configuration
 
@@ -59,7 +59,13 @@ each section; `disable` lists are unioned.
 ```
 
 Automode uses the active model unless `autoMode.model` is set to a
-`provider/model-id`. To use normal Pi tools instead of Codex-shaped tools, add
+`provider/model-id`. `bashGate.mode` accepts `"auto"` (default), `"strict"`, or
+`"yolo"`; `--yolo` fixes YOLO for the run. Safe commands use the tree-sitter fast
+path in every mode. Auto escalates reviewer denials to the user; Strict and Auto
+without UI deny them with the reviewer’s rationale. Session allowances apply only
+to Auto. `disable: ["autoMode"]` disables the reviewer, not the gate: gated
+commands fail closed without a human-only fallback (YOLO still bypasses review).
+To use normal Pi tools instead of Codex-shaped tools, add
 `"codexAdapter"` to `disable`.
 
 See the [configuration schema](pi-bites.schema.json) for all options and extension

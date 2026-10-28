@@ -387,14 +387,24 @@ it("gives programmatic spawns task paths and the current capability ceiling", as
 });
 
 it("does not deliver a stopped turn's final, and still updates completion UI events", async () => {
-  readyChild();
+  let finish!: () => void;
+  vi.mocked(runAgent).mockImplementation(async (_parent, _type, _prompt, options) => {
+    const session = mockSession();
+    session.sessionManager = SessionManager.inMemory("/tmp", { id: options.agentId });
+    session.abort.mockImplementation(async () => finish());
+    options.onSessionCreated?.(session);
+    await new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    return { session, responseText: "partial" };
+  });
   const h = harness();
   await h.emit("session_start");
   await h.call("spawn_agent", { task_name: "a", message: "x" });
-  const id = vi.mocked(runAgent).mock.calls[0]![3].agentId;
   const failed = vi.fn();
   h.pi.events.on("subagents:failed", failed);
-  h.pi.events.emit("subagents:rpc:stop", { requestId: "stop", agentId: id });
+  h.pi.getActiveTools = () => ["interrupt_agent"];
+  await h.call("interrupt_agent", { target: "a" });
   await Reflect.get(globalThis, Symbol.for("pi-subagents:manager")).waitForAll();
   expect(h.pi.sendMessage).not.toHaveBeenCalled();
   expect(failed).toHaveBeenCalledTimes(1);
@@ -448,35 +458,6 @@ it("transfers admission to a published runtime before reentrant spawning", async
   await h.call("spawn_agent", { task_name: "a", message: "A", fork_turns: "none" });
   await expect(second).resolves.toMatchObject({ value: { task_name: "/root/b" } });
   expect((await h.call("list_agents", {})).value.agents).toHaveLength(3);
-});
-
-it("reads saved selected-target waits without restoring a V1 executor", () => {
-  const h = harness();
-  const tool = h.direct.get("wait_agent");
-  const theme = { bold: (s: string) => s, fg: (_color: string, s: string) => s };
-  const context = { state: {}, expanded: true, isError: false };
-  tool.renderResult(
-    {
-      content: [
-        {
-          type: "text",
-          text: '{"status":{"saved-id":{"completed":"saved finding"}},"timed_out":false}',
-        },
-      ],
-      details: { agents: [], outcome: "terminal" },
-    },
-    {},
-    theme,
-    context,
-  );
-  const row = tool.renderCall({ targets: ["saved-id"] }, theme, context);
-  expect(row.render(100).join("\n")).toContain("wait_agent 1 agents");
-  expect(row.render(100).join("\n")).toContain("saved finding");
-  for (const line of row.render(16)) expect(visibleWidth(line)).toBeLessThanOrEqual(16);
-  h.pi.getActiveTools = () => ["wait_agent"];
-  return expect(h.call("wait_agent", { targets: ["saved-id"] })).rejects.toThrow(
-    "Invalid arguments",
-  );
 });
 
 it.each([

@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BashGateApprovalResult } from "./events.js";
-import { withApprovalDialog } from "./pending.js";
 import { waitForOperation } from "../shared/abortable-wait.js";
 import { promptAutoModeEscalation } from "./automode-escalation.js";
 
@@ -13,39 +11,25 @@ interface CommandApprovalOptions {
   command: string;
   toolName?: "bash" | "exec_command";
   signal: AbortSignal;
-  prompt: string;
+  mode: "auto" | "strict";
   sessionAllowKey: string;
   isAllowed: () => boolean;
   rememberAllowance: () => void;
   review?: () => Promise<{ outcome: "allow" | "deny"; rationale?: string }>;
   checkCurrent?: () => void;
-  failureMessage?: (message: string, phase: "review" | "manual" | "authorization") => string;
+  failureMessage?: (message: string, phase: "review" | "authorization") => string;
 }
 
 /** Dependencies must be captured while the owning extension context is active. */
 export async function requestCommandApproval(
   options: CommandApprovalOptions,
 ): Promise<BashGateApprovalResult> {
-  const {
-    pi,
-    ui,
-    cwd,
-    command,
-    toolName,
-    signal,
-    prompt,
-    sessionAllowKey,
-    isAllowed,
-    rememberAllowance,
-  } = options;
+  const { pi, ui, cwd, command, toolName, signal, isAllowed } = options;
   const check = () => {
     options.checkCurrent?.();
     signal.throwIfAborted();
   };
-  const failure = (
-    error: unknown,
-    phase: "review" | "manual" | "authorization",
-  ): BashGateApprovalResult => {
+  const failure = (error: unknown, phase: "review" | "authorization"): BashGateApprovalResult => {
     const message = error instanceof Error ? error.message : String(error);
     return {
       outcome: "failure",
@@ -56,7 +40,8 @@ export async function requestCommandApproval(
   };
   try {
     check();
-    if (isAllowed()) return { outcome: "allow-session", authorization: "human-approved" };
+    if (options.mode === "auto" && isAllowed())
+      return { outcome: "allow-session", authorization: "human-approved" };
     if (options.review) {
       let decision;
       try {
@@ -68,7 +53,7 @@ export async function requestCommandApproval(
       check();
       if (decision.outcome === "allow")
         return { outcome: "allow", authorization: "reviewer-approved" };
-      if (options.hasUI) {
+      if (options.mode === "auto" && options.hasUI) {
         const escalation = await waitForOperation(
           promptAutoModeEscalation({
             pi,
@@ -80,10 +65,15 @@ export async function requestCommandApproval(
             isAllowed,
             rationale: decision.rationale,
             checkCurrent: check,
+            sessionAllowKey: options.sessionAllowKey,
+            rememberAllowance: options.rememberAllowance,
           }),
           signal,
         );
         check();
+        if (isAllowed()) return { outcome: "allow-session", authorization: "human-approved" };
+        if (escalation === "allow-session")
+          return { outcome: "allow-session", authorization: "human-approved" };
         if (escalation === "allow") return { outcome: "allow", authorization: "human-approved" };
       }
       return {
@@ -92,32 +82,10 @@ export async function requestCommandApproval(
         ...(decision.rationale ? { rationale: decision.rationale } : {}),
       };
     }
-    if (!options.hasUI) return { outcome: "deny", source: "manual" };
-    return await waitForOperation(
-      withApprovalDialog(pi.events, signal, async () => {
-        check();
-        if (isAllowed()) return { outcome: "allow-session", authorization: "human-approved" };
-        const gate = { cwd, command, toolName, requiresHuman: true, waitId: randomUUID() } as const;
-        const allowSession = `Allow for session ("${sessionAllowKey}")`;
-        pi.events.emit("bites:bash_gate", gate);
-        try {
-          const choice = await ui.select(prompt, ["Allow", allowSession, "Deny"], { signal });
-          check();
-          if (choice === allowSession) {
-            rememberAllowance();
-            return { outcome: "allow-session", authorization: "human-approved" };
-          }
-          return choice === "Allow"
-            ? { outcome: "allow", authorization: "human-approved" }
-            : { outcome: "deny", source: "manual" };
-        } catch (error) {
-          return failure(error, "manual");
-        } finally {
-          pi.events.emit("bites:bash_gate_resolved", gate);
-        }
-      }),
-      signal,
-    );
+    return {
+      outcome: "failure",
+      message: "Bash gate: automated reviewer is disabled or unavailable.",
+    };
   } catch (error) {
     return failure(error, "authorization");
   }

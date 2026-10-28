@@ -327,7 +327,13 @@ it.each(["human", "automode"])(
   async (mode) => {
     const approval = Promise.withResolvers<any>();
     const review = vi.fn(() => approval.promise);
-    const h = await setup(mode === "automode" ? { isEnabled: () => true, review } : undefined);
+    const h = await setup({
+      getMode: () => "auto" as const,
+      review:
+        mode === "automode"
+          ? review
+          : vi.fn().mockResolvedValue({ outcome: "deny", rationale: "Needs approval" }),
+    });
     const select = vi.fn(() => approval.promise);
     h.ctx.hasUI = true;
     h.ctx.ui.select = select;

@@ -41,7 +41,10 @@ describe("shared command authorization", () => {
 test("cancelled nested review settles promptly and a late allow never launches", async () => {
   const reviewResult = Promise.withResolvers<AutoModeDecision>();
   const review = vi.fn(() => reviewResult.promise);
-  const { gate, ctx, pi } = createBashGateHarness([], false, { isEnabled: () => true, review });
+  const { gate, ctx, pi } = createBashGateHarness([], false, {
+    getMode: () => "auto" as const,
+    review,
+  });
   const controller = new AbortController();
   const launch = vi.fn();
   const pending = gate.captureSession(ctx as any).authorize(
@@ -136,7 +139,7 @@ test.each(["queued", "displayed"])(
     controller.abort();
     const cancelled = stage === "queued" ? await secondResult : await firstResult;
     expect(cancelled[0].status).toBe("rejected");
-    choice.resolve(stage === "displayed" ? 'Allow for session ("rm")' : "Allow");
+    choice.resolve(stage === "displayed" ? 'Allow for session ("rm")' : "Allow once");
     await Promise.all([firstResult, secondResult]);
     // A cancelled late session allowance cannot make this launch bypass the gate.
     await expect(session.authorize(nestedRequest("third"), launch)).rejects.toThrow(/denied/);
@@ -189,7 +192,7 @@ test("parallel reviewers keep unique command identities and denial only blocks i
   const { gate, ctx, pi } = createBashGateHarness(
     [],
     false,
-    { isEnabled: () => true, review },
+    { getMode: () => "auto" as const, review },
     false,
   );
   const session = gate.captureSession(ctx as any);
@@ -222,7 +225,10 @@ test.each(["review", "escalation"])(
       failure === "review"
         ? vi.fn().mockRejectedValue(new Error("review unavailable"))
         : vi.fn().mockResolvedValue({ outcome: "deny" });
-    const { gate, ctx, ui } = createBashGateHarness([], false, { isEnabled: () => true, review });
+    const { gate, ctx, ui } = createBashGateHarness([], false, {
+      getMode: () => "auto" as const,
+      review,
+    });
     ui.select.mockRejectedValue(new Error("UI unavailable"));
     const launch = vi.fn();
     await expect(
@@ -299,7 +305,7 @@ test.each(["completed", "cancelled"])(
 test("direct exec review pins relative execution context before delayed approval", async () => {
   const decision = Promise.withResolvers<AutoModeDecision>();
   const review = vi.fn((_request: unknown) => decision.promise);
-  const harness = createBashGateHarness([], false, { isEnabled: () => true, review });
+  const harness = createBashGateHarness([], false, { getMode: () => "auto" as const, review });
   let stale = false;
   const ctx = new Proxy(
     { ...harness.ctx, isProjectTrusted: () => false },

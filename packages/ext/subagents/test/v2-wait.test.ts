@@ -99,22 +99,27 @@ it("renders wait outcomes once in the call row, with bounded width and styled de
     bold: (s: string) => `<b>${s}</b>`,
     fg: (c: string, s: string) => `<${c}>${s}</${c}>`,
   };
-  for (const [summary, label] of [
-    ["Wait completed.", "completed"],
-    ["Wait timed out.", "timed out"],
-    ["Wait interrupted by new input.", "interrupted by new input"],
+  for (const [outcome, label] of [
+    ["completed", "completed"],
+    ["timeout", "timed out"],
+    ["input", "interrupted by new input"],
   ]) {
     for (const expanded of [false, true]) {
       const context = { state: {}, expanded, isError: false };
       const result = tool.renderResult(
-        { content: [], details: { status: summary } },
+        {
+          content: [],
+          details: {
+            wait: { outcome, elapsedMs: 500, requestedMs: 30000, timeoutMs: 30000, agents: [] },
+          },
+        },
         {},
         theme,
         context,
       );
       expect(result.render(120)).toEqual([]);
       const row = tool.renderCall({}, theme, context).render(120).join("\n");
-      expect(row).toBe(`<b>wait_agent</b><accent> ${label}</accent>`);
+      expect(row).toBe(`<b>wait_agent</b><accent> ${label} after 0.5s</accent>`);
     }
   }
   for (const error of ["Wait cancelled.", "Mailbox is unavailable"]) {

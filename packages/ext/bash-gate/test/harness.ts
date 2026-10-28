@@ -1,5 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { vi } from "vitest";
+import type { AutoModeController } from "../../automode/index.js";
 import registerBashGate from "../index.js";
 export function subagentEntry(data: Record<string, unknown>): SessionEntry {
   return {
@@ -15,8 +16,8 @@ export function subagentEntry(data: Record<string, unknown>): SessionEntry {
 export function createBashGateHarness(
   entries: SessionEntry[] = [],
   yolo = false,
-  autoMode?: Omit<NonNullable<Parameters<typeof registerBashGate>[2]>, "setEnabled"> &
-    Partial<Pick<NonNullable<Parameters<typeof registerBashGate>[2]>, "setEnabled">>,
+  autoMode?: Omit<AutoModeController, "setMode" | "isEnabled"> &
+    Partial<Pick<AutoModeController, "setMode">>,
   hasUI = true,
   config: Parameters<typeof registerBashGate>[1]["current"] = {},
 ) {
@@ -61,11 +62,11 @@ export function createBashGateHarness(
     sessionManager: { getEntries: () => entries },
   };
 
-  const gate = registerBashGate(
-    pi as any,
-    { current: config },
-    autoMode && { setEnabled: vi.fn(), ...autoMode },
-  );
+  const gate = registerBashGate(pi as any, { current: config }, {
+    setMode: vi.fn(),
+    review: vi.fn(async () => ({ outcome: "deny", rationale: "Needs approval" })),
+    ...autoMode,
+  } as AutoModeController);
   handlers.get("session_start")?.({}, ctx);
 
   return {

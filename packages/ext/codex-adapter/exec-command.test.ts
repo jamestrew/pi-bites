@@ -708,7 +708,7 @@ test.each(["default", "absolute", "relative"])(
     const decision = Promise.withResolvers<{ outcome: "allow" }>();
     const review = vi.fn((_request: unknown) => decision.promise);
     const harness = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review: review as never,
     });
     const tool = createExecCommandTool(manager());

@@ -549,6 +549,7 @@ it.each(["idle custom", "automatic compaction"] as const)(
     const settled: boolean[] = [];
     const rootObservations: Array<{ event: string; status: unknown }> = [];
     let compactions = 0;
+    let committedCompactions = 0;
     const execute = vi.fn(async () => ({
       content: [{ type: "text" as const, text: "TOOL_RESULT_404 ".repeat(200) }],
       details: {},
@@ -616,9 +617,6 @@ it.each(["idle custom", "automatic compaction"] as const)(
               idle: ctx.isIdle(),
             });
           });
-          pi.on("session_compact", () => {
-            pi.sendMessage(pending, { triggerTurn: false, deliverAs: "nextTurn" });
-          });
         },
       ],
       [probe.name, "list_agents", "bash", "codemode", "exec_command", "write_stdin"],
@@ -669,6 +667,11 @@ it.each(["idle custom", "automatic compaction"] as const)(
     });
     session.subscribe((event) => {
       if (event.type === "agent_settled") settled.push(event.aborted);
+      if (event.type === "entry_appended" && event.entry.type === "compaction") {
+        committedCompactions++;
+        // Queue for the next tool-loop request, not a new run/startup boundary.
+        void session.sendCustomMessage(pending, { triggerTurn: false });
+      }
     });
     try {
       if (origin === "idle custom") {
@@ -680,32 +683,25 @@ it.each(["idle custom", "automatic compaction"] as const)(
         );
       } else {
         await session.prompt("Run the synthetic startup probe.");
-        await expect.poll(() => settled.length).toBe(2);
+        expect(settled).toHaveLength(1);
       }
       expect(errors).toEqual([]);
       expect(starts).toEqual([
-        ...(origin === "automatic compaction"
-          ? [{ type: "user", hasPrompt: true, idle: false }]
-          : []),
-        { type: "custom", hasPrompt: false, idle: false },
+        origin === "automatic compaction"
+          ? { type: "user", hasPrompt: true, idle: false }
+          : { type: "custom", hasPrompt: false, idle: false },
       ]);
-      expect(settled).toEqual(origin === "automatic compaction" ? [true, false] : [false]);
+      expect(settled).toEqual([false]);
       expect(rootObservations).toEqual([
-        ...(origin === "automatic compaction"
-          ? [
-              { event: "agent_start", status: "running" },
-              { event: "agent_end", status: "running" },
-              { event: "agent_settled", status: "interrupted" },
-            ]
-          : []),
         { event: "agent_start", status: "running" },
         { event: "agent_end", status: "running" },
         { event: "agent_settled", status: { completed: "Finished continuation." } },
       ]);
       expect(compactions).toBe(origin === "automatic compaction" ? 1 : 0);
+      expect(committedCompactions).toBe(compactions);
       expect(requests).toHaveLength(origin === "automatic compaction" ? 3 : 2);
       expect(execute).toHaveBeenCalledTimes(origin === "automatic compaction" ? 2 : 1);
-      for (const messages of requests.slice(-2)) {
+      for (const messages of requests.slice(origin === "automatic compaction" ? 1 : -2)) {
         const system = getCurrentSystemPrompt(messages);
         for (const section of [
           "EXISTING_POLICY_404",
@@ -725,7 +721,7 @@ it.each(["idle custom", "automatic compaction"] as const)(
         if (origin === "idle custom") expect(text).toContain(continuation);
         else {
           expect(text).toContain("STARTUP_CHECKPOINT_404");
-          expect(text.match(/Continue the previous task after compaction\./g)).toHaveLength(1);
+          expect(text).not.toContain("Continue the previous task after compaction.");
         }
       }
       expect(requestText(requests.at(-1)!)).toContain("TOOL_RESULT_404");

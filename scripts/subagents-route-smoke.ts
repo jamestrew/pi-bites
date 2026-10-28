@@ -229,7 +229,7 @@ async function main() {
         ),
         // An explicit empty command constraint matches every parsed command in the existing gate.
         bashGate: {
-          mode: "manual",
+          mode: "auto",
           rules: [{ cmd: [], reason: "route smoke: approve exact command only" }],
         },
       },
@@ -323,7 +323,6 @@ async function main() {
             pi,
             undefined,
             gate,
-            () => undefined,
             () => adapter?.getAllowedTools() ?? pi.getActiveTools(),
           );
           observeController(controller, "parent");

@@ -75,11 +75,11 @@ describe("bash gate tool_call", () => {
 
     await expect(toolCall({ toolName, input }, ctx)).resolves.toEqual({
       block: true,
-      reason: "Bash gate: command was denied by the user.",
+      reason: expect.stringContaining("Automode denied this command: Needs approval"),
     });
     expect(ui.select).toHaveBeenCalledWith(
-      expect.stringContaining("production deployment"),
-      ["Allow", 'Allow for session ("deploy")', "Deny"],
+      expect.stringContaining("Needs approval"),
+      ["Allow once", 'Allow for session ("deploy")', "Export command", "Deny"],
       { signal: expect.any(AbortSignal) },
     );
   });
@@ -103,7 +103,7 @@ describe("bash gate tool_call", () => {
 
   test("allows exec_command once without remembering the decision", async () => {
     const { toolCall, ctx, ui } = createBashGateHarness();
-    ui.select.mockResolvedValue("Allow");
+    ui.select.mockResolvedValue("Allow once");
 
     await toolCall({ toolName: "exec_command", input: { cmd: "rm first.txt" } }, ctx);
     await toolCall({ toolName: "exec_command", input: { cmd: "rm second.txt" } }, ctx);
@@ -118,11 +118,11 @@ describe("bash gate tool_call", () => {
       toolCall({ toolName: "exec_command", input: { cmd: "rm build.txt" } }, ctx),
     ).resolves.toEqual({
       block: true,
-      reason: "Bash gate: no UI available for confirmation.",
+      reason: expect.stringContaining("Automode denied this command: Needs approval"),
     });
   });
 
-  test("records a failed manual approval prompt as blocked", async () => {
+  test("records a failed escalation as blocked", async () => {
     const { toolCall, ctx, ui, pi } = createBashGateHarness();
     ui.select.mockRejectedValue(new Error("UI unavailable"));
 
@@ -130,7 +130,7 @@ describe("bash gate tool_call", () => {
       toolCall({ toolName: "bash", input: { command: "rm build.txt" } }, ctx),
     ).resolves.toEqual({
       block: true,
-      reason: "Bash gate: approval failed closed: UI unavailable",
+      reason: expect.stringContaining("Automode denied this command: Needs approval"),
     });
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "pi-bites:shell-authorization",
@@ -141,7 +141,7 @@ describe("bash gate tool_call", () => {
   test("sends exec_command's original cmd and tool contract through automode and lifecycle events", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
     const { toolCall, ctx, pi } = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review,
     });
     await expect(
@@ -176,7 +176,7 @@ describe("bash gate tool_call", () => {
       () => new Promise<AutoModeDecision>((resolve) => (resolveReview = resolve)),
     );
     const { toolCall, ctx, pi, sessionShutdown } = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review,
     });
 
@@ -217,7 +217,7 @@ describe("bash gate tool_call", () => {
     const { pi, ui, toolCall, ctx } = createBashGateHarness(
       [subagentEntry({ bashGatePolicy: "deny" })],
       false,
-      { isEnabled: () => true, review },
+      { getMode: () => "auto" as const, review },
     );
 
     const result = await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
@@ -262,7 +262,7 @@ describe("bash gate tool_call", () => {
       .fn()
       .mockResolvedValueOnce({ outcome: "allow" })
       .mockRejectedValueOnce(new Error("timeout"));
-    const autoMode = { isEnabled: () => true, review };
+    const autoMode = { getMode: () => "auto" as const, review };
     const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, autoMode, false);
 
     await expect(
@@ -288,7 +288,7 @@ describe("bash gate tool_call", () => {
       rationale: "removes files outside the requested build directory",
     });
     const { toolCall, ctx, ui } = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review,
     });
 
@@ -301,7 +301,7 @@ describe("bash gate tool_call", () => {
     });
     expect(ui.select).toHaveBeenCalledWith(
       expect.stringContaining("removes files outside the requested build directory"),
-      ["Allow once", "Export command", "Deny"],
+      ["Allow once", 'Allow for session ("rm")', "Export command", "Deny"],
       { signal: expect.any(AbortSignal) },
     );
   });
@@ -309,7 +309,7 @@ describe("bash gate tool_call", () => {
   test("records an automode-denied command allowed by the human as human-approved", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "too broad" });
     const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review,
     });
     ui.select.mockResolvedValue("Allow once");
@@ -330,7 +330,7 @@ describe("bash gate tool_call", () => {
   test("exports the exact denied command to a private non-executable file and stays blocked", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "not authorized" });
     const { toolCall, ctx, ui } = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review,
     });
     ui.select.mockResolvedValue("Export command");
@@ -358,7 +358,7 @@ describe("bash gate tool_call", () => {
     const { toolCall, ctx, ui } = createBashGateHarness(
       [],
       false,
-      { isEnabled: () => true, review },
+      { getMode: () => "auto" as const, review },
       false,
     );
 
@@ -379,7 +379,7 @@ describe("bash gate tool_call", () => {
       return { outcome: "deny", rationale: "not authorized" };
     });
     const { toolCall, ctx, ui } = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review,
     });
     ui.select.mockResolvedValue("Allow once");
@@ -406,7 +406,7 @@ describe("bash gate tool_call", () => {
   test("does not invoke automode until a bash command actually matches the gate", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
     const { toolCall, ctx, pi } = createBashGateHarness([], false, {
-      isEnabled: () => true,
+      getMode: () => "auto" as const,
       review,
     });
 
@@ -425,15 +425,15 @@ describe("bash gate tool_call", () => {
   });
 
   test("--yolo disables automode, bypasses review, and locks the shortcut", async () => {
-    let enabled = true;
+    let mode: "auto" | "strict" | "yolo" = "auto";
     const review = vi.fn().mockResolvedValue({ outcome: "deny" });
     const autoMode = {
-      isEnabled: () => enabled,
-      setEnabled: vi.fn((value: boolean) => (enabled = value)),
+      getMode: () => mode,
+      setMode: vi.fn((value: "auto" | "strict" | "yolo") => (mode = value)),
       review,
     };
     const { toolCall, ctx, toggleYolo, ui, pi } = createBashGateHarness([], true, autoMode, false);
-    expect(enabled).toBe(false);
+    expect(mode).toBe("yolo");
     await toggleYolo();
     expect(ui.notify).toHaveBeenCalledWith("Bash gate mode is fixed to YOLO by --yolo.", "info");
     await expect(
@@ -447,18 +447,18 @@ describe("bash gate tool_call", () => {
   });
 
   test("configured yolo mode starts in YOLO without locking the shortcut", async () => {
-    let enabled = true;
+    let mode: "auto" | "strict" | "yolo" = "auto";
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
     const autoMode = {
-      isEnabled: () => enabled,
-      setEnabled: vi.fn((value: boolean) => (enabled = value)),
+      getMode: () => mode,
+      setMode: vi.fn((value: "auto" | "strict" | "yolo") => (mode = value)),
       review,
     };
     const { toolCall, ctx, toggleYolo, ui } = createBashGateHarness([], false, autoMode, true, {
       bashGate: { mode: "yolo" },
     });
 
-    expect(enabled).toBe(false);
+    expect(mode).toBe("yolo");
     expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
     await expect(
       toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx),
@@ -466,24 +466,24 @@ describe("bash gate tool_call", () => {
     expect(review).not.toHaveBeenCalled();
 
     await toggleYolo();
-    expect(enabled).toBe(true);
+    expect(mode).toBe("auto");
   });
 
   test("an existing session allowance bypasses later automode review", async () => {
-    let enabled = false;
+    let mode: "auto" | "strict" | "yolo" = "auto";
     const review = vi.fn().mockResolvedValue({ outcome: "deny" });
     const { toolCall, ctx, ui, pi } = createBashGateHarness([], false, {
-      isEnabled: () => enabled,
+      getMode: () => mode,
       review,
     });
     ui.select.mockResolvedValue('Allow for session ("rm")');
     await toolCall({ toolName: "bash", input: { command: "rm first.txt" } }, ctx);
-    enabled = true;
+
     await expect(
       toolCall({ toolName: "bash", input: { command: "rm second.txt" } }, ctx),
     ).resolves.toBeUndefined();
 
-    expect(review).not.toHaveBeenCalled();
+    expect(review).toHaveBeenCalledTimes(1);
     expect(ui.select).toHaveBeenCalledTimes(1);
     expect(
       pi.appendEntry.mock.calls.map(([, data]) => (data as { status: string }).status),
@@ -517,30 +517,21 @@ describe("bash gate tool_call", () => {
     expect(ui.select).toHaveBeenCalledTimes(2);
   });
 
-  test("shortcut cycles YOLO, Auto, and Bash gate modes", async () => {
-    let autoEnabled = false;
+  test("shortcut cycles yolo, auto, strict without manual approval", async () => {
     const review = vi.fn().mockResolvedValue({ outcome: "allow" });
-    const autoMode = {
-      isEnabled: () => autoEnabled,
-      setEnabled: vi.fn((enabled: boolean) => (autoEnabled = enabled)),
-      review,
-    };
-    const { ui, toggleYolo, toolCall, ctx } = createBashGateHarness([], false, autoMode);
-    const gatedCall = () => toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
-    await toggleYolo();
-    await expect(gatedCall()).resolves.toBeUndefined();
-    expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", "🔥 YOLO");
-    expect(ui.select).not.toHaveBeenCalled();
-    await toggleYolo();
-    await expect(gatedCall()).resolves.toBeUndefined();
-    expect(autoMode.setEnabled).toHaveBeenLastCalledWith(true, ctx);
-    expect(review).toHaveBeenCalledTimes(1);
-    expect(ui.select).not.toHaveBeenCalled();
-    await toggleYolo();
-    await gatedCall();
-    expect(autoMode.setEnabled).toHaveBeenLastCalledWith(false, ctx);
-    expect(ui.setStatus).toHaveBeenLastCalledWith("bash-gate-yolo", undefined);
-    expect(ui.select).toHaveBeenCalled();
+    const autoMode = { getMode: () => "auto" as const, setMode: vi.fn(), review };
+    const h = createBashGateHarness([], false, autoMode, true, { bashGate: { mode: "yolo" } });
+    const call = () => h.toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, h.ctx);
+    expect(h.gate.getMode()).toBe("yolo");
+    await call();
+    expect(review).not.toHaveBeenCalled();
+    for (const mode of ["auto", "strict", "yolo"]) {
+      await h.toggleYolo();
+      expect(h.gate.getMode()).toBe(mode);
+      await expect(call()).resolves.toBeUndefined();
+    }
+    expect(review).toHaveBeenCalledTimes(2);
+    expect(h.ui.select).not.toHaveBeenCalled();
   });
 
   test("main-agent yolo mode does not bypass explicit deny-policy subagent gates", async () => {
@@ -610,7 +601,7 @@ describe("bash gate tool_call", () => {
     );
   });
 
-  test("prompt-policy allow for session is scoped to one subagent session", async () => {
+  test("child allowances remain parent-owned so mode changes cannot bypass the broker", async () => {
     const entries = [
       subagentEntry({ agentId: "agent-1", title: "Explore", bashGatePolicy: "prompt" }),
     ];
@@ -629,7 +620,7 @@ describe("bash gate tool_call", () => {
     entries[0] = subagentEntry({ agentId: "agent-2", title: "Explore", bashGatePolicy: "prompt" });
     await toolCall({ toolName: "bash", input: { command: "rm -rf tmp" } }, ctx);
 
-    expect(approvals).toBe(2);
+    expect(approvals).toBe(3);
   });
 
   test.each(["subagents:completed", "subagents:failed"])(

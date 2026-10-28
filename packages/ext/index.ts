@@ -7,7 +7,7 @@ import registerContext, { type ContextPromptPreview } from "./context.js";
 import registerCustomTools from "./tools.js";
 import registerFzfFileSearch from "./file-search/index.js";
 import registerNotifications from "./notifications.js";
-import registerAutoCompaction, { DEFAULT_AUTO_COMPACTION_THRESHOLD } from "./auto-compaction.js";
+import registerAutoCompaction from "./auto-compaction.js";
 import registerAutoMode from "./automode/index.js";
 import registerPromptNormalization from "./prompt-normalization/index.js";
 import registerSpotme from "./spotme/index.js";
@@ -63,9 +63,7 @@ export default async function (pi: ExtensionAPI) {
     isSubagent || disabled.has("autoMode") ? undefined : registerAutoMode(pi, configRef);
   const bashGate = disabled.has("bashGate") ? undefined : registerBashGate(pi, configRef, autoMode);
   if (!disabled.has("tools")) registerCustomTools(pi);
-  // Subagent sessions install the same policy directly at Pi's safe
-  // prepare-next-turn seam; ctx.compact() would abort their owning invocation.
-  if (!isSubagent && !disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
+  if (!disabled.has("autoCompaction")) registerAutoCompaction(pi, configRef);
   let codexAdapter: CodexAdapterController | undefined;
   const getAllowedTools = () => codexAdapter?.getAllowedTools() ?? pi.getActiveTools();
   const subagents = disabled.has("subagents")
@@ -76,11 +74,6 @@ export default async function (pi: ExtensionAPI) {
           pi,
           autoMode,
           bashGate,
-          () =>
-            configRef.current.disable?.includes("autoCompaction")
-              ? undefined
-              : (configRef.current.autoCompaction?.thresholdTokens ??
-                DEFAULT_AUTO_COMPACTION_THRESHOLD),
           getAllowedTools,
           () => configRef.current.subagents ?? {},
         );
