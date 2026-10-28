@@ -56,15 +56,7 @@ export default async function (pi: ExtensionAPI) {
   const disabled = new Set(startupConfig.disable ?? []);
 
   pi.on("session_start", async (_event, ctx) => {
-    configRef.current = loadConfig(
-      ctx.cwd,
-      isSubagent
-        ? undefined
-        : (message) => {
-            if (ctx.hasUI) ctx.ui.notify(message, "warning");
-            else console.warn(message);
-          },
-    );
+    configRef.current = loadConfig(ctx.cwd);
   });
 
   const autoMode =

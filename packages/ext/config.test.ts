@@ -129,48 +129,6 @@ describe("config JSON schema", () => {
 });
 
 describe("loadConfig", () => {
-  test("warns about legacy files without reading, using, or changing them or unrelated config", async () => {
-    const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
-    agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));
-    mkdirSync(join(project, ".pi"));
-    const globalLegacy = join(agentDir, "subagents.json");
-    const projectLegacy = join(project, ".pi", "subagents.json");
-    const globalConfig = join(agentDir, "pi-bites.json");
-    const projectConfig = join(project, ".pi", "pi-bites.json");
-    const warn = vi.fn();
-    const { loadConfig } = await import("./config.js");
-    try {
-      expect(loadConfig(project, warn).subagents).toEqual({});
-      expect(warn).not.toHaveBeenCalled();
-      const globalBytes = '{ "maxConcurrent": 99, "defaultModel": "legacy/model" }\n';
-      const projectBytes = "{ invalid legacy JSON";
-      const configBytes = '{ "custom": true, "subagents": { "fleetView": false } }\n';
-      writeFileSync(globalLegacy, globalBytes);
-      writeFileSync(projectLegacy, projectBytes);
-      writeFileSync(globalConfig, configBytes);
-      for (let load = 0; load < 2; load++) {
-        expect(loadConfig(project, warn).subagents).toEqual({ fleetView: false });
-        expect(warn).toHaveBeenLastCalledWith(expect.stringContaining(projectLegacy));
-      }
-      expect(warn).toHaveBeenCalledTimes(4);
-      for (const [legacy, destination] of [
-        [globalLegacy, globalConfig],
-        [projectLegacy, projectConfig],
-      ]) {
-        const message = warn.mock.calls.find(([message]) => message.includes(legacy))![0];
-        expect(message).toContain(destination);
-        expect(message).toMatch(/manual/i);
-        expect(message).toContain("subagents");
-      }
-      expect(readFileSync(globalLegacy, "utf8")).toBe(globalBytes);
-      expect(readFileSync(projectLegacy, "utf8")).toBe(projectBytes);
-      expect(readFileSync(globalConfig, "utf8")).toBe(configBytes);
-      expect(existsSync(projectConfig)).toBe(false);
-    } finally {
-      rmSync(project, { recursive: true, force: true });
-    }
-  });
-
   test("merges subagent fields independently and forgets removed settings on the next load", async () => {
     const project = mkdtempSync(join(tmpdir(), "pi-bites-project-"));
     agentDir = mkdtempSync(join(tmpdir(), "pi-bites-agent-"));

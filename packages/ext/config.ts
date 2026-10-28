@@ -324,21 +324,9 @@ function tryReadJson(filePath: string, label: string): BitesConfig {
  * Load and merge config from global and project-local files.
  * Project-local values override global values within each section.
  */
-export function loadConfig(cwd: string, warn?: (message: string) => void): BitesConfig {
+export function loadConfig(cwd: string): BitesConfig {
   const globalPath = join(getAgentDir(), "pi-bites.json");
   const projectPath = join(cwd, CONFIG_DIR_NAME, "pi-bites.json");
-
-  // Only lifecycle loads supply a notifier; eager startup and SDK children stay silent.
-  if (warn) {
-    for (const directory of [getAgentDir(), join(cwd, CONFIG_DIR_NAME)]) {
-      const legacy = join(directory, "subagents.json");
-      if (existsSync(legacy)) {
-        warn(
-          `Legacy subagent settings at ${legacy} are ignored. Manually move supported fields into "subagents" in ${join(directory, "pi-bites.json")}, then /reload. No files were changed.`,
-        );
-      }
-    }
-  }
 
   const global = tryReadJson(globalPath, "global");
   const project = tryReadJson(projectPath, "project-local");
