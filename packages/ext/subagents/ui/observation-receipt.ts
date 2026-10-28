@@ -219,7 +219,7 @@ type Receipt = {
   agents?: AgentSnapshot[];
   wait?: WaitSnapshot;
 };
-type State = { receipt?: Receipt; error?: string; legacyWait?: string; legacyStatus?: string };
+type State = { receipt?: Receipt; error?: string };
 
 /** The host owns padding/background; the call component reads state after renderResult runs. */
 export function observationReceiptRenderers(
@@ -227,7 +227,7 @@ export function observationReceiptRenderers(
 ) {
   return {
     renderCall(
-      args: { target?: string; path_prefix?: string; timeout_ms?: number; targets?: unknown[] },
+      args: { target?: string; path_prefix?: string; timeout_ms?: number },
       theme: { bold(s: string): string; fg(color: "accent" | "dim", s: string): string },
       context: { state: State; expanded: boolean },
     ) {
@@ -238,14 +238,11 @@ export function observationReceiptRenderers(
           const wait = receipt?.wait;
           let summary: string;
           if (name === "wait_agent") {
-            if (Array.isArray(args.targets)) summary = `${args.targets.length} agents`;
-            else if (wait) summary = waitSummary(wait);
+            if (wait) summary = waitSummary(wait);
             else if (state.error)
               summary = /cancelled|aborted/i.test(state.error) ? "cancelled" : "failed";
             else
-              summary =
-                state.legacyStatus ??
-                `waiting 0s / timeout ${seconds(Math.max(10000, args.timeout_ms ?? 30000))}`;
+              summary = `waiting 0s / timeout ${seconds(Math.max(10000, args.timeout_ms ?? 30000))}`;
           } else if (name === "list_agents") {
             summary = `${receipt?.prefix ?? args.path_prefix ?? "/root"}${receipt?.agents ? ` ${receipt.agents.length} loaded` : ""}`;
           } else {
@@ -261,11 +258,7 @@ export function observationReceiptRenderers(
             state.error ??
             (receipt?.previousStatus ? `Previous status: ${receipt.previousStatus}` : "");
           const activity = wait ? waitLines(wait, width, context.expanded) : undefined;
-          const details =
-            activity?.lines ??
-            (state.legacyWait
-              ? wrapDisplayLines(state.legacyWait, width)
-              : (receipt?.agents ?? []).map(listRow));
+          const details = activity?.lines ?? (receipt?.agents ?? []).map(listRow);
           const trailing = body ? wrapDisplayLines(body, width) : [];
           const budget = context.expanded ? Infinity : 8;
           const tail = trailing.slice(0, budget);
@@ -311,18 +304,6 @@ export function observationReceiptRenderers(
       } else {
         context.state.error = undefined;
         const details = result.details as Receipt | undefined;
-        if (name === "wait_agent") {
-          const legacy = result.details as
-            | { agents?: unknown[]; outcome?: string; status?: string }
-            | undefined;
-          if (!details?.wait && Array.isArray(legacy?.agents) && legacy.outcome)
-            context.state.legacyWait = extractText(result.content);
-          if (!details?.wait && legacy?.status)
-            context.state.legacyStatus = legacy.status
-              .replace(/^Wait /, "")
-              .replace(/\.$/, "")
-              .toLowerCase();
-        }
         if (options.isPartial && name !== "wait_agent") return new Container();
         let previousStatus = details?.previousStatus;
         if (name === "interrupt_agent" && !previousStatus) {

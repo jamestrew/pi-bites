@@ -8,7 +8,6 @@ import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
-import { registerNotificationRenderer } from "./notifications.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import {
   createSubagentMessenger,
@@ -37,7 +36,6 @@ export function createSubagents(
   getSettings: (cwd: string) => SubagentsSettings = (cwd) => loadConfig(cwd).subagents ?? {},
 ) {
   // ---- Register custom notification renderers ----
-  registerNotificationRenderer(pi);
   registerSubagentMessageRenderer(pi);
   const parentMessenger = createSubagentMessenger(pi);
   const deliveries = new Map<

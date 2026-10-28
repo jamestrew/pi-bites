@@ -146,23 +146,6 @@ export type WaitAgentStatus =
   | { completed: string | null }
   | { errored: string };
 
-/** Details attached to custom notification messages for visual rendering. */
-export interface NotificationDetails {
-  id: string;
-  description: string;
-  status: string;
-  toolUses: number;
-  turnCount: number;
-  totalTokens: number;
-  durationMs: number;
-  error?: string;
-  result?: string;
-  /** Legacy details restored from sessions created before expandable notifications. */
-  resultPreview?: string;
-  /** Additional agents in a group notification. */
-  others?: NotificationDetails[];
-}
-
 export interface EnvInfo {
   isGitRepo: boolean;
   branch: string;
