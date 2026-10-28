@@ -18,7 +18,6 @@ import { createSpawnExecution } from "./agent-tool-execute.js";
 import type { AgentManager } from "./agent-manager.js";
 import { extractText } from "./message-text.js";
 import { getAgentStatus } from "./agent-status.js";
-import { CODEX_V2_CONTRACT } from "./codex-v2-contract.js";
 import { defineSubagentTool } from "./operation-context.js";
 import { SubagentOperationError, textResult } from "./tool-result.js";
 import type { SubagentMessageDetails } from "./subagent-messages.js";
@@ -72,7 +71,8 @@ export function createV2Tools(
   const spawn_agent = defineSubagentTool({
     name: "spawn_agent",
     label: "spawn_agent",
-    description: CODEX_V2_CONTRACT.tools.spawn_agent.description,
+    description:
+      '\n        No picker-visible model overrides are currently loaded.\n        Spawns an agent to work on the specified task. If your current task is `/root/task1` and you spawn_agent with task_name "task_3" the agent will have canonical task name `/root/task1/task_3`.\nYou are then able to refer to this agent as `task_3` or `/root/task1/task_3` interchangeably. However an agent `/root/task2/task_3` would only be able to communicate with this agent via its canonical name `/root/task1/task_3`.\nThe spawned agent will have the same tools as you and the ability to spawn its own subagents.\nSpawned agents inherit your current model by default. Omit `model` to use that preferred default; set `model` only when an explicit override is needed.\nIt will be able to send you and other running agents messages, and its final answer will be provided to you when it finishes.\nThe new agent\'s canonical task name will be provided to it along with the message.\n\nNote that passing `fork_turns="none"` will not pass any surrounding context to the spawned subagent, which may cause the agent to lack the context it needs to complete its task, whereas `fork_turns="all"` will provide the subagent with all surrounding context.',
     promptGuidelines: [
       "Do not spawn sub-agents unless the user or applicable AGENTS.md/skill instructions explicitly ask for sub-agents, delegation, or parallel agent work. Requests for depth, thoroughness, research, investigation, or detailed codebase analysis do not count as permission to spawn. Role guidance never authorizes spawning. When authorized, delegate bounded independent work with a concrete benefit; keep the immediate critical-path task local. Give agents bounded, self-contained assignments and avoid duplicating delegated work. Verify delegated changes before reporting completion.",
       "Subagent tools are direct, including with Code Mode active. send_message queues information without starting idle work; followup_task assigns work. wait_agent observes your mailbox, does not consume messages or cancel children, and is distinct from Code Mode wait. Completed tasks release execution capacity; retained task paths remain addressable for later messages or follow-up.",
@@ -84,7 +84,42 @@ export function createV2Tools(
       agent_type?: string;
       model?: string;
       reasoning_effort?: string;
-    }>(CODEX_V2_CONTRACT.tools.spawn_agent.parameters),
+    }>({
+      type: "object",
+      properties: {
+        agent_type: {
+          type: "string",
+          description:
+            'Agent type override for the new agent. Omit unless explicitly asked. The selected role applies regardless of how much parent history is inherited.\nAvailable roles:\ndefault: {\nDefault agent.\n}\nexplorer: {\nUse `explorer` for specific codebase questions.\nExplorers are fast and authoritative.\nThey must be used to ask specific, well-scoped questions on the codebase.\nRules:\n- In order to avoid redundant work, you should avoid exploring the same problem that explorers have already covered. Typically, you should trust the explorer results without additional verification. You are still allowed to inspect the code yourself to gain the needed context!\n- You are encouraged to spawn up multiple explorers in parallel when you have multiple distinct questions to ask about the codebase that can be answered independently. This allows you to get more information faster without waiting for one question to finish before asking the next. While waiting for the explorer results, you can continue working on other local tasks that do not depend on those results. This parallelism is a key advantage of delegation, so use it whenever you have multiple questions to ask.\n- Reuse existing explorers for related questions.\n}\nworker: {\nUse for execution and production work.\nTypical tasks:\n- Implement part of a feature\n- Fix tests or bugs\n- Split large refactors into independent chunks\nRules:\n- Explicitly assign **ownership** of the task (files / responsibility). When the subtask involves code changes, you should clearly specify which files or modules the worker is responsible for. This helps avoid merge conflicts and ensures accountability. For example, you can say "Worker 1 is responsible for updating the authentication module, while Worker 2 will handle the database layer." By defining clear ownership, you can delegate more effectively and reduce coordination overhead.\n- Always tell workers they are **not alone in the codebase**, and they should not revert the edits made by others, and they should adjust their implementation to accommodate the changes made by others. This is important because there may be multiple workers making changes in parallel, and they need to be aware of each other\'s work to avoid conflicts and ensure a cohesive final product.\n}',
+        },
+        fork_turns: {
+          type: "string",
+          description:
+            "Optional number of turns to fork. Defaults to `all`. Use `none`, `all`, or a positive integer string such as `3` to fork only the most recent turns.",
+        },
+        message: {
+          type: "string",
+          description: "Initial plain-text task for the new agent.",
+        },
+        model: {
+          type: "string",
+          description:
+            "Model override for the new agent. Omit unless an explicit override is needed.",
+        },
+        reasoning_effort: {
+          type: "string",
+          description:
+            "Reasoning effort override for the new agent. Omit to inherit the parent effort.",
+        },
+        task_name: {
+          type: "string",
+          description:
+            "Task name for the new agent. Use lowercase letters, digits, and underscores.",
+        },
+      },
+      additionalProperties: false,
+      required: ["task_name", "message"],
+    }),
     captureHistory: (args) => forkMode(args) !== "none",
     ...taskReceiptRenderers("spawn_agent", deps.getModelDefaults),
     async execute(callId, args, signal, onUpdate, ctx) {
@@ -132,10 +167,19 @@ export function createV2Tools(
   const list_agents = defineSubagentTool({
     name: "list_agents",
     label: "list_agents",
-    description: CODEX_V2_CONTRACT.tools.list_agents.description,
-    parameters: Type.Unsafe<{ path_prefix?: string }>(
-      CODEX_V2_CONTRACT.tools.list_agents.parameters,
-    ),
+    description:
+      "List live agents in the current root thread tree. Optionally filter by task-path prefix.",
+    parameters: Type.Unsafe<{ path_prefix?: string }>({
+      type: "object",
+      properties: {
+        path_prefix: {
+          type: "string",
+          description:
+            "Task-path prefix filter without a trailing slash. Omit to list all live agents.",
+        },
+      },
+      additionalProperties: false,
+    }),
     ...observationReceiptRenderers("list_agents"),
     async execute(_id, args, _signal, _update, ctx) {
       const sessionId = ctx.sessionManager.getSessionId();
@@ -178,13 +222,54 @@ export function createV2Tools(
       };
     },
   });
+  const messagingDefinitions = {
+    send_message: {
+      description:
+        "Send a message to an existing agent. The message will be delivered promptly. Does not trigger a new turn.",
+      parameters: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "Message text to queue on the target agent.",
+          },
+          target: {
+            type: "string",
+            description: "Relative or canonical task name to message (from spawn_agent).",
+          },
+        },
+        additionalProperties: false,
+        required: ["target", "message"],
+      },
+    },
+    followup_task: {
+      description:
+        "Send a follow-up task to an existing non-root target agent and trigger a turn if it is idle. If the target is already running, deliver the task promptly at message boundaries while sampling, or after the pending tool call completes.",
+      parameters: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "Message text to send to the target agent.",
+          },
+          target: {
+            type: "string",
+            description:
+              "Agent id or canonical task name to send a follow-up task to (from spawn_agent).",
+          },
+        },
+        additionalProperties: false,
+        required: ["target", "message"],
+      },
+    },
+  };
   const messaging = (name: "send_message" | "followup_task") =>
     defineSubagentTool({
       name,
       label: name,
-      description: CODEX_V2_CONTRACT.tools[name].description,
+      description: messagingDefinitions[name].description,
       parameters: Type.Unsafe<{ target: string; message: string }>(
-        CODEX_V2_CONTRACT.tools[name].parameters,
+        messagingDefinitions[name].parameters,
       ),
       ...taskReceiptRenderers(name),
       async execute(_id, args, signal, _update, ctx) {
@@ -227,8 +312,19 @@ export function createV2Tools(
   const interrupt_agent = defineSubagentTool({
     name: "interrupt_agent",
     label: "interrupt_agent",
-    description: CODEX_V2_CONTRACT.tools.interrupt_agent.description,
-    parameters: Type.Unsafe<{ target: string }>(CODEX_V2_CONTRACT.tools.interrupt_agent.parameters),
+    description:
+      "Interrupt an agent's current turn, if any, and return its previous status. The agent remains available for messages and follow-up tasks.",
+    parameters: Type.Unsafe<{ target: string }>({
+      type: "object",
+      properties: {
+        target: {
+          type: "string",
+          description: "Agent id or canonical task name to interrupt (from spawn_agent).",
+        },
+      },
+      additionalProperties: false,
+      required: ["target"],
+    }),
     ...observationReceiptRenderers("interrupt_agent"),
     async execute(_id, args, signal, _update, ctx) {
       signal?.throwIfAborted();
@@ -253,8 +349,18 @@ export function createV2Tools(
   const wait_agent = defineSubagentTool({
     name: "wait_agent",
     label: "wait_agent",
-    description: CODEX_V2_CONTRACT.tools.wait_agent.description,
-    parameters: Type.Unsafe<{ timeout_ms?: number }>(CODEX_V2_CONTRACT.tools.wait_agent.parameters),
+    description:
+      "Wait for a mailbox update from any live agent, including queued messages and final-status notifications. The wait also ends early when new user input is steered into the active turn. Does not return the content; returns either a mailbox-activity summary without agent names, an interruption summary for steered input, or a timeout summary if no activity arrives before the deadline.",
+    parameters: Type.Unsafe<{ timeout_ms?: number }>({
+      type: "object",
+      properties: {
+        timeout_ms: {
+          type: "integer",
+          description: "Timeout in milliseconds. Defaults to 30000, min 10000, max 3600000.",
+        },
+      },
+      additionalProperties: false,
+    }),
     ...observationReceiptRenderers("wait_agent"),
     async execute(_id, args, signal, onUpdate, ctx) {
       const requested = args.timeout_ms ?? 30_000;
