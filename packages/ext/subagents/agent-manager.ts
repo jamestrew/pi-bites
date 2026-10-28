@@ -12,11 +12,6 @@ import { AgentInterrupter } from "./agent-interruption.js";
 import { resumeAgent, runAgent, steerAgent, type ToolActivity } from "./agent-runner.js";
 import { AgentRuntimes } from "./agent-runtimes.js";
 import { resolveAgent } from "./agent-types.js";
-import {
-  appendSubagentDiagnostic,
-  agentDiagnostic,
-  serializeDiagnosticError,
-} from "./diagnostics.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import { assertValidSpawnCwd } from "./spawn-cwd.js";
 import { formatToolCall, summarizeToolArg } from "./ui/tool-call-format.js";
@@ -56,7 +51,6 @@ interface TurnHooks {
   onTextDelta: (delta: string, fullText: string) => void;
   onAssistantUsage: (usage: AssistantUsage) => void;
   onCompaction: (info: CompactionInfo) => void;
-  onDiagnostic: (event: string, details?: Record<string, unknown>) => void;
   onAssistantFailure: (failure: AgentRecord["failureHistory"][number]) => void;
 }
 
@@ -116,15 +110,12 @@ export class AgentManager {
     this.maxConcurrent = maxConcurrent;
     this.interruptions = new AgentInterrupter({
       isSettled: (record, generation) => (this.settledGeneration.get(record) ?? 0) >= generation,
-      onRequest: (record, source, generation) =>
-        this.recordDiagnostic(record, "abort_requested", { source, generation }),
       onFailure: (record, error) => {
         this.recordFailure(record, {
           timestamp: Date.now(),
           phase: "manager",
           message: error instanceof Error ? error.message : String(error),
           ...(error instanceof Error ? { name: error.name } : {}),
-          error_details: serializeDiagnosticError(error),
           manager_signal_aborted: record.abortController?.signal.aborted ?? false,
         });
       },
@@ -223,17 +214,8 @@ export class AgentManager {
     if (this.executing.delete(record)) this.drainQueue();
   }
 
-  private recordDiagnostic(
-    record: AgentRecord,
-    event: string,
-    details?: Record<string, unknown>,
-  ): void {
-    appendSubagentDiagnostic(agentDiagnostic(record, event, details)).catch(() => undefined);
-  }
-
   private recordFailure(record: AgentRecord, failure: AgentRecord["failureHistory"][number]): void {
     record.failureHistory.push(failure);
-    this.recordDiagnostic(record, "failure_observed", { ...failure });
   }
 
   setMaxConcurrent(n = DEFAULT_MAX_CONCURRENT) {
@@ -305,11 +287,6 @@ export class AgentManager {
     this.agents.set(id, record);
     this.options.set(record, options);
     this.turnCounts.set(record, 0);
-    this.recordDiagnostic(record, "created", {
-      manager_running_count: this.runningCount,
-      manager_queue_length: this.queue.length,
-      manager_max_concurrent: this.maxConcurrent,
-    });
 
     const args: SpawnArgs = { pi, parent, parentEntries, type, prompt, options };
 
@@ -328,11 +305,7 @@ export class AgentManager {
           phase: "manager",
           message: err instanceof Error ? err.message : String(err),
           ...(err instanceof Error ? { name: err.name } : {}),
-          error_details: serializeDiagnosticError(err),
           manager_signal_aborted: abortController.signal.aborted,
-        });
-        this.recordDiagnostic(record, "start_rejected", {
-          error: serializeDiagnosticError(err),
         });
         this.stopObservingExecution(record);
         this.agents.delete(id);
@@ -392,9 +365,6 @@ export class AgentManager {
         this.onCompact?.(record, info);
         options.onCompaction?.(info);
       },
-      onDiagnostic: (event, details) => {
-        if (current()) this.recordDiagnostic(record, event, details);
-      },
       onAssistantFailure: (failure) => {
         if (current()) this.recordFailure(record, failure);
       },
@@ -443,7 +413,6 @@ export class AgentManager {
       phase: "manager",
       message,
       ...(error instanceof Error ? { name: error.name } : {}),
-      error_details: serializeDiagnosticError(error),
       manager_signal_aborted: abortController.signal.aborted,
     });
     record.completedAt ??= Date.now();
@@ -453,16 +422,6 @@ export class AgentManager {
   private settleGeneration(record: AgentRecord, generation: number): void {
     this.settledGeneration.set(record, generation);
     this.runtimes.touch(record.id);
-    this.recordDiagnostic(record, "completed", {
-      status: record.status,
-      error: record.error,
-      duration_ms: (record.completedAt ?? Date.now()) - record.startedAt,
-      tool_uses: record.toolUses,
-      lifetime_usage: { ...record.lifetimeUsage },
-      compaction_count: record.compactionCount,
-      failure_count: record.failureHistory.length,
-      abort: record.abort,
-    });
     this.notifyComplete(record, generation);
     this.drainQueue();
   }
@@ -521,16 +480,7 @@ export class AgentManager {
     const customCwd = options.cwd ?? undefined; // null (RPC "unset") → undefined
 
     record.status = "running";
-    const queuedAt = record.startedAt;
     record.startedAt = Date.now();
-    this.recordDiagnostic(record, "started", {
-      cwd: customCwd ?? parent.cwd,
-      isolated: options.isolated === true,
-      queue_duration_ms: record.startedAt - queuedAt,
-      manager_running_count: this.runningCount,
-      manager_queue_length: this.queue.length,
-      manager_max_concurrent: this.maxConcurrent,
-    });
 
     const abortController = record.abortController;
     if (!abortController) throw new Error(`Agent ${id} has no abort controller`);
@@ -604,14 +554,7 @@ export class AgentManager {
           phase: "manager",
           message: record.error,
           ...(err instanceof Error ? { name: err.name } : {}),
-          error_details: serializeDiagnosticError(err),
           manager_signal_aborted: record.abortController?.signal.aborted ?? false,
-        });
-        this.recordDiagnostic(record, "completed", {
-          status: record.status,
-          error: record.error,
-          duration_ms: record.completedAt - record.startedAt,
-          failure_count: record.failureHistory.length,
         });
         this.notifyComplete(record);
         this.stopObservingExecution(record);
@@ -729,17 +672,8 @@ export class AgentManager {
   ): void {
     if (record.generation !== generation || record.status !== "queued") return;
     record.status = "running";
-    const queuedAt = record.startedAt;
     record.startedAt = Date.now();
     try {
-      this.recordDiagnostic(record, "started", {
-        resumed: true,
-        generation,
-        queue_duration_ms: record.startedAt - queuedAt,
-        manager_running_count: this.runningCount,
-        manager_queue_length: this.queue.length,
-        manager_max_concurrent: this.maxConcurrent,
-      });
       const hooks = this.createTurnHooks(record, options, generation, "increment");
       if (!record.taskName) this.clearSessionQueue(session);
       if (record.pendingSteers?.length) {
@@ -848,12 +782,6 @@ export class AgentManager {
       record.completedAt = Date.now();
       this.settledGeneration.set(record, record.generation);
       record.abort = { timestamp: Date.now(), source: "stop", reason: "stop" };
-      this.recordDiagnostic(record, "abort_requested", { source: "stop", queued: true });
-      this.recordDiagnostic(record, "completed", {
-        status: record.status,
-        duration_ms: record.completedAt - record.startedAt,
-        abort: record.abort,
-      });
       this.notifyComplete(record);
       return true;
     }
@@ -864,7 +792,6 @@ export class AgentManager {
     record.completedAt = Date.now();
     record.abort = { timestamp: Date.now(), source: "stop", reason: "stop" };
     try {
-      this.recordDiagnostic(record, "abort_requested", { source: "stop" });
       this.clearSessionQueue(record.session);
     } finally {
       record.abortController?.abort(record.abort.reason);
@@ -889,12 +816,6 @@ export class AgentManager {
         record.completedAt = Date.now();
         this.settledGeneration.set(record, record.generation);
         record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
-        this.recordDiagnostic(record, "abort_requested", { source: "shutdown", queued: true });
-        this.recordDiagnostic(record, "completed", {
-          status: record.status,
-          duration_ms: record.completedAt - record.startedAt,
-          abort: record.abort,
-        });
         count++;
       }
     }
@@ -904,7 +825,6 @@ export class AgentManager {
       if (record.status === "running") {
         record.pendingSteers = undefined;
         record.abort = { timestamp: Date.now(), source: "shutdown", reason: "shutdown" };
-        this.recordDiagnostic(record, "abort_requested", { source: "shutdown" });
         this.clearSessionQueue(record.session);
         record.abortController?.abort(record.abort.reason);
         record.status = "stopped";

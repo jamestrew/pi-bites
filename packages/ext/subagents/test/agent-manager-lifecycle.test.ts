@@ -13,13 +13,7 @@ vi.mock("node:fs/promises", async (importOriginal) => ({
   appendFile: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("../diagnostics.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../diagnostics.js")>()),
-  appendSubagentDiagnostic: vi.fn(() => Promise.resolve()),
-}));
-
 import { resumeAgent, runAgent } from "../agent-runner.js";
-import { appendSubagentDiagnostic } from "../diagnostics.js";
 import {
   mockCtx,
   mockPendingRun,
@@ -181,11 +175,6 @@ describe("AgentManager — detached lifecycle", () => {
       onTextDelta,
     });
     await manager.getRecord(id)!.promise;
-    const firstCompletion = vi
-      .mocked(appendSubagentDiagnostic)
-      .mock.calls.map(([entry]) => entry)
-      .reverse()
-      .find((entry) => entry.event === "completed" && entry.details?.generation === 1);
     goStale();
 
     expect(manager.startTurn(id, "second")).toBe(true);
@@ -207,11 +196,6 @@ describe("AgentManager — detached lifecycle", () => {
     expect(completedGenerations).toEqual([1, 2]);
     expect(onTurnEnd).toHaveBeenCalledWith(2);
     expect(onTextDelta).toHaveBeenCalledWith("second", "second");
-    expect(firstCompletion?.details?.lifetime_usage).toEqual({
-      input: 10,
-      output: 2,
-      cacheWrite: 1,
-    });
     expect((manager as any).runningCount).toBe(0);
   });
 
@@ -427,38 +411,6 @@ describe("AgentManager — detached lifecycle", () => {
     expect(manager.getRecord(retained)).toMatchObject({
       status: "error",
       error: "session setup failed",
-    });
-    mockPendingRun();
-    const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
-      description: "follower",
-    });
-    expect(manager.getRecord(follower)?.status).toBe("running");
-    await manager.close(retained);
-    expect(manager.getClosedRecord(retained)).toEqual({ id: retained, recoverable: false });
-  });
-
-  it("does not consume execution when retained-turn diagnostics fails", async () => {
-    manager = new AgentManager(undefined, 1);
-    const retainedSession = mockSession();
-    vi.mocked(runAgent).mockResolvedValueOnce({
-      responseText: "first result",
-      session: retainedSession,
-    });
-    const retained = manager.spawn(mockPi, mockCtx, "worker", "first", { description: "retained" });
-    await manager.getRecord(retained)!.promise;
-    const recordDiagnostic = (manager as any).recordDiagnostic.bind(manager);
-    (manager as any).recordDiagnostic = (
-      record: any,
-      event: string,
-      details?: Record<string, unknown>,
-    ) => {
-      if (event === "started" && details?.resumed) throw new Error("diagnostic failed");
-      return recordDiagnostic(record, event, details);
-    };
-    expect(manager.startTurn(retained, "second")).toBe(true);
-    expect(manager.getRecord(retained)).toMatchObject({
-      status: "error",
-      error: "diagnostic failed",
     });
     mockPendingRun();
     const follower = manager.spawn(mockPi, mockCtx, "worker", "follow", {
