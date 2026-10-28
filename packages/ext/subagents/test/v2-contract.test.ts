@@ -11,8 +11,12 @@ it("preserves the inline model-facing collaboration contract", () => {
   const { direct } = harness(cleanup);
   expect({
     tools: [...direct.values()].map(({ name, description, parameters }) => ({
-      name, description, parameters,
+      name,
+      description,
+      parameters,
     })),
-    roles: Object.fromEntries(Object.entries(DEFAULT_AGENTS).map(([name, role]) => [name, role.description])),
+    roles: Object.fromEntries(
+      Object.entries(DEFAULT_AGENTS).map(([name, role]) => [name, role.description]),
+    ),
   }).toMatchSnapshot();
 });
