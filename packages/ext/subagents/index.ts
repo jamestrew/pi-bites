@@ -8,7 +8,6 @@ import { randomUUID } from "node:crypto";
 import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAgentCompletionHandler } from "./agent-completion.js";
 import { AgentManager } from "./agent-manager.js";
-import { registerRpcHandlers } from "./cross-extension-rpc.js";
 import { registerNotificationRenderer } from "./notifications.js";
 import { registerSubagentMessageRenderer } from "./subagent-message-renderer.js";
 import {
@@ -375,26 +374,6 @@ export function createSubagents(
     });
   });
 
-  const {
-    unsubPing: unsubPingRpc,
-    unsubSpawn: unsubSpawnRpc,
-    unsubStop: unsubStopRpc,
-    unsubClose: unsubCloseRpc,
-  } = registerRpcHandlers({
-    events: pi.events,
-    pi,
-    getCtx: () => currentCtx,
-    getErrorModels: () => operations.getAllowedModels(),
-    manager: {
-      spawn: (_pi, _ctx, type, prompt, options) => {
-        if (!currentCtx) throw new Error("No active session");
-        return spawnInternal(pi, currentCtx, type, prompt, options);
-      },
-      abort: (id) => manager.abort(id),
-      close: (id) => manager.close(id),
-    },
-  });
-
   // Broadcast readiness so extensions loaded after us can discover us
   pi.events.emit("subagents:ready", {});
 
@@ -408,10 +387,6 @@ export function createSubagents(
     parentAllowances.clear();
     currentCtx = undefined;
     currentSessionToken = undefined;
-    unsubSpawnRpc();
-    unsubStopRpc();
-    unsubCloseRpc();
-    unsubPingRpc();
     unsubBashGateApproval();
     Reflect.deleteProperty(globalThis, MANAGER_KEY);
     manager.abortAll();
