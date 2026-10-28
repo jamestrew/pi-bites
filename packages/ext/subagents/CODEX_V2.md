@@ -5,7 +5,7 @@
 The subagent declaration baseline is OpenAI Codex
 `1a89aec960cd92e2c59ce49b7f3c3347a915e4a9`. This does **not** upgrade the Code Mode
 host, vendor source, or V1 historical baseline. No executor is imported or registered
-by `codex-v2-contract.ts`.
+as inline declarations in `v2-tools.ts`, `default-agents.ts`, and `ui/observation-receipt.ts`.
 
 ```sh
 python3 scripts/generate-subagents-v2-contract.py /path/to/codex
@@ -33,7 +33,7 @@ usage hint/description, and an empty picker-visible model catalog. These are exp
 factory inputs, not a claim that Pi has no runtime model registry. Hidden spawn
 metadata controls the result (`task_name` only); it does not remove V2 role inputs.
 
-`CODEX_V2_CONTRACT.tools` is keyed by the six names below. Each entry has `name`,
+The provenance JSON records the six names below. Each entry has `name`,
 `description`, `parameters` (plain JSON Schema, suitable for a TypeBox `TSchema`
 cast at registration), and `output_schema` (null for upstream text-only results).
 No nested declarations, discovery metadata, namespaces, or executors are generated.

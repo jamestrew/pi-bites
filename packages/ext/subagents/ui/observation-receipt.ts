@@ -1,6 +1,5 @@
 import { Type } from "typebox";
 import { Check } from "typebox/value";
-import { CODEX_V2_CONTRACT } from "../codex-v2-contract.js";
 import { Container } from "@earendil-works/pi-tui";
 import { keyHint } from "@earendil-works/pi-coding-agent";
 import { extractText } from "../message-text.js";
@@ -116,10 +115,102 @@ function waitLines(
 
 const listResultSchema = Type.Unsafe<{
   agents: Array<{ agent_name: string; agent_status: WaitAgentStatus }>;
-}>(CODEX_V2_CONTRACT.tools.list_agents.output_schema);
-const interruptResultSchema = Type.Unsafe<{ previous_status: WaitAgentStatus }>(
-  CODEX_V2_CONTRACT.tools.interrupt_agent.output_schema,
-);
+}>({
+  type: "object",
+  properties: {
+    agents: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          agent_name: {
+            type: "string",
+            description:
+              "Canonical task name for the agent when available, otherwise the agent id.",
+          },
+          agent_status: {
+            description: "Last known status of the agent.",
+            allOf: [
+              {
+                oneOf: [
+                  {
+                    type: "string",
+                    enum: ["pending_init", "running", "interrupted", "shutdown", "not_found"],
+                  },
+                  {
+                    type: "object",
+                    properties: {
+                      completed: {
+                        type: ["string", "null"],
+                      },
+                    },
+                    required: ["completed"],
+                    additionalProperties: false,
+                  },
+                  {
+                    type: "object",
+                    properties: {
+                      errored: {
+                        type: "string",
+                      },
+                    },
+                    required: ["errored"],
+                    additionalProperties: false,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        required: ["agent_name", "agent_status"],
+        additionalProperties: false,
+      },
+      description: "Live agents visible in the current root thread tree.",
+    },
+  },
+  required: ["agents"],
+  additionalProperties: false,
+});
+const interruptResultSchema = Type.Unsafe<{ previous_status: WaitAgentStatus }>({
+  type: "object",
+  properties: {
+    previous_status: {
+      description: "The agent status observed before the interrupt request was handled.",
+      allOf: [
+        {
+          oneOf: [
+            {
+              type: "string",
+              enum: ["pending_init", "running", "interrupted", "shutdown", "not_found"],
+            },
+            {
+              type: "object",
+              properties: {
+                completed: {
+                  type: ["string", "null"],
+                },
+              },
+              required: ["completed"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                errored: {
+                  type: "string",
+                },
+              },
+              required: ["errored"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  required: ["previous_status"],
+  additionalProperties: false,
+});
 
 type Receipt = {
   target?: string;
