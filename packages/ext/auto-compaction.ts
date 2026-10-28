@@ -21,7 +21,7 @@ export default function registerAutoCompaction(
     event: BoundaryState,
     ctx: ExtensionContext,
   ): Promise<BoundaryResult | undefined> => {
-    const { model, modelRegistry, signal, thinkingLevel } = ctx;
+    const { model, modelRegistry, signal, thinkingLevel, sessionManager } = ctx;
     if (!model || signal?.aborted || event.outcome !== "completed") return;
     // Another handler already supplied a checkpoint for this boundary.
     if (event.entries.some((entry) => entry.type === "compaction")) return;
@@ -54,9 +54,11 @@ export default function registerAutoCompaction(
     );
     const cut = findCutPoint(entries, 0, entries.length, settings.keepRecentTokens);
     const firstKeptEntryId = entries[cut.firstKeptEntryIndex]?.id;
+    // Proposed entries get new IDs at commit; wait for a stable retention anchor.
     if (
       !firstKeptEntryId ||
       cut.firstKeptEntryIndex === 0 ||
+      !sessionManager.getEntry(firstKeptEntryId) ||
       (previous?.type === "compaction" && previous.firstKeptEntryId === firstKeptEntryId)
     )
       return;
