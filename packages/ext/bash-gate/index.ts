@@ -150,7 +150,11 @@ export default function registerBashGate(
       autoMode?.setMode(mode, ctx);
       syncYoloStatus(ctx);
       ctx.ui.notify(
-        `${mode === "yolo" ? "YOLO" : mode === "auto" ? "Auto" : "Strict"} mode enabled.`,
+        {
+          yolo: "YOLO: shell commands run without approval.",
+          auto: "Auto: AI reviews gated commands; you can override denials.",
+          strict: "Strict: AI reviews gated commands; denials stay blocked.",
+        }[mode],
         "info",
       );
     },
