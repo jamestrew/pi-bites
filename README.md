@@ -23,9 +23,6 @@ A small collection of personal extensions for the pi coding agent.
   raw sessions, exports, and editable history retain them.
 - **`/usage` and `/context`** — session cost/token statistics and a breakdown of
   the active context window.
-- **Local prompt-cache diagnostics** — provider-agnostic, default-on rolling fingerprints;
-  `/cache-debug on|off|status` controls local anomaly capture outside model context.
-  See [capture limits and inspection](docs/cache-debug.md).
 - **FFF-powered `@` file search** — fuzzy workspace file ranking, with Pi's
   normal completion as a fallback.
 - **Session tracker** — track Pi panes across tmux sessions, with a status-line
