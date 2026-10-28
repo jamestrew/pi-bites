@@ -2,7 +2,6 @@ import type { BitesConfig } from "./config.js";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 const registerModules = [
-  "./cache-debug/index.js",
   "./bash-gate/index.js",
   "./statusline.js",
   "./footer/index.js",
@@ -140,7 +139,6 @@ describe("extension entrypoint", () => {
   test("default registers in normal interactive sessions", async () => {
     const loaded = await loadExtension();
     try {
-      expect(loaded.registerSpies.get("./cache-debug/index.js")).toHaveBeenCalledWith(loaded.pi);
       expect(loaded.registerSpies.get("./footer/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./session-tracker/index.js")).toHaveBeenCalledWith(
@@ -215,7 +213,6 @@ describe("extension entrypoint", () => {
   test("subagents load shared tools and behavior without recursive features", async () => {
     const loaded = await loadExtension({ subagent: "general" });
     try {
-      expect(loaded.registerSpies.get("./cache-debug/index.js")).toHaveBeenCalledWith(loaded.pi);
       expect(loaded.registerSpies.get("./bash-gate/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./auto-compaction.js")).not.toHaveBeenCalled();
