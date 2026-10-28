@@ -38,7 +38,7 @@ async function loadExtension(
   const registerSpies = new Map<RegisterModule, ReturnType<typeof vi.fn>>();
   const previewPonytailPrompt = vi.fn((prompt: string) => `ponytail:${prompt}`);
   const previewCodexPrompt = vi.fn((prompt: string) => `codex:${prompt}`);
-  const autoMode = { isEnabled: vi.fn(() => false), review: vi.fn() };
+  const autoMode = { isEnabled: vi.fn(() => false), getMode: () => "auto", review: vi.fn() };
   const bashGate = {
     manageExecCommand: vi.fn(),
     isYolo: vi.fn(() => false),
@@ -152,7 +152,6 @@ describe("extension entrypoint", () => {
         loaded.bashGate,
         expect.any(Function),
         expect.any(Function),
-        expect.any(Function),
       );
       expect(loaded.registerSpies.get("./ponytail/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./codex-adapter/index.js")).toHaveBeenCalledWith(
@@ -179,21 +178,17 @@ describe("extension entrypoint", () => {
     }
   });
 
-  test("refreshes shared subagent config and surfaces migration warnings on session start/reload", async () => {
+  test("refreshes shared subagent config on session start/reload without stale context access", async () => {
     const loaded = await loadExtension();
     const notify = vi.fn();
-    const stderr = vi.spyOn(console, "warn").mockImplementation(() => {});
     const configs: BitesConfig[] = [{ subagents: { maxConcurrent: 1, fleetView: false } }, {}];
-    loaded.loadConfig.mockImplementation((_cwd, warn) => {
-      warn?.("Legacy settings: manual migration required");
-      return configs.shift()!;
-    });
-    const getSettings = loaded.registerSpies.get("./subagents/index.js")!.mock.calls[0]![5];
+    loaded.loadConfig.mockImplementation(() => configs.shift()!);
+    const getSettings = loaded.registerSpies.get("./subagents/index.js")!.mock.calls[0]![4];
     const ctx = { cwd: "/project", hasUI: true, ui: { notify } };
     try {
       for (const handler of loaded.handlers.get("session_start") ?? []) await handler({}, ctx);
       expect(getSettings()).toEqual({ maxConcurrent: 1, fleetView: false });
-      expect(notify).toHaveBeenCalledWith("Legacy settings: manual migration required", "warning");
+      expect(notify).not.toHaveBeenCalled();
       for (const key of Object.keys(ctx))
         Object.defineProperty(ctx, key, {
           get() {
@@ -204,7 +199,6 @@ describe("extension entrypoint", () => {
       for (const handler of loaded.handlers.get("session_start") ?? [])
         await handler({ reason: "reload" }, { cwd: "/project", hasUI: false });
       expect(getSettings()).toEqual({});
-      expect(stderr).toHaveBeenCalledWith("Legacy settings: manual migration required");
     } finally {
       loaded.restoreArgv();
     }
@@ -215,7 +209,7 @@ describe("extension entrypoint", () => {
     try {
       expect(loaded.registerSpies.get("./bash-gate/index.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./tools.js")).toHaveBeenCalledTimes(1);
-      expect(loaded.registerSpies.get("./auto-compaction.js")).not.toHaveBeenCalled();
+      expect(loaded.registerSpies.get("./auto-compaction.js")).toHaveBeenCalledTimes(1);
       expect(loaded.registerSpies.get("./subagents/index.js")).not.toHaveBeenCalled();
     } finally {
       loaded.restoreArgv();

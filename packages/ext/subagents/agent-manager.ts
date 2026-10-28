@@ -103,7 +103,6 @@ export class AgentManager {
     maxConcurrent = DEFAULT_MAX_CONCURRENT,
     private onStart?: OnAgentStart,
     private onCompact?: OnAgentCompact,
-    private getAutoCompactionThreshold?: () => number | undefined,
     private onAgentInvalidated?: (record: AgentRecord) => void,
     private registerCollaboration?: (record: AgentRecord) => RegisterCollaboration,
   ) {
@@ -154,7 +153,6 @@ export class AgentManager {
         }
       },
       registerCollaboration,
-      autoCompactionThreshold: getAutoCompactionThreshold,
     });
   }
 
@@ -496,7 +494,6 @@ export class AgentManager {
       thinkingLevel: options.thinkingLevel,
       parentEntries,
       allowedTools: options.allowedTools,
-      autoCompactionThreshold: this.getAutoCompactionThreshold?.(),
       cwd: customCwd,
       configCwd: customCwd !== undefined ? parent.cwd : undefined,
       signal: abortController.signal,

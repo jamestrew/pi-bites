@@ -15,7 +15,6 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { installTurnBoundaryAutoCompaction } from "../auto-compaction.js";
 import * as agentSession from "./agent-session-shutdown.js";
 import { resolveAgent } from "./agent-types.js";
 import type { RegisterCollaboration } from "./subagent-context.js";
@@ -102,8 +101,6 @@ export interface RunOptions {
   allowedTools?: string[];
   /** Selected parent conversation entries imported into an independent child. */
   parentEntries?: ReturnType<ExtensionContext["sessionManager"]["buildContextEntries"]>;
-  /** Pi-bites threshold policy captured by the owning parent extension. */
-  autoCompactionThreshold?: number;
   /** Override working directory. */
   cwd?: string;
   /**
@@ -356,9 +353,6 @@ export async function openAgentSession(
   try {
     if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
 
-    if (options.autoCompactionThreshold !== undefined)
-      installTurnBoundaryAutoCompaction(session, options.autoCompactionThreshold);
-
     sessionManager.appendCustomEntry(SUBAGENT_METADATA_ENTRY, {
       agentId: options.agentId,
       agentSessionId: options.agentSessionId,
@@ -420,6 +414,9 @@ export async function runAgent(
     dispatchToolActivity(event, options.onToolActivity);
     if (event.type === "message_end" && event.message.role === "assistant") {
       options.onAssistantUsage?.(getAssistantUsage(event.message));
+    }
+    if (event.type === "entry_appended" && event.entry.type === "compaction") {
+      options.onCompaction?.({ reason: "threshold", tokensBefore: event.entry.tokensBefore });
     }
     if (event.type === "compaction_end" && !event.aborted && event.result) {
       options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
@@ -490,6 +487,9 @@ export async function resumeAgent(
           dispatchToolActivity(event, options.onToolActivity);
           if (event.type === "message_end" && event.message.role === "assistant") {
             options.onAssistantUsage?.(getAssistantUsage(event.message));
+          }
+          if (event.type === "entry_appended" && event.entry.type === "compaction") {
+            options.onCompaction?.({ reason: "threshold", tokensBefore: event.entry.tokensBefore });
           }
           if (event.type === "compaction_end" && !event.aborted && event.result) {
             options.onCompaction?.({

@@ -35,14 +35,14 @@ describe("automode registration state", () => {
     expect(controller.isEnabled()).toBe(true);
     expect(ui.setStatus).toHaveBeenLastCalledWith("automode", "🤖 AUTO");
 
-    controller.setEnabled(false, ctx);
+    controller.setMode("yolo", ctx);
     expect(controller.isEnabled()).toBe(false);
     expect(ui.setStatus).toHaveBeenLastCalledWith("automode", undefined);
 
-    controller.setEnabled(true, ctx);
+    controller.setMode("auto", ctx);
     expect(controller.isEnabled()).toBe(true);
 
-    configRef.current = { bashGate: { mode: "manual" } };
+    configRef.current = { bashGate: { mode: "yolo" } };
     start({}, ctx);
     expect(controller.isEnabled()).toBe(false);
     expect(ui.setStatus).toHaveBeenLastCalledWith("automode", undefined);

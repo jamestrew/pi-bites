@@ -9,6 +9,8 @@ function approvalOptions() {
     pi,
     ui,
     hasUI: true,
+    mode: "auto" as const,
+    review: async () => ({ outcome: "deny" as const, rationale: "Needs approval" }),
     cwd: "/repo",
     command: "rm build.txt",
     toolName: "bash" as const,
@@ -56,19 +58,18 @@ describe("command approval workflow", () => {
       ]);
     },
   );
-  test("adapters can retain their failure wording without owning error decisions", async () => {
+  test("adapters retain reviewer failure wording", async () => {
     const options = approvalOptions();
-    options.ui.select.mockRejectedValue(new Error("UI unavailable"));
     await expect(
       requestCommandApproval({
         ...options,
+        review: async () => {
+          throw new Error("offline");
+        },
         failureMessage: (message, phase) => `${phase} failed closed: ${message}`,
       }),
-    ).resolves.toEqual({ outcome: "failure", message: "manual failed closed: UI unavailable" });
-    expect(options.pi.events.emit.mock.calls.map(([name]) => name)).toEqual([
-      "bites:bash_gate",
-      "bites:bash_gate_resolved",
-    ]);
+    ).resolves.toEqual({ outcome: "failure", message: "review failed closed: offline" });
+    expect(options.ui.select).not.toHaveBeenCalled();
   });
   test("ownership invalidation during review cannot approve a replaced child", async () => {
     const options = approvalOptions();
@@ -100,7 +101,7 @@ describe("command approval workflow", () => {
   });
   test.each([true, false])("review failure stays closed with hasUI=%s", async (hasUI) => {
     const options = approvalOptions();
-    options.ui.select.mockResolvedValue("Allow");
+    options.ui.select.mockResolvedValue("Allow once");
     await expect(
       requestCommandApproval({
         ...options,
@@ -185,7 +186,7 @@ describe("command approval workflow", () => {
     expect(options.pi.events.emit.mock.calls).toEqual([]);
   });
 
-  test("replacing ownership during a manual choice cannot save an allowance", async () => {
+  test("replacing ownership during a escalation choice cannot save an allowance", async () => {
     const options = approvalOptions();
     let current = true;
     options.ui.select.mockImplementationOnce(async () => {
@@ -208,25 +209,26 @@ describe("command approval workflow", () => {
   });
 
   test.each(["Deny", undefined, "unknown selection"])(
-    "manual choice %s fails closed",
+    "escalation choice %s fails closed",
     async (choice) => {
       const options = approvalOptions();
       options.ui.select.mockResolvedValue(choice);
       await expect(requestCommandApproval(options)).resolves.toEqual({
         outcome: "deny",
-        source: "manual",
+        source: "automode",
+        rationale: "Needs approval",
       });
       expect(options.isAllowed()).toBe(false);
     },
   );
 
-  test("without UI a manual request is denied", async () => {
+  test("a disabled reviewer fails closed without a fallback human prompt", async () => {
     const options = approvalOptions();
-    await expect(requestCommandApproval({ ...options, hasUI: false })).resolves.toEqual({
-      outcome: "deny",
-      source: "manual",
+    await expect(requestCommandApproval({ ...options, review: undefined })).resolves.toEqual({
+      outcome: "failure",
+      message: "Bash gate: automated reviewer is disabled or unavailable.",
     });
-    expect(options.pi.events.emit.mock.calls).toEqual([]);
+    expect(options.ui.select).not.toHaveBeenCalled();
   });
   test("an automated allow needs neither UI nor a human allowance", async () => {
     const options = approvalOptions();
@@ -242,7 +244,7 @@ describe("command approval workflow", () => {
   });
   test("a human can approve one command without granting a session allowance", async () => {
     const options = approvalOptions();
-    options.ui.select.mockResolvedValue("Allow");
+    options.ui.select.mockResolvedValue("Allow once");
 
     await expect(requestCommandApproval(options)).resolves.toEqual({
       outcome: "allow",
@@ -250,8 +252,8 @@ describe("command approval workflow", () => {
     });
     expect(options.isAllowed()).toBe(false);
     expect(options.ui.select).toHaveBeenCalledWith(
-      options.prompt,
-      ["Allow", 'Allow for session ("rm")', "Deny"],
+      expect.stringContaining("Needs approval"),
+      ["Allow once", 'Allow for session ("rm")', "Export command", "Deny"],
       { signal: options.signal },
     );
     expect(options.pi.events.emit.mock.calls).toEqual([

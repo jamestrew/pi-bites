@@ -4,7 +4,7 @@ import type { ShellAuthorizationDecision } from "./authorization.js";
 import { pinExecLaunch } from "../codex-adapter/exec/launch-context.js";
 import { randomUUID } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { BashGateRule, BitesConfig } from "../config.js";
+import type { BashGateMode, BashGateRule, BitesConfig } from "../config.js";
 import { requestSubagentApproval } from "./events.js";
 import type { AutoModeController } from "../automode/index.js";
 import { ShellAuthorizationTransactions } from "./authorization.js";
@@ -52,6 +52,7 @@ export interface BashGateController {
   /** Native exec_command authorizes at execute, with its per-call cancellation signal. */
   manageExecCommand(): void;
   isYolo(): boolean;
+  getMode(): BashGateMode;
   captureSession(ctx: ExtensionContext): CommandAuthorizationSession;
 }
 
@@ -87,7 +88,7 @@ function compensateTimeout(input: Record<string, unknown>, gateStartMs: number):
 export default function registerBashGate(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
-  autoMode?: AutoModeController,
+  autoMode?: Pick<AutoModeController, "setMode" | "review">,
 ): BashGateController {
   pi.registerFlag("yolo", {
     description: "Bypass all bash-gate confirmations (useful for non-interactive / scripted runs)",
@@ -97,7 +98,8 @@ export default function registerBashGate(
 
   let managedExecCommand = false;
   let rules: BashGateRule[] = [];
-  let mainAgentYolo = false;
+  let mode: BashGateMode = "auto";
+  const getMode = (): BashGateMode => (pi.getFlag("yolo") ? "yolo" : mode);
   let owner = new AbortController();
   const usedCallIds = new Set<string>();
   const authorizations = new ShellAuthorizationTransactions(pi);
@@ -106,7 +108,7 @@ export default function registerBashGate(
   const activeSubagentGenerations = new Map<string, number>();
 
   function syncYoloStatus(ctx: ExtensionContext): void {
-    ctx.ui.setStatus("bash-gate-yolo", pi.getFlag("yolo") || mainAgentYolo ? "🔥 YOLO" : undefined);
+    ctx.ui.setStatus("bash-gate-yolo", getMode() === "yolo" ? "🔥 YOLO" : undefined);
   }
 
   pi.on("session_start", (_event, ctx) => {
@@ -115,8 +117,8 @@ export default function registerBashGate(
     usedCallIds.clear();
     authorizations.sessionStarted();
     rules = resolveEffectiveRules(configRef.current);
-    mainAgentYolo = configRef.current.bashGate?.mode === "yolo";
-    if (pi.getFlag("yolo") || mainAgentYolo) autoMode?.setEnabled(false, ctx);
+    mode = configRef.current.bashGate?.mode ?? "auto";
+    autoMode?.setMode(getMode(), ctx);
     sessionAllowed.clear();
     finishedSubagents.clear();
     activeSubagentGenerations.clear();
@@ -137,24 +139,20 @@ export default function registerBashGate(
   });
 
   pi.registerShortcut("alt+y", {
-    description: "Cycle bash-gate mode: YOLO, Auto, Bash gate",
+    description: "Cycle bash-gate mode: YOLO, Auto, Strict",
     handler: async (ctx) => {
       if (pi.getFlag("yolo")) {
         ctx.ui.notify("Bash gate mode is fixed to YOLO by --yolo.", "info");
         return;
       }
 
-      if (mainAgentYolo) {
-        mainAgentYolo = false;
-        autoMode?.setEnabled(true, ctx);
-      } else if (autoMode?.isEnabled()) {
-        autoMode.setEnabled(false, ctx);
-      } else {
-        mainAgentYolo = true;
-      }
+      mode = getMode() === "yolo" ? "auto" : getMode() === "auto" ? "strict" : "yolo";
+      autoMode?.setMode(mode, ctx);
       syncYoloStatus(ctx);
-      const mode = mainAgentYolo ? "YOLO" : autoMode?.isEnabled() ? "Auto" : "Bash gate";
-      ctx.ui.notify(`${mode} mode enabled.`, "info");
+      ctx.ui.notify(
+        `${mode === "yolo" ? "YOLO" : mode === "auto" ? "Auto" : "Strict"} mode enabled.`,
+        "info",
+      );
     },
   });
 
@@ -234,11 +232,11 @@ export default function registerBashGate(
             : sessionAllowKey;
 
           // --yolo bypasses every gate; shortcut YOLO reaches default subagents via the parent broker.
-          if (pi.getFlag("yolo") || (mainAgentYolo && metadata === undefined))
+          if (pi.getFlag("yolo") || (getMode() === "yolo" && metadata === undefined))
             return { outcome: "allow", authorization: "not-reviewed" };
 
           // Pattern was already approved for this session — run silently.
-          if (sessionAllowed.has(effectiveSessionAllowKey))
+          if (!metadata && getMode() === "auto" && sessionAllowed.has(effectiveSessionAllowKey))
             return { outcome: "allow", authorization: "human-approved" };
           if (subagentPolicy === "deny") {
             return {
@@ -290,7 +288,6 @@ export default function registerBashGate(
               }
 
               if (result.outcome === "allow-session") {
-                sessionAllowed.add(effectiveSessionAllowKey);
                 return {
                   outcome: "allow",
                   authorization: result.authorization,
@@ -327,7 +324,8 @@ export default function registerBashGate(
             }
           }
 
-          const review = autoMode?.isEnabled()
+          const approvalMode = getMode();
+          const review = autoMode
             ? () =>
                 autoMode.review(
                   {
@@ -342,11 +340,6 @@ export default function registerBashGate(
             : undefined;
           const autoGate = { cwd, command, toolName, requiresHuman: false } as const;
           if (review) pi.events.emit("bites:bash_gate", autoGate);
-          const reasons = matchedPatterns.map((match) => match.reason).filter(Boolean);
-          const prompt =
-            reasons.length > 0
-              ? `🔒 Bash gate — ${reasons.join("; ")} (${matchedPatternLabels.join(", ")})`
-              : `🔒 Bash gate — command requires approval (${matchedPatternLabels.join(", ")})`;
           try {
             const result = await wait(
               requestCommandApproval({
@@ -357,19 +350,22 @@ export default function registerBashGate(
                 toolName,
                 signal,
                 hasUI,
-                prompt,
+                mode: approvalMode === "strict" ? "strict" : "auto",
                 sessionAllowKey,
                 review,
-                isAllowed: () => sessionAllowed.has(effectiveSessionAllowKey),
+                isAllowed: () =>
+                  getMode() === "auto" && sessionAllowed.has(effectiveSessionAllowKey),
                 rememberAllowance: () => {
-                  sessionAllowed.add(effectiveSessionAllowKey);
+                  if (getMode() === "auto") sessionAllowed.add(effectiveSessionAllowKey);
+                },
+                checkCurrent: () => {
+                  if (getMode() !== approvalMode)
+                    throw new Error("Bash gate mode changed during review.");
                 },
                 failureMessage: (message, phase) =>
                   phase === "review"
                     ? `Automode review failed closed: ${message}`
-                    : phase === "manual"
-                      ? `Bash gate: approval failed closed: ${message}`
-                      : `Bash gate: authorization failed closed: ${message}`,
+                    : `Bash gate: authorization failed closed: ${message}`,
               }),
             );
             signal.throwIfAborted();
@@ -445,7 +441,8 @@ export default function registerBashGate(
     manageExecCommand: () => {
       managedExecCommand = true;
     },
-    isYolo: () => pi.getFlag("yolo") === true || mainAgentYolo,
+    isYolo: () => getMode() === "yolo",
+    getMode,
     captureSession,
   };
 }

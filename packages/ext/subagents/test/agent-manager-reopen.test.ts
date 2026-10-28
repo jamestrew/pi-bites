@@ -134,7 +134,7 @@ it("retains the selected model in close tombstones instead of substituting the c
 it("invalidates approvals when closing and reopening a conversation", async () => {
   const invalidated = vi.fn();
   await manager.dispose();
-  manager = new AgentManager(undefined, 1, undefined, undefined, undefined, undefined, invalidated);
+  manager = new AgentManager(undefined, 1, undefined, undefined, invalidated);
   const id = await closedAgent();
   expect(invalidated).toHaveBeenCalledTimes(1);
 

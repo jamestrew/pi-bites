@@ -50,7 +50,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 export type OneOrMany<T> = T | T[];
-export const BASH_GATE_MODES = ["manual", "auto", "yolo"] as const;
+export const BASH_GATE_MODES = ["auto", "strict", "yolo"] as const;
 export type BashGateMode = (typeof BASH_GATE_MODES)[number];
 export const BASH_GATE_REDIRECT_RULES = ["any-write", "append", "truncate"] as const;
 export type BashGateRedirectRule = (typeof BASH_GATE_REDIRECT_RULES)[number];
@@ -133,7 +133,7 @@ const BashGateSchema = Type.Object({
   mode: Type.Optional(
     Type.Enum(BASH_GATE_MODES, {
       description: "Initial permission mode for each session.",
-      default: "manual",
+      default: "auto",
     }),
   ),
   rules: Type.Optional(

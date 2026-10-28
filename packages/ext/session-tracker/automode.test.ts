@@ -58,8 +58,9 @@ test("only human bash reviews report the session as blocked", async () => {
   let autoModeEnabled = true;
   const autoMode = {
     isEnabled: () => autoModeEnabled,
-    setEnabled: (enabled: boolean) => {
-      autoModeEnabled = enabled;
+    getMode: () => "auto" as const,
+    setMode: (mode: string) => {
+      autoModeEnabled = mode !== "yolo";
     },
     review: vi
       .fn()
@@ -174,7 +175,7 @@ test("only human bash reviews report the session as blocked", async () => {
       ),
     );
 
-    autoModeEnabled = false;
+    autoMode.review.mockResolvedValueOnce({ outcome: "deny", rationale: "Needs approval" });
     send.mockClear();
     const manual = toolCall?.({ toolName: "bash", input: { command: "rm other-file" } }, ctx);
     await vi.waitFor(() =>
@@ -187,7 +188,7 @@ test("only human bash reviews report the session as blocked", async () => {
       ),
     );
     expect(ctx.ui.select).toHaveBeenCalled();
-    manualReview.resolve("Allow");
+    manualReview.resolve("Allow once");
     await manual;
     await vi.waitFor(() =>
       expect(send).toHaveBeenLastCalledWith(

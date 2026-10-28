@@ -1,139 +1,102 @@
-import type { AgentSession, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
+import {
+  estimateTokens,
+  findCutPoint,
+  generateSummaryWithUsage,
+  SettingsManager,
+  type BoundaryState,
+  type BoundaryResult,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import type { BitesConfig } from "./config.js";
 
 export const DEFAULT_AUTO_COMPACTION_THRESHOLD = 200_000;
-
-function compactionThreshold(thresholdTokens: number, contextWindow: number | undefined): number {
-  return contextWindow != null && contextWindow > 0
-    ? Math.min(thresholdTokens, Math.floor(contextWindow * 0.85))
-    : thresholdTokens;
-}
-
-type AutoCompactingSession = {
-  _runAutoCompaction?(reason: "threshold", willRetry: false): Promise<boolean>;
-};
-
-/**
- * Use Pi's automatic compaction path while the current agent loop is already
- * paused between turns. Unlike ctx.compact(), this does not abort the run.
- */
-export function installTurnBoundaryAutoCompaction(
-  session: AgentSession,
-  thresholdTokens: number,
-): void {
-  const previousPrepare = session.agent.prepareNextTurnWithContext;
-  session.agent.prepareNextTurnWithContext = async (turn, signal) => {
-    const snapshot = await previousPrepare?.(turn, signal);
-    const usage = session.getContextUsage();
-    const tokens = usage?.tokens;
-    const threshold = compactionThreshold(thresholdTokens, usage?.contextWindow);
-    if (signal?.aborted || tokens == null || tokens < threshold) return snapshot;
-    const autoSession = session as unknown as AutoCompactingSession;
-    if (!autoSession._runAutoCompaction) return snapshot;
-
-    const abortCompaction = () => session.abortCompaction();
-    // Older Pi runtimes create the compaction abort controller only after auth.
-    // If cancellation lands during auth, retry the abort immediately after the
-    // controller is announced so no summarization outlives the owning run.
-    const stopWatching = signal
-      ? session.subscribe((event) => {
-          if (event.type === "compaction_start" && signal.aborted) queueMicrotask(abortCompaction);
-        })
-      : undefined;
-    signal?.addEventListener("abort", abortCompaction, { once: true });
-    try {
-      await autoSession._runAutoCompaction("threshold", false);
-    } catch {
-      // This is a private Pi seam. Preserve the active invocation if an
-      // incompatible upstream implementation rejects; continue uncompacted.
-      return snapshot;
-    } finally {
-      signal?.removeEventListener("abort", abortCompaction);
-      stopWatching?.();
-    }
-    const context = snapshot?.context ?? turn.context;
-    return {
-      ...snapshot,
-      context: { ...context, messages: session.agent.state.messages.slice() },
-    };
-  };
-}
 
 export default function registerAutoCompaction(
   pi: ExtensionAPI,
   configRef: { current: BitesConfig },
 ): void {
-  let compactionPending = false;
-  let resumeAfterCompaction = false;
-
-  const tokensAtThreshold = (ctx: ExtensionContext): number | undefined => {
-    if (ctx.mode === "print" || ctx.mode === "json") return;
+  const compact = async (
+    event: BoundaryState,
+    ctx: ExtensionContext,
+  ): Promise<BoundaryResult | undefined> => {
+    const { model, modelRegistry, signal, thinkingLevel } = ctx;
+    if (!model || signal?.aborted || event.outcome !== "completed") return;
+    // Another handler already supplied a checkpoint for this boundary.
+    if (event.entries.some((entry) => entry.type === "compaction")) return;
+    const context = event.context;
     const usage = ctx.getContextUsage();
-    const threshold = compactionThreshold(
+    const system = getCurrentSystemMessage(context.contextMessages);
+    const estimated = () =>
+      (system ? estimateTokens(system) : 0) +
+      context.contextMessages.reduce(
+        (sum, message) => sum + (message.role === "system" ? 0 : estimateTokens(message)),
+        0,
+      );
+    const tokens = event.entries.length ? estimated() : (usage?.tokens ?? estimated());
+    const threshold = Math.min(
       configRef.current.autoCompaction?.thresholdTokens ?? DEFAULT_AUTO_COMPACTION_THRESHOLD,
-      usage?.contextWindow,
+      Math.floor(model.contextWindow * 0.85),
     );
-    const tokens = usage?.tokens;
-    return tokens != null && tokens >= threshold ? tokens : undefined;
-  };
+    if (tokens < threshold) return;
 
-  const reset = () => {
-    resumeAfterCompaction = false;
-  };
-  pi.on("session_start", reset);
-  pi.on("session_tree", reset);
-
-  pi.on("turn_end", (event, ctx) => {
+    const settings = SettingsManager.inMemory(pi.getSettings()).getCompactionSettings(model);
+    const previous = context.contextEntries.find(
+      (entry) => entry.sourceEntry.type === "compaction" && entry.messages.length > 0,
+    )?.sourceEntry;
+    const entries = context.contextEntries.flatMap(({ sourceEntry, messages }) =>
+      sourceEntry.type === "compaction"
+        ? []
+        : messages
+            .filter((message) => message.role !== "system")
+            .map((message) => ({ ...sourceEntry, type: "message" as const, message })),
+    );
+    const cut = findCutPoint(entries, 0, entries.length, settings.keepRecentTokens);
+    const firstKeptEntryId = entries[cut.firstKeptEntryIndex]?.id;
     if (
-      resumeAfterCompaction ||
-      ctx.signal?.aborted ||
-      ctx.hasPendingMessages() ||
-      tokensAtThreshold(ctx) === undefined ||
-      event.message.role !== "assistant" ||
-      !event.message.content.some((block) => block.type === "toolCall")
-    ) {
+      !firstKeptEntryId ||
+      cut.firstKeptEntryIndex === 0 ||
+      (previous?.type === "compaction" && previous.firstKeptEntryId === firstKeptEntryId)
+    )
       return;
-    }
 
-    // End the run cleanly before manual compaction; ctx.compact() aborts an
-    // active run and races with tools such as Code Mode's exec invocation.
-    resumeAfterCompaction = true;
-    ctx.abort();
-  });
-
-  pi.on("agent_settled", (_event, ctx) => {
-    const tokens = tokensAtThreshold(ctx);
-    if (compactionPending || tokens === undefined) return;
-
-    compactionPending = true;
-    const resume = resumeAfterCompaction;
-    resumeAfterCompaction = false;
     const ui = ctx.hasUI ? ctx.ui : undefined;
-    ui?.notify(`Compacting at ${tokens.toLocaleString()} tokens`, "info");
-    const finish = () => {
-      compactionPending = false;
-      if (resume) {
-        try {
-          pi.sendMessage(
-            {
-              customType: "auto-compaction-continuation",
-              content: "Continue the previous task after compaction.",
-              display: false,
-            },
-            { triggerTurn: true, deliverAs: "followUp" },
-          );
-        } catch {
-          // Session replacement invalidates the old extension API; the new
-          // session owns any continuation from that point onward.
-        }
-      }
-    };
-    ctx.compact({
-      onComplete: finish,
-      onError: (error) => {
-        ui?.notify(`Compaction failed: ${error.message}`, "error");
-        finish();
-      },
-    });
-  });
+    try {
+      const summary = await generateSummaryWithUsage(
+        entries.slice(0, cut.firstKeptEntryIndex).map((entry) => entry.message),
+        model,
+        settings.reserveTokens,
+        undefined,
+        undefined,
+        signal,
+        undefined,
+        previous?.type === "compaction" ? previous.summary : undefined,
+        thinkingLevel,
+        (requestModel, messages, options) =>
+          modelRegistry.streamSimple(requestModel, messages, options),
+      );
+      if (signal?.aborted) return;
+      if (!summary.text.trim()) throw new Error("Compaction returned an empty summary");
+      return {
+        entries: [
+          ...event.entries,
+          {
+            type: "compaction",
+            summary: summary.text,
+            firstKeptEntryId,
+            usage: summary.usage,
+          },
+        ],
+      };
+    } catch (error) {
+      if (!signal?.aborted)
+        ui?.notify(
+          `Compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+          "error",
+        );
+    }
+  };
+  pi.on("turn_end", compact);
+  pi.on("agent_before_settle", compact);
 }

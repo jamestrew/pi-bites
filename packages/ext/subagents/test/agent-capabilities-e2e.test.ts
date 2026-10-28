@@ -266,12 +266,12 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
       pending.push(queued);
       await expect.poll(() => starts.length).toBe(3);
       expect(approve).not.toHaveBeenCalled();
-      choices[0]!.resolve("Allow");
+      choices[0]!.resolve("Allow once");
       const result = await queued;
       expect(result.isError, result.text).toBe(false);
       expect(result.text).toContain('"output":"child"');
       expect(approve).toHaveBeenCalledOnce();
-      choices[1]!.resolve("Allow");
+      choices[1]!.resolve("Allow once");
       for (const result of await Promise.all(pending.slice(0, 2))) {
         expect((result as any).isError, textOf(result)).toBe(false);
       }
@@ -435,7 +435,23 @@ describe("delegated Code Mode capabilities (real embedded child)", () => {
       await open(undefined, INITIAL, { pi });
       const oldContext = child!.extensionRunner.createContext();
       try {
-        const pending = run(`await tools.exec_command({cmd:'touch forbidden',login:false});`);
+        const session = child!;
+        let turns = 0;
+        session.agent.streamFunction = (model) =>
+          turns++ === 0
+            ? response(model, [
+                {
+                  type: "toolCall",
+                  id: "blocked",
+                  name: "codemode",
+                  arguments: {
+                    code: "await tools.exec_command({cmd:'touch forbidden',login:false});",
+                  },
+                },
+              ])
+            : response(model, [{ type: "text", text: "done" }]);
+        // Shutdown may dispose the session before a cancelled tool result is persisted.
+        const pending = session.prompt("run");
         await expect.poll(() => approve.mock.calls.length).toBe(1);
         if (mode === "shutdown") {
           await shutdownAgentSession(child!);

@@ -260,7 +260,7 @@ test("parallel shell reviews serialize dialogs, authorize once per launch, and p
   await expect.poll(() => h.ui.select.mock.calls.length).toBe(1);
   await new Promise((resolve) => setTimeout(resolve, 25));
   expect(h.ui.select).toHaveBeenCalledTimes(1);
-  first.resolve("Allow");
+  first.resolve("Allow once");
   const result = await pending;
   expect(result.isError, textOf(result)).toBe(false);
   expect(textOf(result)).toContain('"output":"one"');
@@ -305,7 +305,7 @@ test("cancellation and throwing stale contexts reject late approval without laun
   await pending;
   h.session.dispose();
   expect(() => ctx.cwd).toThrow();
-  choice.resolve("Allow");
+  choice.resolve("Allow once");
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(existsSync(join(h.cwd, "forbidden"))).toBe(false);
 });
@@ -356,14 +356,14 @@ test("unhandled script errors cancel pending approvals but preserve finished she
     config: { bashGate: { rules: [{ cmd: "touch" }] } },
   });
   const choice = Promise.withResolvers<string>();
-  h.ui.select.mockResolvedValueOnce("Allow").mockImplementationOnce(() => choice.promise);
+  h.ui.select.mockResolvedValueOnce("Allow once").mockImplementationOnce(() => choice.promise);
   const pending = h.run(
     `const shell=await tools.exec_command({cmd:'echo $$ > owned.pid; sleep 60',login:false,yield_time_ms:250}); text(shell); await Promise.all([tools.exec_command({cmd:'touch forbidden',login:false}),tools.exec_command({cmd:'printf done',login:false}).then(()=>{throw new Error('stop script');})]);`,
   );
   await expect.poll(() => h.ui.select.mock.calls.length).toBe(2);
   const result = await pending;
   expect(result.isError).toBe(true);
-  choice.resolve("Allow");
+  choice.resolve("Allow once");
   expect(() =>
     process.kill(Number(readFileSync(join(h.cwd, "owned.pid"), "utf8").trim()), 0),
   ).not.toThrow();

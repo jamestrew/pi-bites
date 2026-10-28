@@ -263,7 +263,10 @@ it("rechecks the retained model and narrows delegated tools on reload", async ()
 });
 
 it("invalidates session approvals across runtime incarnations", async () => {
-  const h = await setup();
+  const h = await setupV2(cleanup, {
+    getMode: () => "auto",
+    review: vi.fn().mockResolvedValue({ outcome: "deny", rationale: "Fixture requires approval" }),
+  });
   h.ctx.hasUI = true;
   const select = vi.fn(async () => 'Allow for session ("touch")');
   h.ctx.ui.select = select;
@@ -352,32 +355,16 @@ it("retires unloaded identities on root replacement instead of routing into the 
   expect(h.manager.getRecord(id)).toBeUndefined();
 });
 
-it.each(["registry", "rpc"])("bounds loaded runtimes for sequential %s spawns", async (route) => {
+it("bounds loaded runtimes for sequential programmatic spawns", async () => {
   const h = await setup();
   writeSubagentsConfig({ maxConcurrent: 1 }, h.ctx.cwd);
   await h.emit("session_start");
   h.faux.setResponses(["first", "second", "third"].map((text) => fauxAssistantMessage(text)));
   const ids: string[] = [];
   for (let index = 0; index < 3; index++) {
-    const id =
-      route === "registry"
-        ? await h.manager.spawn(h.pi, h.ctx, "worker", "complete this task", {
-            description: "internal",
-          })
-        : await new Promise<string>((resolve, reject) => {
-            const requestId = crypto.randomUUID();
-            const off = h.pi.events.on(`subagents:rpc:spawn:reply:${requestId}`, (reply: any) => {
-              off();
-              if (reply.success) resolve(reply.data.id);
-              else reject(new Error(reply.error));
-            });
-            h.pi.events.emit("subagents:rpc:spawn", {
-              requestId,
-              type: "worker",
-              prompt: "complete this task",
-              options: { description: "internal" },
-            });
-          });
+    const id = await h.manager.spawn(h.pi, h.ctx, "worker", "complete this task", {
+      description: "internal",
+    });
     ids.push(id);
     await h.manager.waitForAll();
     const listed = (await h.call("list_agents", {})).value.agents;

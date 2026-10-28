@@ -39,7 +39,7 @@ describe("config JSON schema", () => {
   const config = {
     smallModel: { model: "provider/model", thinking: "low" },
     statusline: { command: "echo status" },
-    bashGate: { mode: "manual", rules: [rule] },
+    bashGate: { mode: "auto", rules: [rule] },
     notifications: { command: "" },
     autoCompaction: { thresholdTokens: 200_000 },
     autoMode: { model: "provider/model", thinking: "max", policy: "Review safely" },

@@ -4,8 +4,9 @@
 
 The subagent declaration baseline is OpenAI Codex
 `1a89aec960cd92e2c59ce49b7f3c3347a915e4a9`. This does **not** upgrade the Code Mode
-host, vendor source, or V1 historical baseline. No executor is imported or registered
-as inline declarations in `v2-tools.ts`, `default-agents.ts`, and `ui/observation-receipt.ts`.
+host, vendor source, or V1 historical baseline. No Codex executor is imported or
+registered. Runtime declarations live inline in `v2-tools.ts`, `default-agents.ts`,
+and `ui/observation-receipt.ts`; the JSON below is provenance only.
 
 ```sh
 python3 scripts/generate-subagents-v2-contract.py /path/to/codex

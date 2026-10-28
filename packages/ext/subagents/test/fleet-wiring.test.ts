@@ -217,7 +217,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
   it("inherits parent yolo mode without prompting or automode review", async () => {
     const { pi, lifecycle } = makePi();
     const review = vi.fn().mockResolvedValue({ outcome: "deny" });
-    subagentsExtension(pi, { isEnabled: () => true, review }, { isYolo: () => true });
+    subagentsExtension(pi, { getMode: () => "auto" as const, review }, { isYolo: () => true });
     await lifecycle.get("session_start")?.({}, { ...ctxWith(uiCtx()), hasUI: false });
 
     const reply = vi.fn();
@@ -240,7 +240,14 @@ describe("Fleet wiring (real extension lifecycle)", () => {
 
   it("fails closed without dereferencing stale context during a session switch", async () => {
     const { pi, lifecycle } = makePi();
-    subagentsExtension(pi, undefined, { isYolo: () => false });
+    subagentsExtension(
+      pi,
+      {
+        getMode: () => "auto",
+        review: vi.fn().mockResolvedValue({ outcome: "deny", rationale: "Needs approval" }),
+      },
+      { isYolo: () => false },
+    );
     const ctx = ctxWith(uiCtx());
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("session_before_switch")?.({}, ctx);
@@ -269,11 +276,18 @@ describe("Fleet wiring (real extension lifecycle)", () => {
     });
   });
 
-  it("prompts for subagent approval when parent yolo and automode are off", async () => {
+  it("prompts for subagent approval when auto review denies", async () => {
     const { pi, lifecycle } = makePi();
     const ui = uiCtx();
-    ui.select.mockResolvedValue("Allow");
-    subagentsExtension(pi, undefined, { isYolo: () => false });
+    ui.select.mockResolvedValue("Allow once");
+    subagentsExtension(
+      pi,
+      {
+        getMode: () => "auto",
+        review: vi.fn().mockResolvedValue({ outcome: "deny", rationale: "Needs approval" }),
+      },
+      { isYolo: () => false },
+    );
     await lifecycle.get("session_start")?.({}, ctxWith(ui));
 
     const reply = vi.fn();
@@ -315,7 +329,10 @@ describe("Fleet wiring (real extension lifecycle)", () => {
     const ui = uiCtx();
     const choice = Promise.withResolvers<string>();
     ui.select.mockImplementationOnce(() => choice.promise);
-    subagentsExtension(pi);
+    subagentsExtension(pi, {
+      getMode: () => "auto",
+      review: vi.fn().mockResolvedValue({ outcome: "deny", rationale: "Needs approval" }),
+    });
     await lifecycle.get("session_start")?.({}, ctxWith(ui));
     const replies = vi.fn();
     for (const id of ["one", "two"]) {
@@ -341,13 +358,20 @@ describe("Fleet wiring (real extension lifecycle)", () => {
     });
   });
 
-  it("keeps the Fleet row stable while manual subagent approval is pending", async () => {
+  it("keeps the Fleet row stable while escalated subagent approval is pending", async () => {
     mockRunningAgent();
     const { pi, tools, lifecycle } = makePi();
     const ui = uiCtx();
     let resolveSelect!: (choice: string) => void;
     ui.select.mockImplementation(() => new Promise<string>((resolve) => (resolveSelect = resolve)));
-    subagentsExtension(pi, undefined, { isYolo: () => false });
+    subagentsExtension(
+      pi,
+      {
+        getMode: () => "auto",
+        review: vi.fn().mockResolvedValue({ outcome: "deny", rationale: "Needs approval" }),
+      },
+      { isYolo: () => false },
+    );
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
     await lifecycle.get("tool_execution_start")?.({}, ctx);
@@ -379,7 +403,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
 
     expect(ui.select).toHaveBeenCalledWith(
       expect.stringContaining("git push origin main"),
-      ["Allow", 'Allow for session ("git push")', "Deny"],
+      ["Allow once", 'Allow for session ("git push")', "Export command", "Deny"],
       { signal: expect.any(AbortSignal) },
     );
     expectStableFleetRow(ui, "git push origin main");
@@ -401,7 +425,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
           '{"risk_level":"medium","user_authorization":"low","outcome":"allow","rationale":"Bounded local change"}',
         ),
       );
-    subagentsExtension(pi, { isEnabled: () => true, review });
+    subagentsExtension(pi, { getMode: () => "auto" as const, review });
     const ctx = { ...ctxWith(uiCtx()), hasUI: false };
     await lifecycle.get("session_start")?.({}, ctx);
 
@@ -438,7 +462,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
     const review = vi.fn(
       () => new Promise<AutoModeDecision>((resolve) => (resolveReview = resolve)),
     );
-    subagentsExtension(pi, { isEnabled: () => true, review });
+    subagentsExtension(pi, { getMode: () => "auto" as const, review });
     const ctx = { ...ctxWith(uiCtx()), hasUI: false };
     await lifecycle.get("session_start")?.({}, ctx);
     const reply = vi.fn();
@@ -469,7 +493,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
     const review = vi.fn(
       () => new Promise<AutoModeDecision>((resolve) => (resolveReview = resolve)),
     );
-    subagentsExtension(pi, { isEnabled: () => true, review });
+    subagentsExtension(pi, { getMode: () => "auto" as const, review });
     const ui = uiCtx();
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
@@ -519,7 +543,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
         '{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}',
       );
     });
-    subagentsExtension(pi, { isEnabled: () => true, review });
+    subagentsExtension(pi, { getMode: () => "auto" as const, review });
     const ui = uiCtx();
     ui.select.mockResolvedValue("Allow once");
     const ctx = ctxWith(ui);
@@ -555,7 +579,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
 
     expect(ui.select).toHaveBeenCalledWith(
       expect.stringContaining("not authorized"),
-      ["Allow once", "Export command", "Deny"],
+      ["Allow once", 'Allow for session ("rm")', "Export command", "Deny"],
       { signal: expect.any(AbortSignal) },
     );
     expect(pi.events.emit).toHaveBeenCalledWith(
@@ -643,7 +667,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
       .fn()
       .mockResolvedValueOnce({ outcome: "deny", rationale: "needs human approval" })
       .mockResolvedValueOnce({ outcome: "allow" });
-    subagentsExtension(pi, { isEnabled: () => true, review });
+    subagentsExtension(pi, { getMode: () => "auto" as const, review });
     const ui = uiCtx();
     const ctx = ctxWith(ui);
     await lifecycle.get("session_start")?.({}, ctx);
@@ -741,7 +765,7 @@ describe("Fleet wiring (real extension lifecycle)", () => {
     ).toEqual([undefined, "human-approved", "reviewer-approved"]);
     expect(ui.select).toHaveBeenCalledWith(
       expect.stringContaining("needs human approval"),
-      ["Allow once", "Export command", "Deny"],
+      ["Allow once", 'Allow for session ("rm")', "Export command", "Deny"],
       { signal: expect.any(AbortSignal) },
     );
     expect(review).toHaveBeenCalledTimes(2);
@@ -787,5 +811,31 @@ describe("Fleet wiring (real extension lifecycle)", () => {
 
     await lifecycle.get("session_shutdown")?.({}, ctxWith(uiCtx()));
     expect(ui.setWidget).toHaveBeenCalledWith("fleet", undefined); // dispose cleared it
+  });
+  it.each(["strict", "headless auto"])("%s child denials never wait on a human", async (mode) => {
+    const { pi, lifecycle } = makePi();
+    const ui = uiCtx();
+    ui.select.mockImplementation(() => new Promise(() => {}));
+    const review = vi.fn().mockResolvedValue({ outcome: "deny", rationale: "Production deletion" });
+    subagentsExtension(pi, { getMode: () => (mode === "strict" ? "strict" : "auto"), review });
+    const ctx = ctxWith(ui);
+    ctx.hasUI = mode === "strict";
+    await lifecycle.get("session_start")?.({}, ctx);
+    const reply = vi.fn();
+    pi.events.on("subagents:bash_gate:approval:reply:strict", reply);
+    pi.events.emit("subagents:bash_gate:approval", {
+      requestId: "strict",
+      title: "worker",
+      command: "rm production",
+      labels: ["rm"],
+      reasons: [],
+      sessionAllowKey: "rm",
+    });
+    await flush();
+    expect(reply).toHaveBeenCalledWith({
+      result: { outcome: "deny", source: "automode", rationale: "Production deletion" },
+    });
+    expect(ui.select).not.toHaveBeenCalled();
+    await lifecycle.get("session_shutdown")?.({}, ctx);
   });
 });

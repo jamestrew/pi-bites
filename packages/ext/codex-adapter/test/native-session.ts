@@ -77,7 +77,7 @@ export async function setup(
 ) {
   const config = { current: options.config ?? {} };
   const ui = {
-    select: vi.fn(async () => "Allow" as string | undefined),
+    select: vi.fn(async () => "Allow once" as string | undefined),
     notify: vi.fn(),
     setStatus: vi.fn(),
     input: vi.fn(),
@@ -124,6 +124,7 @@ export async function setup(
           ? {
               manageExecCommand() {},
               isYolo: () => false,
+              getMode: () => "auto",
               captureSession: () => ({
                 async authorize(request, launch) {
                   options.onAuthorization!(request);
@@ -132,7 +133,15 @@ export async function setup(
               }),
             }
           : options.gate
-            ? registerBashGate(pi, config)
+            ? registerBashGate(pi, config, {
+                setMode() {},
+                review: async () => ({
+                  outcome: "deny",
+                  risk_level: "high",
+                  user_authorization: "low",
+                  rationale: "Fixture requires user approval",
+                }),
+              })
             : undefined;
         const original = pi.registerMarkdownTransformer;
         adapter = registerAdapter(

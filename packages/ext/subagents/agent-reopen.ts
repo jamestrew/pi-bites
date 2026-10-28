@@ -32,7 +32,6 @@ export class AgentReopener {
       invalidate: (record: AgentRecord) => void;
       commit: (record: AgentRecord) => void;
       registerCollaboration?: (record: AgentRecord) => RegisterCollaboration;
-      autoCompactionThreshold?: () => number | undefined;
     },
   ) {}
 
@@ -187,7 +186,6 @@ export class AgentReopener {
           cwd: conversation.cwd,
           configCwd: parent.cwd,
           signal,
-          autoCompactionThreshold: this.hooks.autoCompactionThreshold?.(),
         });
         signal.throwIfAborted();
         this.hooks.assertOwnerAvailable(record.parentSessionId, rootSessionId);

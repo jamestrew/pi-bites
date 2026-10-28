@@ -1,359 +1,197 @@
-import { describe, expect, test, vi } from "vitest";
-import registerAutoCompaction, {
-  DEFAULT_AUTO_COMPACTION_THRESHOLD,
-  installTurnBoundaryAutoCompaction,
-} from "./auto-compaction.js";
+import { afterEach, expect, it } from "vitest";
+import {
+  registerFauxProvider,
+  fauxAssistantMessage,
+  getApiProvider,
+} from "@earendil-works/pi-ai/compat";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import registerAutoCompaction from "./auto-compaction.js";
 
-const thresholdCases = [
-  { contextWindow: 1_000_000, configured: undefined, threshold: 200_000 },
-  { contextWindow: 200_000, configured: undefined, threshold: 170_000 },
-  { contextWindow: undefined, configured: undefined, threshold: 200_000 },
-  { contextWindow: 1_000_000, configured: 42_000, threshold: 42_000 },
-  { contextWindow: 10_000, configured: 42_000, threshold: 8_500 },
-];
-
-function setup(thresholdTokens?: number, mode = "tui", contextWindow?: number) {
-  const handlers = new Map<string, (...args: never[]) => void>();
-  const compact = vi.fn();
-  const run = new AbortController();
-  const abort = vi.fn(() => run.abort());
-  const sendMessage = vi.fn();
-  let apiIsStale = false;
-  let tokens: number | null = 0;
+const cleanup: (() => void)[] = [];
+afterEach(() => cleanup.splice(0).forEach((fn) => fn()));
+function setup(tokens = 42_000, contextWindow = 1_000_000, thresholdTokens = 42_000) {
+  const faux = registerFauxProvider({
+    provider: "compaction-test",
+    models: [{ id: "test", contextWindow }],
+  });
+  cleanup.push(() => faux.unregister());
+  faux.setResponses([fauxAssistantMessage("Checkpoint")]);
+  const manager = SessionManager.inMemory("/tmp");
+  manager.appendMessage({ role: "user", content: "Old task. ".repeat(1000), timestamp: 1 });
+  manager.appendMessage(fauxAssistantMessage("Old answer ".repeat(1000)));
+  manager.appendMessage({ role: "user", content: "Recent task", timestamp: 2 });
+  manager.appendMessage(fauxAssistantMessage("Recent answer"));
+  const handlers = new Map<string, Function>();
   const pi = {
-    on: vi.fn((event: string, handler: (...args: never[]) => void) => handlers.set(event, handler)),
-    sendMessage: (...args: unknown[]) => {
-      if (apiIsStale) throw new Error("stale extension API");
-      sendMessage(...args);
-    },
+    on: (event: string, handler: Function) => handlers.set(event, handler),
+    getSettings: () => ({ compaction: { keepRecentTokens: 100, reserveTokens: 500 } }),
+    getThinkingLevel: () => "off",
   };
-  const configRef = {
-    current: thresholdTokens === undefined ? {} : { autoCompaction: { thresholdTokens } },
+  registerAutoCompaction(pi as never, { current: { autoCompaction: { thresholdTokens } } });
+  let stale = false;
+  const controller = new AbortController();
+  const dependencies = {
+    model: faux.getModel(),
+    modelRegistry: { streamSimple: getApiProvider(faux.api)!.streamSimple },
+    signal: controller.signal,
+    sessionManager: manager,
+    getContextUsage: () => ({ tokens, contextWindow }),
+    hasUI: false,
   };
-  registerAutoCompaction(pi as never, configRef);
-  let contextIsStale = false;
-  const notify = vi.fn();
-  const ctx = {
-    mode,
-    getContextUsage: () => {
-      if (contextIsStale) throw new Error("stale extension ctx");
-      return tokens == null ? undefined : { tokens, contextWindow };
+  const ctx = Object.fromEntries(Object.entries(dependencies).map(([key, value]) => [key, value]));
+  for (const key of Object.keys(ctx))
+    Object.defineProperty(ctx, key, {
+      get() {
+        if (stale) throw new Error("stale ctx");
+        return dependencies[key as keyof typeof dependencies];
+      },
+    });
+  const event = () => ({
+    entries: [],
+    outcome: "completed",
+    context: {
+      contextEntries: manager
+        .getBranch()
+        .flatMap((sourceEntry) =>
+          sourceEntry.type === "message" ? [{ sourceEntry, messages: [sourceEntry.message] }] : [],
+        ),
+      contextMessages: manager.buildSessionContext().messages,
     },
-    signal: run.signal,
-    abort,
-    hasPendingMessages: () => false,
-    compact,
-    get hasUI() {
-      if (contextIsStale) throw new Error("stale extension ctx");
-      return true;
-    },
-    get ui() {
-      if (contextIsStale) throw new Error("stale extension ctx");
-      return { notify };
-    },
-  };
-
+  });
   return {
-    compact,
-    abort,
-    notify,
-    sendMessage,
-    signal: run.signal,
-    cancelRun: () => run.abort(),
-    invalidateApi: () => (apiIsStale = true),
-    invalidateContext: () => (contextIsStale = true),
-    setTokens: (value: number | null) => (tokens = value),
-    setContextWindow: (value: number) => (contextWindow = value),
-    turnEnd: (hasToolCall = false) =>
-      handlers.get("turn_end")?.(
-        {
-          message: {
-            role: "assistant",
-            content: hasToolCall ? [{ type: "toolCall" }] : [],
-          },
-          toolResults: [],
-        } as never,
-        ctx as never,
-      ),
-    agentSettled: () =>
-      handlers.get("agent_settled")?.({ aborted: run.signal.aborted } as never, ctx as never),
+    manager,
+    faux,
+    ctx,
+    event,
+    handlers,
+    abort: () => controller.abort(),
+    invalidate: () => {
+      stale = true;
+    },
+    boundary: (name = "turn_end", e = event()) => handlers.get(name)!(e, ctx),
   };
 }
 
-describe("auto compaction", () => {
-  test("stops, compacts, and resumes a tool loop at the configured threshold", () => {
-    const { abort, agentSettled, compact, sendMessage, setTokens, turnEnd } = setup(42_000);
-
-    setTokens(41_999);
-    turnEnd();
-    expect(compact).not.toHaveBeenCalled();
-
-    setTokens(42_000);
-    turnEnd(true);
-    expect(abort).toHaveBeenCalledOnce();
-    expect(compact).not.toHaveBeenCalled();
-
-    agentSettled();
-    expect(compact).toHaveBeenCalledTimes(1);
-
-    compact.mock.calls[0]?.[0].onComplete();
-    expect(sendMessage).toHaveBeenCalledWith(
-      {
-        customType: "auto-compaction-continuation",
-        content: "Continue the previous task after compaction.",
-        display: false,
-      },
-      { triggerTurn: true, deliverAs: "followUp" },
-    );
+it("compacts at the configured threshold using the public boundary without forcing continuation", async () => {
+  const h = setup();
+  const result = await h.boundary();
+  expect(result).toMatchObject({
+    entries: [expect.objectContaining({ type: "compaction", summary: "Checkpoint" })],
   });
+  expect(result.continue).toBeUndefined();
+});
 
-  test("does not resume a tool loop canceled before its turn ended", () => {
-    const { abort, agentSettled, cancelRun, compact, sendMessage, setTokens, turnEnd } = setup();
+it.each([
+  [41_999, 1_000_000, false],
+  [8_499, 10_000, false],
+  [8_500, 10_000, true],
+])(
+  "applies the configured threshold and 85%% ceiling at %i tokens",
+  async (tokens, window, fires) => {
+    const h = setup(tokens, window);
+    expect(Boolean(await h.boundary())).toBe(fires);
+  },
+);
 
-    setTokens(DEFAULT_AUTO_COMPACTION_THRESHOLD);
-    cancelRun();
-    turnEnd(true);
-    expect(abort).not.toHaveBeenCalled();
-
-    agentSettled();
-    compact.mock.calls[0]?.[0].onComplete();
-    expect(sendMessage).not.toHaveBeenCalled();
-  });
-
-  test.each(["print", "json"])("leaves %s-mode tool loops to Pi's overflow compaction", (mode) => {
-    const { agentSettled, compact, setTokens, turnEnd } = setup(1, mode);
-
-    setTokens(100);
-    turnEnd(true);
-    agentSettled();
-
-    expect(compact).not.toHaveBeenCalled();
-  });
-
-  test.each(thresholdCases)("uses the lower cap: $configured / $contextWindow", (entry) => {
-    const { abort, compact, setTokens, agentSettled, turnEnd } = setup(
-      entry.configured,
-      "tui",
-      entry.contextWindow,
-    );
-
-    setTokens(entry.threshold - 1);
-    turnEnd(true);
-    agentSettled();
-    expect(abort).not.toHaveBeenCalled();
-    expect(compact).not.toHaveBeenCalled();
-
-    setTokens(entry.threshold);
-    turnEnd(true);
-    expect(abort).toHaveBeenCalledOnce();
-    agentSettled();
-    expect(compact).toHaveBeenCalledOnce();
-  });
-
-  test("uses the active model's context window after a model change", () => {
-    const { compact, setTokens, setContextWindow, agentSettled } = setup(
-      undefined,
-      "tui",
-      1_000_000,
-    );
-    setTokens(85_000);
-    agentSettled();
-    expect(compact).not.toHaveBeenCalled();
-
-    setContextWindow(100_000);
-    agentSettled();
-    expect(compact).toHaveBeenCalledOnce();
-  });
-
-  test("does not recompact while usage is unknown or below the threshold", () => {
-    const { compact, setTokens, agentSettled } = setup(42_000);
-
-    setTokens(42_000);
-    agentSettled();
-    expect(compact).toHaveBeenCalledTimes(1);
-
-    setTokens(null);
-    compact.mock.calls[0]?.[0].onComplete();
-    agentSettled();
-    setTokens(41_999);
-    agentSettled();
-    expect(compact).toHaveBeenCalledTimes(1);
-  });
-
-  test("allows a later retry after compaction fails", () => {
-    const { compact, setTokens, agentSettled } = setup(42_000);
-
-    setTokens(42_000);
-    agentSettled();
-    agentSettled();
-    expect(compact).toHaveBeenCalledTimes(1);
-
-    compact.mock.calls[0]?.[0].onError(new Error("failed"));
-    agentSettled();
-    expect(compact).toHaveBeenCalledTimes(2);
-  });
-
-  test("handles compaction failure after its extension context becomes stale", () => {
-    const { compact, notify, invalidateContext, setTokens, agentSettled } = setup(42_000);
-
-    setTokens(42_000);
-    agentSettled();
-    invalidateContext();
-
-    expect(() => compact.mock.calls[0]?.[0].onError(new Error("failed"))).not.toThrow();
-    expect(notify).toHaveBeenLastCalledWith("Compaction failed: failed", "error");
-  });
-
-  test("ignores a continuation after its extension API becomes stale", () => {
-    const { agentSettled, compact, invalidateApi, sendMessage, setTokens, turnEnd } = setup(42_000);
-
-    setTokens(42_000);
-    turnEnd(true);
-    agentSettled();
-    invalidateApi();
-
-    expect(() => compact.mock.calls[0]?.[0].onComplete()).not.toThrow();
-    expect(sendMessage).not.toHaveBeenCalled();
+it("also compacts before settlement without forcing an additional turn", async () => {
+  const h = setup();
+  expect(await h.boundary("agent_before_settle")).toMatchObject({
+    entries: [expect.objectContaining({ type: "compaction" })],
   });
 });
 
-describe("subagent turn-boundary compaction", () => {
-  test.each(thresholdCases)("uses the lower cap: $configured / $contextWindow", async (entry) => {
-    let tokens = entry.threshold - 1;
-    const session = {
-      agent: {
-        state: { messages: [] },
-        prepareNextTurnWithContext: vi.fn(async (turn) => ({ context: turn.context })),
+it("does not repeat a proposed checkpoint or compact aborted boundaries", async () => {
+  const h = setup();
+  const result = await h.boundary();
+  expect(
+    await h.boundary("agent_before_settle", { ...h.event(), entries: result.entries }),
+  ).toBeUndefined();
+  expect(
+    await h.handlers.get("turn_end")!({ ...h.event(), outcome: "aborted" }, h.ctx),
+  ).toBeUndefined();
+  expect(h.faux.state.callCount).toBe(1);
+});
+
+it("summarizes projected content, retains the recent tail, and never reads stale ctx after awaiting", async () => {
+  const h = setup();
+  const e = h.event();
+  const first = e.context.contextEntries[0]!;
+  first.messages = [{ role: "user", content: "PROJECTED_TASK ".repeat(1000), timestamp: 1 }];
+  let transcript = "";
+  h.faux.setResponses([
+    (context) => {
+      transcript = JSON.stringify(context);
+      h.invalidate();
+      return fauxAssistantMessage("Projected checkpoint");
+    },
+  ]);
+  const result = await h.boundary("turn_end", e);
+  expect(transcript).toContain("PROJECTED_TASK");
+  expect(transcript).not.toContain("Old task.");
+  expect(transcript).not.toContain("Recent task");
+  expect(result.entries[0].firstKeptEntryId).toBe(e.context.contextEntries[1]!.sourceEntry.id);
+});
+
+it.each(["empty summary", "cancelled summary"])(
+  "leaves context intact after %s",
+  async (failure) => {
+    const h = setup();
+    const original = structuredClone(h.manager.getBranch());
+    h.faux.setResponses([
+      () => {
+        if (failure === "cancelled summary") h.abort();
+        return fauxAssistantMessage(failure === "empty summary" ? "" : "Cancelled checkpoint");
       },
-      getContextUsage: () => ({ tokens, contextWindow: entry.contextWindow }),
-      _runAutoCompaction: vi.fn(async () => false),
-    };
-    installTurnBoundaryAutoCompaction(
-      session as never,
-      entry.configured ?? DEFAULT_AUTO_COMPACTION_THRESHOLD,
+    ]);
+    expect(await h.boundary()).toBeUndefined();
+    expect(h.manager.getBranch()).toEqual(original);
+  },
+);
+
+it("uses the same public compaction handler in real child sessions", async () => {
+  const { setupV2 } = await import("./subagents/test/helpers/v2-harness.js");
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const dispose: (() => Promise<unknown>)[] = [];
+  try {
+    const h = await setupV2(dispose);
+    mkdirSync(join(h.ctx.cwd, ".pi"), { recursive: true });
+    writeFileSync(
+      join(h.ctx.cwd, ".pi/pi-bites.json"),
+      JSON.stringify({ autoCompaction: { thresholdTokens: 1000 } }),
     );
-
-    await session.agent.prepareNextTurnWithContext({ context: { messages: [] } });
-    expect(session._runAutoCompaction).not.toHaveBeenCalled();
-
-    tokens = entry.threshold;
-    await session.agent.prepareNextTurnWithContext({ context: { messages: [] } });
-    expect(session._runAutoCompaction).toHaveBeenCalledWith("threshold", false);
-  });
-
-  test("replaces the next-turn context without aborting the active run", async () => {
-    const compactedMessages = [{ role: "compactionSummary" }];
-    const runAutoCompaction = vi.fn(async () => false);
-    const session = {
-      agent: {
-        state: { messages: compactedMessages },
-        prepareNextTurnWithContext: vi.fn(async (turn, _signal?: AbortSignal) => ({
-          context: turn.context,
-        })),
-      },
-      getContextUsage: () => ({ tokens: 42_000 }),
-      abortCompaction: vi.fn(),
-      _runAutoCompaction: runAutoCompaction,
-    };
-    installTurnBoundaryAutoCompaction(session as never, 42_000);
-
-    const result = await session.agent.prepareNextTurnWithContext({ context: { messages: [] } });
-
-    expect(runAutoCompaction).toHaveBeenCalledWith("threshold", false);
-    expect(result.context.messages).toEqual(compactedMessages);
-    expect(session.abortCompaction).not.toHaveBeenCalled();
-  });
-
-  test("continues with the original context when automatic compaction rejects", async () => {
-    const originalMessages = [{ role: "toolResult" }];
-    const session = {
-      agent: {
-        state: { messages: [{ role: "partiallyCompacted" }] },
-        prepareNextTurnWithContext: vi.fn(async (turn) => ({ context: turn.context })),
-      },
-      getContextUsage: () => ({ tokens: 42_000 }),
-      abortCompaction: vi.fn(),
-      _runAutoCompaction: vi.fn(async () => {
-        throw new Error("incompatible private API");
-      }),
-    };
-    installTurnBoundaryAutoCompaction(session as never, 42_000);
-
-    const result = await session.agent.prepareNextTurnWithContext({
-      context: { messages: originalMessages },
+    writeFileSync(
+      join(h.ctx.cwd, ".pi/settings.json"),
+      JSON.stringify({ compaction: { enabled: false, keepRecentTokens: 100, reserveTokens: 500 } }),
+    );
+    const reply = fauxAssistantMessage("Final child answer ".repeat(1000));
+    reply.usage = { ...reply.usage, input: 2000, totalTokens: 2000 };
+    h.faux.setResponses([reply, fauxAssistantMessage("Child checkpoint")]);
+    let id = "";
+    h.pi.events.on("subagents:created", (event: any) => {
+      id = event.id;
     });
-
-    expect(session._runAutoCompaction).toHaveBeenCalledOnce();
-    expect(result.context.messages).toBe(originalMessages);
-  });
-
-  test("forwards external cancellation to in-progress compaction", async () => {
-    let finishCompaction: (() => void) | undefined;
-    const session = {
-      agent: {
-        state: { messages: [] },
-        prepareNextTurnWithContext: vi.fn(async (turn, _signal?: AbortSignal) => ({
-          context: turn.context,
-        })),
-      },
-      getContextUsage: () => ({ tokens: 42_000 }),
-      subscribe: vi.fn(() => vi.fn()),
-      abortCompaction: vi.fn(() => finishCompaction?.()),
-      _runAutoCompaction: vi.fn(
-        () => new Promise<boolean>((resolve) => (finishCompaction = () => resolve(false))),
-      ),
-    };
-    installTurnBoundaryAutoCompaction(session as never, 42_000);
-    const controller = new AbortController();
-
-    const prepare = session.agent.prepareNextTurnWithContext as (
-      turn: { context: { messages: never[] } },
-      signal?: AbortSignal,
-    ) => Promise<{ context: { messages: never[] } } | undefined>;
-    const preparing = prepare({ context: { messages: [] } }, controller.signal);
-    await vi.waitFor(() => expect(session._runAutoCompaction).toHaveBeenCalledOnce());
-    controller.abort();
-    await preparing;
-
-    expect(session.abortCompaction).toHaveBeenCalledOnce();
-  });
-
-  test("cancels after compaction starts when cancellation landed during auth", async () => {
-    let releaseAuth: (() => void) | undefined;
-    let finishCompaction: (() => void) | undefined;
-    let listener: ((event: { type: string }) => void) | undefined;
-    const session = {
-      agent: {
-        state: { messages: [] },
-        prepareNextTurnWithContext: vi.fn(async (turn, _signal?: AbortSignal) => ({
-          context: turn.context,
-        })),
-      },
-      getContextUsage: () => ({ tokens: 42_000 }),
-      subscribe: vi.fn((next: (event: { type: string }) => void) => {
-        listener = next;
-        return vi.fn();
-      }),
-      abortCompaction: vi.fn(() => finishCompaction?.()),
-      _runAutoCompaction: vi.fn(async () => {
-        await new Promise<void>((resolve) => (releaseAuth = resolve));
-        listener?.({ type: "compaction_start" });
-        await new Promise<void>((resolve) => (finishCompaction = resolve));
-        return false;
-      }),
-    };
-    installTurnBoundaryAutoCompaction(session as never, 42_000);
-    const controller = new AbortController();
-
-    const preparing = session.agent.prepareNextTurnWithContext(
-      { context: { messages: [] } },
-      controller.signal,
+    await h.call("spawn_agent", {
+      task_name: "compact",
+      fork_turns: "none",
+      message: "Child task ".repeat(1000),
+    });
+    await h.manager.waitForAll();
+    const child = h.manager.getRecord(id);
+    expect(child.status).toBe("completed");
+    expect(child.compactionCount).toBe(1);
+    expect(child.session.sessionManager.getBranch()).toContainEqual(
+      expect.objectContaining({ type: "compaction", summary: "Child checkpoint" }),
     );
-    await vi.waitFor(() => expect(session._runAutoCompaction).toHaveBeenCalledOnce());
-    controller.abort();
-    releaseAuth?.();
-    await preparing;
-
-    expect(session.abortCompaction).toHaveBeenCalledTimes(2);
-  });
+    expect(h.faux.state.callCount).toBe(2);
+    h.faux.setResponses([reply, fauxAssistantMessage("Follow-up checkpoint")]);
+    await h.call("followup_task", { target: "compact", message: "Next child task ".repeat(1000) });
+    await h.manager.waitForAll();
+    expect(child.compactionCount).toBe(2);
+    expect(child.session.sessionManager.getBranch()).toContainEqual(
+      expect.objectContaining({ type: "compaction", summary: "Follow-up checkpoint" }),
+    );
+  } finally {
+    for (const fn of dispose.reverse()) await fn();
+  }
 });
