@@ -107,48 +107,6 @@ restores its built-in behavior on the next load; removing a project override exp
 any global value. Changing defaults does not replace retained children's selected
 models or reasoning efforts on follow-up or runtime reload.
 
-#### Manual cutover from `subagents.json`
-
-Legacy `~/.pi/agent/subagents.json` and `.pi/subagents.json` are **ignored**, even
-when no replacement exists. Each existing file produces a warning on session
-start/reload naming its location and destination. Pi-bites never copies, rewrites,
-or deletes these files. Global paths follow Pi's agent-directory override.
-
-For example, manually replace the supported fields from a legacy global file:
-
-```json
-{ "defaultModel": "provider/model-id", "defaultReasoningEffort": "high", "maxConcurrent": 8 }
-```
-
-by merging this section into `~/.pi/agent/pi-bites.json`, preserving other sections:
-
-```json
-{
-  "subagents": {
-    "defaultModel": "provider/model-id",
-    "defaultReasoningEffort": "high",
-    "maxConcurrent": 8
-  }
-}
-```
-
-Likewise, legacy project settings such as `{ "maxConcurrent": 2, "fleetView": false }`
-become this section in `.pi/pi-bites.json`:
-
-```json
-{
-  "subagents": {
-    "maxConcurrent": 2,
-    "fleetView": false
-  }
-}
-```
-
-Here the project keeps the global model/effort but overrides concurrency. Copy only
-the five supported fields above, not retired controls such as `scopeModels` or
-`defaultJoinMode`; the editor schema flags them. Run `/reload` to apply. To stop the
-warnings, manually archive or remove the old files after checking the cutover.
-
 ## Tmux integration
 
 Add this to `.tmux.conf` after any theme or plugin that sets `status-right`:

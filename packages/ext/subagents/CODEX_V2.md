@@ -411,8 +411,7 @@ No model, including GPT-5.4, is hardcoded as the subagent default.
 
 Configure `subagents.defaultModel` and `subagents.defaultReasoningEffort` in global
 `~/.pi/agent/pi-bites.json` or project `.pi/pi-bites.json` (project fields win
-individually). Legacy `subagents.json` files are ignored and left untouched, with
-manual-cutover warnings on session start/reload; see the [migration examples](../../../README.md#manual-cutover-from-subagentsjson).
+individually). Legacy `subagents.json` files are ignored and left untouched.
 They correspond to Codex's `agents.default_subagent_model` and
 `agents.default_subagent_reasoning_effort`. Settings load on session start/reload. Existing children retain
 their selected model/effort through follow-up and unload/reload.
