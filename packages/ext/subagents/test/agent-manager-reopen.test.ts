@@ -9,10 +9,6 @@ vi.mock("../agent-runner.js", () => ({
   openAgentSession: vi.fn(),
   resumeAgent: vi.fn(),
 }));
-vi.mock("../diagnostics.js", async (original) => ({
-  ...(await original<typeof import("../diagnostics.js")>()),
-  appendSubagentDiagnostic: vi.fn(async () => {}),
-}));
 import { openAgentSession, runAgent, resumeAgent } from "../agent-runner.js";
 
 const model = { id: "current", provider: "test", reasoning: false } as any;

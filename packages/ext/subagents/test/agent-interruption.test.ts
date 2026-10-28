@@ -36,7 +36,6 @@ test("late abort rejection cannot roll back a settled interrupt", async () => {
   const onFailure = vi.fn();
   const interrupter = new AgentInterrupter({
     isSettled: (_, generation) => settledGeneration >= generation,
-    onRequest: vi.fn(),
     onFailure,
   });
 

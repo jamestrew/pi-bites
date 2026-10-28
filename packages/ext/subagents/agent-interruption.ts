@@ -3,7 +3,6 @@ import type { AgentRecord } from "./types.js";
 
 interface Hooks {
   isSettled: (record: AgentRecord, generation: number) => boolean;
-  onRequest: (record: AgentRecord, source: "interrupt", generation: number) => void;
   onFailure: (record: AgentRecord, error: unknown) => void;
 }
 
@@ -28,7 +27,6 @@ export class AgentInterrupter {
 
       let cleared = { steering: [] as string[], followUp: [] as string[] };
       try {
-        this.hooks.onRequest(record, source, generation);
         cleared = session.clearQueue();
         await session.abort();
         return this.owns(record, session, generation, promise, abort);

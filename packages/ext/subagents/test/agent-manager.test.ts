@@ -13,11 +13,6 @@ vi.mock("node:fs/promises", async (importOriginal) => ({
   appendFile: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("../diagnostics.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../diagnostics.js")>()),
-  appendSubagentDiagnostic: vi.fn(() => Promise.resolve()),
-}));
-
 import { runAgent } from "../agent-runner.js";
 import { appendFile } from "node:fs/promises";
 import {

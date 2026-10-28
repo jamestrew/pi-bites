@@ -23,15 +23,6 @@ import { extractText } from "./message-text.js";
 import { detectEnv } from "./env.js";
 import { snapshotParent, type ParentSnapshot } from "./parent-snapshot.js";
 import { buildAgentPrompt } from "./prompts.js";
-import {
-  abortReason,
-  emitDiagnostic,
-  errorInfo,
-  observeAbortSignal,
-  recordSessionDiagnostic,
-  summarizeProviderPayload,
-  summarizeProviderResponse,
-} from "./runner-diagnostics.js";
 import { SUBAGENT_METADATA_ENTRY, type SubagentMetadata } from "./metadata.js";
 import { runAsSubagent } from "./subagent-context.js";
 import { createSubagentEventBus } from "./subagent-event-bus.js";
@@ -148,8 +139,6 @@ export interface RunOptions {
     reason: "manual" | "threshold" | "overflow";
     tokensBefore: number;
   }) => void;
-  /** Receives safe lifecycle/provider observations for persistent diagnostics. */
-  onDiagnostic?: (event: string, details?: Record<string, unknown>) => void;
   /** Called for every failed assistant response, not only the terminal one. */
   onAssistantFailure?: (failure: AgentFailure) => void;
 }
@@ -211,102 +200,40 @@ function collectResponseText(session: AgentSession) {
  * Wire an AbortSignal to abort a session.
  * Returns a cleanup function to remove the listener.
  */
-function forwardAbortSignal(
-  session: AgentSession,
-  signal?: AbortSignal,
-  onAbort?: () => void,
-): () => void {
+function forwardAbortSignal(session: AgentSession, signal?: AbortSignal): () => void {
   if (!signal) return () => {};
   if (signal.aborted) {
-    onAbort?.();
     void session.abort();
     return () => {};
   }
   const listener = () => {
-    onAbort?.();
     void session.abort();
   };
   signal.addEventListener("abort", listener, { once: true });
   return () => signal.removeEventListener("abort", listener);
 }
 
-const providerRequestCounts = new WeakMap<AgentSession, number>();
-
-function instrumentProviderDiagnostics(
-  session: AgentSession,
-  options: {
-    signal?: AbortSignal;
-    onDiagnostic?: (event: string, details?: Record<string, unknown>) => void;
-  },
-) {
-  let requestIndex: number | undefined;
-  let requestStartedAt: number | undefined;
-  const httpIdleTimeoutMs = session.settingsManager.getHttpIdleTimeoutMs();
-  const providerRetrySettings = session.settingsManager.getProviderRetrySettings();
-  const effectiveProviderTimeoutMs =
-    providerRetrySettings.timeoutMs ??
-    (httpIdleTimeoutMs === 0 ? 2_147_483_647 : httpIdleTimeoutMs);
-  const observedAgentSignals = new WeakSet<AbortSignal>();
-  const priorOnPayload = session.agent.onPayload;
-  const priorOnResponse = session.agent.onResponse;
-  const onPayload: NonNullable<typeof session.agent.onPayload> = async (payload, requestModel) => {
-    const transformed = priorOnPayload ? await priorOnPayload(payload, requestModel) : payload;
-    requestIndex = (providerRequestCounts.get(session) ?? 0) + 1;
-    providerRequestCounts.set(session, requestIndex);
-    requestStartedAt = Date.now();
-    observeAbortSignal(session.agent.signal, observedAgentSignals, (signal) => {
-      emitDiagnostic(options.onDiagnostic, "agent_signal_abort", {
-        request_index: requestIndex,
-        reason: abortReason(signal),
-        ...(signal.reason === undefined ? {} : errorInfo(signal.reason)),
-        manager_signal_aborted: options.signal?.aborted ?? false,
-        manager_abort_reason: abortReason(options.signal),
-      });
+function reportAssistantFailure(
+  event: AgentSessionEvent,
+  options: Pick<RunOptions, "onAssistantFailure" | "signal">,
+): void {
+  if (event.type !== "message_end" || event.message.role !== "assistant") return;
+  const message = event.message;
+  if (message.stopReason !== "error" && message.stopReason !== "aborted") return;
+  try {
+    options.onAssistantFailure?.({
+      timestamp: message.timestamp,
+      phase: "assistant",
+      message:
+        message.errorMessage?.trim() || `Assistant response ended with ${message.stopReason}`,
+      stop_reason: message.stopReason,
+      provider: message.provider,
+      model: message.model,
+      manager_signal_aborted: options.signal?.aborted ?? false,
     });
-    emitDiagnostic(options.onDiagnostic, "provider_request", {
-      request_index: requestIndex,
-      provider: requestModel.provider,
-      model: requestModel.id,
-      api: requestModel.api,
-      effective_timeout_ms: effectiveProviderTimeoutMs,
-      timeout_deadline: requestStartedAt + effectiveProviderTimeoutMs,
-      ...summarizeProviderPayload(transformed === undefined ? payload : transformed),
-    });
-    return transformed;
-  };
-  const onResponse: NonNullable<typeof session.agent.onResponse> = async (
-    response,
-    responseModel,
-  ) => {
-    emitDiagnostic(options.onDiagnostic, "provider_response", {
-      request_index: requestIndex,
-      provider: responseModel.provider,
-      model: responseModel.id,
-      ...summarizeProviderResponse(response),
-      ...(requestStartedAt === undefined ? {} : { elapsed_ms: Date.now() - requestStartedAt }),
-    });
-    await priorOnResponse?.(response, responseModel);
-  };
-  session.agent.onPayload = onPayload;
-  session.agent.onResponse = onResponse;
-  return {
-    get requestIndex() {
-      return requestIndex;
-    },
-    get requestStartedAt() {
-      return requestStartedAt;
-    },
-    get requestCount() {
-      return providerRequestCounts.get(session) ?? 0;
-    },
-    httpIdleTimeoutMs,
-    providerRetrySettings,
-    effectiveProviderTimeoutMs,
-    dispose() {
-      if (session.agent.onPayload === onPayload) session.agent.onPayload = priorOnPayload;
-      if (session.agent.onResponse === onResponse) session.agent.onResponse = priorOnResponse;
-    },
-  };
+  } catch {
+    // Failure reporting must not replace the original failure.
+  }
 }
 
 export async function openAgentSession(
@@ -474,21 +401,6 @@ export async function runAgent(
   options: RunOptions,
 ): Promise<RunResult> {
   const session = await openAgentSession(parentSource, type, options);
-  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
-  emitDiagnostic(options.onDiagnostic, "session_created", {
-    session_id: session.sessionManager.getSessionId(),
-    provider: session.model?.provider,
-    model: session.model?.id,
-    api: session.model?.api,
-    thinking: session.thinkingLevel,
-    transport: session.settingsManager.getTransport(),
-    retry: session.settingsManager.getRetrySettings(),
-    provider_retry: providerDiagnostics.providerRetrySettings,
-    http_idle_timeout_ms: providerDiagnostics.httpIdleTimeoutMs,
-    effective_provider_timeout_ms: providerDiagnostics.effectiveProviderTimeoutMs,
-    websocket_connect_timeout_ms: session.settingsManager.getWebSocketConnectTimeoutMs(),
-    compaction: session.settingsManager.getCompactionSettings(),
-  });
 
   let turnCount = 0;
 
@@ -512,45 +424,19 @@ export async function runAgent(
     if (event.type === "compaction_end" && !event.aborted && event.result) {
       options.onCompaction?.({ reason: event.reason, tokensBefore: event.result.tokensBefore });
     }
-    recordSessionDiagnostic(session, event, options, {
-      requestIndex: providerDiagnostics.requestIndex,
-      requestStartedAt: providerDiagnostics.requestStartedAt,
-    });
+    reportAssistantFailure(event, options);
   });
 
   const collector = collectResponseText(session);
-  const cleanupAbort = forwardAbortSignal(session, options.signal, () => {
-    emitDiagnostic(options.onDiagnostic, "manager_signal_abort", {
-      reason: abortReason(options.signal),
-      request_index: providerDiagnostics.requestIndex,
-    });
-  });
+  const cleanupAbort = forwardAbortSignal(session, options.signal);
 
-  const invocationStart = session.messages.length;
-  emitDiagnostic(options.onDiagnostic, "prompt_start", {
-    invocation_start: invocationStart,
-    prompt_bytes: Buffer.byteLength(prompt, "utf8"),
-  });
   try {
     if (options.signal?.aborted) await agentSession.shutdownCancelledAgentSession(session);
     await session.prompt(prompt);
-    emitDiagnostic(options.onDiagnostic, "prompt_resolved", {
-      request_count: providerDiagnostics.requestCount,
-      manager_signal_aborted: options.signal?.aborted ?? false,
-    });
-  } catch (error) {
-    emitDiagnostic(options.onDiagnostic, "prompt_rejected", {
-      ...errorInfo(error),
-      request_count: providerDiagnostics.requestCount,
-      manager_signal_aborted: options.signal?.aborted ?? false,
-      manager_abort_reason: abortReason(options.signal),
-    });
-    throw error;
   } finally {
     unsubTurns();
     collector.unsubscribe();
     cleanupAbort();
-    providerDiagnostics.dispose();
   }
 
   const responseText = collector.getText();
@@ -572,7 +458,6 @@ export async function resumeAgent(
       reason: "manual" | "threshold" | "overflow";
       tokensBefore: number;
     }) => void;
-    onDiagnostic?: (event: string, details?: Record<string, unknown>) => void;
     onAssistantFailure?: (failure: AgentFailure) => void;
     signal?: AbortSignal;
     /** Scheduling instruction, not another user/task boundary in inherited history. */
@@ -580,7 +465,6 @@ export async function resumeAgent(
   } = {},
 ): Promise<string> {
   agentSession.assertAgentNotCancelled(options.signal);
-  const providerDiagnostics = instrumentProviderDiagnostics(session, options);
   const collector = collectResponseText(session);
   const cleanupAbort = forwardAbortSignal(session, options.signal);
 
@@ -592,7 +476,6 @@ export async function resumeAgent(
     options.onTextDelta ||
     options.onAssistantUsage ||
     options.onCompaction ||
-    options.onDiagnostic ||
     options.onAssistantFailure
       ? session.subscribe((event: AgentSessionEvent) => {
           if (event.type === "turn_end") options.onTurnEnd?.(++turnCount);
@@ -614,19 +497,10 @@ export async function resumeAgent(
               tokensBefore: event.result.tokensBefore,
             });
           }
-          recordSessionDiagnostic(session, event, options, {
-            resumed: true,
-            requestIndex: providerDiagnostics.requestIndex,
-            requestStartedAt: providerDiagnostics.requestStartedAt,
-          });
+          reportAssistantFailure(event, options);
         })
       : () => {};
 
-  const invocationStart = session.messages.length;
-  emitDiagnostic(options.onDiagnostic, "resume_prompt_start", {
-    invocation_start: invocationStart,
-    prompt_bytes: Buffer.byteLength(prompt, "utf8"),
-  });
   try {
     if (options.taskContinuation) {
       await session.sendCustomMessage(
@@ -640,21 +514,10 @@ export async function resumeAgent(
     } else {
       await session.prompt(prompt);
     }
-    emitDiagnostic(options.onDiagnostic, "resume_prompt_resolved", {
-      manager_signal_aborted: options.signal?.aborted ?? false,
-    });
-  } catch (error) {
-    emitDiagnostic(options.onDiagnostic, "resume_prompt_rejected", {
-      ...errorInfo(error),
-      manager_signal_aborted: options.signal?.aborted ?? false,
-      manager_abort_reason: abortReason(options.signal),
-    });
-    throw error;
   } finally {
     collector.unsubscribe();
     unsubEvents();
     cleanupAbort();
-    providerDiagnostics.dispose();
   }
 
   return collector.getText();

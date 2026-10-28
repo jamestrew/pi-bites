@@ -208,66 +208,10 @@ describe("agent-runner final output capture", () => {
     expect(session.prompt).toHaveBeenCalledWith("assigned task");
   });
 
-  it("records the effective provider timeout and request deadline", async () => {
-    const { session } = createSession("DONE");
-    session.settingsManager.getProviderRetrySettings.mockReturnValue({
-      timeoutMs: 120_000,
-      maxRetryDelayMs: 60_000,
-    });
-    createAgentSession.mockResolvedValue({ session });
-    const diagnostics: Array<{ event: string; details?: Record<string, unknown> }> = [];
-    session.prompt.mockImplementationOnce(async () => {
-      await session.agent.onPayload?.(
-        { input: ["secret prompt"] },
-        {
-          provider: "openai-codex",
-          id: "gpt-test",
-          api: "openai-codex-responses",
-        },
-      );
-      session.messages.push({ role: "assistant", content: [{ type: "text", text: "DONE" }] });
-    });
-
-    await runAgent(ctx, "explorer", "go", {
-      pi,
-      onDiagnostic: (event, details) => diagnostics.push({ event, details }),
-    });
-
-    expect(diagnostics.find(({ event }) => event === "session_created")?.details).toMatchObject({
-      http_idle_timeout_ms: 300_000,
-      effective_provider_timeout_ms: 120_000,
-    });
-    const request = diagnostics.find(({ event }) => event === "provider_request")?.details;
-    expect(request).toMatchObject({ effective_timeout_ms: 120_000, input_count: 1 });
-    expect((request?.timeout_deadline as number) - 120_000).toBeGreaterThan(0);
-    expect(JSON.stringify(request)).not.toContain("secret prompt");
-  });
-
-  it("records provider diagnostics for resumed turns and restores hooks", async () => {
-    const { session } = createSession("RESUMED");
-    const diagnostics: string[] = [];
-    session.prompt.mockImplementationOnce(async () => {
-      const model = { provider: "openai-codex", id: "gpt-test", api: "responses" };
-      await session.agent.onPayload?.({ input: ["resume"] }, model);
-      await session.agent.onResponse?.({ status: 200, headers: {} }, model);
-      session.messages.push({ role: "assistant", content: [{ type: "text", text: "RESUMED" }] });
-    });
-
-    await resumeAgent(session as any, "continue", {
-      onDiagnostic: (event) => diagnostics.push(event),
-    });
-
-    expect(diagnostics).toContain("provider_request");
-    expect(diagnostics).toContain("provider_response");
-    expect(session.agent.onPayload).toBeUndefined();
-    expect(session.agent.onResponse).toBeUndefined();
-  });
-
   it("reports an earlier quota failure before a terminal abort", async () => {
     const { session, listeners } = createSession("");
     createAgentSession.mockResolvedValue({ session });
     const failures: any[] = [];
-    const diagnosticEvents: string[] = [];
     const usage = {
       input: 1,
       output: 0,
@@ -311,7 +255,6 @@ describe("agent-runner final output capture", () => {
       runAgent(ctx, "explorer", "go", {
         pi,
         onAssistantFailure: (failure) => failures.push(failure),
-        onDiagnostic: (event) => diagnosticEvents.push(event),
       }),
     ).rejects.toThrow("The operation was aborted.");
 
@@ -319,7 +262,6 @@ describe("agent-runner final output capture", () => {
       "429 quota exceeded",
       "The operation was aborted.",
     ]);
-    expect(diagnosticEvents).toContain("auto_retry_start");
   });
 
   it("returns the final assistant text even when no text_delta events were streamed", async () => {
@@ -922,27 +864,3 @@ describe("embedded agent runner configuration", () => {
     expect(options.customTools).toBeUndefined();
   });
 });
-
-it.each([true, false, undefined])(
-  "retains explicit settlement aborted=%s in runner diagnostics",
-  async (aborted) => {
-    const { session, listeners } = createSession("DONE");
-    createAgentSession.mockResolvedValue({ session });
-    const prompt = session.prompt.getMockImplementation()!;
-    session.prompt.mockImplementationOnce(async () => {
-      await prompt();
-      for (const listener of listeners)
-        listener({ type: "agent_settled", ...(aborted === undefined ? {} : { aborted }) });
-    });
-    const diagnostics: Array<{ event: string; details?: Record<string, unknown> }> = [];
-    await resumeAgent(session as any, "continue", {
-      onDiagnostic: (event, details) => diagnostics.push({ event, details }),
-    });
-    const settled = diagnostics.find(({ event }) => event === "agent_settled");
-    expect(settled).toBeDefined();
-    expect(settled!.details).toEqual({
-      resumed: true,
-      ...(aborted === undefined ? {} : { aborted }),
-    });
-  },
-);

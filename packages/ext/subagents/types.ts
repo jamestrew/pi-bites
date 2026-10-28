@@ -8,7 +8,6 @@ import type { AssistantUsage } from "./usage.js";
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { AgentSession, FileEntry } from "@earendil-works/pi-coding-agent";
-import type { DiagnosticErrorInfo } from "./diagnostics.js";
 import type { LifetimeUsage } from "./usage.js";
 
 export type { ThinkingLevel };
@@ -113,10 +112,7 @@ export interface AgentFailure {
   stop_reason?: string;
   provider?: string;
   model?: string;
-  request_index?: number;
   manager_signal_aborted?: boolean;
-  error_details?: DiagnosticErrorInfo;
-  diagnostics?: unknown[];
 }
 
 export interface AgentAbort {
